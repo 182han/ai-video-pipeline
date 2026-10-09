@@ -1,0 +1,14 @@
+{
+  "name": "ai-video-pipeline",
+  "version": "1.0.0",
+  "description": "AI长视频自动生成流水线 - 模块化质检+可插拔视频生成器",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  }
+}

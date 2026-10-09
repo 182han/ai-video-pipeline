@@ -1,0 +1,144 @@
+{
+  "landscape": {
+    "name": "自然风景",
+    "emoji": "🏔",
+    "keywords": [
+      "mountain",
+      "lake",
+      "forest",
+      "sunset",
+      "sunrise",
+      "river",
+      "valley",
+      "meadow"
+    ],
+    "styleEnhancers": [
+      "cinematic lighting",
+      "golden hour",
+      "4K ultra HD",
+      "highly detailed",
+      "epic atmosphere",
+      "slow camera movement",
+      "breathtaking scenery",
+      "photorealistic"
+    ],
+    "negative": "people, text, watermark, logo"
+  },
+  "space": {
+    "name": "宇宙星空",
+    "emoji": "🌌",
+    "keywords": [
+      "nebula",
+      "stars",
+      "galaxy",
+      "planet",
+      "cosmic dust",
+      "supernova",
+      "black hole",
+      "asteroid"
+    ],
+    "styleEnhancers": [
+      "deep space",
+      "HDR",
+      "ultra detailed",
+      "cinematic",
+      "slow dolly through",
+      "epic scale",
+      "vibrant colors",
+      "realistic"
+    ],
+    "negative": "people, earth, text"
+  },
+  "aurora": {
+    "name": "极光",
+    "emoji": "✨",
+    "keywords": [
+      "northern lights",
+      "aurora borealis",
+      "green lights",
+      "purple lights",
+      "snow mountain",
+      "frozen lake",
+      "pine trees",
+      "night sky"
+    ],
+    "styleEnhancers": [
+      "dancing lights",
+      "reflection on snow",
+      "magical atmosphere",
+      "cinematic",
+      "slow movement",
+      "4K",
+      "dreamlike",
+      "vivid colors"
+    ],
+    "negative": "people, buildings, city"
+  },
+  "ocean": {
+    "name": "海洋",
+    "emoji": "🌊",
+    "keywords": [
+      "ocean waves",
+      "coral reef",
+      "tropical fish",
+      "underwater",
+      "sunlight rays",
+      "sea turtle",
+      "jellyfish",
+      "deep blue"
+    ],
+    "styleEnhancers": [
+      "underwater lighting",
+      "serene and peaceful",
+      "4K ultra HD",
+      "slow graceful movement",
+      "crystal clear water",
+      "cinematic",
+      "realistic",
+      "bubbles and particles"
+    ],
+    "negative": "people, boats, text"
+  },
+  "mountain": {
+    "name": "雪山",
+    "emoji": "❄️",
+    "keywords": [
+      "snow covered peaks",
+      "alpine mountains",
+      "glaciers",
+      "rocky cliffs",
+      "clouds",
+      "mist",
+      "sunrise summit",
+      "icy slopes"
+    ],
+    "styleEnhancers": [
+      "majestic and grand",
+      "golden sunrise light",
+      "aerial view",
+      "4K cinematic",
+      "slow sweeping camera",
+      "epic scale",
+      "pristine wilderness",
+      "dramatic shadows"
+    ],
+    "negative": "people, buildings, text"
+  },
+  "city": {
+    "name": "城市夜景",
+    "emoji": "🎬",
+    "keywords": [
+      "city",
+      "skyline",
+      "night",
+      "neon lights"
+    ],
+    "styleEnhancers": [
+      "cinematic",
+      "urban",
+      "cyberpunk",
+      "vibrant colors"
+    ],
+    "negative": ""
+  }
+}

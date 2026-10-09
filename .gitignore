@@ -1,0 +1,8 @@
+node_modules/
+clips/
+output/
+data/tasks/
+data/trash/
+*.mp4
+*.mp4.txt
+.env
