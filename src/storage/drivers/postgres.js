@@ -6,7 +6,8 @@
 // 表结构见同目录 schema.sql，需先在数据库里执行一次。
 // ==========================================
 
-const config = require('../../config');
+// 注意层级：src/storage/drivers/ -> ../../.. 才是项目根（app/）
+const config = require('../../../config');
 
 let pool = null;
 
@@ -16,14 +17,22 @@ function getPool() {
   try {
     pg = require('pg');
   } catch (e) {
-    throw new Error("使用 PostgreSQL 需要先安装依赖：npm install pg");
+    // 区分"依赖没装"和"其他加载错误"，否则会把真实原因掩盖成误导性的提示
+    if (e && (e.code === 'MODULE_NOT_FOUND' || /Cannot find module 'pg'/.test(e.message))) {
+      throw new Error('使用 PostgreSQL 需要先安装依赖：npm install pg');
+    }
+    throw e;
   }
   pool = new pg.Pool({
     connectionString: config.DATABASE_URL,
-    // Supabase / Neon 免费实例必须走 TLS
-    ssl: /localhost|127\.0\.0\.0/.test(config.DATABASE_URL) ? false : { rejectUnauthorized: false },
+    // Supabase / Neon 免费实例必须走 TLS；本地连接关闭 TLS
+    ssl: /localhost|127\.0\.0\.0|\bhost\.docker\.internal\b/.test(config.DATABASE_URL)
+      ? false
+      : { rejectUnauthorized: false },
     max: 5,
-    idleTimeoutMillis: 30000
+    idleTimeoutMillis: 30000,
+    // 连不上时快速失败，避免服务启动卡住
+    connectionTimeoutMillis: 10000
   });
   pool.on('error', (err) => console.error('[storage:pg] 连接池错误:', err.message));
   return pool;

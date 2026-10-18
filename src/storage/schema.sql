@@ -7,8 +7,16 @@
 -- 幂等：可以重复执行，不会报错也不会丢数据
 -- ==========================================
 
--- ===== 扩展 =====
-create extension if not exists "pgcrypto";
+-- ===== 扩展（可选）=====
+-- 只在拿不到 gen_random_uuid() 时才需要 pgcrypto。
+-- Supabase / Neon / PG13+ 内置了 gen_random_uuid()，不需要扩展；
+-- 部分受限环境（无超级用户权限）装不了扩展，所以这里吞掉错误，不阻断建表。
+do $$
+begin
+  create extension if not exists "pgcrypto";
+exception when others then
+  raise notice 'pgcrypto 不可用，使用内置 gen_random_uuid()';
+end $$;
 
 -- ==========================================
 -- 1. 任务表：一次完整的视频生成作业
@@ -24,9 +32,9 @@ create table if not exists tasks (
   model             text,
   theme             text,
   total_clips       integer default 0,
-  clip_duration     integer default 15,
+  clip_duration     numeric default 15,
   resolution        text default '1080p',
-  total_duration    integer default 0,
+  total_duration    numeric default 0,
   -- 产物
   output_path       text,
   s3_url            text,
