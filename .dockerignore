@@ -5,6 +5,8 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+
+# 运行时产物（容器内重新生成；视频应该放对象存储而不是打进镜像）
 clips
 output
 data/tasks
@@ -12,7 +14,18 @@ data/trash
 *.mp4
 *.log
 _e2e_*.js
-assets/bgm/*.mp3
-assets/bgm/*.wav
+
+# 配乐素材：单个 * 不跨目录，必须用 ** 才能匹配 calm/ epic/ 等子目录
+assets/bgm/**/*.mp3
+assets/bgm/**/*.wav
+assets/bgm/**/*.m4a
+
+# 内置 ffmpeg 二进制（约 640MB）。镜像里用 apt 装的 ffmpeg，
+# 不能把 Windows 的 .exe 拷进 Linux 容器。
+tools/ffmpeg/bin
+tools/ffmpeg/*.exe
+
 .DS_Store
 Thumbs.db
+spec
+docs

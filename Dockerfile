@@ -19,8 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 先装依赖，利用 Docker 层缓存
-COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+# 注意：不用 npm ci —— 本项目主要用 pnpm，package-lock.json 可能与
+# package.json 不同步，npm ci 会因此报错退出，导致构建失败。
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev --no-audit --no-fund
 
 # 再拷代码
 COPY . .

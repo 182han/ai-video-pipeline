@@ -1,4 +1,18 @@
-# app - AI 长视频自动生成流水线
+---
+title: AI 长视频自动生成流水线
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 3000
+pinned: false
+license: gpl-3.0
+---
+
+# AI 长视频自动生成流水线
+
+> 上面这段 YAML 是 **Hugging Face Spaces** 部署所需的元数据（指定用 Docker 构建、端口 3000）。
+> 在 GitHub 上不影响阅读；部署到其他平台时可忽略或删除。
 
 ## 项目简介
 
