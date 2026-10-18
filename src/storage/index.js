@@ -125,19 +125,28 @@ async function getRules() {
 async function migrateFromJsonFiles(dataDir) {
   const fs = require('fs');
   const path = require('path');
-  const result = { migrated: 0, failed: 0 };
+  const result = { migrated: 0, failed: 0, trashed: 0 };
 
+  // isTrash=true 的目录里的任务要打上 deleted_at，
+  // 否则垃圾箱里的任务会混进正常列表。
   const dirs = [
-    dataDir || path.join(__dirname, '..', '..', 'data', 'tasks'),
-    path.join(__dirname, '..', '..', 'data', 'trash')
+    { dir: dataDir || path.join(__dirname, '..', '..', 'data', 'tasks'), isTrash: false },
+    { dir: path.join(__dirname, '..', '..', 'data', 'trash'), isTrash: true }
   ];
 
-  for (const dir of dirs) {
+  for (const { dir, isTrash } of dirs) {
     if (!fs.existsSync(dir)) continue;
     for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
       try {
         const task = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
         if (!task || !task.taskId) continue;
+
+        if (isTrash) {
+          // 垃圾箱任务：标记删除时间，进入软删除状态
+          task.deletedAt = task.deletedAt || new Date().toISOString();
+          result.trashed++;
+        }
+
         await saveTask(task);
         result.migrated++;
       } catch (e) {

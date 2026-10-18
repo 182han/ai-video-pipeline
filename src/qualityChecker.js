@@ -131,45 +131,83 @@ class QualityChecker {
   async checkClip(videoPath, expectedDuration = 30) {
     const results = {};
 
+    // 前置闸门：FFmpeg 是这四个检测项的唯一执行手段。
+    // 历史缺陷（已修）：没有 ffmpeg 时执行到 catch，返回 {passed:true, skipped:true}，
+    // 而下面的汇总又把 skipped 当 pass 算，导致「一项都没测」却报告「片段质检通过」。
+    // 现在明确区分：可以合法跳过的原因（业务上本就不适用）vs 检测器不可用（必须判 fail）。
+    if (!this._hasFFmpeg()) {
+      return {
+        passed: false,
+        reason: '片段质检无法执行：FFmpeg 不可用，黑帧/模糊/重复帧/时长四项均未实际检测',
+        failedCount: 4,
+        totalChecks: 4,
+        detectorUnavailable: true,
+        details: {
+          blackFrame: { passed: false, reason: 'FFmpeg 不可用', level: 'fail' },
+          blur: { passed: false, reason: 'FFmpeg 不可用', level: 'fail' },
+          duplicate: { passed: false, reason: 'FFmpeg 不可用', level: 'fail' },
+          duration: { passed: false, reason: 'FFmpeg 不可用', level: 'fail' }
+        }
+      };
+    }
+
     // 1. 黑帧检测
     try {
       results.blackFrame = await this.checkBlackFrame(videoPath);
     } catch (e) {
-      results.blackFrame = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      results.blackFrame = { passed: false, reason: '黑帧检测出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 2. 模糊检测
     try {
       results.blur = await this.checkBlur(videoPath);
     } catch (e) {
-      results.blur = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      results.blur = { passed: false, reason: '模糊检测出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 3. 重复帧检测
     try {
       results.duplicate = await this.checkDuplicate(videoPath);
     } catch (e) {
-      results.duplicate = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      results.duplicate = { passed: false, reason: '重复帧检测出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 4. 时长校验
     try {
       results.duration = await this.checkDuration(videoPath, expectedDuration);
     } catch (e) {
-      results.duration = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      results.duration = { passed: false, reason: '时长校验出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
-    // 汇总
-    const allPassed = Object.values(results).every(r => r.passed || r.skipped);
-    const failedItems = Object.entries(results)
-      .filter(([k, v]) => !v.passed && !v.skipped)
+    // 汇总：
+    //   passed 且非 genuine skip -> 通过
+    //   skipped 且非 legitimateSkip -> 只是「没测」，不算通过
+    //   failed  -> 不通过
+    const entries = Object.entries(results);
+    const failedItems = entries
+      .filter(([, v]) => !v.passed && !v.skipped)
       .map(([k, v]) => `${this._getItemName(k)}: ${v.reason}`);
+    const notRunItems = entries
+      .filter(([, v]) => v.skipped && !v.legitimateSkip)
+      .map(([k, v]) => `${this._getItemName(k)}: ${v.reason}`);
+    const legitSkipItems = entries
+      .filter(([, v]) => v.skipped && v.legitimateSkip)
+      .map(([k, v]) => `${this._getItemName(k)}: ${v.reason}`);
+
+    const allPassed = failedItems.length === 0 && notRunItems.length === 0;
+    const reasons = [];
+    if (failedItems.length) reasons.push('未通过 ' + failedItems.join('; '));
+    if (notRunItems.length) reasons.push('未执行 ' + notRunItems.join('; '));
 
     return {
       passed: allPassed,
-      reason: allPassed ? '片段质检通过' : failedItems.join('; '),
+      reason: allPassed
+        ? (legitSkipItems.length ? `片段质检通过（${legitSkipItems.length} 项按设计跳过）` : '片段质检通过')
+        : reasons.join(' | '),
       failedCount: failedItems.length,
-      totalChecks: Object.keys(results).length,
+      notRunCount: notRunItems.length,
+      legitSkipCount: legitSkipItems.length,
+      totalChecks: entries.length,
       details: results
     };
   }
@@ -230,60 +268,72 @@ class QualityChecker {
   // ========== 拼接质检 ==========
   // clipPaths：可选，传入各输入片段路径后，用实测时长之和作为期望值（改动点 4）
   async checkConcat(videoPath, clipCount, clipPaths = []) {
+    // 前置闸门：没有 ffmpeg 就没法测时长，此时不能假装通过。
+    // 历史缺陷：下面的 catch 是空的，然后无条件 return passed:true，
+    // 导致 ffmpeg 缺失时拼接质检永久「通过」，14s 截断产物也能过江。
+    if (!this._hasFFmpeg()) {
+      return {
+        passed: false,
+        reason: '拼接质检无法执行：FFmpeg 不可用，无法测量产物时长',
+        level: 'fail',
+        detectorUnavailable: true
+      };
+    }
+
     try {
-      if (this._hasFFmpeg()) {
-        const info = await this._getVideoInfoFFmpeg(videoPath);
+      const info = await this._getVideoInfoFFmpeg(videoPath);
 
-        // 优先：按各输入片段实测时长求和作为期望值，允许小容差。
-        // 旧的 clipCount × 2 过于宽松，14s 的截断产物也能判 pass。
-        let expected = null;
-        if (Array.isArray(clipPaths) && clipPaths.length > 0) {
-          let sum = 0;
-          let probed = 0;
-          for (const p of clipPaths) {
-            const d = await this._probeDurationFFmpeg(p);
-            if (d > 0) { sum += d; probed++; }
-          }
-          if (probed === clipPaths.length && sum > 0) expected = sum;
+      // 优先：按各输入片段实测时长求和作为期望值，允许小容差。
+      // 旧的 clipCount × 2 过于宽松，14s 的截断产物也能判 pass。
+      let expected = null;
+      if (Array.isArray(clipPaths) && clipPaths.length > 0) {
+        let sum = 0;
+        let probed = 0;
+        for (const p of clipPaths) {
+          const d = await this._probeDurationFFmpeg(p);
+          if (d > 0) { sum += d; probed++; }
         }
+        if (probed === clipPaths.length && sum > 0) expected = sum;
+      }
 
-        if (expected !== null) {
-          const tolerance = Math.max(0.5, expected * 0.02);
-          const passed = Math.abs(info.duration - expected) <= tolerance;
-          return {
-            passed,
-            reason: passed
-              ? `拼接完成，总时长 ${info.duration.toFixed(2)}s（期望 ${expected.toFixed(2)}s）`
-              : `拼接后时长异常 (${info.duration.toFixed(2)}s，期望 ${expected.toFixed(2)}s，容差 ±${tolerance.toFixed(2)}s)`,
-            duration: info.duration,
-            expected: Math.round(expected * 100) / 100,
-            tolerance: Math.round(tolerance * 100) / 100,
-            clipCount,
-            level: passed ? 'pass' : 'fail'
-          };
-        }
-
-        // 退化路径：拿不到输入时长时沿用旧下限（保守，标注 fallback 以便排查）
-        const expectedMin = clipCount * 2;
-        const passed = info.duration >= expectedMin;
+      if (expected !== null) {
+        const tolerance = Math.max(0.5, expected * 0.02);
+        const passed = Math.abs(info.duration - expected) <= tolerance;
         return {
           passed,
           reason: passed
-            ? `拼接完成，总时长 ${info.duration.toFixed(1)}s`
-            : `拼接后时长不足 (${info.duration.toFixed(1)}s)`,
+            ? `拼接完成，总时长 ${info.duration.toFixed(2)}s（期望 ${expected.toFixed(2)}s）`
+            : `拼接后时长异常 (${info.duration.toFixed(2)}s，期望 ${expected.toFixed(2)}s，容差 ±${tolerance.toFixed(2)}s)`,
           duration: info.duration,
+          expected: Math.round(expected * 100) / 100,
+          tolerance: Math.round(tolerance * 100) / 100,
           clipCount,
-          level: passed ? 'pass' : 'fail',
-          fallback: true
+          level: passed ? 'pass' : 'fail'
         };
       }
-    } catch (e) {}
-    return {
-      passed: true,
-      reason: '拼接质检通过（模拟）',
-      level: 'pass',
-      mock: true
-    };
+
+      // 退化路径：拿不到输入时长时沿用旧下限（保守，标注 fallback 以便排查）
+      const expectedMin = clipCount * 2;
+      const passed = info.duration >= expectedMin;
+      return {
+        passed,
+        reason: passed
+          ? `拼接完成，总时长 ${info.duration.toFixed(1)}s`
+          : `拼接后时长不足 (${info.duration.toFixed(1)}s)`,
+        duration: info.duration,
+        clipCount,
+        level: passed ? 'pass' : 'fail',
+        fallback: true
+      };
+    } catch (e) {
+      // 有 ffmpeg 但检测过程抛错 —— 属于检测器失效，判 fail 而不是放行
+      return {
+        passed: false,
+        reason: `拼接质检执行出错: ${e.message}`,
+        level: 'fail',
+        detectorError: true
+      };
+    }
   }
 
   // 探测媒体时长（秒）；失败返回 0
@@ -293,7 +343,7 @@ class QualityChecker {
         const cmd = `"${FFMPEG_PATH}" -i "${mediaPath}" 2>&1`;
         let output;
         try {
-          output = execSync(cmd, { encoding: 'utf8' });
+          output = this._exec(cmd);
         } catch (e) {
           // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
           output = e.stdout ? String(e.stdout) : '';
@@ -313,7 +363,7 @@ class QualityChecker {
     const cmd = `"${FFMPEG_PATH}" -hide_banner -i "${videoPath}" -af volumedetect -f null - 2>&1`;
     let output;
     try {
-      output = execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+      output = this._exec(cmd);
     } catch (e) {
       output = String(e.stdout || '') + String(e.stderr || '');
     }
@@ -398,10 +448,18 @@ class QualityChecker {
         };
         if (info.duration <= 0) totalPassed = false;
       } else {
-        results.videoInfo = { passed: true, reason: '视频信息正常（模拟）', level: 'pass', mock: true };
+        // 无 FFmpeg 时不能谎称「视频信息正常」，成片可能损坏/为 0 字节都无从判断
+        totalPassed = false;
+        results.videoInfo = {
+          passed: false,
+          reason: '无法读取视频信息：FFmpeg 不可用',
+          level: 'fail',
+          detectorUnavailable: true
+        };
       }
     } catch (e) {
-      results.videoInfo = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      totalPassed = false;
+      results.videoInfo = { passed: false, reason: '读取视频信息出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 音频音量检测（P1）：有音频流却整段静音 → fail；无音频流 → skip（未配乐任务属正常）
@@ -409,7 +467,8 @@ class QualityChecker {
       if (this._hasFFmpeg()) {
         const audio = this._probeAudioLoudness(videoPath);
         if (!audio.hasAudio) {
-          results.audioVolume = { passed: true, skipped: true, reason: '成片无音频流（未配乐）', level: 'skip' };
+          // 这是合法的跳过：未配乐任务的成片本来就没有音轨，不算缺陷
+          results.audioVolume = { passed: true, skipped: true, reason: '成片无音频流（未配乐）', level: 'skip', legitimateSkip: true };
         } else {
           const silent = audio.meanDb === null || !isFinite(audio.meanDb) || audio.meanDb <= -85;
           results.audioVolume = {
@@ -422,9 +481,19 @@ class QualityChecker {
           };
           if (silent) totalPassed = false;
         }
+      } else {
+        // 无 FFmpeg 时既不能确认有音轨、也不能确认静音与否 —— 必须显式记录为未检测
+        totalPassed = false;
+        results.audioVolume = {
+          passed: false,
+          reason: '无法检测音频：FFmpeg 不可用（无法区分「未配乐」与「配乐静音」）',
+          level: 'fail',
+          detectorUnavailable: true
+        };
       }
     } catch (e) {
-      results.audioVolume = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      totalPassed = false;
+      results.audioVolume = { passed: false, reason: '音频检测出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 黑帧抽检
@@ -433,12 +502,43 @@ class QualityChecker {
       results.blackFrame = bfResult;
       if (!bfResult.passed) totalPassed = false;
     } catch (e) {
-      results.blackFrame = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+      totalPassed = false;
+      results.blackFrame = { passed: false, reason: '黑帧抽检出错: ' + e.message, level: 'fail', detectorError: true };
+    }
+
+    // 汇总「为什么没过」，避免只回一个笼统的「存在问题」
+    // 区分两类跳过：
+    //   legitimateSkip = true  -> 业务上本就不适用（如未配乐任务没有音轨），不算缺陷
+    //   其它 skipped           -> 检测器没跑起来，必须判不通过
+    const failedItems = Object.entries(results)
+      .filter(([, v]) => !v.passed && !v.skipped)
+      .map(([k, v]) => v.reason);
+    const notRunItems = Object.entries(results)
+      .filter(([, v]) => v.skipped && !v.legitimateSkip)
+      .map(([k, v]) => v.reason);
+    const legitSkipItems = Object.entries(results)
+      .filter(([, v]) => v.skipped && v.legitimateSkip)
+      .map(([k, v]) => v.reason);
+
+    // 只要求「实际执行的检测项都通过」，且不存在未执行的检测项
+    if (notRunItems.length > 0) totalPassed = false;
+
+    const parts = [];
+    if (failedItems.length) parts.push('未通过：' + failedItems.join('; '));
+    if (notRunItems.length) parts.push('未执行：' + notRunItems.join('; '));
+
+    let reason;
+    if (!totalPassed) {
+      reason = '最终质检未通过｜' + parts.join('｜');
+    } else if (legitSkipItems.length) {
+      reason = `最终质检通过（${legitSkipItems.length} 项按设计跳过：${legitSkipItems.join('; ')}）`;
+    } else {
+      reason = '最终质检通过';
     }
 
     return {
       passed: totalPassed,
-      reason: totalPassed ? '最终质检通过' : '最终质检存在问题',
+      reason,
       details: results,
       fileInfo: details
     };
@@ -520,7 +620,7 @@ class QualityChecker {
       const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
       let output;
       try {
-        output = execSync(cmd, { encoding: 'utf8' });
+        output = this._exec(cmd);
       } catch (e) {
         // ffmpeg 探测不完整输入会返回非零码，输出仍在 e.stdout 中
         output = e.stdout ? String(e.stdout) : '';
@@ -598,6 +698,33 @@ class QualityChecker {
 
   // ===== FFmpeg 实现 =====
 
+  // 统一的子进程执行入口：优先直接捕获 stdout；
+  // 若运行环境禁止捕获外部进程输出（沙箱/CI 里会出现 spawn EPERM），
+  // 自动降级为「重定向到临时文件再读」，保证质检逻辑在受限环境下同样真实执行。
+  // 生产桌面/服务器环境下走的是第一条路径，行为与原先完全一致。
+  _exec(cmd) {
+    try {
+      return execSync(cmd, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    } catch (e) {
+      if (!(e && (e.code === 'EPERM' || /EPERM|EACCES/.test(String(e.message || ''))))) throw e;
+      // 降级路径：把 stdout+stderr 都重定向到临时文件
+      const os = require('os');
+      const tmp = path.join(os.tmpdir(), `qc_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+      try {
+        execSync(`${cmd} > "${tmp}" 2>&1`, { stdio: 'ignore' });
+      } catch (e2) {
+        // ffmpeg 检测类命令常以非 0 退出（如 blackdetect 命中），产物仍可能写在文件里，
+        // 所以这里不直接抛出，读取已有内容即可；确实读不到再抛原错误。
+        if (!fs.existsSync(tmp)) throw e;
+      }
+      try {
+        return fs.readFileSync(tmp, 'utf8');
+      } finally {
+        try { fs.unlinkSync(tmp); } catch (e3) {}
+      }
+    }
+  }
+
   _hasFFmpeg() {
     try {
       execSync(`"${FFMPEG_PATH}" -version`, { stdio: 'ignore' });
@@ -610,7 +737,7 @@ class QualityChecker {
   _checkBlackFrameFFmpeg(videoPath) {
     const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" -vf "blackdetect=d=${this.options.blackFrameMinDuration}:pic_th=${this.options.blackFrameThreshold}" -f null - 2>&1`;
     try {
-      const output = execSync(cmd, { encoding: 'utf8' });
+      const output = this._exec(cmd);
       const hasBlackFrame = output.includes('black_start');
       return {
         passed: !hasBlackFrame,
@@ -619,14 +746,15 @@ class QualityChecker {
         level: hasBlackFrame ? 'fail' : 'pass'
       };
     } catch (e) {
-      return { passed: true, skipped: true, reason: '检测失败', level: 'skip' };
+      // 有 FFmpeg 但执行抛错：这是检测器失效，不能算通过
+      return { passed: false, reason: '检测执行出错: ' + e.message, level: 'fail', detectorError: true };
     }
   }
 
   _checkBlurFFmpeg(videoPath) {
     const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" -vf "blurdetect,metadata=print:key=lavfi.blur" -an -f null - 2>&1`;
     try {
-      const output = execSync(cmd, { encoding: 'utf8' });
+      const output = this._exec(cmd);
       const blurValues = output.match(/lavfi\.blur=([\d.]+)/g) || [];
       const maxBlur = blurValues.reduce((max, m) => {
         const val = parseFloat(m.split('=')[1]);
@@ -640,14 +768,15 @@ class QualityChecker {
         level: maxBlur >= this.options.blurThreshold ? 'fail' : 'pass'
       };
     } catch (e) {
-      return { passed: true, skipped: true, reason: '检测失败', level: 'skip' };
+      // 有 FFmpeg 但执行抛错：这是检测器失效，不能算通过
+      return { passed: false, reason: '检测执行出错: ' + e.message, level: 'fail', detectorError: true };
     }
   }
 
   _checkDuplicateFFmpeg(videoPath) {
     const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" -vf "mpdecimate" -f null - 2>&1`;
     try {
-      const output = execSync(cmd, { encoding: 'utf8' });
+      const output = this._exec(cmd);
       const dropMatch = output.match(/drop_count:\s*(\d+)/);
       const dropCount = dropMatch ? parseInt(dropMatch[1]) : 0;
 
@@ -658,7 +787,8 @@ class QualityChecker {
         level: dropCount >= 10 ? 'fail' : 'pass'
       };
     } catch (e) {
-      return { passed: true, skipped: true, reason: '检测失败', level: 'skip' };
+      // 有 FFmpeg 但执行抛错：这是检测器失效，不能算通过
+      return { passed: false, reason: '检测执行出错: ' + e.message, level: 'fail', detectorError: true };
     }
   }
 
@@ -668,7 +798,7 @@ class QualityChecker {
         const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
         let output;
         try {
-          output = execSync(cmd, { encoding: 'utf8' });
+          output = this._exec(cmd);
         } catch (e) {
           // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
           output = e.stdout ? String(e.stdout) : '';
@@ -707,7 +837,7 @@ class QualityChecker {
         const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
         let output;
         try {
-          output = execSync(cmd, { encoding: 'utf8' });
+          output = this._exec(cmd);
         } catch (e) {
           // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
           output = e.stdout ? String(e.stdout) : '';
@@ -742,20 +872,23 @@ class QualityChecker {
   }
 
   // ===== Mock 实现 =====
-
+  // 历史缺陷（已修）：原来是 `Math.random() > 0.1`，即随机 90% 判通过、10% 判失败。
+  // 这既不是真实检测，还会让 10% 的正常产物被误判 fail、90% 的坏产物被误判 pass，
+  // 而且表现为「偶发失败」，极难排查。现在明确返回「无法检测」。
   _mockCheck(type, videoPath) {
-    const passed = Math.random() > 0.1;
-    const reasons = {
-      blackFrame: passed ? '无黑帧（模拟）' : '检测到黑帧（模拟）',
-      blur: passed ? '画质正常（模拟）' : '画面模糊（模拟）',
-      duplicate: passed ? '无重复帧（模拟）' : '重复帧过多（模拟）'
+    const names = {
+      blackFrame: '黑帧检测',
+      blur: '模糊检测',
+      duplicate: '重复帧检测',
+      duration: '时长校验'
     };
-
     return {
-      passed,
-      reason: reasons[type] || '检测通过（模拟）',
-      level: passed ? 'pass' : 'fail',
-      mock: true
+      passed: false,
+      skipped: true,
+      reason: `${names[type] || type}未执行：FFmpeg 不可用`,
+      level: 'skip',
+      detectorUnavailable: true,
+      mock: false
     };
   }
 }

@@ -29,6 +29,25 @@
   }
 })();
 
+// 解析项目内自带的 ffmpeg/ffprobe。
+// 找不到时返回空字符串，让调用方回退到系统 PATH（保持云上 Linux 容器行为不变）。
+// 注意：这里只做「文件存在」判断，不执行 -version，避免每次 require config 都拉起进程。
+function resolveBundled(binName) {
+  const fs = require('fs');
+  const path = require('path');
+  const exe = process.platform === 'win32' ? binName + '.exe' : binName;
+  const candidates = [
+    path.join(__dirname, 'tools', 'ffmpeg', 'bin', exe),
+    path.join(__dirname, 'tools', 'ffmpeg', exe)
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch (e) { /* 忽略权限错误，继续找下一个 */ }
+  }
+  return '';
+}
+
 // 读取环境变量，未设置时回退到默认值
 function env(key, fallback = '') {
   const v = process.env[key];
@@ -108,11 +127,12 @@ module.exports = {
   SUPABASE_BUCKET: env('SUPABASE_BUCKET', 'videos'),
 
   // ===== FFmpeg 路径 =====
-  // 留空则使用系统 PATH 里的 ffmpeg / ffprobe（Linux 容器推荐）
-  // Windows 本地开发可在 .env 里写完整路径，例如：
-  //   FFMPEG_PATH=C:\\ffmpeg\\bin\\ffmpeg.exe
-  FFMPEG_PATH: env('FFMPEG_PATH'),
-  FFPROBE_PATH: env('FFPROBE_PATH'),
+  // 优先级：.env 显式配置 > 项目内自带 tools/ffmpeg/bin > 系统 PATH
+  // 项目内自带的那份是 Windows 静态构建，随仓库一起分发（见 app/tools/ffmpeg/），
+  // 好处是不依赖开发者机器上装没装 ffmpeg，也不用往系统 PATH 里塞东西。
+  // 云上 Linux 容器建议留空 PATH 里 apt install ffmpeg。
+  FFMPEG_PATH: env('FFMPEG_PATH') || resolveBundled('ffmpeg'),
+  FFPROBE_PATH: env('FFPROBE_PATH') || resolveBundled('ffprobe'),
 
   // ===== 生成参数 =====
   GENERATION: {

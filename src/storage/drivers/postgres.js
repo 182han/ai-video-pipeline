@@ -71,7 +71,8 @@ function rowToTask(row, clips) {
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at || null
   };
 }
 
@@ -123,10 +124,10 @@ module.exports = {
           model, theme, total_clips, clip_duration, resolution, total_duration,
           output_path, s3_url, runtime_config, steps, current_step, current_step_key,
           error, final_qc, estimated_total_time,
-          created_at, started_at, completed_at, updated_at
+          created_at, started_at, completed_at, updated_at, deleted_at
         ) values (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-          coalesce($21, now()),$22,$23, now()
+          coalesce($21, now()),$22,$23, now(),$24
         )
         on conflict (task_id) do update set
           status = excluded.status,
@@ -150,6 +151,7 @@ module.exports = {
           estimated_total_time = excluded.estimated_total_time,
           started_at = excluded.started_at,
           completed_at = excluded.completed_at,
+          deleted_at = excluded.deleted_at,
           updated_at = now()
       `, [
         task.taskId, task.status || 'pending', task.prompt || '', task.optimizedPrompt || null,
@@ -160,7 +162,8 @@ module.exports = {
         task.currentStep || null, task.currentStepKey || null, task.error || null,
         task.finalQC ? JSON.stringify(task.finalQC) : null,
         task.estimatedTotalTime || null, task.createdAt || null,
-        task.startedAt || null, task.completedAt || null
+        task.startedAt || null, task.completedAt || null,
+        task.deletedAt || null
       ]);
 
       // 片段：先清后插，保证与内存态一致

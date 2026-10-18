@@ -64,6 +64,14 @@ class VideoProcessor {
         try { fs.unlinkSync(listPath); } catch (e) {}
         return { success: true, outputPath, durationCheck: v };
       }
+      // 不可判定（探测不到时长）时不做重编码兜底：
+      // 重编码同样无法校验结果，只会白白多花一次编码时间并可能覆盖可用产物。
+      // 此时保留 copy 产物，但把 unverified 标记透传给上层，让质检如实记录「未验证」。
+      if (v.undetermined) {
+        console.warn('[concat] 时长不可判定，保留 copy 产物但标记未验证：' + v.reason);
+        try { fs.unlinkSync(listPath); } catch (e) {}
+        return { success: true, outputPath, durationCheck: v, unverified: true };
+      }
       console.warn('[concat] copy 产物时长校验失败，改用重编码兜底：' + v.reason);
       cleanup();
     } catch (e) {
@@ -80,6 +88,11 @@ class VideoProcessor {
       const v = this._validateConcatDuration(outputPath, clips);
       if (v.ok) {
         return { success: true, outputPath, durationCheck: v, reencoded: true };
+      }
+      if (v.undetermined) {
+        // 同上：重编码已完成但无法校验，保留产物并标记未验证，不谎报成功也不丢弃结果
+        console.warn('[concat] 重编码后时长仍不可判定，保留产物但标记未验证：' + v.reason);
+        return { success: true, outputPath, durationCheck: v, reencoded: true, unverified: true };
       }
       cleanup();
       return { success: false, error: '拼接产物时长校验失败: ' + v.reason };
@@ -102,7 +115,9 @@ class VideoProcessor {
   }
 
   // 校验拼接产物时长 ≈ 各输入时长之和（容差 ±max(0.5s, 2%)）
-  // 输入时长全部探测失败时跳过校验（不误伤），否则以实测比对判定是否被截断
+  // 注意：探测失败不等于校验通过。输入时长全部探测失败时，本函数无法判断产物
+  // 是否被截断，此时必须返回不可判定（ok:false + undetermined:true），由调用方
+  // 决定回退重编码还是判失败 —— 绝不能悄悄当成「校验通过」放行。
   _validateConcatDuration(outputPath, clips) {
     let expected = 0;
     let probed = 0;
@@ -111,7 +126,11 @@ class VideoProcessor {
       if (d > 0) { expected += d; probed++; }
     }
     if (probed === 0 || expected <= 0) {
-      return { ok: true, skipped: true, reason: '无法探测输入时长，跳过时长校验' };
+      return {
+        ok: false,
+        undetermined: true,
+        reason: '无法探测任何输入片段时长，拼接完整性不可判定'
+      };
     }
     const actual = this._probeDurationSec(outputPath);
     if (actual <= 0) {

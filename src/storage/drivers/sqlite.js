@@ -156,7 +156,8 @@ function rowToTask(r, clips) {
     createdAt: r.created_at,
     startedAt: r.started_at,
     completedAt: r.completed_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    deletedAt: r.deleted_at || null
   };
 }
 
@@ -188,8 +189,8 @@ module.exports = {
         task_id,status,prompt,optimized_prompt,is_multi_prompt,model,theme,
         total_clips,clip_duration,resolution,total_duration,output_path,s3_url,
         runtime_config,steps,current_step,current_step_key,error,final_qc,
-        estimated_total_time,created_at,started_at,completed_at,updated_at
-      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        estimated_total_time,created_at,started_at,completed_at,updated_at,deleted_at
+      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       on conflict(task_id) do update set
         status=excluded.status, prompt=excluded.prompt, optimized_prompt=excluded.optimized_prompt,
         is_multi_prompt=excluded.is_multi_prompt, model=excluded.model, theme=excluded.theme,
@@ -201,7 +202,7 @@ module.exports = {
         error=excluded.error, final_qc=excluded.final_qc,
         estimated_total_time=excluded.estimated_total_time,
         started_at=excluded.started_at, completed_at=excluded.completed_at,
-        updated_at=excluded.updated_at`).run(
+        updated_at=excluded.updated_at, deleted_at=excluded.deleted_at`).run(
         task.taskId, task.status || 'pending', task.prompt || '', task.optimizedPrompt || null,
         task.isMultiPrompt ? 1 : 0, task.model || null, task.theme || null,
         task.totalClips || 0, task.clipDuration || 15, task.resolution || '1080p',
@@ -210,7 +211,8 @@ module.exports = {
         task.currentStep || null, task.currentStepKey || null, task.error || null,
         task.finalQC ? JSON.stringify(task.finalQC) : null,
         task.estimatedTotalTime || null, task.createdAt || nowIso(),
-        task.startedAt || null, task.completedAt || null, nowIso()
+        task.startedAt || null, task.completedAt || null, nowIso(),
+        task.deletedAt || null
       );
       db.prepare('delete from clips where task_id = ?').run(task.taskId);
       const ins = db.prepare(`insert into clips (

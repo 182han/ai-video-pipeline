@@ -27,6 +27,13 @@ assets/bgm/**/*.mp3
 assets/bgm/**/*.wav
 assets/bgm/**/*.m4a
 
+# ===== 项目内自带的 ffmpeg 二进制（约 640MB，不进仓库）=====
+# 放进 app/tools/ffmpeg/bin/ 后 config.js 会自动优先使用它，
+# 不需要改系统 PATH，也不依赖开发者机器上装没装 ffmpeg。
+# 新机器首次克隆后，按 tools/ffmpeg/README.md 恢复二进制即可。
+tools/ffmpeg/bin/*.exe
+tools/ffmpeg/bin/*.dll
+
 # ===== 本地临时文件 =====
 _e2e_*.js
 .DS_Store
