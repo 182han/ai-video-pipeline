@@ -1292,6 +1292,97 @@ select {
   border-radius: 12px;
   overflow: hidden;
 }
+
+/* ===== 片段列表 ===== */
+.clip-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.clip-card {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  transition: border-color .15s, box-shadow .15s;
+}
+.clip-card:hover {
+  border-color: var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+.clip-thumb {
+  position: relative;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.clip-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.clip-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: rgba(0,0,0,.66);
+  color: #fff;
+  font-weight: 500;
+}
+.clip-badge.ok   { background: rgba(21,128,61,.86); }
+.clip-badge.fail { background: rgba(185,28,28,.86); }
+.clip-badge.wait { background: rgba(120,119,116,.86); }
+.clip-meta {
+  padding: 8px 10px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.clip-meta .clip-name {
+  color: var(--text-primary, #37352f);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clip-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.clip-actions a, .clip-actions button {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  padding: 4px 0;
+  border-radius: 5px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all .15s;
+}
+.clip-actions a:hover, .clip-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.clip-empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 12px 0;
+}
 .no-video-placeholder {
   background: var(--bg-secondary);
   border-radius: 12px;
@@ -2485,6 +2576,15 @@ select {
         <div>该任务暂无视频</div>
         <button class="btn btn-primary" id="resumeGenBtn" style="display:none;margin-top:12px;" onclick="resumeGeneration()">使用已成功片段继续生成</button>
       </div>
+    </div>
+
+    <!-- 片段列表：展示本次生成的每一段原始视频 -->
+    <div class="modal-section" id="clipListSection" style="display:none;">
+      <div class="modal-section-title">
+        片段列表
+        <span id="clipListSummary" style="font-weight:400;font-size:12px;color:var(--text-secondary);margin-left:8px;"></span>
+      </div>
+      <div id="clipList" class="clip-list"></div>
     </div>
 
     <div class="modal-section">
@@ -5029,10 +5129,79 @@ async function showTaskDetail(taskId) {
 
     renderTaskBgmDetail(data);
 
+    // 片段列表（异步加载，不阻塞弹窗显示）
+    renderClipList(taskId);
+
     modal.classList.add('show');
   } catch (e) {
     console.error('加载详情失败:', e);
     alert('加载失败');
+  }
+}
+
+// ===== 片段列表 =====
+// 展示本次生成的每一段原始视频，支持预览与下载
+async function renderClipList(taskId) {
+  const section = document.getElementById('clipListSection');
+  const listEl = document.getElementById('clipList');
+  const summaryEl = document.getElementById('clipListSummary');
+  if (!section || !listEl) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/clips`);
+    if (!res.ok) { section.style.display = 'none'; return; }
+    const clips = await res.json();
+    if (!Array.isArray(clips) || clips.length === 0) { section.style.display = 'none'; return; }
+
+    const okCount = clips.filter(c => c.status === 'success').length;
+    const availCount = clips.filter(c => c.available).length;
+    summaryEl.textContent = `共 ${clips.length} 段 · 成功 ${okCount} · 文件在 ${availCount}`;
+
+    listEl.innerHTML = clips.map(c => {
+      const idx = c.index + 1;
+      const isOk = c.status === 'success';
+      const isFail = c.status === 'failed' || c.status === 'qc_failed';
+      const badgeCls = isOk ? 'ok' : (isFail ? 'fail' : 'wait');
+      const badgeTxt = isOk ? '成功' : (isFail ? '失败' : '进行中');
+
+      let mediaHtml;
+      if (c.url) {
+        mediaHtml = `<video src="${c.url}" preload="metadata" muted playsinline
+                        onmouseover="this.play().catch(()=>{})"
+                        onmouseout="this.pause();this.currentTime=0;"></video>`;
+      } else {
+        mediaHtml = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:12px;">无文件</div>`;
+      }
+
+      const sizeTxt = c.sizeBytes ? (c.sizeBytes / 1048576).toFixed(2) + 'MB' : '-';
+      const durTxt = c.duration ? c.duration.toFixed(1) + 's' : '';
+
+      const actions = c.url
+        ? `<div class="clip-actions">
+             <a href="${c.url}" target="_blank">打开</a>
+             <a href="${c.url}" download="${c.fileName || 'clip.mp4'}">下载</a>
+           </div>`
+        : '';
+
+      const tip = String(c.prompt || '').replace(/"/g, '&quot;').slice(0, 300);
+
+      return `<div class="clip-card" title="${tip}">
+        <div class="clip-thumb">
+          ${mediaHtml}
+          <span class="clip-badge ${badgeCls}">#${idx} ${badgeTxt}</span>
+        </div>
+        <div class="clip-meta">
+          <div class="clip-name">${c.fileName || '第' + idx + '段'}</div>
+          <div>${sizeTxt}${durTxt ? ' · ' + durTxt : ''}</div>
+          ${actions}
+        </div>
+      </div>`;
+    }).join('');
+
+    section.style.display = 'block';
+  } catch (e) {
+    console.error('加载片段列表失败:', e);
+    section.style.display = 'none';
   }
 }
 

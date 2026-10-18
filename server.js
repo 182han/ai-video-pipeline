@@ -36,6 +36,17 @@ app.use('/output', express.static(path.join(__dirname, 'output'), {
   }
 }));
 
+// 片段静态访问（任务详情页的"片段列表"播放/下载用）
+// 只暴露 clips 目录下的 mp4，且禁止路径穿越
+app.use('/clips', express.static(path.join(__dirname, 'clips'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+  }
+}));
+
 // ==========================================
 // 配乐库存 API（§6 配乐模块）
 // ==========================================
@@ -505,18 +516,54 @@ app.get('/api/tasks/:id/progress', (req, res) => {
   res.json(progress);
 });
 
-// 获取片段状态
+// 获取片段状态（含视频文件信息，供详情页"片段列表"使用）
 app.get('/api/tasks/:id/clips', (req, res) => {
   const task = taskManager.getTask(req.params.id);
   if (!task) {
     return res.status(404).json({ error: '任务不存在' });
   }
-  res.json(task.clips.map(c => ({
-    index: c.index,
-    status: c.status,
-    attempts: c.attempts,
-    error: c.error
-  })));
+
+  const clipsDir = path.join(__dirname, 'clips');
+
+  res.json(task.clips.map(c => {
+    // 片段文件名约定：<taskId>_clip_<index+1>.mp4
+    // 优先用任务里记录的 videoPath，找不到再按约定拼
+    let filePath = '';
+    if (c.videoPath && fs.existsSync(c.videoPath)) {
+      filePath = c.videoPath;
+    } else {
+      const guess = path.join(clipsDir, `${task.taskId}_clip_${c.index + 1}.mp4`);
+      if (fs.existsSync(guess)) filePath = guess;
+    }
+
+    let sizeBytes = 0;
+    let available = false;
+    if (filePath) {
+      try {
+        const st = fs.statSync(filePath);
+        sizeBytes = st.size;
+        available = st.size > 1024; // 过滤空文件
+      } catch (e) { /* 忽略 */ }
+    }
+
+    return {
+      index: c.index,
+      status: c.status,
+      attempts: c.attempts,
+      error: c.error,
+      prompt: c.prompt || '',
+      theme: c.theme || null,
+      themeTag: c.themeTag || null,
+      trackId: c.trackId || null,
+      duration: c.duration || 0,
+      qcPassed: c.qcResult ? !!c.qcResult.passed : null,
+      fileName: filePath ? path.basename(filePath) : null,
+      // 浏览器可直接访问的地址
+      url: filePath && available ? '/clips/' + encodeURIComponent(path.basename(filePath)) : null,
+      sizeBytes,
+      available
+    };
+  }));
 });
 
 // 重新运行任务
