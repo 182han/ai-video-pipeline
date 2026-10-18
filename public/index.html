@@ -349,6 +349,105 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
 textarea { resize: vertical; min-height: 100px; }
+
+/* ===== 提示词编辑区强化 ===== */
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.label-row .form-label { margin-bottom: 0; }
+.expand-btn {
+  border: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.expand-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* 提示词框：默认 12 行，可拖动，拖过的高度会被记住 */
+#promptInput {
+  min-height: 240px;
+  line-height: 1.6;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 13px;
+}
+
+/* ===== 全屏编辑弹窗 ===== */
+#promptFocusOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 24px;
+}
+#promptFocusOverlay.show { display: flex; }
+.prompt-focus-panel {
+  background: var(--bg-primary);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  width: min(1000px, 96vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.prompt-focus-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.prompt-focus-title { font-size: 15px; font-weight: 600; }
+.prompt-focus-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.prompt-focus-body { flex: 1; display: flex; min-height: 0; }
+#promptFocusArea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 20px;
+  font-size: 14px;
+  line-height: 1.75;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  width: 100%;
+  height: 100%;
+}
+.prompt-focus-foot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.prompt-focus-foot .btn { min-width: 96px; }
 select {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23787774' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
@@ -2038,60 +2137,8 @@ select {
 }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
 
-/* ===== 配乐分配（提示词环节逐段配乐） ===== */
-.bgm-assign-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
-.bgm-assign-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border, #e5e5ea);
-  border-radius: 10px; background: var(--bg-card, #fff);
-}
-.bgm-assign-row:hover { border-color: #c7c7cc; }
-.bgm-assign-seg {
-  flex: 0 0 40px; text-align: center; font-size: 12px; font-weight: 600;
-  color: var(--text-secondary, #6e6e73); background: var(--bg-sub, #f5f5f7);
-  border-radius: 6px; padding: 4px 0;
-}
-.bgm-assign-theme { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary, #6e6e73); max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bgm-assign-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
-.bgm-assign-row.is-manual .bgm-assign-seg { background: #e8f2ff; color: #1a73e8; }
-.bgm-mode-chip {
-  display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
-  padding: 2px 8px; border-radius: 999px; font-size: 11px;
-  background: var(--primary-light, #eef4ff); color: #1a73e8;
-}
-/* 配乐模式开关：把下拉改成分段选择 */
-.bgm-mode-segments { display: flex; gap: 8px; flex-wrap: wrap; }
-.bgm-mode-segment {
-  padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 8px;
-  font-size: 12px; cursor: pointer; user-select: none; color: var(--text-secondary, #6e6e73);
-}
-.bgm-mode-segment.selected { background: var(--primary-light, #eef4ff); border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
-
-/* ===== 提示词内【主题】内联联想 ===== */
-.theme-suggest-wrap { position: relative; }
-.theme-suggest {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
-  background: #fff; border: 1px solid var(--border, #e5e5ea); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); max-height: 220px; overflow-y: auto;
-}
-.theme-suggest-item {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
-  font-size: 13px; color: var(--text-primary, #1d1d1f);
-}
-.theme-suggest-item .suggest-emoji { font-size: 15px; }
-.theme-suggest-item .suggest-desc { color: var(--text-tertiary, #86868b); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.theme-suggest-item:hover, .theme-suggest-item.active { background: var(--primary-light, #eef4ff); }
-.theme-suggest-empty { padding: 10px 12px; font-size: 12px; color: var(--text-tertiary, #86868b); }
-
-/* ===== 任务详情：逐段配乐 ===== */
-.bgm-detail-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
-.bgm-detail-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 10px; }
-.bgm-detail-seg { flex: 0 0 48px; font-size: 12px; font-weight: 600; color: var(--text-secondary, #6e6e73); }
-.bgm-detail-theme { flex: 0 0 90px; font-size: 12px; color: var(--text-secondary, #6e6e73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bgm-detail-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
-.bgm-detail-status { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary, #a1a1a6); min-width: 46px; text-align: right; }
-.bgm-detail-status.done { color: #34c759; }
-.bgm-detail-status.fail { color: #c73030; }
+/* 说明：逐段配乐的样式（bgm-assign-* / bgm-detail-*）已随功能下线移除，
+   配乐编辑在独立页面 bgm-editor.html 中，样式也在该页面内。 */
 </style>
 </head>
 <body>
@@ -2129,8 +2176,12 @@ select {
           <span class="nav-icon ic-history"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
           <span>历史记录</span>
         </div>
-        <div class="nav-item" onclick="window.location.href='/music-library.html'">
+        <div class="nav-item" onclick="window.location.href='/bgm-editor.html'">
           <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span>添加配乐</span>
+        </div>
+        <div class="nav-item" onclick="window.location.href='/music-library.html'">
+          <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
           <span>配乐库存</span>
         </div>
       </div>
@@ -2194,8 +2245,11 @@ select {
         <div class="card">
           <div class="card-title">视频描述</div>
           <div class="form-group theme-suggest-wrap">
-            <label class="form-label">提示词</label>
-            <textarea id="promptInput" rows="5" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
+            <div class="label-row">
+              <label class="form-label">提示词</label>
+              <button type="button" class="expand-btn" id="expandPromptBtn" title="全屏编辑（Ctrl+Shift+E）">⤢ 放大编辑</button>
+            </div>
+            <textarea id="promptInput" rows="12" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
             <div class="theme-suggest" id="themeSuggest" style="display:none;"></div>
             <div id="multiPromptHint" style="display:none;margin-top:8px;padding:8px 12px;background:var(--primary-light, #eef4ff);border-radius:8px;font-size:12px;color:var(--text-secondary);"></div>
             <div class="form-hint">💡 单行 = 单场景 × 段数；多行 = 每行一个场景（行数覆盖段数设置）。输入【 可联想选择主题模板；不写【 = 不套主题，只走通用优化规则。</div>
@@ -2224,16 +2278,19 @@ select {
             <label class="form-label">配乐模式</label>
             <select id="bgmModeSelect" onchange="onBgmModeChange()">
               <option value="off">不添加配乐</option>
-              <option value="auto">自动配乐（按每段主题推荐轻音乐/环境音）</option>
+              <option value="auto">自动配乐（轻音乐按成片时长自动铺满）</option>
             </select>
-            <div class="form-hint" id="bgmModeHint">开启后，系统将按每段主题自动分配音轨，你可在此逐段预览与手动更换；无可用音轨时自动跳过配乐。</div>
+            <div class="form-hint" id="bgmModeHint">自动配乐只使用轻音乐：从默认开场曲开始，一首放完按库存顺序接下一首，跨曲自然衔接。生成完成后可到「添加配乐」页面做精细调整（环境音、裁剪、变速、关键帧等）。</div>
           </div>
           <div id="bgmAssignSection" style="display:none;">
             <div class="form-hint" style="margin:4px 0 2px;">
               <span id="bgmTrackCountText">已加载 0 条音轨</span>
-              <span class="bgm-mode-chip">自动分配（按主题匹配 mood）</span>
             </div>
-            <div class="bgm-assign-list" id="bgmAssignList"></div>
+            <div class="form-group">
+              <label class="form-label">开场曲</label>
+              <select id="bgmStartTrack" class="form-input"></select>
+              <div class="form-hint">不选则随机开始。</div>
+            </div>
           </div>
         </div>
 
@@ -2638,9 +2695,9 @@ select {
     </div>
 
     <div class="modal-section" id="bgmDetailSection" style="display:none;">
-      <div class="modal-section-title">片段配乐</div>
-      <div class="form-hint" style="margin-bottom:8px;">对单段更换或移除配乐，仅重混该片段并快速重出片，不影响其他片段与视频本身。改动后可重新下载视频。</div>
-      <div class="bgm-detail-list" id="bgmDetailList"></div>
+      <div class="modal-section-title">配乐</div>
+      <div class="form-hint" style="margin-bottom:8px;" id="bgmDetailSummary">-</div>
+      <button class="btn btn-secondary" style="font-size:13px;" onclick="openBgmEditor(currentDetailTask && currentDetailTask.taskId)">去「添加配乐」编辑 →</button>
     </div>
 
     <div class="modal-section" id="errorAnalysisSection" style="display:none;">
@@ -3600,6 +3657,88 @@ function themeSuggestPick(index) {
   scheduleBgmAssignment();
 }
 
+// ===== 提示词输入框：高度记忆 + 全屏编辑 =====
+(function initPromptBox() {
+  const ta = document.getElementById('promptInput');
+  if (!ta) return;
+  const STORAGE_KEY = 'vs_prompt_height';
+  const MIN_H = 240;
+
+  // 1. 恢复上次拖动的高度
+  try {
+    const saved = parseInt(localStorage.getItem(STORAGE_KEY) || '', 10);
+    const maxH = Math.round(window.innerHeight * 0.75);
+    if (!isNaN(saved) && saved >= MIN_H) ta.style.height = Math.min(saved, maxH) + 'px';
+  } catch (e) {}
+
+  // 2. 拖动结束后记住高度
+  ta.addEventListener('mouseup', () => {
+    try {
+      const h = ta.offsetHeight;
+      if (h >= MIN_H) localStorage.setItem(STORAGE_KEY, String(h));
+    } catch (e) {}
+  });
+
+  // 3. 全屏编辑
+  const overlay = document.getElementById('promptFocusOverlay');
+  const area = document.getElementById('promptFocusArea');
+  const countEl = document.getElementById('promptFocusCount');
+  const btnExpand = document.getElementById('expandPromptBtn');
+  const btnApply = document.getElementById('promptFocusApply');
+  const btnCancel = document.getElementById('promptFocusCancel');
+  if (!overlay || !area) return;
+
+  let snapshot = '';
+
+  function updateCount() {
+    const v = area.value;
+    const n = v ? v.split('\n').filter(function (l) { return l.trim(); }).length : 0;
+    if (countEl) countEl.textContent = n + ' 行 · ' + v.length + ' 字符';
+  }
+
+  function openFocus() {
+    snapshot = ta.value;
+    area.value = ta.value;
+    updateCount();
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+    setTimeout(function () {
+      area.focus();
+      area.setSelectionRange(area.value.length, area.value.length);
+    }, 30);
+  }
+
+  function closeFocus(apply) {
+    ta.value = apply ? area.value : snapshot;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    overlay.classList.remove('show');
+    document.body.style.overflow = '';
+  }
+
+  if (btnExpand) btnExpand.addEventListener('click', openFocus);
+  if (btnApply) btnApply.addEventListener('click', function () { closeFocus(true); });
+  if (btnCancel) btnCancel.addEventListener('click', function () { closeFocus(false); });
+  area.addEventListener('input', updateCount);
+
+  overlay.addEventListener('click', function (e) {
+    if (e.target === overlay) closeFocus(false);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!overlay.classList.contains('show')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeFocus(false); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); closeFocus(true); }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
+      e.preventDefault();
+      if (overlay.classList.contains('show')) closeFocus(true);
+      else openFocus();
+    }
+  });
+})();
+
 document.getElementById('promptInput').addEventListener('input', () => {
   themeSuggestionIndex = -1;
   if (!themeSuggestOpen()) themeSuggestClose();
@@ -3816,7 +3955,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         clipCount,
         clipDuration,
         resolution,
-        clipTracks: collectClipTracks(),
+        bgm: collectBgmConfig(),
         apiKey,
         apiBaseUrl,
         modelId,
@@ -5168,7 +5307,7 @@ async function showTaskDetail(taskId) {
       errorSection.style.display = 'none';
     }
 
-    renderTaskBgmDetail(data);
+    renderBgmSummary(data);
 
     // 片段列表（异步加载，不阻塞弹窗显示）
     renderClipList(taskId);
@@ -5461,103 +5600,22 @@ async function updateStatus() {
     }
   } catch (e) {
     document.getElementById('statusDot').className = 'status-dot error';
-    document.getElementById('statusText').textContent = '服务未连接';
+    document.getElementById('statusText').textContent = '系统离线';
   }
 }
 
 // ==========================================
-// 配乐自动分配（提示词环节逐段配乐 + 制作后逐段改配乐）
+// 配乐（自动配乐：创建任务时配置；精细编辑在「添加配乐」页面）
 // ==========================================
+// 说明：按主题自动选曲已下线（一段成片通常包含多个主题，单主题反推不可靠）。
+// 这里只负责「自动配乐」的开关与开场曲选择；时间轴编辑见 bgm-editor.html。
 
-let bgmInventory = [];      // /api/bgm 返回的全部音轨（含 category）
-let bgmAssignManual = {};   // 每段手动覆盖：{ 段索引: trackId | '' }
-const CATEGORY_NAMES = { music: '轻音乐', ambient: '环境音' };
-const MOOD_NAMES = { calm: '舒缓宁静', epic: '壮阔史诗', ethereal: '空灵梦幻', nature: '自然声景' };
-
-// 与后端 audioMixer.THEME_MOOD_MAP 保持一致：主题 id 关键词 → mood
-const BGM_THEME_MOOD = {
-  mountain: 'epic', ice: 'epic', glacier: 'epic', snow: 'epic',
-  aurora: 'ethereal', space: 'ethereal', starry: 'ethereal', night: 'ethereal', galaxy: 'ethereal',
-  ocean: 'nature', waterfall: 'nature', rain: 'nature', coast: 'nature', sea: 'nature', wave: 'nature',
-  lake: 'calm', forest: 'calm', desert: 'calm', landscape: 'calm', meadow: 'calm', mist: 'calm'
-};
-
-function bgmMoodForTheme(themeId) {
-  if (!themeId) return null; // 无主题 → 无 mood 依据，不静默沉底
-  const key = String(themeId).toLowerCase();
-  if (BGM_THEME_MOOD[key]) return BGM_THEME_MOOD[key];
-  // 关键词兜底匹配（主题 id 未命中时，用中文关键词匹配模板）
-  for (const t of themes) {
-    if (t.id === key) {
-      for (const kw of (t.keywords || [])) {
-        const lower = String(kw).toLowerCase();
-        if (BGM_THEME_MOOD[lower]) return BGM_THEME_MOOD[lower];
-      }
-    }
-  }
-  return 'calm';
-}
-
-// 行尾【主题】标签解析（与后端 parseThemeTag 对齐：模板名精确 → 关键词最长包含）
-// 无标签 → themeId null（无主题）；未识别标签 → themeId null + matched:false
-function bgmResolveLineTheme(line, globalTheme) {
-  const trimmed = (line || '').trim();
-  const m = trimmed.match(/[【\[]([^】\]]+)[】\]]$/);
-  if (!m) return { themeId: globalTheme ?? null, tag: null, matched: true };
-  const tag = m[1].trim();
-  let themeId = (themes.find(t => t.name && tag === t.name) || {}).id;
-  if (!themeId) {
-    let best = 0;
-    for (const t of themes) {
-      for (const kw of (t.keywords || [])) {
-        if (kw && tag.includes(kw) && kw.length > best) { themeId = t.id; best = kw.length; }
-      }
-    }
-  }
-  if (!themeId) return { themeId: null, tag, matched: false };
-  return { themeId, tag, matched: true };
-}
-
-// 获取当前提示词对应的分段（多行=每行一段；单行=clipCount 段同主题）
-function bgmCurrentSegments() {
-  const raw = (document.getElementById('promptInput').value || '').trim();
-  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-  const globalTheme = null; // 无全局主题：不写【】= 无主题
-  const isMulti = lines.length > 1;
-  if (isMulti) {
-    return lines.map((ln, i) => {
-      const t = bgmResolveLineTheme(ln, globalTheme);
-      return { index: i, themeId: t.themeId, themeName: bgmThemeName(t.themeId), tag: t.tag, matched: t.matched, text: ln };
-    });
-  }
-  const count = parseInt(document.getElementById('clipCountInput').value) || 10;
-  return Array.from({ length: count }, (_, i) => ({
-    index: i, themeId: globalTheme, themeName: bgmThemeName(globalTheme), tag: null, matched: true
-  }));
-}
-
-function bgmThemeName(themeId) {
-  if (!themeId) return '未选主题';
-  const t = themes.find(x => x.id === themeId);
-  if (!t) return themeId;
-  return (t.emoji ? t.emoji + ' ' : '') + t.name;
-}
-
-// 第 idx 段选曲：优先匹配主题 mood 池，轮转取曲避免相邻重复；无主题 → 不自动推荐
-function bgmPickTrack(themeId, idx) {
-  const mood = bgmMoodForTheme(themeId);
-  if (!mood) return null;
-  const pool = bgmInventory.filter(t => (t.mood || []).includes(mood));
-  const any = pool.length > 0 ? pool : bgmInventory;
-  if (any.length === 0) return null;
-  return any[idx % any.length];
-}
+let bgmInventory = [];      // /api/bgm 返回的全部音轨（含 category/order/defaultTrackId）
 
 function bgmOptionLabel(t) {
-  const cat = CATEGORY_NAMES[t.category] || t.category || '';
-  const moods = (t.mood || []).map(x => MOOD_NAMES[x] || x).join(' · ');
-  const style = [cat, moods].filter(Boolean).join(' · ');
-  return `${t.title}（${t.id}${style ? ' · ' + style : ''}）`;
+  const cat = t.category === 'ambient' ? '环境音' : '轻音乐';
+  const dur = t.durationSec ? Math.round(t.durationSec) + 's' : '时长未知';
+  return t.title + '（' + t.id + ' · ' + cat + ' · ' + dur + '）';
 }
 
 async function loadBgmInventory() {
@@ -5567,215 +5625,66 @@ async function loadBgmInventory() {
       const data = await res.json();
       bgmInventory = Array.isArray(data.tracks) ? data.tracks : [];
       const el = document.getElementById('bgmTrackCountText');
-      if (el) el.textContent = `已加载 ${bgmInventory.length} 条音轨`;
-      updateBgmAssignment();
+      if (el) el.textContent = '已加载 ' + bgmInventory.length + ' 条音轨（自动配乐仅使用轻音乐）';
+      renderBgmStartTrack(data.defaultTrackId || '');
     }
   } catch (e) { console.error('加载配乐库存失败:', e); }
+}
+
+// 开场曲下拉：只列轻音乐
+function renderBgmStartTrack(defaultId) {
+  const sel = document.getElementById('bgmStartTrack');
+  if (!sel) return;
+  const music = bgmInventory.filter(t => t.category !== 'ambient');
+  sel.innerHTML = '<option value="">随机开场</option>' +
+    music.map(t => '<option value="' + t.id + '">' + bgmOptionLabel(t) + '</option>').join('');
+  if (defaultId && music.some(t => t.id === defaultId)) sel.value = defaultId;
 }
 
 function onBgmModeChange() {
   const mode = document.getElementById('bgmModeSelect').value;
   const section = document.getElementById('bgmAssignSection');
-  section.style.display = mode === 'auto' ? 'block' : 'none';
-  if (mode === 'auto') {
-    bgmAssignManual = {};
-    updateBgmAssignment();
-  }
+  if (section) section.style.display = mode === 'auto' ? 'block' : 'none';
 }
 
-function onBgmAssignChange(index, value) {
-  if (value === '__random__') {
-    // 随机兜底（无主题片段）：随机挑一条音轨并落为实际 id，避免把占位值传给后端
-    if (bgmInventory.length > 0) {
-      const track = bgmInventory[Math.floor(Math.random() * bgmInventory.length)];
-      bgmAssignManual[index] = track.id;
-      const rowEl = document.getElementById('bgm-assign-row-' + index);
-      const selectEl = rowEl ? rowEl.querySelector('select') : null;
-      if (selectEl) selectEl.value = track.id;
-    } else {
-      bgmAssignManual[index] = '';
-    }
-  } else {
-    bgmAssignManual[index] = value; // '' 表示该段不配乐
-  }
-  const row = document.getElementById('bgm-assign-row-' + index);
-  if (row) row.classList.toggle('is-manual', !!bgmAssignManual[index]);
-}
-
-function updateBgmAssignment() {
+// 生成时收集配乐配置（整片级）
+function collectBgmConfig() {
   const mode = document.getElementById('bgmModeSelect').value;
-  const list = document.getElementById('bgmAssignList');
-  if (!list) return;
-  if (mode !== 'auto') { list.innerHTML = ''; return; }
-
-  const segments = bgmCurrentSegments();
-  const options = bgmInventory.map(t =>
-    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
-  ).join('');
-
-  list.innerHTML = segments.map(seg => {
-    const suggested = bgmPickTrack(seg.themeId, seg.index);
-    const current = (bgmAssignManual[seg.index] !== undefined)
-      ? bgmAssignManual[seg.index]
-      : (suggested ? suggested.id : '');
-    const themeBadge = seg.themeId
-      ? (seg.tag
-          ? (seg.matched ? `${bgmThemeName(seg.themeId)}` : `⚠️ ${seg.tag}（未识别→${bgmThemeName(seg.themeId)}）`)
-          : bgmThemeName(seg.themeId))
-      : (seg.tag ? `⚠️ ${seg.tag}（未识别→未选主题）` : '未选主题 · 手动选或随机');
-    return `
-      <div class="bgm-assign-row ${current ? 'is-manual' : ''}" id="bgm-assign-row-${seg.index}">
-        <div class="bgm-assign-seg" title="片段 ${seg.index + 1}">#${seg.index + 1}</div>
-        <div class="bgm-assign-theme" title="${themeBadge}">${themeBadge}</div>
-        <select class="bgm-assign-select" onchange="onBgmAssignChange(${seg.index}, this.value)">
-          <option value="">不配乐</option>
-          <option value="__random__">🎲 随机</option>
-          ${options}
-        </select>
-      </div>
-    `;
-  }).join('');
-
-  // 回填当前值（含自动推荐）
-  list.querySelectorAll('select').forEach((sel, i) => {
-    const s = segments[i];
-    const value = (bgmAssignManual[s.index] !== undefined)
-      ? bgmAssignManual[s.index]
-      : (s && bgmPickTrack(s.themeId, s.index) ? bgmPickTrack(s.themeId, s.index).id : '');
-    sel.value = value;
-    const row = document.getElementById('bgm-assign-row-' + s.index);
-    if (row) row.classList.toggle('is-manual', !!value);
-  });
+  if (mode !== 'auto') return { enabled: false, mode: 'off' };
+  const sel = document.getElementById('bgmStartTrack');
+  return {
+    enabled: true,
+    mode: 'auto',
+    trackId: (sel && sel.value) || null
+  };
 }
 
-// 生成时收集片段配乐：off → undefined（不配乐）；auto → 读 DOM 逐段选择
-function collectClipTracks() {
-  const mode = document.getElementById('bgmModeSelect').value;
-  if (mode !== 'auto') return undefined;
-  const selList = Array.from(document.querySelectorAll('#bgmAssignList select'));
-  return selList.map(s => s.value || null);
-}
+// 兼容旧函数名（别处可能仍调用）
+function collectClipTracks() { return undefined; }
+function scheduleBgmAssignment() { /* 已无逐段预览，保留空实现以兼容旧调用 */ }
 
-// 配乐重算节流
-let _bgmRefreshTimer = null;
-function scheduleBgmAssignment() {
-  clearTimeout(_bgmRefreshTimer);
-  _bgmRefreshTimer = setTimeout(updateBgmAssignment, 200);
-}
-
-// ===== 任务详情：逐段配乐 =====
-async function renderTaskBgmDetail(data) {
+// 任务详情里的配乐摘要（真正编辑在「添加配乐」页面）
+function renderBgmSummary(data) {
   const section = document.getElementById('bgmDetailSection');
-  const list = document.getElementById('bgmDetailList');
-  if (!section || !list) return;
-  const clips = Array.isArray(data.clips) ? data.clips : [];
-  const editable = clips.filter(c => c.status === 'success').sort((a, b) => a.index - b.index);
-  if (editable.length === 0 || !bgmInventory || bgmInventory.length === 0) {
-    if (editable.length > 0 && (!bgmInventory || bgmInventory.length === 0)) {
-      await loadBgmInventory();
-    }
+  const summary = document.getElementById('bgmDetailSummary');
+  if (!section || !summary) return;
+  const r = data && data.bgmResult;
+  if (!r) {
+    summary.textContent = '该成片尚未应用配乐。';
+  } else if (r.applied) {
+    summary.textContent = '已应用整片配乐（' + (r.segments || 0) + ' 段' +
+      (r.meanVolumeDb ? '，平均音量 ' + r.meanVolumeDb + 'dB' : '') + '）' +
+      (r.warnings && r.warnings.length ? '；提示：' + r.warnings.join('；') : '');
+  } else {
+    summary.textContent = '配乐未应用：' + (r.error || '未启用');
   }
-  if (editable.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
-
-  const options = bgmInventory.map(t =>
-    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
-  ).join('');
-
-  list.innerHTML = editable.map(c => {
-    const themeName = bgmThemeName(c.theme || data.theme || '');
-    const hasTrack = !!c.trackId;
-    return `
-      <div class="bgm-detail-row" id="bgm-detail-row-${c.index}">
-        <div class="bgm-detail-seg">#${c.index + 1}</div>
-        <div class="bgm-detail-theme" title="${themeName}">${themeName}</div>
-        <select class="bgm-detail-select" data-index="${c.index}">
-          <option value="">不配乐</option>
-          ${options}
-        </select>
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="applyClipBgm('${data.taskId}', ${c.index}, this)">应用</button>
-        <span class="bgm-detail-status" id="bgm-detail-status-${c.index}">${hasTrack ? '已配乐' : '无配乐'}</span>
-      </div>
-    `;
-  }).join('');
-
-  // 回填当前已配音轨
-  editable.forEach(c => {
-    const sel = list.querySelector(`select[data-index="${c.index}"]`);
-    if (sel) sel.value = c.trackId || '';
-  });
 }
 
-// 单段改配乐：调后端只重混该片段并重建，不影响其他片段与视频本身
-async function applyClipBgm(taskId, index, btn) {
-  const row = document.getElementById('bgm-detail-row-' + index);
-  const sel = row ? row.querySelector('select') : null;
-  const statusEl = document.getElementById('bgm-detail-status-' + index);
-  if (!sel || !statusEl) return;
-  const trackId = sel.value || null;
-
-  btn.disabled = true;
-  sel.disabled = true;
-  statusEl.className = 'bgm-detail-status';
-  statusEl.textContent = '处理中…';
-
-  try {
-    const res = await fetch(`/api/tasks/${taskId}/clips/${index}/audio`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trackId })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || '改配乐失败');
-    }
-    statusEl.className = 'bgm-detail-status done';
-    statusEl.textContent = '✓ 已更新';
-    // 更新成片播放地址（新 final 文件）
-    if (data.outputUrl) {
-      const videoEl = document.getElementById('detailVideo');
-      const wrapper = document.getElementById('videoPlayerWrapper');
-      const noVideo = document.getElementById('noVideoPlaceholder');
-      if (videoEl && wrapper && noVideo) {
-        videoEl.src = data.outputUrl;
-        wrapper.style.display = 'block';
-        noVideo.style.display = 'none';
-        const downloadBtn = document.getElementById('downloadVideoBtn');
-        if (downloadBtn) {
-          downloadBtn.style.display = 'block';
-          downloadBtn.onclick = () => {
-            const a = document.createElement('a');
-            a.href = data.outputUrl;
-            a.download = data.outputUrl.split('/').pop();
-            a.click();
-          };
-        }
-      }
-    }
-    // 刷新片段配乐状态（重取任务进度，获取最新各 clip.trackId）
-    try {
-      const freshRes = await fetch(`/api/tasks/${taskId}/progress`);
-      if (freshRes.ok) {
-        const fresh = await freshRes.json();
-        currentDetailTask = fresh;
-        document.getElementById('detailStatus').innerHTML = `<span class="history-status status-${fresh.status}">${statusText(fresh.status)}</span>`;
-        renderTaskBgmDetail(fresh);
-      }
-    } catch (e) { console.error('刷新配乐状态失败:', e); }
-  } catch (e) {
-    statusEl.className = 'bgm-detail-status fail';
-    statusEl.textContent = '失败';
-    btn.disabled = false;
-    sel.disabled = false;
-    alert('改配乐失败: ' + e.message);
-  }
+function openBgmEditor(taskId) {
+  window.location.href = '/bgm-editor.html' + (taskId ? ('?task=' + encodeURIComponent(taskId)) : '');
 }
 
-// ==========================================
-// 初始化
-// ==========================================
-
-loadModels();
 loadTemplates();
 updateStatus();
 loadBgmInventory();
@@ -5801,5 +5710,22 @@ async function checkRunningTask() {
   } catch (e) {}
 }
 </script>
+
+<!-- 提示词全屏编辑 -->
+<div id="promptFocusOverlay">
+  <div class="prompt-focus-panel">
+    <div class="prompt-focus-head">
+      <span class="prompt-focus-title">提示词 · 全屏编辑</span>
+      <span class="prompt-focus-count" id="promptFocusCount">0 行 · 0 字符</span>
+    </div>
+    <div class="prompt-focus-body">
+      <textarea id="promptFocusArea" spellcheck="false" placeholder="每行一个场景提示词，行数即片段数"></textarea>
+    </div>
+    <div class="prompt-focus-foot">
+      <button class="btn btn-secondary" id="promptFocusCancel">取消</button>
+      <button class="btn btn-primary" id="promptFocusApply">应用并关闭</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
