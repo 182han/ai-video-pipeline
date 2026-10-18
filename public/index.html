@@ -1104,6 +1104,8 @@ select {
 .trash-item:last-child { border-bottom: none; }
 .trash-item-info {
   flex: 1;
+  /* min-width:0 让文字真正可以被 ellipsis 截断，而不是把兄弟元素挤走 */
+  min-width: 0;
   cursor: pointer;
 }
 .trash-item-prompt {
@@ -1122,6 +1124,9 @@ select {
   display: flex;
   gap: 6px;
   margin-left: 12px;
+  /* 关键：不加这行，左侧 flex:1 的信息区会把按钮压缩到不可见 */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .trash-restore-btn, .trash-perm-delete-btn {
   border: 1px solid var(--border-light);
