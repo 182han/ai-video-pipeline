@@ -1164,22 +1164,33 @@ select {
   box-shadow: var(--shadow-lg);
   padding: 32px;
   max-width: 380px;
+  /* 限高，避免长提示词把弹窗撑出屏幕、把按钮挤出可视区 */
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   text-align: center;
 }
 .confirm-delete-title {
   font-size: 17px;
   font-weight: 600;
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 .confirm-delete-desc {
   font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 24px;
   line-height: 1.5;
+  /* 溢出时在内部滚动，不撑破弹窗 */
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  word-break: break-word;
 }
 .confirm-delete-actions {
   display: flex;
   gap: 10px;
+  flex-shrink: 0;
 }
 .confirm-delete-actions button {
   flex: 1;
@@ -4951,11 +4962,21 @@ async function loadTrash() {
           </div>
           <div class="trash-actions">
             <button class="trash-restore-btn" onclick="restoreTask('${t.taskId}')">恢复</button>
-            <button class="trash-perm-delete-btn" onclick="confirmPermanentDelete('${t.taskId}', '${(t.prompt || '').substring(0, 20).replace(/'/g, '')}')">彻底删除</button>
+            <button class="trash-perm-delete-btn"
+                    data-delete-task="${escapeHtml(t.taskId)}"
+                    data-delete-prompt="${escapeHtml((t.prompt || '').substring(0, 60))}">彻底删除</button>
           </div>
         </div>
       `;
     }).join('');
+
+    // 事件委托：从 data-* 属性取任务信息，避免把提示词拼进 onclick 里
+    // （提示词含双引号会提前闭合属性，破坏 HTML 结构，导致按钮错位）
+    list.querySelectorAll('.trash-perm-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        confirmPermanentDelete(btn.dataset.deleteTask, btn.dataset.deletePrompt || '');
+      });
+    });
   } catch (e) {
     console.error('加载垃圾箱失败:', e);
   }
@@ -4998,12 +5019,27 @@ async function restoreTask(taskId) {
 }
 
 function confirmPermanentDelete(taskId, prompt) {
+  // 提示词可能很长（实测有 900+ 字符），必须截断后再显示，
+  // 否则会把弹窗撑出屏幕，把「确认删除」按钮挤到看不见的位置。
+  const MAX = 60;
+  const raw = String(prompt == null ? '' : prompt).trim();
+  const shown = raw.length > MAX ? raw.slice(0, MAX) + '…' : raw;
+  // 转义 HTML 特殊字符，避免提示词里的 < > & " 破坏结构
+  const esc = shown
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const isTruncated = raw.length > MAX;
+
   const overlay = document.createElement('div');
   overlay.className = 'confirm-delete-overlay';
   overlay.innerHTML = `
     <div class="confirm-delete-modal">
       <div class="confirm-delete-title">彻底删除</div>
-      <div class="confirm-delete-desc">「${prompt}...」将被永久删除，此操作不可撤销。确定要继续吗？</div>
+      <div class="confirm-delete-desc">
+        ${shown ? `「${esc}」` : '该任务'}${isTruncated ? '' : ''}将被永久删除，此操作不可撤销。确定要继续吗？
+      </div>
       <div class="confirm-delete-actions">
         <button class="btn btn-secondary" onclick="this.closest('.confirm-delete-overlay').remove()">取消</button>
         <button class="btn btn-primary" style="background:#ff3b30;" id="confirmPermDeleteBtn">确认删除</button>
