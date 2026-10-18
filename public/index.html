@@ -3038,6 +3038,23 @@ select {
   </div>
 </div>
 
+<!-- 提示词全屏编辑 -->
+<div id="promptFocusOverlay">
+  <div class="prompt-focus-panel">
+    <div class="prompt-focus-head">
+      <span class="prompt-focus-title">提示词 · 全屏编辑</span>
+      <span class="prompt-focus-count" id="promptFocusCount">0 行 · 0 字符</span>
+    </div>
+    <div class="prompt-focus-body">
+      <textarea id="promptFocusArea" spellcheck="false" placeholder="每行一个场景提示词，行数即片段数"></textarea>
+    </div>
+    <div class="prompt-focus-foot">
+      <button class="btn btn-secondary" id="promptFocusCancel">取消</button>
+      <button class="btn btn-primary" id="promptFocusApply">应用并关闭</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ==========================================
 // 全局状态
@@ -5964,21 +5981,5 @@ async function checkRunningTask() {
   } catch (e) {}
 }
 </script>
-<!-- 提示词全屏编辑 -->
-<div id="promptFocusOverlay">
-  <div class="prompt-focus-panel">
-    <div class="prompt-focus-head">
-      <span class="prompt-focus-title">提示词 · 全屏编辑</span>
-      <span class="prompt-focus-count" id="promptFocusCount">0 行 · 0 字符</span>
-    </div>
-    <div class="prompt-focus-body">
-      <textarea id="promptFocusArea" spellcheck="false" placeholder="每行一个场景提示词，行数即片段数"></textarea>
-    </div>
-    <div class="prompt-focus-foot">
-      <button class="btn btn-secondary" id="promptFocusCancel">取消</button>
-      <button class="btn btn-primary" id="promptFocusApply">应用并关闭</button>
-    </div>
-  </div>
-</div>
 </body>
 </html>
