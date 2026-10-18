@@ -54,6 +54,20 @@ function env(key, fallback = '') {
   return v === undefined || v === '' ? fallback : v;
 }
 
+// NSFW 置信度阈值：必须是 [0,1] 内的有限小数。
+// 非法输入（空/非数字/负数/>1/NaN）一律回退默认值，避免 ×100 比较时把红线悄悄放宽或收紧。
+// 注意：这里是在 require 时求值，改了 .env 需重启进程（与其它配置项一致）。
+function nsfwThreshold(fallback = 0.8) {
+  const raw = env('QC_NSFW_THRESHOLD');
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    console.warn(`[config] QC_NSFW_THRESHOLD="${raw}" 非法（需 0~1 之间的数），已回退默认 ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 module.exports = {
   // ===== 视频生成模型 API Key =====
   // 留空的模型在页面上还是可以选，但会用 Mock 模式模拟
@@ -125,6 +139,9 @@ module.exports = {
   SUPABASE_URL: env('SUPABASE_URL'),
   SUPABASE_SERVICE_KEY: env('SUPABASE_SERVICE_KEY'),
   SUPABASE_BUCKET: env('SUPABASE_BUCKET', 'videos'),
+  // 自定义公开访问域名（R2 绑了自定义域，或用了 CDN 时填）
+  // 留空则自动按 Supabase / S3 规则拼 URL
+  STORAGE_PUBLIC_BASE_URL: env('STORAGE_PUBLIC_BASE_URL'),
 
   // ===== FFmpeg 路径 =====
   // 优先级：.env 显式配置 > 项目内自带 tools/ffmpeg/bin > 系统 PATH
@@ -154,8 +171,15 @@ module.exports = {
     blackFrameThreshold: 0.95,
     // 模糊检测阈值（值越大越模糊）
     blurThreshold: 100,
-    // NSFW 检测置信度阈值
-    nsfwThreshold: 0.8
+    // NSFW 检测置信度阈值。[0,1] 内的有限小数，非法值回退 0.8（见下方 QUALITY_CHECK_NSFW_THRESHOLD）
+    nsfwThreshold: nsfwThreshold(0.8)
+  },
+
+  // 质检子配置：保留 QUALITY_CHECK.nsfwThreshold 兼容既有读法，
+  // 同时给 NSFW 检测一项独立的、可被 .env 覆盖的参数容器。
+  QC: {
+    // 合规红线：NSFW 置信度阈值，.env 里用 QC_NSFW_THRESHOLD 覆盖
+    nsfwThreshold: nsfwThreshold(0.8)
   },
 
   // ===== 存储配置 =====
