@@ -34,6 +34,11 @@ assets/bgm/**/*.m4a
 tools/ffmpeg/bin/*.exe
 tools/ffmpeg/bin/*.dll
 
+# ===== 内置 ffmpeg 二进制（约 640MB，绝不进仓库）=====
+# config.js 会自动探测 tools/ffmpeg/bin/，存在就用，不存在回退系统 PATH
+tools/ffmpeg/bin/
+tools/ffmpeg/*.exe
+
 # ===== 本地临时文件 =====
 _e2e_*.js
 .DS_Store
