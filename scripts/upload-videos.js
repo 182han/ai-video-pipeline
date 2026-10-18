@@ -72,10 +72,17 @@ async function main() {
     if (!health.ok) {
       console.error('❌ 存储不可用:', health.reason);
       console.error('');
-      console.error('请检查：');
-      console.error('  1. Supabase 里是否已创建 bucket: ' + (config.SUPABASE_BUCKET || 'videos'));
-      console.error('  2. SUPABASE_SERVICE_KEY 是否是 service_role key（不是 anon key）');
-      console.error('  3. SUPABASE_URL 是否正确');
+      if (health.networkError) {
+        console.error('这是网络问题，与配置无关。可选办法：');
+        console.error('  1. 开启代理后再跑本命令（Supabase 走 HTTPS，易被干扰）');
+        console.error('  2. 部署到海外服务器（如 Hugging Face Spaces）后在那里上传');
+        console.error('  3. 先跳过上传，本地使用不受影响');
+      } else {
+        console.error('请检查：');
+        console.error('  1. Supabase 里是否已创建 bucket: ' + (config.SUPABASE_BUCKET || 'videos') + '（需勾选 Public）');
+        console.error('  2. SUPABASE_SERVICE_KEY 是否是 service_role / secret key（不是 anon / publishable）');
+        console.error('  3. SUPABASE_URL 是否正确');
+      }
       await storage.close();
       process.exit(1);
     }

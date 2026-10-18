@@ -259,6 +259,19 @@ async function healthCheck() {
       }
       return { ok: true, bucket: cred.bucket, method: 'rest', buckets: names };
     } catch (e) {
+      // 区分「网络不通」和「key 错误」，否则提示会误导人
+      const cause = (e && e.cause && (e.cause.code || e.cause.message)) || e.code || '';
+      const isNetwork = /ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|fetch failed|socket/i
+        .test(String(e.message) + ' ' + String(cause));
+      if (isNetwork) {
+        return {
+          ok: false,
+          method: 'rest',
+          networkError: true,
+          reason: '网络不通（' + (cause || e.message) + '）：这台机器连不上 ' + base + ' 的 HTTPS。'
+            + '这不是 bucket 或 key 的问题——请确认能正常访问 supabase.com，或改用能访问的服务器上传。'
+        };
+      }
       return { ok: false, reason: e.message, method: 'rest' };
     }
   }
