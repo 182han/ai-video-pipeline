@@ -6,9 +6,44 @@
 
 ## 快速启动
 
-- Windows: 双击 `启动.bat` 或 `启动.ps1`
-- 命令行: `node server.js`
-- 访问地址: http://localhost:3000
+```bash
+npm install
+cp .env.example .env    # 填写 API Key（不填也能用 Mock 模式演示）
+npm start
+```
+
+访问 http://localhost:3000
+
+> Windows 也可以双击 `启动.bat`
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [Supabase 数据库接入手册](docs/Supabase数据库接入手册.md) | 把任务/提示词/视频元数据存进云端数据库 |
+| [云端部署与数据库指南](docs/云端部署与数据库指南.md) | 部署到 Hugging Face Spaces / Oracle Cloud |
+| [.env.example](.env.example) | 全部环境变量说明 |
+
+## 配置说明
+
+所有密钥通过**环境变量**提供，不写在代码里：
+
+- 复制 `.env.example` 为 `.env`，填写需要的 Key
+- `.env` 已被 `.gitignore` 忽略，不会进入版本库
+- 不填任何 AI Key 也能运行（Mock 模式）
+
+## 数据存储
+
+支持两种模式，通过 `.env` 切换：
+
+| 模式 | 配置 | 说明 |
+|------|------|------|
+| 本地 JSON（默认） | `DATABASE_TYPE=` | 数据存在 `data/tasks/`，零依赖 |
+| PostgreSQL | `DATABASE_TYPE=postgres` | Supabase / Neon / 自建，多机共享 |
+
+切到数据库后，本地 JSON 仍作为兜底：数据库不可用时服务照常运行，数据不会丢失。
+
+**视频文件不建议存数据库**，应放对象存储（Supabase Storage / Cloudflare R2），数据库只存元数据 URL，详见接入手册。
 
 ## 目录结构
 
