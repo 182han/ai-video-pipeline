@@ -42,9 +42,9 @@ if (-not $nodeExe) {
 Write-Host "[1/3] Node.js found: $nodeExe" -ForegroundColor Green
 
 # 检查服务是否已在运行
-$portInUse = netstat -ano | Select-String ":3000\s" | Select-String "LISTENING"
+$portInUse = netstat -ano | Select-String ":3001\s" | Select-String "LISTENING"
 if ($portInUse) {
-    Write-Host "[2/3] Server is already running on port 3000" -ForegroundColor Yellow
+    Write-Host "[2/3] Server is already running on port 3001" -ForegroundColor Yellow
 } else {
     Write-Host "[2/3] Starting server..." -ForegroundColor Green
     
@@ -60,7 +60,7 @@ if ($portInUse) {
     while ($waited -lt $maxWait) {
         Start-Sleep -Seconds 1
         $waited++
-        $check = netstat -ano | Select-String ":3000\s" | Select-String "LISTENING"
+        $check = netstat -ano | Select-String ":3001\s" | Select-String "LISTENING"
         if ($check) {
             Write-Host "      Server started in $waited seconds" -ForegroundColor Green
             break
@@ -74,11 +74,11 @@ if ($portInUse) {
 
 # 打开浏览器
 Write-Host "[3/3] Opening browser..." -ForegroundColor Green
-Start-Process "http://localhost:3000"
+Start-Process "http://localhost:3001"
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  Ready! Visit: http://localhost:3000" -ForegroundColor Green
+Write-Host "  Ready! Visit: http://localhost:3001" -ForegroundColor Green
 Write-Host "  Closing this window won't stop the server." -ForegroundColor Gray
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""

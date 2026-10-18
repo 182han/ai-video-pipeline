@@ -62,13 +62,13 @@ if not exist "node_modules" (
 
 REM 4. 启动服务
 echo 🚀  启动服务中...
-echo    访问地址: http://localhost:3000
+echo    访问地址: http://localhost:3001
 echo.
 echo    按 Ctrl+C 停止服务
 echo ========================================
 echo.
 
-start "" http://localhost:3000
+start "" http://localhost:3001
 
 node server.js
 
