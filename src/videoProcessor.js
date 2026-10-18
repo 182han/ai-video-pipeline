@@ -45,28 +45,89 @@ class VideoProcessor {
   }
 
   _concatenateFFmpeg(clips, outputPath) {
-    // 创建 concat 列表文件
     const listPath = outputPath + '.txt';
-    const listContent = clips.map(c => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
-    fs.writeFileSync(listPath, listContent, 'utf8');
+    const cleanup = () => {
+      try { if (fs.existsSync(listPath)) fs.unlinkSync(listPath); } catch (e) {}
+      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) {}
+    };
 
+    // 路径 1：-c copy 直拼（快）
     try {
+      const listContent = clips.map(c => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
+      fs.writeFileSync(listPath, listContent, 'utf8');
       const cmd = `"${FFMPEG_PATH}" -y -f concat -safe 0 -i "${listPath}" -c copy "${outputPath}"`;
       execSync(cmd, { stdio: 'pipe' });
-      fs.unlinkSync(listPath);
-      return { success: true, outputPath };
-    } catch (e) {
-      // 如果 copy 失败，用滤镜重新编码
-      try {
-        const inputs = clips.map((c, i) => `-i "${c}"`).join(' ');
-        const filterParts = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
-        const cmd = `"${FFMPEG_PATH}" -y ${inputs} -filter_complex "${filterParts}concat=n=${clips.length}:v=1:a=1[outv][outa]" -map "[outv]" -map "[outa]" "${outputPath}"`;
-        execSync(cmd, { stdio: 'pipe' });
-        return { success: true, outputPath };
-      } catch (e2) {
-        return { success: false, error: e2.message };
+
+      // 改动点 2：退出码为 0 不代表拼全了（输入损坏时会静默只拼出前几段），必须实测时长
+      const v = this._validateConcatDuration(outputPath, clips);
+      if (v.ok) {
+        try { fs.unlinkSync(listPath); } catch (e) {}
+        return { success: true, outputPath, durationCheck: v };
       }
+      console.warn('[concat] copy 产物时长校验失败，改用重编码兜底：' + v.reason);
+      cleanup();
+    } catch (e) {
+      cleanup();
     }
+
+    // 路径 2：重编码直拼兜底
+    try {
+      const inputs = clips.map(c => `-i "${c}"`).join(' ');
+      const filterParts = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
+      const cmd = `"${FFMPEG_PATH}" -y ${inputs} -filter_complex "${filterParts}concat=n=${clips.length}:v=1:a=1[outv][outa]" -map "[outv]" -map "[outa]" "${outputPath}"`;
+      execSync(cmd, { stdio: 'pipe' });
+
+      const v = this._validateConcatDuration(outputPath, clips);
+      if (v.ok) {
+        return { success: true, outputPath, durationCheck: v, reencoded: true };
+      }
+      cleanup();
+      return { success: false, error: '拼接产物时长校验失败: ' + v.reason };
+    } catch (e2) {
+      cleanup();
+      return { success: false, error: '拼接失败: ' + e2.message };
+    }
+  }
+
+  // 探测单个媒体时长（秒）；失败返回 0
+  _probeDurationSec(mediaPath) {
+    try {
+      const cmd = `"${FFPROBE_PATH}" -v error -show_entries format=duration -of csv=p=0 "${mediaPath}"`;
+      const out = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const d = parseFloat(String(out).trim());
+      return isFinite(d) && d > 0 ? d : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // 校验拼接产物时长 ≈ 各输入时长之和（容差 ±max(0.5s, 2%)）
+  // 输入时长全部探测失败时跳过校验（不误伤），否则以实测比对判定是否被截断
+  _validateConcatDuration(outputPath, clips) {
+    let expected = 0;
+    let probed = 0;
+    for (const c of clips) {
+      const d = this._probeDurationSec(c);
+      if (d > 0) { expected += d; probed++; }
+    }
+    if (probed === 0 || expected <= 0) {
+      return { ok: true, skipped: true, reason: '无法探测输入时长，跳过时长校验' };
+    }
+    const actual = this._probeDurationSec(outputPath);
+    if (actual <= 0) {
+      return { ok: false, reason: '无法探测拼接产物时长（产物可能损坏）' };
+    }
+    const tolerance = Math.max(0.5, expected * 0.02);
+    const ok = Math.abs(actual - expected) <= tolerance;
+    return {
+      ok,
+      actual: Math.round(actual * 100) / 100,
+      expected: Math.round(expected * 100) / 100,
+      tolerance: Math.round(tolerance * 100) / 100,
+      reason: ok
+        ? `时长校验通过 (${actual.toFixed(2)}s ≈ 期望 ${expected.toFixed(2)}s)`
+        : `拼接被截断 (${actual.toFixed(2)}s，期望 ${expected.toFixed(2)}s，容差 ±${tolerance.toFixed(2)}s)`
+    };
   }
 
   _mockConcatenate(clips, outputPath) {
@@ -122,17 +183,30 @@ class VideoProcessor {
     return this._mockLoop(inputPath, outputPath, fadeDuration);
   }
 
+  // 说明（清理无效语法）：
+  // 原实现用 filter_complex 做首尾交叉淡化，但 xfade 的 offset 写成了
+  // `offset=total_duration-${fadeDuration}`——total_duration 不是 ffmpeg 的合法表达式记号，
+  // 所以 ffmpeg 每次都直接报错、落入 catch 的「复制原文件」兜底，实际等同于直通。
+  //
+  // 撤掉滤镜后没有再采用交叉淡化，原因有二：
+  // 1) 真正的无缝循环必须把首尾重叠 fadeDuration 秒，成片会比拼接产物短 fadeDuration
+  //    （35s → 34s），与产品「5 段 × 7s = 35s」的预期不符；
+  // 2) 改配乐重建路径（pipeline._rebuildAfterBgmChange）不经过本步骤，
+  //    若此处缩短时长，会造成「新建任务 34s / 重建任务 35s」的不一致。
+  // 因此这里明确按直通处理，保证与重建路径产出一致。
+  // 如后续确实需要无缝循环，请先确认接受「成片缩短 fadeDuration」，并同步给重建路径加上同一步骤。
   _makeLoopFFmpeg(inputPath, outputPath, fadeDuration) {
-    // 原理：截取开头 fadeDuration 秒，和结尾做交叉淡出
-    const cmd = `"${FFMPEG_PATH}" -y -i "${inputPath}" -filter_complex "[0]trim=end=${fadeDuration},setpts=PTS-STARTPTS[begin];[0]trim=start=${fadeDuration},setpts=PTS-STARTPTS[end];[end][begin]xfade=fade:duration=${fadeDuration}:offset=total_duration-${fadeDuration}" "${outputPath}"`;
-
     try {
-      execSync(cmd, { stdio: 'pipe' });
-      return { success: true, outputPath, fadeDuration };
-    } catch (e) {
-      // 失败的话直接复制原文件
       fs.copyFileSync(inputPath, outputPath);
-      return { success: true, outputPath, note: '无缝循环处理失败，使用原文件', error: e.message };
+      return {
+        success: true,
+        outputPath,
+        fadeDuration,
+        passthrough: true,
+        note: '无缝循环未实现，按直通处理（与重建路径保持一致的时长）'
+      };
+    } catch (e) {
+      return { success: false, error: '循环处理失败: ' + e.message };
     }
   }
 

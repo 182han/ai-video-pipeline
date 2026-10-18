@@ -1,8 +1,35 @@
+# ===== 依赖 =====
 node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ===== 环境变量 / 密钥（务必忽略，泄露会被盗刷）=====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ===== 运行时产物 =====
 clips/
 output/
 data/tasks/
 data/trash/
 *.mp4
 *.mp4.txt
-.env
+*.log
+
+# ===== 大体积素材（BGM 音乐库，47MB，不进仓库）=====
+# 用 assets/bgm/** 是为了连子目录（calm/ epic/ nature/ 等）一起匹配，
+# 单个 * 不跨目录，会导致 mp3 被误提交。
+# 需要的话用对象存储 / Git LFS 单独管理。
+assets/bgm/**/*.mp3
+assets/bgm/**/*.wav
+assets/bgm/**/*.m4a
+
+# ===== 本地临时文件 =====
+_e2e_*.js
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

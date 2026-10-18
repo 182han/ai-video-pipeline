@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配乐库存 · AI 视频流水线</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#fff; color:#1d1d1f; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .container { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  a { color:#0071e3; text-decoration:none; } a:hover{text-decoration:underline;}
+  .back-link { font-size:13px; color:#86868b; margin-bottom:24px; display:inline-block; }
+  .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .page-title { font-size:32px; font-weight:700; letter-spacing:-0.02em; }
+  .page-sub { font-size:15px; color:#86868b; margin-top:8px; }
+  .btn-add { border:none; background:#0071e3; color:#fff; border-radius:10px; padding:10px 18px; font-size:14px; cursor:pointer; font-family:inherit; }
+  .btn-add:hover{ background:#0077ed; }
+  .license-banner { margin-top:20px; padding:12px 16px; border-radius:12px; background:#f5f5f7; font-size:13px; color:#6e6e73; }
+  .license-banner b{ color:#1d1d1f; }
+
+  .filters { margin:26px 0 18px; }
+  .cat-filter { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .cat-chip { padding:9px 20px; border-radius:999px; border:1px solid #d2d2d7; background:#fff; font-size:14px; color:#1d1d1f; cursor:pointer; transition:background .15s; }
+  .cat-chip:hover{ border-color:#86868b; }
+  .cat-chip.active{ background:#1d1d1f; color:#fff; border-color:#1d1d1f; }
+  .mood-filter{ display:flex; gap:8px; flex-wrap:wrap; }
+  .mood-chip { padding:6px 14px; border-radius:999px; border:1px solid #e8e8ed; background:#fff; font-size:13px; color:#6e6e73; cursor:pointer; }
+  .mood-chip:hover{ border-color:#86868b; color:#1d1d1f; }
+  .mood-chip.active{ background:#0071e3; color:#fff; border-color:#0071e3; }
+  .count-note{ font-size:13px; color:#86868b; margin-bottom:16px; }
+
+  .track-card { border:1px solid #e8e8ed; border-radius:16px; padding:20px 22px; margin-bottom:14px; display:flex; align-items:center; gap:18px; transition:box-shadow .15s; }
+  .track-card:hover{ box-shadow:0 4px 16px rgba(0,0,0,.06); }
+  .track-info{ flex:1; min-width:0; }
+  .track-title{ font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge{ font-size:11px; padding:2px 10px; border-radius:999px; font-weight:500; background:#f5f5f7; color:#6e6e73; border:1px solid #e8e8ed; white-space:nowrap; }
+  .badge.music{ background:#e8eef7; color:#3d5a7a; border-color:#d4dcea; }
+  .badge.ambient{ background:#eef7e8; color:#5a7a3d; border-color:#dcead4; }
+  .badge.calm{ background:#eef4ee; color:#3d6b3d; border-color:#d4e3d4; }
+  .badge.epic{ background:#f4eef6; color:#6b3d8a; border-color:#e3d4ea; }
+  .badge.ethereal{ background:#eef0f7; color:#3d5a8a; border-color:#d4dcea; }
+  .badge.nature{ background:#f2f7ee; color:#5a7a3d; border-color:#dcead4; }
+  .badge.custom{ background:#fdf4e3; color:#a06a1e; border-color:#f0e0bb; }
+  .track-meta{ font-size:13px; color:#86868b; margin-top:4px; }
+  .track-license{ font-size:12px; color:#86868b; margin-top:4px; }
+
+  .track-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .btn-mini{ border:1px solid #d2d2d7; background:#fff; border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; color:#1d1d1f; font-family:inherit; }
+  .btn-mini:hover{ background:#f5f5f7; }
+  .btn-mini.danger:hover{ background:#fdecec; color:#c0392b; border-color:#e0b0b0; }
+  .btn-copy.copied,.btn-copied{ background:#eef4ee !important; color:#3d6b3d !important; }
+  .btn-play{ width:44px; height:44px; border-radius:50%; border:1px solid #d2d2d7; background:#fff; font-size:14px; color:#1d1d1f; cursor:pointer; }
+  .btn-play.playing{ background:#1d1d1f; color:#fff; border-color:#1d1d1f; }
+  .progress-bar{ height:3px; background:#e8e8ed; border-radius:2px; margin-top:12px; overflow:hidden; }
+  .progress-bar .fill{ height:100%; background:#0071e3; width:0; transition:width .2s linear; }
+
+  .empty{ text-align:center; color:#86868b; padding:60px 0; font-size:15px; }
+  .hidden{ display:none !important; }
+  .footer{ margin-top:48px; padding-top:24px; border-top:1px solid #e8e8ed; font-size:12px; color:#86868b; }
+  .footer p{ margin-bottom:6px; }
+
+  /* 弹窗 */
+  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .modal{ background:#fff; border-radius:16px; padding:28px; width:100%; max-width:520px; max-height:90vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,.2); }
+  .modal h3{ font-size:20px; margin-bottom:6px; }
+  .modal .sub{ font-size:13px; color:#86868b; margin-bottom:20px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:#1d1d1f; }
+  .field input[type=text],.field textarea,.field select{ width:100%; border:1px solid #d2d2d7; border-radius:8px; padding:9px 12px; font-size:14px; font-family:inherit; }
+  .field .hint{ font-size:12px; color:#86868b; margin-top:4px; }
+  .field-row{ display:flex; gap:12px; } .field-row .field{ flex:1; }
+  .moods-box{ display:flex; gap:6px; flex-wrap:wrap; }
+  .moods-box label{ display:flex; align-items:center; gap:5px; font-size:13px; font-weight:400; border:1px solid #e8e8ed; padding:5px 10px; border-radius:999px; cursor:pointer; }
+  .moods-box input{ margin:0; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
+  .btn{ border:none; border-radius:10px; padding:10px 20px; font-size:14px; cursor:pointer; font-family:inherit; }
+  .btn-primary{ background:#0071e3; color:#fff; } .btn-primary:hover{ background:#0077ed; }
+  .btn-ghost{ background:#f5f5f7; color:#1d1d1f; } .btn-ghost:hover{ background:#e8e8ed; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="/">← 返回主页面</a>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">配乐库存</h1>
+      <p class="page-sub">管理可用的轻音乐与环境音，试听、编辑或上传新音源</p>
+    </div>
+    <button class="btn-add" id="btnAdd">＋ 上传配乐</button>
+  </div>
+  <div class="license-banner">
+    <b>授权合规：</b>内置轻音乐来自 incompetech（Kevin MacLeod，CC BY 4.0，商用需署名）；环境音来自 Pixabay Content License。自定义上传音轨请在入库时如实填写授权信息，正式交付需按授权要求署名。
+  </div>
+
+  <div class="filters">
+    <div class="cat-filter" id="catFilter"></div>
+    <div class="mood-filter" id="moodFilter"></div>
+  </div>
+  <div class="count-note" id="countNote"></div>
+  <div id="trackList"></div>
+  <div class="empty hidden" id="empty">该分类暂无音轨</div>
+
+  <div class="footer">
+    <p>编码(音轨ID) 用于提示词环节与逐段配乐分配，可点击复制。</p>
+    <p>内置音轨来自 incompetech 官方 Agent JSON 与 Pixabay CDN；Pixabay 音轨标题为演示暂定名，正式交付请在 pixabay.com 核对原名。</p>
+  </div>
+</div>
+
+<!-- 上传/编辑弹窗 -->
+<div class="overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">上传配乐</h3>
+    <p class="sub" id="modalSub">填写音源信息并入库存</p>
+    <input type="file" id="fileInput" accept="audio/*" class="hidden">
+    <div class="field" id="fileField">
+      <label>音频文件</label>
+      <input type="text" id="fFileName" placeholder="选择音频文件（mp3/wav/m4a/ogg）" readonly onclick="document.getElementById('fileInput').click()" style="cursor:pointer;background:#fafafc;">
+      <div class="hint">上传的文件仅写入本地 custom/ 目录</div>
+    </div>
+    <div class="field"><label>标题 *</label><input type="text" id="fTitle" placeholder="例如：晨雾森林"></div>
+    <div class="field-row">
+      <div class="field"><label>大标签 *</label><select id="fCategory"><option value="music">轻音乐</option><option value="ambient">环境音</option></select></div>
+      <div class="field"><label>BPM</label><input type="text" id="fBpm" placeholder="如 65"></div>
+    </div>
+    <div class="field"><label>风格标签（mood，可多选）</label>
+      <div class="moods-box" id="fMoods"></div>
+    </div>
+    <div class="field"><label>乐器 / 声景</label><input type="text" id="fInstruments" placeholder="如：钢琴、弦乐"></div>
+    <div class="field-row">
+      <div class="field"><label>作者</label><input type="text" id="fAuthor"></div>
+      <div class="field"><label>来源</label><input type="text" id="fSource" placeholder="如 incompetech.com"></div>
+    </div>
+    <div class="field"><label>授权/许可</label><input type="text" id="fLicense" placeholder="如 CC BY 4.0"></div>
+    <div class="field"><label>来源链接</label><input type="text" id="fSourceUrl"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCancel">取消</button>
+      <button class="btn btn-primary" id="btnSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MOODS = ['calm','epic','ethereal','nature'];
+const MOOD_NAME = { calm:'舒缓宁静', epic:'壮阔史诗', ethereal:'空灵梦幻', nature:'自然声景' };
+const CAT_NAME = { music:'轻音乐', ambient:'环境音' };
+const AUDIO_BASE='/bgm/';
+let allTracks=[], curCat='', curMood='';
+let editingId=null, audioEl=null, playingId=null;
+
+const $=id=>document.getElementById(id);
+
+async function load(){
+  const q=new URLSearchParams();
+  if(curCat)q.set('category',curCat);
+  if(curMood)q.set('mood',curMood);
+  const d=await (await fetch('/api/bgm?'+q)).json();
+  allTracks=d.tracks||[];
+  renderCat(d.categories||['music','ambient']);
+  renderMood();
+  renderTracks(d);
+}
+function renderCat(cats){
+  const f=$('catFilter'); f.innerHTML='';
+  const opts=[{id:'',name:'全部'},...cats.map(c=>({id:c,name:CAT_NAME[c]||c}))];
+  opts.forEach(o=>{const e=document.createElement('div');e.className='cat-chip'+(o.id===curCat?' active':'');e.textContent=o.name;e.onclick=()=>{curCat=o.id;load();};f.appendChild(e);});
+}
+function renderMood(){
+  const f=$('moodFilter'); f.innerHTML='';
+  const opts=[{id:'',name:'全部风格'},...MOODS.map(m=>({id:m,name:MOOD_NAME[m]}))];
+  opts.forEach(o=>{const e=document.createElement('div');e.className='mood-chip'+(o.id===curMood?' active':'');e.textContent=o.name;e.onclick=()=>{curMood=o.id;load();};f.appendChild(e);});
+}
+function renderTracks(d){
+  $('countNote').textContent='共 '+allTracks.length+' 轨'+(d.categoryNames&&curCat?(' · '+CAT_NAME[curCat]):'');
+  $('empty').classList.toggle('hidden', allTracks.length>0);
+  const list=$('trackList'); list.innerHTML='';
+  allTracks.forEach(t=>list.appendChild(card(t)));
+}
+function card(t){
+  const c=document.createElement('div'); c.className='track-card';
+  const info=document.createElement('div'); info.className='track-info';
+  const title=document.createElement('div'); title.className='track-title';
+  title.textContent=t.title;
+  const ctag=document.createElement('span'); ctag.className='badge '+(t.category||'music'); ctag.textContent=CAT_NAME[t.category]||t.category||'音乐'; title.appendChild(ctag);
+  (t.mood||[]).forEach(m=>{const b=document.createElement('span');b.className='badge '+m;b.textContent=MOOD_NAME[m]||m;title.appendChild(b);});
+  if((t.file||'').startsWith('custom/')){const b=document.createElement('span');b.className='badge custom';b.textContent='自定义';title.appendChild(b);}
+  const meta=document.createElement('div'); meta.className='track-meta';
+  const dur=(t.durationSec?t.durationSec.toFixed(1)+'s':'时长未知');
+  meta.textContent='ID: '+t.id+' · '+dur+(t.bpm?(' · '+t.bpm+' BPM'):'')+(t.instruments?(' · '+t.instruments):'');
+  const lic=document.createElement('div'); lic.className='track-license';
+  lic.textContent=t.author?t.author+' · ':''; lic.textContent+=(t.license||'');
+  if(t.sourceUrl){lic.innerHTML+=' · <a href="'+t.sourceUrl+'" target="_blank">'+(t.source||'来源')+'</a>';}
+  if(t.note){const n=document.createElement('div');n.className='track-meta';n.style.color='#c88b00';n.textContent='⚠ '+t.note;info.appendChild(n);}
+  info.appendChild(title); info.appendChild(meta); info.appendChild(lic);
+
+  const acts=document.createElement('div'); acts.className='track-actions';
+  const play=document.createElement('button'); play.className='btn-play'; play.textContent='▶';
+  play.onclick=()=>togglePlay(t,play);
+  const copy=document.createElement('button'); copy.className='btn-mini'; copy.textContent='复制';
+  copy.onclick=()=>{navigator.clipboard.writeText(t.id).then(()=>{copy.textContent='已复制';copy.classList.add('btn-copied');setTimeout(()=>{copy.textContent='复制';copy.classList.remove('btn-copied');},1200);});};
+  const edit=document.createElement('button'); edit.className='btn-mini'; edit.textContent='编辑';
+  edit.onclick=()=>openModal(t,false);
+  const del=document.createElement('button'); del.className='btn-mini danger'; del.textContent='删除';
+  del.onclick=()=>removeTrack(t);
+  acts.appendChild(play); acts.appendChild(copy); acts.appendChild(edit); acts.appendChild(del);
+  c.appendChild(info); c.appendChild(acts);
+  const bar=document.createElement('div'); bar.className='progress-bar hidden'; bar.id='prog-'+t.id; bar.innerHTML='<div class="fill"></div>';
+  c.appendChild(bar); return c;
+}
+function togglePlay(t,btn){
+  const bar=$('prog-'+t.id);
+  if(playingId===t.id){if(audioEl){audioEl.pause();audioEl.currentTime=0;}playingId=null;btn.textContent='▶';btn.classList.remove('playing');bar.classList.add('hidden');return;}
+  if(audioEl)audioEl.pause();
+  audioEl=new Audio(AUDIO_BASE+encodeURI(t.file));
+  audioEl.onplay=()=>{btn.textContent='❚❚';btn.classList.add('playing');bar.classList.remove('hidden');};
+  audioEl.onended=()=>{btn.textContent='▶';btn.classList.remove('playing');bar.classList.add('hidden');playingId=null;};
+  audioEl.ontimeupdate=()=>{const f=bar.querySelector('.fill');if(t.durationSec)f.style.width=Math.min(100,audioEl.currentTime/t.durationSec*100)+'%';};
+  playingId=t.id; audioEl.play();
+}
+
+// 上传/编辑
+function renderMoodCheck(current){
+  const box=$('fMoods'); box.innerHTML='';
+  const sel=Array.isArray(current)?current:[];
+  MOODS.forEach(m=>{const l=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.value=m;cb.checked=sel.includes(m);l.appendChild(cb);l.appendChild(document.createTextNode(MOOD_NAME[m]));box.appendChild(l);});
+}
+function openModal(t){
+  editingId=t?t.id:null; curFileData=null;
+  $('modalTitle').textContent=t?'编辑配乐':'上传配乐';
+  $('modalSub').textContent=t?('编辑 '+(t.id||'')+' 的元信息'):'填写音源信息并入库存';
+  $('fileField').style.display=t?'none':''; $('fFileName').value='';
+  $('fTitle').value=t?t.title:'';
+  $('fCategory').value=t&&t.category?t.category:'music';
+  $('fBpm').value=t&&t.bpm?t.bpm:'';
+  $('fInstruments').value=t?t.instruments||'':'';
+  $('fAuthor').value=t?t.author||'':'';
+  $('fSource').value=t?t.source||'':'';
+  $('fLicense').value=t?t.license||'':'';
+  $('fSourceUrl').value=t?t.sourceUrl||'':'';
+  renderMoodCheck(t?t.mood:[]);
+  $('modalOverlay').classList.remove('hidden');
+}
+let curFileData=null;
+$('btnAdd').onclick=()=>openModal(null);
+$('btnCancel').onclick=()=>$('modalOverlay').classList.add('hidden');
+$('fileInput').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{curFileData=r.result;};r.readAsDataURL(f);$('fFileName').value=f.name;};
+$('btnSave').onclick=async()=>{
+  const mood=[...document.querySelectorAll('#fMoods input:checked')].map(x=>x.value);
+  const body={title:$('fTitle').value, category:$('fCategory').value, mood, bpm:$('fBpm').value, instruments:$('fInstruments').value, author:$('fAuthor').value, source:$('fSource').value, license:$('fLicense').value, sourceUrl:$('fSourceUrl').value};
+  if(!body.title.trim()){alert('请填写标题');return;}
+  let res;
+  if(editingId){res=await fetch('/api/bgm/'+editingId,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});}
+  else{
+    if(!curFileData){alert('请选择音频文件');return;}
+    res=await fetch('/api/bgm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...body,fileData:curFileData})});
+  }
+  const d=await res.json();
+  if(!res.ok||!d.success){alert('保存失败: '+(d.error||''));return;}
+  $('modalOverlay').classList.add('hidden'); load();
+};
+async function removeTrack(t){
+  if(!confirm('确认删除音轨「'+t.title+'」？\n自定义上传的会同时删除音频文件；内置音轨仅从清单移除。'))return;
+  const r=await fetch('/api/bgm/'+t.id,{method:'DELETE'});
+  const d=await r.json();
+  if(!r.ok||!d.success){alert('删除失败: '+(d.error||''));return;}
+  load();
+}
+load();
+</script>
+</body>
+</html>

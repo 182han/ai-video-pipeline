@@ -5,10 +5,14 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "db:migrate": "node scripts/migrate-to-db.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "ws": "^8.16.0"
+  },
+  "optionalDependencies": {
+    "pg": "^8.11.3"
   }
 }

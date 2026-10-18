@@ -7,26 +7,46 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg-primary: #f5f5f7;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #fafafa;
-  --text-primary: #1d1d1f;
-  --text-secondary: #86868b;
-  --text-tertiary: #a1a1a6;
-  --accent: #0071e3;
-  --accent-hover: #0077ed;
-  --border: #d2d2d7;
-  --border-light: #e8e8ed;
-  --success: #34c759;
-  --danger: #ff3b30;
-  --warning: #ff9500;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 20px rgba(0,0,0,0.06);
-  --shadow-lg: 0 10px 40px rgba(0,0,0,0.08);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  /* Notion × Apple Hybrid 设计令牌 */
+  --bg-primary: #f7f6f3;   /* 画布底色，暖灰 Notion 风 */
+  --bg-secondary: #ffffff;  /* 白色内容区 */
+  --bg-tertiary: #f7f7f5;   /* 浅灰次级背景 */
+  --bg-hover: #f1f1ef;      /* hover 态 */
+  --bg-active: #e8e8e5;     /* 选中/激活态 */
+  --text-primary: #37352f;   /* Notion 墨色 */
+  --text-secondary: #787774; /* 次级文字 */
+  --text-tertiary: #9b9a97;  /* 辅助文字 */
+  --text-placeholder: #c4c4c1;
+  --accent: #2383e2;         /* Apple 蓝微调 */
+  --accent-hover: #1a74d1;
+  --accent-bg: #eef6fb;
+  --border: #d3d1cb;         /* 强化边框 */
+  --border-light: #e9e9e7;   /* 细分割线 */
+  --success: #0f7b0f;        /* 低饱和成功绿 */
+  --success-bg: #ecf7ec;
+  --success-light: #dbeddb;
+  --danger: #e03e3e;         /* 低饱和错误红 */
+  --danger-bg: #fbecec;
+  --danger-light: #f5d0d0;
+  --warning: #cb912f;        /* 低饱和警告黄 */
+  --warning-bg: #faf3e2;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(15,15,15,0.08);
+  --shadow-lg: 0 12px 28px rgba(15,15,15,0.12);
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  /* 莫兰迪色图标底色 */
+  --icon-create: #f3e2c9;
+  --icon-progress: #d7e4f0;
+  --icon-template: #dbe9d5;
+  --icon-history: #e2d9ee;
+  --icon-music: #d8e8e6;
+  --icon-settings: #e0e0de;
+  --icon-about: #efd7d3;
+  --icon-fg: #5c5953;
 }
 html, body { height: 100%; }
 body {
@@ -48,97 +68,135 @@ body {
 /* ===== 侧边栏 ===== */
 .sidebar {
   width: 260px;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 }
 .sidebar-header {
-  padding: 28px 24px 20px;
-  border-bottom: 1px solid var(--border-light);
+  padding: 18px 14px 14px;
 }
 .sidebar-logo {
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.5px;
   display: flex;
   align-items: center;
   gap: 10px;
+  color: var(--text-primary);
 }
 .sidebar-logo-dot {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #0071e3, #5856d6);
-  border-radius: 8px;
+  width: 22px;
+  height: 22px;
+  background: var(--icon-create);
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--icon-fg);
+  flex-shrink: 0;
+}
+.sidebar-logo-dot svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .sidebar-subtitle {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-top: 4px;
+  margin-left: 32px;
 }
 .sidebar-nav {
   flex: 1;
-  padding: 16px 12px;
+  padding: 8px 8px 16px;
   overflow-y: auto;
 }
 .nav-section {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 .nav-section-title {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  padding: 0 12px 8px;
+  letter-spacing: 0.5px;
+  padding: 8px 10px 6px;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 11px 14px;
-  border-radius: var(--radius-sm);
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.12s ease;
   font-size: 14px;
   font-weight: 400;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   margin-bottom: 2px;
   position: relative;
 }
 .nav-item:hover {
-  background: var(--bg-tertiary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .nav-item.active {
-  background: var(--accent);
-  color: white;
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font-weight: 500;
 }
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--icon-fg);
+}
+.nav-icon svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.nav-icon.ic-create   { background: var(--icon-create); }
+.nav-icon.ic-progress { background: var(--icon-progress); }
+.nav-icon.ic-template { background: var(--icon-template); }
+.nav-icon.ic-history  { background: var(--icon-history); }
+.nav-icon.ic-music    { background: var(--icon-music); }
+.nav-icon.ic-settings { background: var(--icon-settings); }
+.nav-icon.ic-about    { background: var(--icon-about); }
+
 .nav-badge {
   margin-left: auto;
-  background: var(--accent);
-  color: white;
+  background: var(--bg-active);
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 500;
-  padding: 2px 7px;
+  padding: 1px 7px;
   border-radius: 10px;
-  min-width: 20px;
+  min-width: 18px;
   text-align: center;
 }
 .nav-item.active .nav-badge {
-  background: rgba(255,255,255,0.25);
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 .nav-item .gen-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ff9500;
+  background: var(--warning);
   flex-shrink: 0;
   display: none;
 }
@@ -152,18 +210,20 @@ body {
 }
 
 .sidebar-footer {
-  padding: 16px;
+  padding: 12px 8px;
   border-top: 1px solid var(--border-light);
 }
 .sidebar-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
+  padding: 6px 10px;
   font-size: 12px;
   color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+}
+.sidebar-status:hover {
+  background: var(--bg-hover);
 }
 .status-dot {
   width: 7px;
@@ -180,41 +240,41 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  background: var(--bg-secondary);
 }
 .page-container {
   max-width: 780px;
   margin: 0 auto;
-  padding: 48px 40px 80px;
+  padding: 48px 48px 80px;
 }
 .page-header {
   margin-bottom: 32px;
 }
 .page-title {
-  font-size: 32px;
-  font-weight: 600;
-  letter-spacing: -0.7px;
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -1px;
   margin-bottom: 6px;
 }
 .page-desc {
   font-size: 15px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 /* ===== 卡片 ===== */
 .card {
   background: var(--bg-secondary);
-  border-radius: var(--radius-lg);
-  padding: 28px;
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-sm);
+  padding: 24px;
   border: 1px solid var(--border-light);
   margin-bottom: 16px;
 }
 .card-title {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
-  margin-bottom: 20px;
-  letter-spacing: -0.2px;
+  margin-bottom: 16px;
+  color: var(--text-primary);
 }
 
 /* ===== 表单 ===== */
@@ -252,8 +312,8 @@ body {
   font-size: 12px;
   color: var(--text-tertiary);
 }
-.test-result.success { color: #10b981; }
-.test-result.error { color: #ef4444; }
+.test-result.success { color: var(--success); }
+.test-result.error { color: var(--danger); }
 
 .free-badge {
   display: inline-block;
@@ -273,28 +333,28 @@ input[type="password"],
 input[type="number"],
 select, textarea {
   width: 100%;
-  padding: 11px 14px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   font-size: 14px;
   color: var(--text-primary);
   background: var(--bg-secondary);
   transition: border-color 0.15s, box-shadow 0.15s;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px rgba(0,113,227,0.12);
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 textarea { resize: vertical; min-height: 100px; }
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2386868b' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23787774' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 14px center;
-  padding-right: 36px;
+  background-position: right 12px center;
+  padding-right: 32px;
   cursor: pointer;
 }
 .row { display: flex; gap: 14px; }
@@ -319,7 +379,8 @@ select {
   box-sizing: border-box;
 }
 .clip-count-input:focus {
-  border-color: #0071e3;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 .clip-count-unit {
   position: absolute;
@@ -346,8 +407,9 @@ select {
   font-family: inherit;
 }
 .chip:hover {
-  border-color: #0071e3;
-  color: #0071e3;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 .chip.chip-small {
   padding: 3px 10px;
@@ -356,54 +418,58 @@ select {
 
 /* ===== 按钮 ===== */
 .btn {
-  padding: 11px 22px;
-  border: none;
-  border-radius: 980px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  letter-spacing: -0.05px;
+  white-space: nowrap;
 }
 .btn-primary {
   background: var(--accent);
   color: white;
-  padding: 13px 28px;
-  font-size: 15px;
+  border-color: var(--accent);
+  padding: 9px 20px;
+  font-size: 14px;
 }
-.btn-primary:hover { background: var(--accent-hover); transform: translateY(-0.5px); }
-.btn-primary:active { transform: translateY(0); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-primary:disabled {
   background: #a1c8f5;
+  border-color: #a1c8f5;
   cursor: not-allowed;
-  transform: none;
 }
 .btn-secondary {
-  background: var(--border-light);
+  background: var(--bg-secondary);
   color: var(--text-primary);
-  padding: 10px 20px;
+  border-color: var(--border);
+  padding: 7px 14px;
   font-size: 13px;
 }
-.btn-secondary:hover { background: #dcdce1; }
+.btn-secondary:hover { background: var(--bg-hover); }
 .btn-danger {
   background: var(--danger);
   color: white;
-  padding: 10px 20px;
+  border-color: var(--danger);
+  padding: 7px 14px;
   font-size: 13px;
 }
-.btn-danger:hover { background: #e6352b; }
+.btn-danger:hover { background: #c63535; border-color: #c63535; }
 .btn-ghost {
   background: transparent;
-  color: var(--accent);
-  padding: 8px 12px;
+  color: var(--text-secondary);
+  border-color: transparent;
+  padding: 6px 10px;
   font-size: 13px;
+  font-weight: 400;
 }
-.btn-ghost:hover { background: rgba(0,113,227,0.08); }
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-block { width: 100%; }
 
 /* ===== Tab ===== */
@@ -452,12 +518,12 @@ select {
   text-align: center;
 }
 .theme-card:hover {
-  background: #f0f0f2;
+  background: var(--bg-hover);
   transform: translateY(-1px);
 }
 .theme-card.selected {
   border-color: var(--accent);
-  background: rgba(0,113,227,0.06);
+  background: var(--accent-bg);
 }
 .theme-emoji {
   font-size: 28px;
@@ -652,66 +718,67 @@ select {
   justify-content: space-between;
 }
 .error-box {
-  background: #fff5f5;
-  border: 1px solid #ffd6d6;
-  border-radius: 10px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-light, #f5d0d0);
+  border-radius: var(--radius-sm);
   padding: 14px 16px;
   margin-bottom: 14px;
 }
 .error-title {
   font-weight: 600;
-  color: #c73030;
+  color: var(--danger);
   font-size: 13px;
   margin-bottom: 6px;
 }
 .error-message {
   font-size: 12px;
-  color: #8b1c1c;
+  color: var(--danger);
   line-height: 1.6;
   word-break: break-word;
+  opacity: 0.85;
 }
 .error-analysis-box {
-  background: #fff5f5;
-  border: 1px solid #ffd6d6;
-  border-radius: 10px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-light, #f5d0d0);
+  border-radius: var(--radius-sm);
   padding: 14px 16px;
 }
 .error-analysis-type {
   display: inline-block;
-  background: #ff6b6b;
+  background: var(--danger);
   color: white;
   font-size: 11px;
   font-weight: 600;
   padding: 2px 10px;
-  border-radius: 100px;
+  border-radius: 4px;
   margin-bottom: 8px;
 }
 .error-analysis-desc {
   font-size: 13px;
-  color: #c73030;
+  color: var(--danger);
   line-height: 1.6;
   margin-bottom: 8px;
 }
 .error-analysis-suggestion {
   font-size: 12px;
-  color: #555;
+  color: var(--text-secondary);
   line-height: 1.7;
-  background: #f8f8f8;
-  border-radius: 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-xs);
   padding: 10px 12px;
 }
 .error-analysis-suggestion strong {
-  color: #248a3d;
+  color: var(--success);
 }
 .error-analysis-clips {
   margin-top: 10px;
   font-size: 11px;
-  color: #86868b;
+  color: var(--text-tertiary);
   line-height: 1.5;
 }
 .error-analysis-clips-item {
   padding: 4px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-light);
 }
 .error-analysis-clips-item:last-child {
   border-bottom: none;
@@ -738,6 +805,23 @@ select {
   font-weight: 500;
   color: var(--text-tertiary);
   transition: all 0.3s;
+  position: relative;
+}
+.clip-theme-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.95;
+  pointer-events: none;
+}
+.clip-theme-badge.unmatched {
+  background: #f0ad4e;
+  color: white;
+  border-radius: 3px;
+  padding: 1px 3px;
+  font-size: 7px;
 }
 .clip-cell.pending { background: var(--border-light); }
 .clip-cell.generating {
@@ -964,6 +1048,11 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-right: 14px;
+}
+.history-prompt-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-left: 6px;
 }
 .history-meta {
   display: flex;
@@ -1196,6 +1285,7 @@ select {
   line-height: 1.6;
   color: var(--text-primary);
   word-break: break-word;
+  white-space: pre-line;
 }
 .video-player-wrapper {
   background: #000;
@@ -1840,6 +1930,61 @@ select {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
+
+/* ===== 配乐分配（提示词环节逐段配乐） ===== */
+.bgm-assign-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.bgm-assign-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border, #e5e5ea);
+  border-radius: 10px; background: var(--bg-card, #fff);
+}
+.bgm-assign-row:hover { border-color: #c7c7cc; }
+.bgm-assign-seg {
+  flex: 0 0 40px; text-align: center; font-size: 12px; font-weight: 600;
+  color: var(--text-secondary, #6e6e73); background: var(--bg-sub, #f5f5f7);
+  border-radius: 6px; padding: 4px 0;
+}
+.bgm-assign-theme { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary, #6e6e73); max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bgm-assign-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
+.bgm-assign-row.is-manual .bgm-assign-seg { background: #e8f2ff; color: #1a73e8; }
+.bgm-mode-chip {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  background: var(--primary-light, #eef4ff); color: #1a73e8;
+}
+/* 配乐模式开关：把下拉改成分段选择 */
+.bgm-mode-segments { display: flex; gap: 8px; flex-wrap: wrap; }
+.bgm-mode-segment {
+  padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 8px;
+  font-size: 12px; cursor: pointer; user-select: none; color: var(--text-secondary, #6e6e73);
+}
+.bgm-mode-segment.selected { background: var(--primary-light, #eef4ff); border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
+
+/* ===== 提示词内【主题】内联联想 ===== */
+.theme-suggest-wrap { position: relative; }
+.theme-suggest {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
+  background: #fff; border: 1px solid var(--border, #e5e5ea); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); max-height: 220px; overflow-y: auto;
+}
+.theme-suggest-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
+  font-size: 13px; color: var(--text-primary, #1d1d1f);
+}
+.theme-suggest-item .suggest-emoji { font-size: 15px; }
+.theme-suggest-item .suggest-desc { color: var(--text-tertiary, #86868b); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.theme-suggest-item:hover, .theme-suggest-item.active { background: var(--primary-light, #eef4ff); }
+.theme-suggest-empty { padding: 10px 12px; font-size: 12px; color: var(--text-tertiary, #86868b); }
+
+/* ===== 任务详情：逐段配乐 ===== */
+.bgm-detail-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.bgm-detail-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 10px; }
+.bgm-detail-seg { flex: 0 0 48px; font-size: 12px; font-weight: 600; color: var(--text-secondary, #6e6e73); }
+.bgm-detail-theme { flex: 0 0 90px; font-size: 12px; color: var(--text-secondary, #6e6e73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bgm-detail-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
+.bgm-detail-status { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary, #a1a1a6); min-width: 46px; text-align: right; }
+.bgm-detail-status.done { color: #34c759; }
+.bgm-detail-status.fail { color: #c73030; }
 </style>
 </head>
 <body>
@@ -1849,7 +1994,9 @@ select {
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-logo">
-        <div class="sidebar-logo-dot">V</div>
+        <div class="sidebar-logo-dot">
+          <svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </div>
         <span>Video Studio</span>
       </div>
       <div class="sidebar-subtitle">AI 长视频生成流水线</div>
@@ -1859,27 +2006,36 @@ select {
       <div class="nav-section">
         <div class="nav-section-title">工作区</div>
         <div class="nav-item active" data-page="create" onclick="switchPage('create')">
+          <span class="nav-icon ic-create"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
           <span>新建视频</span>
         </div>
         <div class="nav-item" data-page="generating" onclick="switchPage('generating')">
-          <span class="gen-status-dot" id="genStatusDot"></span>
+          <span class="nav-icon ic-progress"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
           <span>生成进度</span>
         </div>
         <div class="nav-item" data-page="templates" onclick="switchPage('templates')">
+          <span class="nav-icon ic-template"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg></span>
           <span>提示词模板库</span>
           <span class="nav-badge" id="templateCount">5</span>
         </div>
         <div class="nav-item" data-page="history" onclick="switchPage('history')">
+          <span class="nav-icon ic-history"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
           <span>历史记录</span>
+        </div>
+        <div class="nav-item" onclick="window.location.href='/music-library.html'">
+          <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span>配乐库存</span>
         </div>
       </div>
 
       <div class="nav-section">
         <div class="nav-section-title">系统</div>
         <div class="nav-item" onclick="openSettings()">
+          <span class="nav-icon ic-settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span>设置</span>
         </div>
         <div class="nav-item" onclick="openInfo()">
+          <span class="nav-icon ic-about"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
           <span>关于</span>
         </div>
       </div>
@@ -1904,6 +2060,21 @@ select {
           <p class="page-desc">输入你的创意描述，AI 将自动生成高质量长视频</p>
         </div>
 
+        <div class="card" id="continueTaskCard" style="margin-bottom:16px;">
+          <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleContinueTaskList()">
+            <span style="display:flex;align-items:center;gap:8px;">
+              <span id="continueTaskArrow" style="display:inline-block;transition:transform 0.2s;font-size:12px;color:var(--text-tertiary);">▶</span>
+              <span>继续历史任务</span>
+              <span class="form-hint" id="continueTaskSummary" style="font-size:12px;"></span>
+            </span>
+            <button class="btn btn-ghost" onclick="event.stopPropagation(); refreshContinueTasks()" style="font-size:12px;padding:4px 10px;">刷新</button>
+          </div>
+          <div id="continueTaskBody" style="display:none;">
+            <div class="form-hint" style="margin-bottom:10px;">质检失败的任务可在此展开，点击失败片段修改提示词并重新生成（仅重跑该片段，成功后自动重拼成片）。</div>
+            <div id="continueTaskList"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-title">选择模型</div>
           <div class="form-group">
@@ -1914,21 +2085,13 @@ select {
         </div>
 
         <div class="card">
-          <div class="card-title">
-            主题风格
-            <button class="btn-ghost" style="float:right;font-size:12px;padding:2px 8px;" onclick="switchPage('templates')">
-              管理模板 →
-            </button>
-          </div>
-          <div class="theme-grid" id="themeGrid"></div>
-        </div>
-
-        <div class="card">
           <div class="card-title">视频描述</div>
-          <div class="form-group">
+          <div class="form-group theme-suggest-wrap">
             <label class="form-label">提示词</label>
-            <textarea id="promptInput" placeholder="描述你想要生成的视频内容，比如：极光在雪山上方舞动，湖面倒映着绿光..."></textarea>
-            <div class="form-hint">提示：描述越详细，生成效果越好。你也可以点击下方按钮让 AI 帮你优化。</div>
+            <textarea id="promptInput" rows="5" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
+            <div class="theme-suggest" id="themeSuggest" style="display:none;"></div>
+            <div id="multiPromptHint" style="display:none;margin-top:8px;padding:8px 12px;background:var(--primary-light, #eef4ff);border-radius:8px;font-size:12px;color:var(--text-secondary);"></div>
+            <div class="form-hint">💡 单行 = 单场景 × 段数；多行 = 每行一个场景（行数覆盖段数设置）。输入【 可联想选择主题模板；不写【 = 不套主题，只走通用优化规则。</div>
           </div>
 
           <button class="btn btn-ghost" id="optimizeBtn" style="padding-left:0;">✨ 智能优化提示词</button>
@@ -1945,6 +2108,28 @@ select {
           </div>
         </div>
 
+        <div class="card" id="bgmCard">
+          <div class="card-title">
+            配乐
+            <button class="btn-ghost" style="float:right;font-size:12px;padding:2px 8px;" onclick="window.location.href='/music-library.html'">管理库存 →</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">配乐模式</label>
+            <select id="bgmModeSelect" onchange="onBgmModeChange()">
+              <option value="off">不添加配乐</option>
+              <option value="auto">自动配乐（按每段主题推荐轻音乐/环境音）</option>
+            </select>
+            <div class="form-hint" id="bgmModeHint">开启后，系统将按每段主题自动分配音轨，你可在此逐段预览与手动更换；无可用音轨时自动跳过配乐。</div>
+          </div>
+          <div id="bgmAssignSection" style="display:none;">
+            <div class="form-hint" style="margin:4px 0 2px;">
+              <span id="bgmTrackCountText">已加载 0 条音轨</span>
+              <span class="bgm-mode-chip">自动分配（按主题匹配 mood）</span>
+            </div>
+            <div class="bgm-assign-list" id="bgmAssignList"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-title">生成参数</div>
           <div class="row">
@@ -1954,6 +2139,7 @@ select {
                 <input type="number" id="clipCountInput" value="10" min="1" max="200" class="clip-count-input">
                 <span class="clip-count-unit">段</span>
               </div>
+              <div class="form-hint" id="clipCountHint">多行提示词时以行数为准</div>
               <div class="clip-presets">
                 <button type="button" class="chip" data-clips="5">5段</button>
                 <button type="button" class="chip" data-clips="10">10段</button>
@@ -1965,13 +2151,14 @@ select {
             <div class="form-group">
               <label class="form-label">单段时长</label>
               <div class="clip-count-input-wrapper">
-                <input type="number" id="clipDurationInput" value="30" min="1" max="60" class="clip-count-input">
+                <input type="number" id="clipDurationInput" value="15" min="1" max="60" class="clip-count-input">
                 <span class="clip-count-unit">秒</span>
               </div>
               <div class="clip-presets">
                 <button type="button" class="chip chip-small" data-duration="5">5s</button>
                 <button type="button" class="chip chip-small" data-duration="10">10s</button>
                 <button type="button" class="chip chip-small" data-duration="12">12s</button>
+                <button type="button" class="chip chip-small" data-duration="15">15s</button>
                 <button type="button" class="chip chip-small" data-duration="30">30s</button>
               </div>
             </div>
@@ -1981,19 +2168,10 @@ select {
               <label class="form-label">分辨率</label>
               <select id="resolutionSelect">
                 <option value="720p">720p HD</option>
-                <option value="1080p">1080p Full HD</option>
+                <option value="1080p" selected>1080p Full HD</option>
+                <option value="4K">4K 超清（可灵 Kling 3.0）</option>
               </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">主题模板</label>
-              <select id="themeSelect">
-                <option value="landscape">自然风光</option>
-                <option value="portrait">人物肖像</option>
-                <option value="city">城市建筑</option>
-                <option value="abstract">抽象艺术</option>
-                <option value="anime">动漫风格</option>
-                <option value="custom">自定义</option>
-              </select>
+              <div class="form-hint" id="resHint" style="display:none;"></div>
             </div>
           </div>
         </div>
@@ -2209,11 +2387,11 @@ select {
 
         <div class="card rules-section" style="padding:24px;">
           <div class="rules-section-header">
-            <h3 class="rules-section-title">优化规则</h3>
+            <h3 class="rules-section-title">通用提示词优化规则</h3>
             <button class="btn btn-secondary" onclick="saveRules()" style="padding:7px 16px;font-size:12px;">保存规则</button>
           </div>
           <textarea id="rulesTextarea" style="min-height:160px;font-size:13px;line-height:1.7;font-family:inherit;"></textarea>
-          <div class="form-hint">这些规则会用于 AI 优化提示词时的系统提示。你可以根据需要自定义优化风格和要求。</div>
+          <div class="form-hint">这是全局系统提示词，独立于主题模板库：所有提示词优化都会以其为底（选主题时再叠加对应模板词池；不选主题时只走它）。</div>
         </div>
       </div>
 
@@ -2248,7 +2426,11 @@ select {
 
     <div class="modal-section">
       <div class="modal-section-title">基本信息</div>
-      <div class="detail-grid" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="detail-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="detail-item">
+          <div class="detail-label">主题</div>
+          <div class="detail-value" id="clipDetailTheme">-</div>
+        </div>
         <div class="detail-item">
           <div class="detail-label">状态</div>
           <div class="detail-value" id="clipDetailStatus">-</div>
@@ -2267,6 +2449,14 @@ select {
     <div class="modal-section" id="clipDetailErrorSection" style="display:none;">
       <div class="modal-section-title">错误信息</div>
       <div class="clip-detail-error" id="clipDetailError">-</div>
+    </div>
+
+    <div class="modal-section" id="clipRetrySection" style="display:none;">
+      <div class="modal-section-title">修改提示词并重新生成该片段</div>
+      <div class="form-hint" style="margin-top:4px;">重新生成会再次调用模型（产生一次片段费用）；成功后自动重新拼接成片。</div>
+      <textarea id="clipRetryPrompt" rows="3" style="width:100%;margin:8px 0;padding:8px;border-radius:8px;border:1px solid #e5e5ea;font-size:13px;line-height:1.5;box-sizing:border-box;resize:vertical;"></textarea>
+      <button class="btn btn-primary btn-block" id="clipRetryBtn" onclick="regenerateClip()">重新生成该片段</button>
+      <div class="form-hint" id="clipRetryMsg" style="margin-top:6px;"></div>
     </div>
 
     <div class="modal-section">
@@ -2329,6 +2519,12 @@ select {
     <div class="modal-section">
       <div class="modal-section-title">提示词</div>
       <div class="detail-prompt" id="detailPrompt">-</div>
+    </div>
+
+    <div class="modal-section" id="bgmDetailSection" style="display:none;">
+      <div class="modal-section-title">片段配乐</div>
+      <div class="form-hint" style="margin-bottom:8px;">对单段更换或移除配乐，仅重混该片段并快速重出片，不影响其他片段与视频本身。改动后可重新下载视频。</div>
+      <div class="bgm-detail-list" id="bgmDetailList"></div>
     </div>
 
     <div class="modal-section" id="errorAnalysisSection" style="display:none;">
@@ -2416,15 +2612,59 @@ select {
         <input type="text" id="seedanceBaseUrl" placeholder="默认: https://ark.volcengine.com/api/v3" style="width:100%;padding:8px 12px;border:1px solid var(--border-light);border-radius:8px;font-size:13px;">
       </div>
       <div class="form-group">
-        <label class="form-label">Kling API Key</label>
+        <label class="form-label">可灵 AccessKey</label>
         <div class="password-input-wrapper">
-          <input type="password" id="keyKling" placeholder="留空使用演示模式">
-          <span class="toggle-pw" onclick="togglePw('keyKling', this)">显示</span>
+          <input type="password" id="keyKlingAk" placeholder="在可灵开放平台创建 API Key">
+          <span class="toggle-pw" onclick="togglePw('keyKlingAk', this)">显示</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">可灵 SecretKey</label>
+        <div class="password-input-wrapper">
+          <input type="password" id="keyKlingSk" placeholder="与 AccessKey 配对使用">
+          <span class="toggle-pw" onclick="togglePw('keyKlingSk', this)">显示</span>
         </div>
         <div class="test-key-row">
           <button type="button" class="btn btn-secondary test-key-btn" id="testKlingBtn" style="padding:6px 14px;font-size:12px;">测试连接</button>
           <span class="test-result" id="klingTestResult"></span>
         </div>
+        <div class="form-hint">可灵官方 API 使用 JWT 鉴权，需在可灵开放平台 (app.klingai.com) 的 API Key 管理页创建 AccessKey / SecretKey</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Wan 3.0 (阿里 DashScope) API Key</label>
+        <div class="password-input-wrapper">
+          <input type="password" id="keyDashScope" placeholder="百炼控制台创建 Model Studio API Key">
+          <span class="toggle-pw" onclick="togglePw('keyDashScope', this)">显示</span>
+        </div>
+        <div class="test-key-row">
+          <button type="button" class="btn btn-secondary test-key-btn" id="testDashScopeBtn" style="padding:6px 14px;font-size:12px;">测试连接</button>
+          <span class="test-result" id="dashscopeTestResult"></span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Wan 3.0 Region（地域）</label>
+        <select id="dashScopeRegion">
+          <option value="cn-beijing">北京 (cn-beijing)</option>
+          <option value="ap-southeast-1">新加坡 (ap-southeast-1)</option>
+          <option value="us-east-1">弗吉尼亚 (us-east-1)</option>
+          <option value="ap-northeast-1">东京 (ap-northeast-1)</option>
+          <option value="eu-central-1">法兰克福 (eu-central-1)</option>
+          <option value="cn-hongkong">香港 (cn-hongkong)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">WorkspaceId（业务空间 ID）</label>
+        <input type="text" id="dashScopeWorkspaceId" placeholder="如: 1234567890abcdef1234567890">
+        <div class="form-hint">百炼控制台 → 右上角头像 → API-KEY 管理页可查看业务空间 ID；API Key、模型与地域必须一致。<a href="https://bailian.console.aliyun.com" target="_blank">百炼控制台 →</a> Wan 3.0 支持 480P/720P/1080P，最长 30 秒。</div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">成本控制</div>
+      <div class="form-group">
+        <label class="form-label">账户余额（元）</label>
+        <input type="number" id="balanceInput" placeholder="如: 12.75（留空则不拦截）" step="0.01" min="0">
+        <div class="form-hint">填写后，生成前会用预计花费与余额比对；超出余额时直接拦截，避免误点超支。需手动维护。</div>
       </div>
     </div>
 
@@ -2461,6 +2701,23 @@ select {
         <label class="form-label">模型名称</label>
         <input type="text" id="keyLLMModel" placeholder="gpt-4o-mini">
         <div class="form-hint" id="llmHint">支持所有 OpenAI 兼容格式的 API</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">多模态 API Key（§9B 视觉质检，可选）</label>
+        <div class="password-input-wrapper">
+          <input type="password" id="keyMultimodal" placeholder="留空则复用上方 LLM Key">
+          <span class="toggle-pw" onclick="togglePw('keyMultimodal', this)">显示</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">多模态 API 地址（可选）</label>
+        <input type="text" id="keyMultimodalUrl" placeholder="留空则复用上方 API 地址">
+      </div>
+      <div class="form-group">
+        <label class="form-label">多模态模型名称（可选）</label>
+        <input type="text" id="keyMultimodalModel" placeholder="gpt-4o-mini / qwen-vl-max">
+        <div class="form-hint">未配置时视觉质检自动跳过，不影响生成流程</div>
       </div>
     </div>
 
@@ -2574,7 +2831,8 @@ select {
 
 let currentTask = null;
 let themes = [];
-let selectedTheme = 'landscape';
+// 提示词内联联想（§ 主题选择收敛）
+let themeSuggestionIndex = -1;
 let ws = null;
 let editingTemplateId = null;
 let currentPage = 'create';
@@ -2609,6 +2867,10 @@ function switchPage(pageName) {
   // 特殊页面处理
   if (pageName === 'history') {
     loadHistory();
+  }
+  if (pageName === 'create') {
+    // 切回新建页时刷新「继续历史任务」（防止删除后残留旧数据）
+    loadContinueTasks();
   }
   if (pageName === 'templates') {
     loadTemplates();
@@ -2660,7 +2922,7 @@ async function testApiKey(type, keyInputId, resultId, baseUrlInputId) {
     const data = await res.json();
     
     if (data.success) {
-      resultEl.textContent = '✅ ' + data.message;
+      resultEl.textContent = '✅ ' + data.message + '，记得点下方「保存」按钮生效';
       resultEl.className = data.warning ? 'test-result' : 'test-result success';
       if (data.warning) resultEl.style.color = '#f59e0b';
     } else {
@@ -2701,7 +2963,7 @@ async function testApiKeyWithModel(type, keyInputId, resultId, baseUrl, model) {
     const data = await res.json();
 
     if (data.success) {
-      resultEl.textContent = '✅ ' + data.message;
+      resultEl.textContent = '✅ ' + data.message + '，记得点下方「保存」按钮生效';
       resultEl.className = data.warning ? 'test-result' : 'test-result success';
       if (data.warning) resultEl.style.color = '#f59e0b';
     } else {
@@ -2732,9 +2994,47 @@ document.getElementById('testSeedanceBtn').addEventListener('click', () => {
   testApiKeyWithModel('seedance', 'keySeedance', 'seedanceTestResult', baseUrl, model);
 });
 
-// Kling 测试
-document.getElementById('testKlingBtn').addEventListener('click', () => {
-  testApiKey('kling', 'keyKling', 'klingTestResult');
+// Kling 测试（JWT 鉴权需 ak/sk 双字段）
+document.getElementById('testKlingBtn').addEventListener('click', async () => {
+  const ak = document.getElementById('keyKlingAk').value.trim();
+  const sk = document.getElementById('keyKlingSk').value.trim();
+  const resultEl = document.getElementById('klingTestResult');
+
+  if (!ak || !sk) {
+    resultEl.textContent = '请填写 AccessKey 和 SecretKey';
+    resultEl.className = 'test-result error';
+    return;
+  }
+
+  resultEl.textContent = '测试中...';
+  resultEl.className = 'test-result';
+
+  try {
+    const res = await fetch('/api/test-api-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'kling', apiKey: ak, accessKey: ak, secretKey: sk })
+    });
+    const data = await res.json();
+    if (data.success) {
+      resultEl.textContent = '✅ ' + data.message;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = '❌ ' + data.error;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = '❌ 网络错误: ' + e.message;
+    resultEl.className = 'test-result error';
+  }
+});
+
+// DashScope (Wan 3.0) 测试：前端拼完整 API 根地址
+document.getElementById('testDashScopeBtn').addEventListener('click', () => {
+  const region = document.getElementById('dashScopeRegion').value;
+  const wid = document.getElementById('dashScopeWorkspaceId').value.trim();
+  const baseUrl = wid ? `https://${wid}.${region}.maas.aliyuncs.com/api/v1` : '';
+  testApiKeyWithModel('dashscope', 'keyDashScope', 'dashscopeTestResult', baseUrl, 'wan3.0-video');
 });
 
 // LLM 测试
@@ -2763,10 +3063,18 @@ function openSettings() {
   document.getElementById('keySeedance').value = cfg.seedanceKey || '';
   document.getElementById('seedanceModel').value = cfg.seedanceModel || 'doubao-seedance-2.0-mini-250928';
   document.getElementById('seedanceBaseUrl').value = cfg.seedanceBaseUrl || 'https://ark.volcengine.com/api/v3';
-  document.getElementById('keyKling').value = cfg.klingKey || '';
+  document.getElementById('keyKlingAk').value = cfg.klingAk || '';
+  document.getElementById('keyKlingSk').value = cfg.klingSk || '';
+  document.getElementById('keyDashScope').value = cfg.dashScopeKey || '';
+  document.getElementById('dashScopeRegion').value = cfg.dashScopeRegion || 'cn-beijing';
+  document.getElementById('dashScopeWorkspaceId').value = cfg.dashScopeWorkspaceId || '';
+  document.getElementById('balanceInput').value = (cfg.balance !== undefined && cfg.balance !== '') ? cfg.balance : '';
   document.getElementById('keyLLM').value = cfg.llmKey || '';
   document.getElementById('keyLLMUrl').value = cfg.llmUrl || '';
   document.getElementById('keyLLMModel').value = cfg.llmModel || '';
+  document.getElementById('keyMultimodal').value = cfg.multimodalKey || '';
+  document.getElementById('keyMultimodalUrl').value = cfg.multimodalUrl || '';
+  document.getElementById('keyMultimodalModel').value = cfg.multimodalModel || '';
 
   // 自动检测并选中提供商
   const provider = detectLLMProvider(cfg.llmUrl, cfg.llmModel);
@@ -2874,10 +3182,19 @@ function saveSettings() {
     seedanceKey: document.getElementById('keySeedance').value.trim(),
     seedanceModel: document.getElementById('seedanceModel').value,
     seedanceBaseUrl: document.getElementById('seedanceBaseUrl').value.trim(),
-    klingKey: document.getElementById('keyKling').value.trim(),
+    klingAk: document.getElementById('keyKlingAk').value.trim(),
+    klingSk: document.getElementById('keyKlingSk').value.trim(),
+    dashScopeKey: document.getElementById('keyDashScope').value.trim(),
+    dashScopeRegion: document.getElementById('dashScopeRegion').value,
+    dashScopeWorkspaceId: document.getElementById('dashScopeWorkspaceId').value.trim(),
+    dashScopeModel: 'wan3.0-video',
+    balance: document.getElementById('balanceInput').value.trim(),
     llmKey: document.getElementById('keyLLM').value.trim(),
     llmUrl: document.getElementById('keyLLMUrl').value.trim(),
-    llmModel: document.getElementById('keyLLMModel').value.trim()
+    llmModel: document.getElementById('keyLLMModel').value.trim(),
+    multimodalKey: document.getElementById('keyMultimodal').value.trim(),
+    multimodalUrl: document.getElementById('keyMultimodalUrl').value.trim(),
+    multimodalModel: document.getElementById('keyMultimodalModel').value.trim()
   };
   localStorage.setItem('vs_config', JSON.stringify(cfg));
   settingsModal.classList.remove('show');
@@ -2904,12 +3221,39 @@ async function loadModels() {
         if (m.id === 'siliconflow' && cfg.siliconflowKey) available = true;
         else if (m.id === 'agnes' && cfg.agnesKey) available = true;
         else if (m.id === 'seedance' && cfg.seedanceKey) available = true;
-        else if (m.id === 'kling' && cfg.klingKey) available = true;
+        else if (m.id === 'kling' && cfg.klingAk && cfg.klingSk) available = true;
+        else if (m.id === 'dashscope' && cfg.dashScopeKey) available = true;
       }
       return `<option value="${m.id}">${m.name}${available ? '' : ' (未配置)'}</option>`;
     }).join('');
+    window.__models = models;
+    syncResolutionOptions(select.value);
   } catch (e) {}
 }
+
+// 模型 → 分辨率联动（T5：模型不支持的档位前端不提供，并提示）
+function syncResolutionOptions(modelId) {
+  const sel = document.getElementById('resolutionSelect');
+  const hint = document.getElementById('resHint');
+  if (!sel) return;
+  const model = (window.__models || []).find(m => m.id === modelId);
+  const supported = (model && model.resolutions) || ['720p', '1080p', '4K'];
+  const labels = { '480p': '480p HD', '720p': '720p HD', '1080p': '1080p Full HD', '4K': '4K 超清（可灵 Kling 3.0）' };
+  const current = sel.value;
+  sel.innerHTML = supported.map(r => `<option value="${r}">${labels[r] || r}</option>`).join('');
+  if (supported.includes(current)) sel.value = current;
+  else if (supported.includes('1080p')) sel.value = '1080p';
+  else sel.value = supported[0] || '';
+  const missing = ['480p', '720p', '1080p', '4K'].filter(r => !supported.includes(r));
+  if (hint) {
+    hint.style.display = missing.length > 0 ? 'block' : 'none';
+    hint.textContent = missing.length > 0 ? `该模型不支持：${missing.map(r => labels[r]).join('、')}` : '';
+  }
+}
+
+document.getElementById('modelSelect').addEventListener('change', () => {
+  syncResolutionOptions(document.getElementById('modelSelect').value);
+});
 
 // ==========================================
 // 模板管理
@@ -2920,32 +3264,10 @@ async function loadTemplates() {
     const res = await fetch('/api/themes');
     themes = await res.json();
     document.getElementById('templateCount').textContent = themes.length;
-    renderThemeGrid();
     renderTemplateLibrary();
   } catch (e) {
     console.error('加载模板失败:', e);
   }
-}
-
-function renderThemeGrid() {
-  const grid = document.getElementById('themeGrid');
-  if (!grid) return;
-  grid.innerHTML = themes.map(t => {
-    const emoji = t.emoji || themeEmojis[t.id] || themeEmojis.default;
-    const isSelected = t.id === selectedTheme;
-    return `
-      <div class="theme-card ${isSelected ? 'selected' : ''}" onclick="selectTheme('${t.id}')">
-        <div class="theme-emoji">${emoji}</div>
-        <div class="theme-name">${t.name}</div>
-        <div class="theme-desc">${(t.keywords || []).slice(0, 2).join(' · ')}</div>
-      </div>
-    `;
-  }).join('');
-}
-
-function selectTheme(id) {
-  selectedTheme = id;
-  renderThemeGrid();
 }
 
 function renderTemplateLibrary() {
@@ -2956,6 +3278,10 @@ function renderTemplateLibrary() {
     const emoji = t.emoji || themeEmojis[t.id] || themeEmojis.default;
     const keywords = (t.keywords || []).slice(0, 4);
     const enhancersCount = (t.styleEnhancers || []).length;
+    const sc = t.structureCounts;
+    const structureStats = sc
+      ? `${Object.values(sc).reduce((a, b) => a + b, 0)} 词 · 7 词池`
+      : '旧版模板（无结构化词池）';
     return `
       <div class="template-card" onclick="editTemplate('${t.id}')">
         <div class="template-card-header">
@@ -2969,7 +3295,7 @@ function renderTemplateLibrary() {
           ${keywords.map(k => `<span class="keyword-tag">${k}</span>`).join('')}
         </div>
         <div class="template-card-footer">
-          <span class="template-stats">${enhancersCount} 个风格词</span>
+          <span class="template-stats">${enhancersCount} 个风格词 · ${structureStats}</span>
           <div class="template-actions">
             <button class="icon-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')" title="编辑">✎</button>
             <button class="icon-btn danger" onclick="event.stopPropagation(); deleteTemplate('${t.id}')" title="删除">×</button>
@@ -3065,9 +3391,6 @@ async function deleteTemplate(id) {
   if (!confirm(`确定要删除模板 "${id}" 吗？`)) return;
   try {
     await fetch(`/api/templates/${id}`, { method: 'DELETE' });
-    if (selectedTheme === id && themes.length > 0) {
-      selectedTheme = themes[0].id;
-    }
     await loadTemplates();
   } catch (e) {
     alert('删除失败: ' + e.message);
@@ -3105,6 +3428,99 @@ async function saveRules() {
 }
 
 // ==========================================
+// 提示词内【主题】内联联想（§ 主题选择收敛）
+// ==========================================
+
+function themeSuggestPanel() {
+  return document.getElementById('themeSuggest');
+}
+
+// 光标前存在未闭合的【 时弹出模板联想面板
+function themeSuggestOpen() {
+  const panel = themeSuggestPanel();
+  const ta = document.getElementById('promptInput');
+  if (!panel || !ta) return false;
+  const before = ta.value.slice(0, ta.selectionStart);
+  const lastOpen = before.lastIndexOf('【');
+  const lastClose = before.lastIndexOf('】');
+  if (lastOpen === -1 || lastClose > lastOpen) return false;
+
+  if (!themes || themes.length === 0) {
+    panel.innerHTML = '<div class="theme-suggest-empty">暂无模板，请先在模板库创建</div>';
+  } else {
+    panel.innerHTML = themes.map((t, i) => `
+      <div class="theme-suggest-item ${i === themeSuggestionIndex ? 'active' : ''}" data-index="${i}" onclick="themeSuggestPick(${i})">
+        <span class="suggest-emoji">${t.emoji || themeEmojis[t.id] || '🏔'}</span>
+        <span>${t.name}</span>
+        <span class="suggest-desc">${(t.keywords || []).slice(0, 2).join(' · ')}</span>
+      </div>`).join('');
+  }
+  panel.style.display = 'block';
+  return true;
+}
+
+function themeSuggestClose() {
+  const panel = themeSuggestPanel();
+  if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+  themeSuggestionIndex = -1;
+}
+
+// 选中模板：把光标处的【 替换为【模板名】（复用行尾标签解析）
+function themeSuggestPick(index) {
+  const t = themes[index];
+  if (!t) return;
+  const ta = document.getElementById('promptInput');
+  const pos = ta.selectionStart;
+  const before = ta.value.slice(0, pos);
+  const lastOpen = before.lastIndexOf('【');
+  if (lastOpen === -1) return;
+  const after = ta.value.slice(pos);
+  const tag = `【${t.name}】`;
+  ta.value = before.slice(0, lastOpen) + tag + after;
+  const newPos = lastOpen + tag.length;
+  ta.focus();
+  ta.setSelectionRange(newPos, newPos);
+  themeSuggestClose();
+  scheduleBgmAssignment();
+}
+
+document.getElementById('promptInput').addEventListener('input', () => {
+  themeSuggestionIndex = -1;
+  if (!themeSuggestOpen()) themeSuggestClose();
+});
+
+document.getElementById('promptInput').addEventListener('keydown', (e) => {
+  const panel = themeSuggestPanel();
+  if (!panel || panel.style.display !== 'block') return;
+  const items = panel.querySelectorAll('.theme-suggest-item');
+  if (items.length === 0) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    themeSuggestionIndex = (themeSuggestionIndex + 1) % items.length;
+    items.forEach((el, i) => el.classList.toggle('active', i === themeSuggestionIndex));
+    items[themeSuggestionIndex].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    themeSuggestionIndex = (themeSuggestionIndex - 1 + items.length) % items.length;
+    items.forEach((el, i) => el.classList.toggle('active', i === themeSuggestionIndex));
+    items[themeSuggestionIndex].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    if (themeSuggestionIndex >= 0 && themeSuggestionIndex < themes.length) {
+      e.preventDefault();
+      themeSuggestPick(themeSuggestionIndex);
+    }
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    themeSuggestClose();
+  }
+});
+
+// 点击面板外部关闭
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.theme-suggest-wrap')) themeSuggestClose();
+});
+
+// ==========================================
 // 提示词优化
 // ==========================================
 
@@ -3120,7 +3536,7 @@ document.getElementById('optimizeBtn').addEventListener('click', async () => {
     const res = await fetch('/api/optimize-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, theme: selectedTheme })
+      body: JSON.stringify({ prompt, theme: null })
     });
     const data = await res.json();
 
@@ -3146,14 +3562,20 @@ function useOptimizedPrompt() {
 // ==========================================
 
 document.getElementById('startBtn').addEventListener('click', async () => {
-  const prompt = document.getElementById('promptInput').value.trim();
-  if (!prompt) return;
+  const rawPromptText = document.getElementById('promptInput').value.trim();
+  if (!rawPromptText) return;
+
+  // 多提示词批量模式：每行一个场景提示词，行数即片段数（覆盖段数设置）
+  const promptLines = rawPromptText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const isMultiPrompt = promptLines.length > 1;
+  const prompt = promptLines[0];
+  const prompts = isMultiPrompt ? promptLines : null;
 
   const model = document.getElementById('modelSelect').value;
-  const clipCount = parseInt(document.getElementById('clipCountInput').value) || 10;
-  const clipDuration = parseInt(document.getElementById('clipDurationInput').value) || 30;
+  let clipCount = parseInt(document.getElementById('clipCountInput').value) || 10;
+  if (isMultiPrompt) clipCount = promptLines.length;
+  const clipDuration = parseInt(document.getElementById('clipDurationInput').value) || 15;
   const resolution = document.getElementById('resolutionSelect').value;
-  const theme = document.getElementById('themeSelect').value;
 
   // 校验
   if (clipCount < 1 || clipCount > 200) {
@@ -3165,7 +3587,10 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     return;
   }
 
-  // 费用预估（仅非 mock 模型才提示）
+  // 从 localStorage 读取 API 配置（费用预估与后续鉴权都要用，需先声明）
+  const settings = JSON.parse(localStorage.getItem('vs_config') || '{}');
+
+  // 费用预估 + 余额守门（仅非 mock 模型才提示）
   if (model !== 'mock') {
     let priceInfo = null;
     if (model === 'siliconflow') {
@@ -3173,7 +3598,10 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     } else if (model === 'agnes') {
       priceInfo = { name: 'Agnes AI', unit: 3, unitLabel: '¥3.00/个（5秒）' };
     } else if (model === 'kling') {
-      priceInfo = { name: 'Kling AI', unit: 3.5, unitLabel: '约¥3.50/个（5秒）' };
+      // 可灵 3.0 按分辨率计价：4K ¥3/s · 1080p ¥1.2/s · 720p ¥0.6/s（估算）
+      const klingPerSec = resolution === '4K' ? 3 : (resolution === '1080p' ? 1.2 : 0.6);
+      const perClip = klingPerSec * clipDuration;
+      priceInfo = { name: `可灵 Kling 3.0 (${resolution})`, unit: perClip, unitLabel: `约¥${perClip.toFixed(0)}/段（${resolution} ${clipDuration}s）` };
     } else if (model === 'seedance') {
       const seedanceModel = (settings && settings.seedanceModel) || 'doubao-seedance-2.0-mini-250928';
       const SEEDANCE_PRICES = {
@@ -3184,27 +3612,41 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         'seedance-2.5': { name: 'Seedance 2.5（中转）', unit: 3, unitLabel: '约¥3.00/个（5秒）' }
       };
       priceInfo = SEEDANCE_PRICES[seedanceModel] || { name: 'Seedance', unit: 1, unitLabel: '约¥1.00/个' };
+    } else if (model === 'dashscope') {
+      // Wan 3.0 按秒计价：720P ¥0.6/s · 1080P ¥1.2/s；480P 折半，其余（含 4K）按 1080P 保守估算
+      const wanPerSec = resolution === '720p' ? 0.6 : (resolution === '480p' ? 0.3 : 1.2);
+      const perClip = wanPerSec * clipDuration;
+      priceInfo = { name: `Wan 3.0 (${resolution})`, unit: perClip, unitLabel: `约¥${perClip.toFixed(1)}/段（${resolution} ${clipDuration}s）` };
     }
     if (priceInfo) {
       const totalClips = clipCount;
       const estimatedCost = totalClips * priceInfo.unit;
-      const confirmMsg = `费用预估确认\n\n` +
+      let confirmMsg = `费用预估确认\n\n` +
         `模型：${priceInfo.name}\n` +
         `片段数：${totalClips} 个\n` +
         `单次调用：${priceInfo.unitLabel}\n` +
         `────────────────────\n` +
-        `预计花费：约 ¥${estimatedCost.toFixed(0)}\n\n` +
-        `注意：实际费用可能因重试而增加。余额不足时将自动停止。\n` +
-        `是否确认开始生成？`;
+        `预计花费：约 ¥${estimatedCost.toFixed(1)}\n`;
+      if (model === 'dashscope' && resolution === '4K') {
+        confirmMsg += `\n提示：Wan 3.0 最高支持 1080P，选 4K 将按 1080P 生成。\n`;
+      }
+      const balance = parseFloat(settings.balance);
+      if (!isNaN(balance) && balance > 0) {
+        confirmMsg += `账户余额：¥${balance.toFixed(2)}\n`;
+        if (estimatedCost > balance) {
+          alert(`已拦截：预计花费 ¥${estimatedCost.toFixed(1)} 超过账户余额 ¥${balance.toFixed(2)}。\n\n请减少片段数或单段时长、降低分辨率，或先在设置中更新余额。`);
+          return;
+        }
+      }
+      confirmMsg += `\n注意：实际费用可能因重试而增加（每失败一次重试会再扣一次费用）。\n是否确认开始生成？`;
       if (!confirm(confirmMsg)) return;
     }
   }
-
-  // 从 localStorage 读取 API 配置
-  const settings = JSON.parse(localStorage.getItem('vs_config') || '{}');
   let apiKey = '';
   let apiBaseUrl = '';
   let modelId = '';
+  let klingAccessKey = '';
+  let klingSecretKey = '';
   if (model === 'siliconflow') {
     apiKey = settings.siliconflowKey || '';
     modelId = settings.siliconflowModel || '';
@@ -3216,7 +3658,25 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     modelId = settings.seedanceModel || 'doubao-seedance-2.0-mini-250928';
     apiBaseUrl = settings.seedanceBaseUrl || 'https://ark.volcengine.com/api/v3';
   } else if (model === 'kling') {
-    apiKey = settings.klingKey || '';
+    // 可灵官方 API 使用 JWT 鉴权（AccessKey + SecretKey）
+    klingAccessKey = settings.klingAk || '';
+    klingSecretKey = settings.klingSk || '';
+    apiKey = klingAccessKey;
+  } else if (model === 'dashscope') {
+    // Wan 3.0 (DashScope)：复用通用 apiKey/apiBaseUrl/modelId 字段（§六）
+    apiKey = settings.dashScopeKey || '';
+    const region = settings.dashScopeRegion || 'cn-beijing';
+    const wid = (settings.dashScopeWorkspaceId || '').trim();
+    if (wid) {
+      apiBaseUrl = `https://${wid}.${region}.maas.aliyuncs.com/api/v1`;
+    }
+    modelId = settings.dashScopeModel || 'wan3.0-video';
+  }
+
+  // 提交前校验：Wan 3.0 缺 WorkspaceId 拼不出接口地址，直接给明确提示
+  if (model === 'dashscope' && !apiBaseUrl) {
+    alert('Wan 3.0 缺少业务空间 ID（WorkspaceId）。\n\n请到百炼控制台复制真实的业务空间 ID，填入「设置 → Wan 3.0 业务空间 ID」，并确认 Region 与 Key 属于同一账号。');
+    return;
   }
 
   try {
@@ -3234,17 +3694,24 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt,
+        prompts,
         model,
-        theme: theme === 'custom' ? selectedTheme : theme,
+        theme: null,
         clipCount,
         clipDuration,
         resolution,
+        clipTracks: collectClipTracks(),
         apiKey,
         apiBaseUrl,
         modelId,
+        klingAccessKey,
+        klingSecretKey,
         llmApiKey: settings.llmKey || '',
         llmBaseUrl: settings.llmUrl || '',
-        llmModel: settings.llmModel || ''
+        llmModel: settings.llmModel || '',
+        multimodalApiKey: settings.multimodalKey || '',
+        multimodalBaseUrl: settings.multimodalUrl || '',
+        multimodalModel: settings.multimodalModel || ''
       })
     });
     const data = await res.json();
@@ -3280,8 +3747,28 @@ document.getElementById('startBtn').addEventListener('click', async () => {
 document.querySelectorAll('.chip[data-clips]').forEach(chip => {
   chip.addEventListener('click', () => {
     document.getElementById('clipCountInput').value = chip.dataset.clips;
+    scheduleBgmAssignment();
   });
 });
+
+// 多提示词行数实时检测：行数 > 1 时提示批量模式并联动段数，识别【主题】标签
+function updateMultiPromptHint() {
+  const lines = document.getElementById('promptInput').value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const hint = document.getElementById('multiPromptHint');
+  if (lines.length > 1) {
+    const tagged = lines.filter(l => /[【\[]/.test(l)).length;
+    hint.style.display = 'block';
+    hint.textContent = `📋 批量模式：已识别 ${lines.length} 个场景提示词，将生成 ${lines.length} 个片段（行数覆盖段数设置）` +
+      (tagged > 0 ? `，其中 ${tagged} 行带【主题】标签将按行优化` : '');
+    document.getElementById('clipCountInput').value = lines.length;
+  } else {
+    hint.style.display = 'none';
+  }
+}
+document.getElementById('promptInput').addEventListener('input', updateMultiPromptHint);
+// 配乐分配跟随提示词实时刷新
+document.getElementById('promptInput').addEventListener('input', scheduleBgmAssignment);
+document.getElementById('clipCountInput').addEventListener('input', scheduleBgmAssignment);
 
 // 单段时长快捷按钮
 document.querySelectorAll('.chip[data-duration]').forEach(chip => {
@@ -3360,7 +3847,7 @@ async function checkGenerationStatus() {
     const tasks = await res.json();
     // 找到正在运行的任务
     const runningTask = tasks.find(t =>
-      ['pending', 'optimizing', 'generating', 'concatenating', 'looping', 'transcoding'].includes(t.status)
+      ['pending', 'optimizing', 'generating', 'regenerating', 'concatenating', 'looping', 'transcoding'].includes(t.status)
     );
 
     if (runningTask) {
@@ -3973,6 +4460,24 @@ function updateSingleClip(index, clipData) {
   const status = clipData.status || 'pending';
   el.className = 'clip-cell ' + status;
   
+  // 主题徽标（§10B：行级主题标签）
+  const theme = clipData.theme;
+  let badge = el.querySelector('.clip-theme-badge');
+  if (theme) {
+    const tpl = (typeof themes !== 'undefined' && themes.find) ? themes.find(t => t.id === theme) : null;
+    const isUnmatched = clipData.themeTag && clipData.themeMatched === false;
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'clip-theme-badge';
+      el.appendChild(badge);
+    }
+    badge.textContent = (tpl && tpl.emoji) ? tpl.emoji : (isUnmatched ? '⚠' : '');
+    badge.title = (tpl ? tpl.name : theme) + (isUnmatched ? `（未识别标签「${clipData.themeTag}」，已用全局主题）` : '');
+    badge.classList.toggle('unmatched', !!isUnmatched);
+  } else if (badge) {
+    badge.remove();
+  }
+  
   // 失败或有质检问题的片段可点击
   if (status === 'failed' || (clipData.qcResult && clipData.qcResult !== 'pass')) {
     el.classList.add('clickable');
@@ -4000,8 +4505,23 @@ function openClipDetail(index, clip) {
   
   document.getElementById('clipDetailTitle').textContent = `片段 #${index + 1}`;
   document.getElementById('clipDetailSubtitle').textContent = `片段索引: ${index}`;
+  window._clipDetailIndex = index;
   
   // 状态
+  // 主题（§10B：行级主题标签解析结果）
+  const themeEl = document.getElementById('clipDetailTheme');
+  if (clip.theme) {
+    const tpl = (typeof themes !== 'undefined' && themes.find) ? themes.find(t => t.id === clip.theme) : null;
+    const themeName = tpl ? (tpl.emoji || '') + ' ' + tpl.name : clip.theme;
+    if (clip.themeTag && clip.themeMatched === false) {
+      themeEl.innerHTML = `<span style="color:#b8860b;">⚠️ 未识别标签「${clip.themeTag}」→ ${themeName}</span>`;
+    } else {
+      themeEl.textContent = themeName;
+    }
+  } else {
+    themeEl.textContent = '-';
+  }
+
   const statusMap = {
     pending: '等待中',
     generating: '生成中',
@@ -4027,6 +4547,17 @@ function openClipDetail(index, clip) {
     errorEl.textContent = clip.error;
   } else {
     errorSection.style.display = 'none';
+  }
+
+  // 失败片段：显示"修改提示词重新生成"区块
+  const retrySection = document.getElementById('clipRetrySection');
+  if (clip.status === 'failed') {
+    retrySection.style.display = 'block';
+    document.getElementById('clipRetryPrompt').value = clip.prompt || '';
+    document.getElementById('clipRetryMsg').textContent = '';
+    document.getElementById('clipRetryBtn').disabled = false;
+  } else {
+    retrySection.style.display = 'none';
   }
   
   // 质检详情
@@ -4118,6 +4649,131 @@ function showResultPage(data) {
 }
 
 // ==========================================
+// 继续历史任务（新建页顶部常驻区块）
+// ==========================================
+
+let continueTaskClips = {};   // taskId -> clips 数组缓存
+
+// 折叠/展开整个"继续历史任务"卡片
+function toggleContinueTaskList() {
+  const body = document.getElementById('continueTaskBody');
+  const arrow = document.getElementById('continueTaskArrow');
+  if (!body) return;
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    arrow.textContent = '▼';
+    loadContinueTasks();
+  } else {
+    body.style.display = 'none';
+    arrow.textContent = '▶';
+  }
+}
+
+// 强制重新加载（刷新按钮）
+async function refreshContinueTasks() {
+  const body = document.getElementById('continueTaskBody');
+  const arrow = document.getElementById('continueTaskArrow');
+  if (body) body.style.display = 'block';
+  if (arrow) arrow.textContent = '▼';
+  await loadContinueTasks();
+}
+
+// 仅更新标题栏摘要（折叠状态下轻量加载）
+async function updateContinueTaskSummary() {
+  const summaryEl = document.getElementById('continueTaskSummary');
+  if (!summaryEl) return;
+  try {
+    const res = await fetch('/api/tasks');
+    const tasks = await res.json();
+    const failedCount = tasks.filter(t => (t.failedClips || 0) > 0).length;
+    summaryEl.textContent = failedCount > 0 ? `（${failedCount} 个任务有失败片段）` : '';
+  } catch (e) {}
+}
+
+async function loadContinueTasks() {
+  const list = document.getElementById('continueTaskList');
+  if (!list) return;
+  try {
+    const res = await fetch('/api/tasks');
+    const tasks = await res.json();
+    // 更新标题栏摘要
+    const summaryEl = document.getElementById('continueTaskSummary');
+    if (summaryEl) {
+      const failedCount = tasks.filter(t => (t.failedClips || 0) > 0).length;
+      summaryEl.textContent = failedCount > 0 ? `（${failedCount} 个任务有失败片段）` : '';
+    }
+    if (!tasks || tasks.length === 0) {
+      list.innerHTML = `<div class="empty-state"><div>暂无历史任务</div></div>`;
+      return;
+    }
+    // 有失败片段的任务排前面
+    const sorted = tasks.slice().sort((a, b) => (b.failedClips || 0) - (a.failedClips || 0));
+    list.innerHTML = sorted.map(t => {
+      const time = t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '';
+      const statusCls = 'status-' + t.status;
+      const failInfo = (t.failedClips || 0) > 0
+        ? `<span class="history-status status-failed" style="margin-left:6px;">${t.failedClips} 段失败</span>`
+        : '';
+      // 列表只显示首段摘要（完整多段在详情弹窗展示）
+      const lines = (t.promptLines && t.promptLines.length > 0) ? t.promptLines : [t.prompt];
+      const countTag = lines.length > 1 ? `<span class="history-prompt-count">共 ${lines.length} 段</span>` : '';
+      return `
+        <div class="history-item" onclick="toggleContinueTask('${t.taskId}')">
+          <span class="history-prompt">${escapeHtml(lines[0] || '')}${countTag}</span>
+          <span class="history-meta">
+            <span class="history-time">${time}</span>
+            <span class="history-status ${statusCls}">${statusText(t.status)}</span>
+            ${failInfo}
+          </span>
+        </div>
+        <div class="continue-task-clips" id="continue-clips-${t.taskId}" style="display:none;padding:4px 0 12px;">
+          <div class="form-hint" style="margin-bottom:8px;">点击失败的片段可修改提示词并重新生成（仅重跑该片段，成功后自动重拼成片）。</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;" id="continue-grid-${t.taskId}"></div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="empty-state"><div>加载失败: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+async function toggleContinueTask(taskId) {
+  const clipsBox = document.getElementById('continue-clips-' + taskId);
+  if (!clipsBox) return;
+  const isOpen = clipsBox.style.display !== 'none';
+  if (isOpen) {
+    clipsBox.style.display = 'none';
+    return;
+  }
+  // 加载片段详情
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/progress`);
+    const data = await res.json();
+    const clips = data.clips || [];
+    continueTaskClips[taskId] = clips;
+    const grid = document.getElementById('continue-grid-' + taskId);
+    grid.innerHTML = clips.map((c, i) => {
+      const status = c.status || 'pending';
+      const clickable = status === 'failed' ? `onclick="openContinueClip('${taskId}', ${i})"` : '';
+      const extra = clickable ? ' style="cursor:pointer;" title="点击修改提示词重新生成"' : '';
+      return `<div class="clip-cell ${status}" ${clickable}${extra}>${i + 1}</div>`;
+    }).join('');
+    clipsBox.style.display = 'block';
+  } catch (e) {
+    clipsBox.innerHTML = `<div class="form-hint" style="color:#c73030;">加载片段失败: ${escapeHtml(e.message)}</div>`;
+    clipsBox.style.display = 'block';
+  }
+}
+
+function openContinueClip(taskId, index) {
+  const clips = continueTaskClips[taskId];
+  const clip = clips && clips[index];
+  if (!clip) return;
+  // 记录任务上下文，供 regenerateClip 使用
+  window._continueTaskId = taskId;
+  openClipDetail(index, clip);
+}
+
+// ==========================================
 // 历史记录
 // ==========================================
 
@@ -4144,9 +4800,12 @@ async function loadHistory() {
 
     list.innerHTML = tasks.map((t) => {
       const time = t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '';
+      // 列表只显示首段摘要（完整多段在详情弹窗展示）
+      const lines = (t.promptLines && t.promptLines.length > 0) ? t.promptLines : [t.prompt];
+      const countTag = lines.length > 1 ? `<span class="history-prompt-count">共 ${lines.length} 段</span>` : '';
       return `
         <div class="history-item" onclick="showTaskDetail('${t.taskId}')">
-          <span class="history-prompt">${t.prompt}</span>
+          <span class="history-prompt">${escapeHtml(lines[0] || '')}${countTag}</span>
           <span class="history-meta">
             <span class="history-time">${time}</span>
             <span class="history-status status-${t.status}">${statusText(t.status)}</span>
@@ -4181,10 +4840,13 @@ async function loadTrash() {
     list.innerHTML = items.map(t => {
       const time = t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '';
       const delTime = t.deletedAt ? new Date(t.deletedAt).toLocaleString('zh-CN') : '';
+      // 列表只显示首段摘要（完整多段在详情弹窗展示）
+      const lines = (t.promptLines && t.promptLines.length > 0) ? t.promptLines : [t.prompt];
+      const countTag = lines.length > 1 ? `<span class="history-prompt-count">共 ${lines.length} 段</span>` : '';
       return `
         <div class="trash-item">
           <div class="trash-item-info" onclick="showTaskDetail('${t.taskId}')">
-            <div class="trash-item-prompt">${t.prompt}</div>
+            <div class="trash-item-prompt">${escapeHtml(lines[0] || '')}${countTag}</div>
             <div class="trash-item-meta">${time} · ${statusText(t.status)} · 删除于 ${delTime}</div>
           </div>
           <div class="trash-actions">
@@ -4211,6 +4873,7 @@ async function moveToTrash(taskId, prompt) {
     const data = await res.json();
     if (data.success) {
       loadHistory();
+      loadContinueTasks();
     } else {
       alert('删除失败: ' + (data.error || '未知错误'));
     }
@@ -4225,6 +4888,7 @@ async function restoreTask(taskId) {
     const data = await res.json();
     if (data.success) {
       loadHistory();
+      loadContinueTasks();
     } else {
       alert('恢复失败: ' + (data.error || '未知错误'));
     }
@@ -4254,6 +4918,7 @@ function confirmPermanentDelete(taskId, prompt) {
       overlay.remove();
       if (data.success) {
         loadHistory();
+        loadContinueTasks();
       } else {
         alert('删除失败: ' + (data.error || '未知错误'));
       }
@@ -4304,7 +4969,16 @@ async function showTaskDetail(taskId) {
       document.getElementById('detailDuration').textContent = '-';
     }
 
-    document.getElementById('detailPrompt').textContent = data.optimizedPrompt || data.prompt || '-';
+    // 完整多段提示词：优先持久化 prompts，老任务回退 optimizedPrompt/prompt
+    const promptLines = (data.prompts && data.prompts.length > 0)
+      ? data.prompts.map(p => (p && p.text) || p)
+      : (data.isMultiPrompt && data.clips && data.clips.length > 1
+          ? data.clips.map(c => c.prompt || '').filter(Boolean)
+          : null);
+    const fullPromptText = (promptLines && promptLines.length > 0)
+      ? promptLines.join('\n')
+      : (data.optimizedPrompt || data.prompt || '-');
+    document.getElementById('detailPrompt').textContent = fullPromptText;
 
     // 视频播放
     const videoWrapper = document.getElementById('videoPlayerWrapper');
@@ -4353,10 +5027,56 @@ async function showTaskDetail(taskId) {
       errorSection.style.display = 'none';
     }
 
+    renderTaskBgmDetail(data);
+
     modal.classList.add('show');
   } catch (e) {
     console.error('加载详情失败:', e);
     alert('加载失败');
+  }
+}
+
+// 重新生成失败片段（可修改提示词），成功后自动重拼成片
+async function regenerateClip() {
+  const index = window._clipDetailIndex;
+  const prompt = document.getElementById('clipRetryPrompt').value.trim();
+  const msgEl = document.getElementById('clipRetryMsg');
+  const btn = document.getElementById('clipRetryBtn');
+
+  if (!prompt) {
+    msgEl.textContent = '请输入提示词';
+    return;
+  }
+  const tid = window._continueTaskId ||
+              (typeof currentDetailTask !== 'undefined' && currentDetailTask && currentDetailTask.taskId) ||
+              (typeof currentTask !== 'undefined' && currentTask && currentTask.taskId);
+  if (!tid) {
+    msgEl.textContent = '无法确定任务 ID';
+    return;
+  }
+
+  btn.disabled = true;
+  msgEl.textContent = '正在重新生成该片段（约 1-3 分钟）...';
+  try {
+    const res = await fetch(`/api/tasks/${tid}/clips/${index}/regenerate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      msgEl.textContent = '❌ ' + (data.error || '请求失败');
+      btn.disabled = false;
+      return;
+    }
+    closeClipDetail();
+    // 跳转到进度页并加载该任务进度
+    currentTask = { taskId: tid };
+    switchPage('generating');
+    checkGenerationStatus();
+  } catch (e) {
+    msgEl.textContent = '❌ 网络错误: ' + e.message;
+    btn.disabled = false;
   }
 }
 
@@ -4374,15 +5094,10 @@ async function resumeGeneration() {
       document.getElementById('historyDetailModal').classList.remove('show');
       document.getElementById('detailVideo').pause();
       document.getElementById('detailVideo').src = '';
-      // 导航到生成进度页面
-      switchPage('progress');
-      // 连接 WebSocket 监听进度
-      if (typeof connectProgressWS === 'function') {
-        connectProgressWS(taskId);
-      }
-      if (typeof loadProgressData === 'function') {
-        loadProgressData(taskId);
-      }
+      // 导航到生成进度页面并加载进度
+      currentTask = { taskId };
+      switchPage('generating');
+      checkGenerationStatus();
     } else {
       alert('继续生成失败: ' + (data.error || '未知错误'));
       btn.disabled = false;
@@ -4396,8 +5111,17 @@ async function resumeGeneration() {
 }
 
 function statusText(s) {
-  const map = { pending: '等待中', generating: '生成中', completed: '已完成', failed: '失败', partial: '部分完成' };
+  const map = { pending: '等待中', generating: '生成中', regenerating: '重新生成中', completed: '已完成', failed: '失败', partial: '部分完成' };
   return map[s] || s;
+}
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // 失败原因分析
@@ -4417,6 +5141,12 @@ function analyzeTaskError(data) {
     type = '余额不足';
     desc = 'API 账户余额已耗尽，无法继续生成视频。';
     suggestion = '请登录对应的 AI 平台（如 siliconflow.cn）充值后重试。视频生成模型每次调用都会扣费，建议充值前查看当前价格。';
+  }
+  // 接入点 / 业务空间配置错误
+  else if (combinedError.includes('workspace endpoint is invalid') || combinedError.includes('接入点无效') || combinedError.includes('endpoint is invalid')) {
+    type = '接入点配置错误';
+    desc = '接口地址无效，业务空间 ID（WorkspaceId）或 Region 不正确，请求没能到达模型服务。';
+    suggestion = '请到阿里云百炼控制台复制真实的业务空间 ID，填入「设置 → Wan 3.0 业务空间 ID」，并确认 Region 与 API Key 属于同一账号。填完后用「测试连接」验证。';
   }
   // 认证失败
   else if (combinedError.includes('401') || combinedError.includes('invalid token') || combinedError.includes('unauthorized') || combinedError.includes('invalid api key')) {
@@ -4526,12 +5256,320 @@ async function updateStatus() {
 }
 
 // ==========================================
+// 配乐自动分配（提示词环节逐段配乐 + 制作后逐段改配乐）
+// ==========================================
+
+let bgmInventory = [];      // /api/bgm 返回的全部音轨（含 category）
+let bgmAssignManual = {};   // 每段手动覆盖：{ 段索引: trackId | '' }
+const CATEGORY_NAMES = { music: '轻音乐', ambient: '环境音' };
+const MOOD_NAMES = { calm: '舒缓宁静', epic: '壮阔史诗', ethereal: '空灵梦幻', nature: '自然声景' };
+
+// 与后端 audioMixer.THEME_MOOD_MAP 保持一致：主题 id 关键词 → mood
+const BGM_THEME_MOOD = {
+  mountain: 'epic', ice: 'epic', glacier: 'epic', snow: 'epic',
+  aurora: 'ethereal', space: 'ethereal', starry: 'ethereal', night: 'ethereal', galaxy: 'ethereal',
+  ocean: 'nature', waterfall: 'nature', rain: 'nature', coast: 'nature', sea: 'nature', wave: 'nature',
+  lake: 'calm', forest: 'calm', desert: 'calm', landscape: 'calm', meadow: 'calm', mist: 'calm'
+};
+
+function bgmMoodForTheme(themeId) {
+  if (!themeId) return null; // 无主题 → 无 mood 依据，不静默沉底
+  const key = String(themeId).toLowerCase();
+  if (BGM_THEME_MOOD[key]) return BGM_THEME_MOOD[key];
+  // 关键词兜底匹配（主题 id 未命中时，用中文关键词匹配模板）
+  for (const t of themes) {
+    if (t.id === key) {
+      for (const kw of (t.keywords || [])) {
+        const lower = String(kw).toLowerCase();
+        if (BGM_THEME_MOOD[lower]) return BGM_THEME_MOOD[lower];
+      }
+    }
+  }
+  return 'calm';
+}
+
+// 行尾【主题】标签解析（与后端 parseThemeTag 对齐：模板名精确 → 关键词最长包含）
+// 无标签 → themeId null（无主题）；未识别标签 → themeId null + matched:false
+function bgmResolveLineTheme(line, globalTheme) {
+  const trimmed = (line || '').trim();
+  const m = trimmed.match(/[【\[]([^】\]]+)[】\]]$/);
+  if (!m) return { themeId: globalTheme ?? null, tag: null, matched: true };
+  const tag = m[1].trim();
+  let themeId = (themes.find(t => t.name && tag === t.name) || {}).id;
+  if (!themeId) {
+    let best = 0;
+    for (const t of themes) {
+      for (const kw of (t.keywords || [])) {
+        if (kw && tag.includes(kw) && kw.length > best) { themeId = t.id; best = kw.length; }
+      }
+    }
+  }
+  if (!themeId) return { themeId: null, tag, matched: false };
+  return { themeId, tag, matched: true };
+}
+
+// 获取当前提示词对应的分段（多行=每行一段；单行=clipCount 段同主题）
+function bgmCurrentSegments() {
+  const raw = (document.getElementById('promptInput').value || '').trim();
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const globalTheme = null; // 无全局主题：不写【】= 无主题
+  const isMulti = lines.length > 1;
+  if (isMulti) {
+    return lines.map((ln, i) => {
+      const t = bgmResolveLineTheme(ln, globalTheme);
+      return { index: i, themeId: t.themeId, themeName: bgmThemeName(t.themeId), tag: t.tag, matched: t.matched, text: ln };
+    });
+  }
+  const count = parseInt(document.getElementById('clipCountInput').value) || 10;
+  return Array.from({ length: count }, (_, i) => ({
+    index: i, themeId: globalTheme, themeName: bgmThemeName(globalTheme), tag: null, matched: true
+  }));
+}
+
+function bgmThemeName(themeId) {
+  if (!themeId) return '未选主题';
+  const t = themes.find(x => x.id === themeId);
+  if (!t) return themeId;
+  return (t.emoji ? t.emoji + ' ' : '') + t.name;
+}
+
+// 第 idx 段选曲：优先匹配主题 mood 池，轮转取曲避免相邻重复；无主题 → 不自动推荐
+function bgmPickTrack(themeId, idx) {
+  const mood = bgmMoodForTheme(themeId);
+  if (!mood) return null;
+  const pool = bgmInventory.filter(t => (t.mood || []).includes(mood));
+  const any = pool.length > 0 ? pool : bgmInventory;
+  if (any.length === 0) return null;
+  return any[idx % any.length];
+}
+
+function bgmOptionLabel(t) {
+  const cat = CATEGORY_NAMES[t.category] || t.category || '';
+  const moods = (t.mood || []).map(x => MOOD_NAMES[x] || x).join(' · ');
+  const style = [cat, moods].filter(Boolean).join(' · ');
+  return `${t.title}（${t.id}${style ? ' · ' + style : ''}）`;
+}
+
+async function loadBgmInventory() {
+  try {
+    const res = await fetch('/api/bgm');
+    if (res.ok) {
+      const data = await res.json();
+      bgmInventory = Array.isArray(data.tracks) ? data.tracks : [];
+      const el = document.getElementById('bgmTrackCountText');
+      if (el) el.textContent = `已加载 ${bgmInventory.length} 条音轨`;
+      updateBgmAssignment();
+    }
+  } catch (e) { console.error('加载配乐库存失败:', e); }
+}
+
+function onBgmModeChange() {
+  const mode = document.getElementById('bgmModeSelect').value;
+  const section = document.getElementById('bgmAssignSection');
+  section.style.display = mode === 'auto' ? 'block' : 'none';
+  if (mode === 'auto') {
+    bgmAssignManual = {};
+    updateBgmAssignment();
+  }
+}
+
+function onBgmAssignChange(index, value) {
+  if (value === '__random__') {
+    // 随机兜底（无主题片段）：随机挑一条音轨并落为实际 id，避免把占位值传给后端
+    if (bgmInventory.length > 0) {
+      const track = bgmInventory[Math.floor(Math.random() * bgmInventory.length)];
+      bgmAssignManual[index] = track.id;
+      const rowEl = document.getElementById('bgm-assign-row-' + index);
+      const selectEl = rowEl ? rowEl.querySelector('select') : null;
+      if (selectEl) selectEl.value = track.id;
+    } else {
+      bgmAssignManual[index] = '';
+    }
+  } else {
+    bgmAssignManual[index] = value; // '' 表示该段不配乐
+  }
+  const row = document.getElementById('bgm-assign-row-' + index);
+  if (row) row.classList.toggle('is-manual', !!bgmAssignManual[index]);
+}
+
+function updateBgmAssignment() {
+  const mode = document.getElementById('bgmModeSelect').value;
+  const list = document.getElementById('bgmAssignList');
+  if (!list) return;
+  if (mode !== 'auto') { list.innerHTML = ''; return; }
+
+  const segments = bgmCurrentSegments();
+  const options = bgmInventory.map(t =>
+    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
+  ).join('');
+
+  list.innerHTML = segments.map(seg => {
+    const suggested = bgmPickTrack(seg.themeId, seg.index);
+    const current = (bgmAssignManual[seg.index] !== undefined)
+      ? bgmAssignManual[seg.index]
+      : (suggested ? suggested.id : '');
+    const themeBadge = seg.themeId
+      ? (seg.tag
+          ? (seg.matched ? `${bgmThemeName(seg.themeId)}` : `⚠️ ${seg.tag}（未识别→${bgmThemeName(seg.themeId)}）`)
+          : bgmThemeName(seg.themeId))
+      : (seg.tag ? `⚠️ ${seg.tag}（未识别→未选主题）` : '未选主题 · 手动选或随机');
+    return `
+      <div class="bgm-assign-row ${current ? 'is-manual' : ''}" id="bgm-assign-row-${seg.index}">
+        <div class="bgm-assign-seg" title="片段 ${seg.index + 1}">#${seg.index + 1}</div>
+        <div class="bgm-assign-theme" title="${themeBadge}">${themeBadge}</div>
+        <select class="bgm-assign-select" onchange="onBgmAssignChange(${seg.index}, this.value)">
+          <option value="">不配乐</option>
+          <option value="__random__">🎲 随机</option>
+          ${options}
+        </select>
+      </div>
+    `;
+  }).join('');
+
+  // 回填当前值（含自动推荐）
+  list.querySelectorAll('select').forEach((sel, i) => {
+    const s = segments[i];
+    const value = (bgmAssignManual[s.index] !== undefined)
+      ? bgmAssignManual[s.index]
+      : (s && bgmPickTrack(s.themeId, s.index) ? bgmPickTrack(s.themeId, s.index).id : '');
+    sel.value = value;
+    const row = document.getElementById('bgm-assign-row-' + s.index);
+    if (row) row.classList.toggle('is-manual', !!value);
+  });
+}
+
+// 生成时收集片段配乐：off → undefined（不配乐）；auto → 读 DOM 逐段选择
+function collectClipTracks() {
+  const mode = document.getElementById('bgmModeSelect').value;
+  if (mode !== 'auto') return undefined;
+  const selList = Array.from(document.querySelectorAll('#bgmAssignList select'));
+  return selList.map(s => s.value || null);
+}
+
+// 配乐重算节流
+let _bgmRefreshTimer = null;
+function scheduleBgmAssignment() {
+  clearTimeout(_bgmRefreshTimer);
+  _bgmRefreshTimer = setTimeout(updateBgmAssignment, 200);
+}
+
+// ===== 任务详情：逐段配乐 =====
+async function renderTaskBgmDetail(data) {
+  const section = document.getElementById('bgmDetailSection');
+  const list = document.getElementById('bgmDetailList');
+  if (!section || !list) return;
+  const clips = Array.isArray(data.clips) ? data.clips : [];
+  const editable = clips.filter(c => c.status === 'success').sort((a, b) => a.index - b.index);
+  if (editable.length === 0 || !bgmInventory || bgmInventory.length === 0) {
+    if (editable.length > 0 && (!bgmInventory || bgmInventory.length === 0)) {
+      await loadBgmInventory();
+    }
+  }
+  if (editable.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  const options = bgmInventory.map(t =>
+    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
+  ).join('');
+
+  list.innerHTML = editable.map(c => {
+    const themeName = bgmThemeName(c.theme || data.theme || '');
+    const hasTrack = !!c.trackId;
+    return `
+      <div class="bgm-detail-row" id="bgm-detail-row-${c.index}">
+        <div class="bgm-detail-seg">#${c.index + 1}</div>
+        <div class="bgm-detail-theme" title="${themeName}">${themeName}</div>
+        <select class="bgm-detail-select" data-index="${c.index}">
+          <option value="">不配乐</option>
+          ${options}
+        </select>
+        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="applyClipBgm('${data.taskId}', ${c.index}, this)">应用</button>
+        <span class="bgm-detail-status" id="bgm-detail-status-${c.index}">${hasTrack ? '已配乐' : '无配乐'}</span>
+      </div>
+    `;
+  }).join('');
+
+  // 回填当前已配音轨
+  editable.forEach(c => {
+    const sel = list.querySelector(`select[data-index="${c.index}"]`);
+    if (sel) sel.value = c.trackId || '';
+  });
+}
+
+// 单段改配乐：调后端只重混该片段并重建，不影响其他片段与视频本身
+async function applyClipBgm(taskId, index, btn) {
+  const row = document.getElementById('bgm-detail-row-' + index);
+  const sel = row ? row.querySelector('select') : null;
+  const statusEl = document.getElementById('bgm-detail-status-' + index);
+  if (!sel || !statusEl) return;
+  const trackId = sel.value || null;
+
+  btn.disabled = true;
+  sel.disabled = true;
+  statusEl.className = 'bgm-detail-status';
+  statusEl.textContent = '处理中…';
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/clips/${index}/audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trackId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || '改配乐失败');
+    }
+    statusEl.className = 'bgm-detail-status done';
+    statusEl.textContent = '✓ 已更新';
+    // 更新成片播放地址（新 final 文件）
+    if (data.outputUrl) {
+      const videoEl = document.getElementById('detailVideo');
+      const wrapper = document.getElementById('videoPlayerWrapper');
+      const noVideo = document.getElementById('noVideoPlaceholder');
+      if (videoEl && wrapper && noVideo) {
+        videoEl.src = data.outputUrl;
+        wrapper.style.display = 'block';
+        noVideo.style.display = 'none';
+        const downloadBtn = document.getElementById('downloadVideoBtn');
+        if (downloadBtn) {
+          downloadBtn.style.display = 'block';
+          downloadBtn.onclick = () => {
+            const a = document.createElement('a');
+            a.href = data.outputUrl;
+            a.download = data.outputUrl.split('/').pop();
+            a.click();
+          };
+        }
+      }
+    }
+    // 刷新片段配乐状态（重取任务进度，获取最新各 clip.trackId）
+    try {
+      const freshRes = await fetch(`/api/tasks/${taskId}/progress`);
+      if (freshRes.ok) {
+        const fresh = await freshRes.json();
+        currentDetailTask = fresh;
+        document.getElementById('detailStatus').innerHTML = `<span class="history-status status-${fresh.status}">${statusText(fresh.status)}</span>`;
+        renderTaskBgmDetail(fresh);
+      }
+    } catch (e) { console.error('刷新配乐状态失败:', e); }
+  } catch (e) {
+    statusEl.className = 'bgm-detail-status fail';
+    statusEl.textContent = '失败';
+    btn.disabled = false;
+    sel.disabled = false;
+    alert('改配乐失败: ' + e.message);
+  }
+}
+
+// ==========================================
 // 初始化
 // ==========================================
 
 loadModels();
 loadTemplates();
 updateStatus();
+loadBgmInventory();
+updateContinueTaskSummary();
 
 // 定时更新状态
 setInterval(updateStatus, 10000);
@@ -4544,7 +5582,7 @@ async function checkRunningTask() {
     const res = await fetch('/api/tasks');
     const tasks = await res.json();
     const running = tasks.find(t =>
-      ['pending', 'optimizing', 'generating', 'concatenating', 'looping', 'transcoding'].includes(t.status)
+      ['pending', 'optimizing', 'generating', 'regenerating', 'concatenating', 'looping', 'transcoding'].includes(t.status)
     );
     if (running) {
       const dot = document.getElementById('genStatusDot');

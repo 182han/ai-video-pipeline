@@ -13,16 +13,51 @@
       "meadow"
     ],
     "styleEnhancers": [
-      "cinematic lighting",
-      "golden hour",
-      "4K ultra HD",
-      "highly detailed",
-      "epic atmosphere",
-      "slow camera movement",
-      "breathtaking scenery",
-      "photorealistic"
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。雾气与云层缓慢流动，丁达尔柔光，植被纹理丰富，清新色调，宁静松弛。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
     ],
-    "negative": "people, text, watermark, logo"
+    "negative": "people, text, watermark, logo",
+    "structure": {
+      "subjectPool": [
+        "terraced rice fields cascading down a mountainside",
+        "a misty valley of layered mountain ridges",
+        "an alpine meadow dotted with wildflowers",
+        "a winding river cutting through a green canyon"
+      ],
+      "movementPool": [
+        "clouds drifting slowly across the peaks",
+        "mist rolling through the valley floor",
+        "grass swaying in a soft breeze",
+        "water glinting as it threads through the rocks"
+      ],
+      "cameraPool": [
+        "slow aerial push-in on a simulated IMAX film camera",
+        "gentle orbital shot, Panavision C-series 35mm lens, f/4",
+        "high-altitude lateral tracking shot",
+        "static locked-off telephoto shot with shallow depth of field"
+      ],
+      "lightingPool": [
+        "golden hour backlight with long soft shadows",
+        "blue hour ambient light, cool and even",
+        "volumetric god rays breaking through low clouds",
+        "soft diffused overcast light"
+      ],
+      "atmospherePool": [
+        "serene and majestic",
+        "tranquil and expansive",
+        "awe-inspiring stillness",
+        "quiet dawn calm"
+      ],
+      "quality": [
+        "cinematic color grading",
+        "fine 35mm film grain",
+        "natural contrast",
+        "subtle atmospheric haze"
+      ],
+      "endingPool": [
+        "No people, no vehicles — just the landscape holding still as the light shifts",
+        "End on an empty horizon, nothing enters frame"
+      ]
+    }
   },
   "space": {
     "name": "宇宙星空",
@@ -38,16 +73,46 @@
       "asteroid"
     ],
     "styleEnhancers": [
-      "deep space",
-      "HDR",
-      "ultra detailed",
-      "cinematic",
-      "slow dolly through",
-      "epic scale",
-      "vibrant colors",
-      "realistic"
+      "深空延时，三脚架固定机位，画面稳定，推荐 Zoom=0。星云缓缓流动，星点微光闪烁，天文纪实质感，细节细腻，色彩克制，宏大宁静。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
     ],
-    "negative": "people, earth, text"
+    "negative": "people, earth, text",
+    "structure": {
+      "subjectPool": [
+        "a spiral galaxy slowly rotating",
+        "a nebula field of dust and stars",
+        "a planet's terminator line against a starfield"
+      ],
+      "movementPool": [
+        "stars drifting in a long-exposure feel",
+        "nebula dust subtly shifting",
+        "slow parallax against the starfield"
+      ],
+      "cameraPool": [
+        "very slow dolly through the field, simulated IMAX",
+        "static locked-off, Panavision 35mm",
+        "slow orbital around the planet"
+      ],
+      "lightingPool": [
+        "self-luminous nebula glow",
+        "harsh sunlight rim on a planet",
+        "faint starlight"
+      ],
+      "atmospherePool": [
+        "vast and silent",
+        "awe-inspiring",
+        "cold and endless"
+      ],
+      "quality": [
+        "cinematic grade",
+        "deep-space detail",
+        "natural contrast",
+        "fine grain"
+      ],
+      "endingPool": [
+        "No spacecraft, no text — just the field holding",
+        "End on an empty starfield"
+      ]
+    }
   },
   "aurora": {
     "name": "极光",
@@ -63,16 +128,46 @@
       "night sky"
     ],
     "styleEnhancers": [
-      "dancing lights",
-      "reflection on snow",
-      "magical atmosphere",
-      "cinematic",
-      "slow movement",
-      "4K",
-      "dreamlike",
-      "vivid colors"
+      "夜景延时，三脚架固定机位，画面稳定，推荐 Zoom=0。极光流光缓慢舞动，苔原细节清晰，天文纪实风格，色彩自然，静谧宏大。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切"
     ],
-    "negative": "people, buildings, city"
+    "negative": "people, buildings, city",
+    "structure": {
+      "subjectPool": [
+        "aurora curtains rippling over a frozen lake",
+        "green and violet lights above a snow ridge",
+        "a dense star field behind dancing aurora"
+      ],
+      "movementPool": [
+        "aurora ribbons slowly folding and unfolding",
+        "stars rotating in a long-exposure feel",
+        "reflections shimmering on the ice"
+      ],
+      "cameraPool": [
+        "static locked-off wide, simulated long-exposure",
+        "very slow aerial drift, simulated IMAX",
+        "low-angle tracking over the ice"
+      ],
+      "lightingPool": [
+        "aurora green-violet emission against cold night sky",
+        "moonlight on snow",
+        "faint horizon glow"
+      ],
+      "atmospherePool": [
+        "dreamlike and silent",
+        "vast and cold",
+        "quietly magical"
+      ],
+      "quality": [
+        "cinematic grade",
+        "low-noise night detail",
+        "natural contrast",
+        "fine grain"
+      ],
+      "endingPool": [
+        "No people — just the lights and the ice",
+        "End on the aurora fading, nothing enters frame"
+      ]
+    }
   },
   "ocean": {
     "name": "海洋",
@@ -88,16 +183,48 @@
       "deep blue"
     ],
     "styleEnhancers": [
-      "underwater lighting",
-      "serene and peaceful",
-      "4K ultra HD",
-      "slow graceful movement",
-      "crystal clear water",
-      "cinematic",
-      "realistic",
-      "bubbles and particles"
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。海面轻缓起伏，云层缓慢漂移，光影渐变，国家地理质感，层次丰富，松弛治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
     ],
-    "negative": "people, boats, text"
+    "negative": "people, boats, text",
+    "structure": {
+      "subjectPool": [
+        "turquoise waves breaking over dark volcanic rocks",
+        "a vast open sea under a low cloud ceiling",
+        "distant cargo ships on the horizon line",
+        "a rocky island silhouetted in sea mist"
+      ],
+      "movementPool": [
+        "waves rolling in and dissolving into white foam",
+        "the sea surface glittering and shifting",
+        "distant ships barely drifting",
+        "spray lifting off the rocks in slow motion"
+      ],
+      "cameraPool": [
+        "high-altitude aerial push-in, simulated IMAX camera",
+        "slow lateral tracking at wave height, Panavision 35mm, f/5.6",
+        "static locked-off wide shot"
+      ],
+      "lightingPool": [
+        "golden hour glint raking across the water",
+        "cold overcast silver light",
+        "dawn light breaking across the swell"
+      ],
+      "atmospherePool": [
+        "vast and elemental",
+        "calm and endless",
+        "quietly powerful"
+      ],
+      "quality": [
+        "cinematic grade",
+        "natural sea spray",
+        "fine film grain",
+        "realistic water detail"
+      ],
+      "endingPool": [
+        "No boats entering frame, no birds — just the horizon holding",
+        "End on open water, nothing changes"
+      ]
+    }
   },
   "mountain": {
     "name": "雪山",
@@ -113,16 +240,212 @@
       "icy slopes"
     ],
     "styleEnhancers": [
-      "majestic and grand",
-      "golden sunrise light",
-      "aerial view",
-      "4K cinematic",
-      "slow sweeping camera",
-      "epic scale",
-      "pristine wilderness",
-      "dramatic shadows"
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。云海缓慢翻涌，积雪纹理清晰，阳光扫过雪峰，通透体积光，庄严治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
     ],
-    "negative": "people, buildings, text"
+    "negative": "people, buildings, text",
+    "structure": {
+      "subjectPool": [
+        "snow-capped peaks piercing a sea of clouds",
+        "a glacier tongue descending into a dark valley",
+        "sharp granite ridges under thin high-altitude air"
+      ],
+      "movementPool": [
+        "clouds flowing over the summit like water",
+        "snow plumes streaming off the ridge",
+        "mist shifting in the valleys below"
+      ],
+      "cameraPool": [
+        "slow aerial reveal rising above the cloud layer, simulated IMAX",
+        "high-altitude lateral tracking, Panavision 35mm, f/4",
+        "static telephoto compression shot"
+      ],
+      "lightingPool": [
+        "golden sunrise rim light on the summit",
+        "cold blue pre-dawn light",
+        "harsh high-altitude noon light with deep shadows"
+      ],
+      "atmospherePool": [
+        "majestic and austere",
+        "silent and immense",
+        "awe-inspiring isolation"
+      ],
+      "quality": [
+        "cinematic grade",
+        "crisp snow texture",
+        "natural contrast",
+        "fine grain"
+      ],
+      "endingPool": [
+        "No climbers, no flags — just the peak standing in the wind",
+        "End on an empty ridge line"
+      ]
+    }
+  },
+  "desert": {
+    "name": "沙漠",
+    "emoji": "🏜️",
+    "keywords": [
+      "desert",
+      "sand dunes",
+      "camel caravan",
+      "mirage",
+      "golden sand",
+      "arid landscape",
+      "oasis",
+      "wind ripples"
+    ],
+    "styleEnhancers": [
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。沙丘轮廓柔和，薄沙雾缓慢流动，阳光缓慢推移，沙粒纹理细腻，空旷宁静。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+    ],
+    "negative": "people, water, buildings, text",
+    "structure": {
+      "subjectPool": [
+        "endless sand dunes with razor-sharp crests",
+        "wind-carved ripples stretching to the horizon",
+        "a lone oasis ringed by palms",
+        "distant rock mesas under heat haze"
+      ],
+      "movementPool": [
+        "sand streaming off the dune crests",
+        "heat shimmer distorting the horizon",
+        "ripples shifting in the wind"
+      ],
+      "cameraPool": [
+        "sweeping aerial over the dune field, simulated IMAX",
+        "low-angle ground-level push-in, Panavision 35mm, f/4",
+        "static wide shot with telephoto compression"
+      ],
+      "lightingPool": [
+        "golden hour raking light carving deep dune shadows",
+        "harsh midday light with stark contrast",
+        "cool blue hour over warm sand"
+      ],
+      "atmospherePool": [
+        "vast and silent",
+        "austere and timeless",
+        "quietly epic"
+      ],
+      "quality": [
+        "cinematic grade",
+        "fine sand texture",
+        "natural warm tones",
+        "subtle film grain"
+      ],
+      "endingPool": [
+        "No caravans, no figures — just the dunes holding still",
+        "End on an empty dune crest"
+      ]
+    }
+  },
+  "waterfall": {
+    "name": "瀑布",
+    "emoji": "💦",
+    "keywords": [
+      "waterfall",
+      "cascade",
+      "mist spray",
+      "cliff drop",
+      "rainbow",
+      "plunge pool",
+      "rocky gorge",
+      "jungle waterfall"
+    ],
+    "styleEnhancers": [
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。水流平缓下落，水雾林间飘散，柔和漫射光，植被细节丰富，静谧治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+    ],
+    "negative": "people, buildings, text",
+    "structure": {
+      "subjectPool": [
+        "a thundering waterfall dropping into a misty plunge pool",
+        "a thin cascade threading down a mossy cliff",
+        "a jungle waterfall framed by ferns"
+      ],
+      "movementPool": [
+        "water plunging and dissolving into spray",
+        "mist rising and drifting through the gorge",
+        "droplets catching the light in slow motion"
+      ],
+      "cameraPool": [
+        "slow push-in toward the base of the falls, simulated IMAX",
+        "static locked-off wide, Panavision 35mm, f/5.6",
+        "gentle arc around the plunge pool"
+      ],
+      "lightingPool": [
+        "sunlight breaking through the spray into a faint rainbow",
+        "soft diffused light deep in the gorge",
+        "backlit mist glowing"
+      ],
+      "atmospherePool": [
+        "powerful and verdant",
+        "cool and enveloping",
+        "serene and wild"
+      ],
+      "quality": [
+        "cinematic grade",
+        "realistic water and mist",
+        "fine grain",
+        "natural greens"
+      ],
+      "endingPool": [
+        "No people — just the water falling and the mist drifting",
+        "End on the plunge pool, nothing enters frame"
+      ]
+    }
+  },
+  "lake": {
+    "name": "湖泊",
+    "emoji": "🏞️",
+    "keywords": [
+      "lake",
+      "calm water",
+      "mirror reflection",
+      "mountain reflection",
+      "morning mist",
+      "still surface",
+      "lakeside forest",
+      "sunrise over lake"
+    ],
+    "styleEnhancers": [
+      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。湖面静谧，薄雾漂浮，倒影轻晃，光影缓慢变化，通透空气感，安宁治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切"
+    ],
+    "negative": "people, boats, buildings, text",
+    "structure": {
+      "subjectPool": [
+        "a mirror-calm lake reflecting snow peaks",
+        "a misty lake at dawn ringed by forest",
+        "a high alpine tarn under a still sky"
+      ],
+      "movementPool": [
+        "mist drifting low across the surface",
+        "gentle ripples breaking the reflection",
+        "light shifting slowly on the water"
+      ],
+      "cameraPool": [
+        "static locked-off wide, Panavision 35mm, f/4",
+        "very slow aerial push-in, simulated IMAX",
+        "low-level tracking just above the surface"
+      ],
+      "lightingPool": [
+        "golden sunrise glow spreading on the water",
+        "soft blue hour light",
+        "dawn mist catching the first light"
+      ],
+      "atmospherePool": [
+        "serene and still",
+        "quiet and vast",
+        "meditative calm"
+      ],
+      "quality": [
+        "cinematic grade",
+        "perfect reflection detail",
+        "natural tones",
+        "fine grain"
+      ],
+      "endingPool": [
+        "No boats, no birds — just the reflection holding",
+        "End on still water, nothing changes"
+      ]
+    }
   },
   "city": {
     "name": "城市夜景",
@@ -131,14 +454,51 @@
       "city",
       "skyline",
       "night",
-      "neon lights"
+      "neon lights",
+      "urban",
+      "street",
+      "rain"
     ],
     "styleEnhancers": [
-      "cinematic",
-      "urban",
-      "cyberpunk",
-      "vibrant colors"
+      "城市延时，三脚架固定机位，画面稳定，Zoom0~0.05。车流光轨缓慢延展，云层缓缓流动，天际线干净，色彩克制，安静治愈。无人群、广告牌、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
     ],
-    "negative": ""
+    "negative": "people, readable text, logos",
+    "structure": {
+      "subjectPool": [
+        "a neon-soaked skyline across a river",
+        "wet streets reflecting signage",
+        "distant towers half-lost in low cloud"
+      ],
+      "movementPool": [
+        "light reflections shifting on wet pavement",
+        "clouds drifting behind the towers",
+        "traffic light trails streaking below"
+      ],
+      "cameraPool": [
+        "slow aerial push-in, simulated IMAX",
+        "low-angle tracking along the street",
+        "static telephoto compression"
+      ],
+      "lightingPool": [
+        "neon magenta-teal glow",
+        "cold blue hour light",
+        "warm window grids"
+      ],
+      "atmospherePool": [
+        "moody and electric",
+        "quiet after rain",
+        "cinematic urban calm"
+      ],
+      "quality": [
+        "cinematic grade",
+        "realistic reflections",
+        "natural contrast",
+        "fine grain"
+      ],
+      "endingPool": [
+        "No readable text or logos — just the lights holding",
+        "End on the skyline, nothing enters frame"
+      ]
+    }
   }
 }

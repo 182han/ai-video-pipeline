@@ -63,20 +63,20 @@ class QualityChecker {
     details.keywords = foundKeywords;
     if (foundKeywords.length < 3) issues.push('描述关键词不够丰富');
 
-    // 3. 主题匹配度
-    details.theme = theme;
+    // 3. 主题匹配度（theme 为空 = 无主题，不检查主题匹配）
+    details.theme = theme || null;
     const themeKeywords = {
       landscape: ['山', '水', '天空', '自然', '风景', 'mountain', 'sky', 'nature', 'landscape'],
       city: ['城市', '建筑', '街道', '灯光', 'city', 'building', 'street', 'urban'],
       portrait: ['人物', '面部', '表情', 'person', 'face', 'portrait', 'human'],
       abstract: ['抽象', '几何', '艺术', 'abstract', 'geometric', 'art']
     };
-    const themeWords = themeKeywords[theme] || [];
-    const themeMatches = themeWords.filter(w => 
+    const themeWords = (theme && themeKeywords[theme]) || [];
+    const themeMatches = themeWords.filter(w =>
       prompt.toLowerCase().includes(w.toLowerCase())
     );
     details.themeMatchCount = themeMatches.length;
-    if (themeMatches.length === 0 && theme !== 'landscape') {
+    if (theme && themeMatches.length === 0 && theme !== 'landscape') {
       issues.push('提示词与所选主题匹配度较低');
     }
 
@@ -228,19 +228,53 @@ class QualityChecker {
   }
 
   // ========== 拼接质检 ==========
-  async checkConcat(videoPath, clipCount) {
+  // clipPaths：可选，传入各输入片段路径后，用实测时长之和作为期望值（改动点 4）
+  async checkConcat(videoPath, clipCount, clipPaths = []) {
     try {
       if (this._hasFFmpeg()) {
         const info = await this._getVideoInfoFFmpeg(videoPath);
-        const expectedMin = clipCount * 2; // 粗略估计
+
+        // 优先：按各输入片段实测时长求和作为期望值，允许小容差。
+        // 旧的 clipCount × 2 过于宽松，14s 的截断产物也能判 pass。
+        let expected = null;
+        if (Array.isArray(clipPaths) && clipPaths.length > 0) {
+          let sum = 0;
+          let probed = 0;
+          for (const p of clipPaths) {
+            const d = await this._probeDurationFFmpeg(p);
+            if (d > 0) { sum += d; probed++; }
+          }
+          if (probed === clipPaths.length && sum > 0) expected = sum;
+        }
+
+        if (expected !== null) {
+          const tolerance = Math.max(0.5, expected * 0.02);
+          const passed = Math.abs(info.duration - expected) <= tolerance;
+          return {
+            passed,
+            reason: passed
+              ? `拼接完成，总时长 ${info.duration.toFixed(2)}s（期望 ${expected.toFixed(2)}s）`
+              : `拼接后时长异常 (${info.duration.toFixed(2)}s，期望 ${expected.toFixed(2)}s，容差 ±${tolerance.toFixed(2)}s)`,
+            duration: info.duration,
+            expected: Math.round(expected * 100) / 100,
+            tolerance: Math.round(tolerance * 100) / 100,
+            clipCount,
+            level: passed ? 'pass' : 'fail'
+          };
+        }
+
+        // 退化路径：拿不到输入时长时沿用旧下限（保守，标注 fallback 以便排查）
+        const expectedMin = clipCount * 2;
+        const passed = info.duration >= expectedMin;
         return {
-          passed: info.duration >= expectedMin,
-          reason: info.duration >= expectedMin 
-            ? `拼接完成，总时长 ${info.duration.toFixed(1)}s` 
+          passed,
+          reason: passed
+            ? `拼接完成，总时长 ${info.duration.toFixed(1)}s`
             : `拼接后时长不足 (${info.duration.toFixed(1)}s)`,
           duration: info.duration,
           clipCount,
-          level: info.duration >= expectedMin ? 'pass' : 'fail'
+          level: passed ? 'pass' : 'fail',
+          fallback: true
         };
       }
     } catch (e) {}
@@ -250,6 +284,46 @@ class QualityChecker {
       level: 'pass',
       mock: true
     };
+  }
+
+  // 探测媒体时长（秒）；失败返回 0
+  _probeDurationFFmpeg(mediaPath) {
+    return new Promise((resolve) => {
+      try {
+        const cmd = `"${FFMPEG_PATH}" -i "${mediaPath}" 2>&1`;
+        let output;
+        try {
+          output = execSync(cmd, { encoding: 'utf8' });
+        } catch (e) {
+          // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
+          output = e.stdout ? String(e.stdout) : '';
+        }
+        const m = output.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+        if (!m) return resolve(0);
+        resolve(parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]));
+      } catch (e) {
+        resolve(0);
+      }
+    });
+  }
+
+  // 探测成品音频响度：{ hasAudio, meanRaw, meanDb }
+  // 用于区分「有音频流但静音」（缺陷）与「根本没有音频流」（未配乐，属正常）
+  _probeAudioLoudness(videoPath) {
+    const cmd = `"${FFMPEG_PATH}" -hide_banner -i "${videoPath}" -af volumedetect -f null - 2>&1`;
+    let output;
+    try {
+      output = execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    } catch (e) {
+      output = String(e.stdout || '') + String(e.stderr || '');
+    }
+    const hasAudio = /Stream #\d+:\d+.*Audio:/.test(output);
+    const m = output.match(/mean_volume:\s*(-?[\d.]+|-inf)\s*dB/i);
+    const meanRaw = m ? m[1] : null;
+    const meanDb = meanRaw === null
+      ? null
+      : (String(meanRaw).toLowerCase() === '-inf' ? -Infinity : parseFloat(meanRaw));
+    return { hasAudio, meanRaw, meanDb };
   }
 
   // ========== 循环质检 ==========
@@ -330,6 +404,29 @@ class QualityChecker {
       results.videoInfo = { passed: true, skipped: true, reason: e.message, level: 'skip' };
     }
 
+    // 音频音量检测（P1）：有音频流却整段静音 → fail；无音频流 → skip（未配乐任务属正常）
+    try {
+      if (this._hasFFmpeg()) {
+        const audio = this._probeAudioLoudness(videoPath);
+        if (!audio.hasAudio) {
+          results.audioVolume = { passed: true, skipped: true, reason: '成片无音频流（未配乐）', level: 'skip' };
+        } else {
+          const silent = audio.meanDb === null || !isFinite(audio.meanDb) || audio.meanDb <= -85;
+          results.audioVolume = {
+            passed: !silent,
+            reason: silent
+              ? `成片音频静音 (mean_volume=${audio.meanRaw} dB)`
+              : `音频音量正常 (mean_volume=${audio.meanRaw} dB)`,
+            meanVolume: audio.meanRaw,
+            level: silent ? 'fail' : 'pass'
+          };
+          if (silent) totalPassed = false;
+        }
+      }
+    } catch (e) {
+      results.audioVolume = { passed: true, skipped: true, reason: e.message, level: 'skip' };
+    }
+
     // 黑帧抽检
     try {
       const bfResult = await this.checkBlackFrame(videoPath);
@@ -350,6 +447,153 @@ class QualityChecker {
   // 兼容旧接口：checkAll
   async checkAll(videoPath) {
     return this.checkClip(videoPath, 30);
+  }
+
+  // ========== 视觉内容质检（§9B，多模态 LLM 抽帧） ==========
+  // FFmpeg 抽首/中/尾 3 帧 → 多模态 LLM 判断画面是否符合提示词意图
+  // 任一环节失败（无 Key/超时/非2xx/解析失败）一律 skipped，不阻塞主流程
+  async checkContentMatch(videoPath, expectedPrompt, options = {}) {
+    const apiKey = options.apiKey || config.OPENAI_API_KEY || '';
+    const baseUrl = options.baseUrl || config.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+    const model = options.model || config.OPENAI_MULTIMODAL_MODEL || 'gpt-4o-mini';
+
+    const skip = (reason) => ({
+      passed: true,
+      skipped: true,
+      reason: `视觉质检跳过: ${reason}`,
+      level: 'skip'
+    });
+
+    if (!apiKey) return skip('未配置多模态 LLM Key');
+    if (!expectedPrompt) return skip('提示词为空');
+    if (!this._hasFFmpeg()) return skip('FFmpeg 不可用');
+
+    try {
+      // 1. 抽帧（首/中/尾，base64 JPEG）
+      const frames = this._extractFramesBase64(videoPath);
+      if (!frames || frames.length === 0) return skip('抽帧失败');
+
+      // 2. 多模态调用
+      const verdict = await this._callMultimodal(frames, expectedPrompt, { apiKey, baseUrl, model });
+      if (!verdict) return skip('多模态调用失败/超时');
+
+      // 3. 解析判断
+      return {
+        passed: verdict.passed,
+        reason: verdict.passed ? '画面符合提示词意图' : `画面与提示词不符: ${verdict.reason}`,
+        frames: frames.length,
+        model,
+        level: verdict.passed ? 'pass' : 'fail',
+        details: { answer: verdict.reason }
+      };
+    } catch (e) {
+      return skip('异常: ' + e.message);
+    }
+  }
+
+  // 抽 3 帧（首/中/尾）转 base64 JPEG；时长过短则减少帧数
+  _extractFramesBase64(videoPath) {
+    const info = this._getVideoInfoFFmpegSync(videoPath);
+    const duration = info ? info.duration : 0;
+    if (duration <= 0) return null;
+
+    const times = duration < 1 ? [0] : duration < 3
+      ? [0, duration * 0.8]
+      : [0, duration / 2, duration * 0.85];
+
+    const frames = [];
+    for (const t of times) {
+      const cmd = `"${FFMPEG_PATH}" -ss ${t} -i "${videoPath}" -frames:v 1 -f image2pipe -vcodec mjpeg -q:v 3 - 2>NUL`;
+      try {
+        const buf = execSync(cmd, { encoding: null, maxBuffer: 64 * 1024 * 1024 });
+        if (buf && buf.length > 0) frames.push(buf.toString('base64'));
+      } catch (e) {
+        // 单帧失败跳过该帧
+      }
+    }
+    return frames.length > 0 ? frames : null;
+  }
+
+  // 同步取视频信息（execSync 包装，失败返回 null）
+  _getVideoInfoFFmpegSync(videoPath) {
+    try {
+      const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
+      let output;
+      try {
+        output = execSync(cmd, { encoding: 'utf8' });
+      } catch (e) {
+        // ffmpeg 探测不完整输入会返回非零码，输出仍在 e.stdout 中
+        output = e.stdout ? String(e.stdout) : '';
+      }
+      const info = { duration: 0 };
+      const durMatch = output.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+      if (durMatch) {
+        info.duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60 + parseFloat(durMatch[3]);
+      }
+      return info;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 多模态 LLM 调用（OpenAI 兼容格式），失败/超时返回 null
+  async _callMultimodal(framesBase64, expectedPrompt, { apiKey, baseUrl, model }) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const imageContent = framesBase64.map(f => ({
+        type: 'image_url',
+        image_url: { url: `data:image/jpeg;base64,${f}` }
+      }));
+      const text = `请判断视频抽帧画面是否符合以下提示词意图。只输出 JSON：{"pass": true 或 false, "reason": "一句话理由"}
+提示词意图：${expectedPrompt}
+注意：若画面与提示词主体明显不符（如要雪山给了沙漠）判 false；合理构图、光影细节差异不判失败。`;
+
+      const resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text }, ...imageContent] }
+          ],
+          max_tokens: 150,
+          temperature: 0.2
+        }),
+        signal: controller.signal
+      });
+      if (!resp.ok) {
+        console.error(`视觉质检请求失败: HTTP ${resp.status}`);
+        return null;
+      }
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      return this._parseVerdict(content);
+    } catch (e) {
+      console.error('视觉质检调用异常:', e.message);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // 容错解析模型输出的 {"pass": bool, "reason": str}（容忍 markdown 代码块/多余文字）
+  _parseVerdict(content) {
+    let text = String(content).trim();
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end < start) return null;
+    try {
+      const obj = JSON.parse(text.slice(start, end + 1));
+      if (typeof obj.pass !== 'boolean') return null;
+      return { passed: obj.pass, reason: String(obj.reason || '').slice(0, 200) };
+    } catch (e) {
+      return null;
+    }
   }
 
   // ===== FFmpeg 实现 =====
@@ -422,7 +666,13 @@ class QualityChecker {
     return new Promise((resolve) => {
       try {
         const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
-        const output = execSync(cmd, { encoding: 'utf8' });
+        let output;
+        try {
+          output = execSync(cmd, { encoding: 'utf8' });
+        } catch (e) {
+          // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
+          output = e.stdout ? String(e.stdout) : '';
+        }
         const durationMatch = output.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
         
         if (durationMatch) {
@@ -455,7 +705,13 @@ class QualityChecker {
     return new Promise((resolve, reject) => {
       try {
         const cmd = `"${FFMPEG_PATH}" -i "${videoPath}" 2>&1`;
-        const output = execSync(cmd, { encoding: 'utf8' });
+        let output;
+        try {
+          output = execSync(cmd, { encoding: 'utf8' });
+        } catch (e) {
+          // ffmpeg 仅探测（无输出参数）退出码恒非 0，输出仍在 e.stdout 中
+          output = e.stdout ? String(e.stdout) : '';
+        }
         
         const info = { width: 0, height: 0, fps: 0, duration: 0 };
         

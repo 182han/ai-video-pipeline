@@ -4,7 +4,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 const wsManager = require('./wsManager');
+const storage = require('./storage');
+const redact = require('./utils/redact');
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'tasks');
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
@@ -55,12 +58,36 @@ class TaskManager {
     console.log(`已加载 ${Object.keys(this.tasks).length} 个任务`);
   }
 
-  // 保存任务到文件
+  // 保存任务：内存态是唯一事实来源，同时落本地 JSON 兜底 + 异步镜像到数据库
+  // ⚠️ 落盘前必须脱敏：API Key 只在内存里用于当次生成，绝不写入磁盘/数据库
   _saveTask(taskId) {
     const task = this.tasks[taskId];
     if (!task) return;
-    const filePath = path.join(DATA_DIR, `${taskId}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(task, null, 2), 'utf8');
+
+    const safe = redact.redactTask(task);
+
+    // 1. 本地 JSON 兜底（数据库不可用时数据也不丢）
+    try {
+      const filePath = path.join(DATA_DIR, `${taskId}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(safe, null, 2), 'utf8');
+    } catch (e) {
+      console.error('本地保存任务失败:', taskId, e.message);
+    }
+
+    // 2. 异步写入数据库（失败不影响主流程，只记日志）
+    storage.saveTask(safe).catch(err => {
+      console.error('数据库保存任务失败:', taskId, err.message);
+    });
+  }
+
+  // 从数据库重新加载全部任务（服务启动时可用，也可手动触发）
+  async reloadFromStorage() {
+    const tasks = await storage.getAllTasks();
+    if (!Array.isArray(tasks)) return 0;
+    for (const t of tasks) {
+      if (t && t.taskId) this.tasks[t.taskId] = t;
+    }
+    return tasks.length;
   }
 
   // 生成任务ID
@@ -71,23 +98,52 @@ class TaskManager {
   // 创建新任务
   createTask(prompt, options = {}) {
     const taskId = this._generateId();
-    const totalClips = options.totalClips || 10;
-    const clipDuration = options.clipDuration || 30;
+    // 多提示词模式（§10A）：元素为 { text, theme } 对象，theme 可能为 null（用全局主题）
+    const prompts = Array.isArray(options.prompts) && options.prompts.length > 0
+      ? options.prompts
+        .map(p => {
+          if (typeof p === 'string') return { text: String(p || '').trim(), theme: null, tag: null, matched: true };
+          if (p && typeof p === 'object') return {
+            text: String(p.text || '').trim(),
+            theme: p.theme || null,
+            tag: p.tag || null,
+            matched: p.matched !== false
+          };
+          return null;
+        })
+        .filter(p => p && p.text.length > 0)
+      : null;
+    const totalClips = prompts ? prompts.length : (options.totalClips || 10);
+    const clipDuration = options.clipDuration || config.GENERATION.defaultClipDuration || 15;
+    const globalTheme = options.theme ?? null;
 
     // 初始化片段列表
     const clips = [];
     for (let i = 0; i < totalClips; i++) {
+      const entry = prompts ? (prompts[i] || prompts[prompts.length - 1]) : null;
       clips.push({
         index: i,
-        prompt: '',
+        // 多提示词：每段使用各自提示词与主题（主题为空时用全局主题），缺行用最后一行补齐（不报错）
+        prompt: entry ? entry.text : '',
+        theme: entry ? (entry.theme ?? globalTheme) : globalTheme,
+        themeTag: entry && entry.tag || null,
+        themeMatched: entry ? (entry.matched !== false) : true,
         status: 'pending',
         attempts: 0,
         videoPath: null,
+        // 片段配乐音轨 id（§6 配乐）：null/'' 表示该段不配乐
+        trackId: null,
         duration: 0,
         qcResult: null,
         error: null,
         createdAt: null,
         completedAt: null
+      });
+    }
+    // 片段级配乐分配：clipTracks[i] 命中则写入对应片段（用于提示词环节预览分配的落库）
+    if (Array.isArray(options.clipTracks)) {
+      clips.forEach((c, i) => {
+        if (options.clipTracks[i]) c.trackId = options.clipTracks[i];
       });
     }
 
@@ -115,11 +171,14 @@ class TaskManager {
       status: 'pending',
       prompt,
       optimizedPrompt: '',
+      isMultiPrompt: !!prompts,
+      // 原始多段提示词（§10A）：持久化用户输入，供历史记录/详情完整展示
+      prompts: prompts ? prompts.map(p => ({ text: p.text, theme: p.theme, tag: p.tag, matched: p.matched })) : null,
       model: options.model || 'mock',
-      theme: options.theme || 'landscape',
+      theme: options.theme ?? null,
       totalClips,
       clipDuration,
-      resolution: options.resolution || '720p',
+      resolution: options.resolution || config.GENERATION.defaultResolution || '720p',
       totalDuration: totalClips * clipDuration,
       clips,
       steps,
@@ -349,10 +408,17 @@ class TaskManager {
   }
 
   // 设置优化后的提示词
-  setOptimizedPrompt(taskId, optimizedPrompt) {
+  // options.skipClipOverwrite: 仅更新摘要字段，不覆盖各片段 prompt（调用方已逐片段写回）
+  setOptimizedPrompt(taskId, optimizedPrompt, options = {}) {
     const task = this.tasks[taskId];
     if (!task) return;
     task.optimizedPrompt = optimizedPrompt;
+
+    // 多提示词模式：每片段保留各自输入的场景提示词，不覆盖
+    if (task.isMultiPrompt || options.skipClipOverwrite) {
+      this._saveTask(taskId);
+      return;
+    }
 
     // 把优化后的提示词分配给每个片段
     for (let i = 0; i < task.clips.length; i++) {
@@ -479,6 +545,8 @@ class TaskManager {
       status: task.status,
       prompt: task.prompt,
       optimizedPrompt: task.optimizedPrompt,
+      isMultiPrompt: task.isMultiPrompt,
+      prompts: task.prompts || null,
       model: task.model,
       resolution: task.resolution,
       total: clips.length,
@@ -498,8 +566,13 @@ class TaskManager {
         index: c.index,
         status: c.status,
         attempts: c.attempts || 0,
+        prompt: c.prompt || '',
         qcResult: c.qcResult,
-        error: c.error
+        error: c.error,
+        theme: c.theme,
+        themeTag: c.themeTag,
+        themeMatched: c.themeMatched,
+        trackId: c.trackId || null
       })),
       // 预估时间
       estimatedRemaining: estimated ? estimated.remainingMs : null,
@@ -600,9 +673,18 @@ class TaskManager {
     for (const file of files) {
       try {
         const data = JSON.parse(fs.readFileSync(path.join(TRASH_DIR, file), 'utf8'));
+        // 完整多段提示词：优先持久化 prompts，老任务回退各片段 prompt
+        let promptLines = null;
+        if (Array.isArray(data.prompts) && data.prompts.length > 0) {
+          promptLines = data.prompts.map(p => (p && p.text) || p);
+        } else if (Array.isArray(data.clips) && data.clips.length > 0) {
+          promptLines = data.clips.map(c => c.prompt || '').filter(Boolean);
+          if (promptLines.length === 0) promptLines = null;
+        }
         items.push({
           taskId: data.taskId,
           prompt: data.prompt,
+          promptLines,
           status: data.status,
           model: data.model,
           totalClips: data.totalClips,
