@@ -1,0 +1,38 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><pre id="out" style="font:12px monospace"></pre>
+<script>
+const out=document.getElementById('out'); const log=[];
+function w(s){ log.push(s); out.textContent=log.join('\n'); }
+
+(async()=>{
+  try {
+    // 1) 读取当前计划
+    const planRes = await (await fetch('/api/tasks/task_mv4v7qp2_m8r0/bgm-plan')).json();
+    w('1. 计划片段数: music=' + (planRes.plan?planRes.plan.music.length:0) + ' ambient=' + (planRes.plan?planRes.plan.ambient.length:0));
+    const t0 = Date.now();
+    // 2) 触发预览渲染
+    const r = await fetch('/api/tasks/task_mv4v7qp2_m8r0/bgm-preview', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ plan: planRes.plan })
+    });
+    const j = await r.json();
+    const ms = Date.now()-t0;
+    if (!r.ok) { w('2. 渲染失败: ' + j.error); return; }
+    w('2. 渲染成功，耗时 ' + ms + 'ms');
+    w('3. 预览地址: ' + j.previewUrl);
+    w('4. 时长: ' + (j.duration||0).toFixed(2) + 's');
+
+    // 3) 验证视频能加载并播放
+    const v = document.createElement('video');
+    v.src = j.previewUrl;
+    v.muted = true;
+    document.body.appendChild(v);
+    const loaded = await new Promise((res)=>{
+      v.onloadedmetadata = ()=>res('metadata ok, duration=' + v.duration.toFixed(2));
+      v.onerror = ()=>res('ERROR 加载失败');
+      setTimeout(()=>res('TIMEOUT'), 12000);
+    });
+    w('5. ' + loaded);
+  } catch(e) { w('异常: ' + e.message); }
+  w('=== 完 ===');
+})();
+</script></body></html>

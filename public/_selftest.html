@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>前端功能自检 — 档位 / 补跑 / 质检角标</title>
+<style>
+  :root { --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --muted:#6b7280; --line:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; padding: 24px; background:#fafafa; color:#111827; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; }
+  .row { display:flex; gap:10px; align-items:baseline; padding:5px 0; border-bottom:1px dashed var(--line); }
+  .row:last-child { border-bottom:none; }
+  .badge { flex:0 0 auto; font-size:12px; font-weight:600; padding:1px 8px; border-radius:10px; }
+  .pass { color:var(--ok); background:#dcfce7; }
+  .fail { color:var(--bad); background:#fee2e2; }
+  .skip { color:var(--warn); background:#fef3c7; }
+  .info { color:var(--muted); background:#f3f4f6; }
+  .name { flex:0 0 auto; min-width:210px; }
+  .detail { color:var(--muted); font-size:12.5px; word-break:break-all; }
+  .summary { position:sticky; top:0; background:#111827; color:#fff; padding:10px 16px; border-radius:10px; margin-bottom:16px; font-weight:600; }
+  pre { background:#f9fafb; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; overflow:auto; max-height:260px; }
+  button { font:inherit; padding:6px 14px; border-radius:8px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
+  button:hover { background:#f3f4f6; }
+  .note { color:var(--muted); font-size:12px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>前端功能自检</h1>
+  <div class="sub">
+    检查「档位选择 / 补跑 / 质检可信度角标」三个功能的后端接口是否正常，
+    以及 <code>index.html</code> 里对应的 UI 元素是否就位。<br>
+    说明：本页只验证接口与元素存在性；<b>布局与交互手感仍需人工目视</b>。
+  </div>
+
+  <div class="summary" id="summary">检测中…</div>
+
+  <div class="card">
+    <h2>1. 创建任务时档位是否生效</h2>
+    <div id="sec-preset"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. 补跑接口</h2>
+    <div id="sec-continue"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. 质检可信度字段</h2>
+    <div id="sec-qc"></div>
+  </div>
+
+  <div class="card">
+    <h2>4. index.html 的 UI 元素是否就位</h2>
+    <div id="sec-dom"></div>
+  </div>
+
+  <div class="card">
+    <h2>操作</h2>
+    <button id="rerun">重新检测</button>
+    <button id="makeQuick" style="margin-left:8px;">创建一条 quick 档测试任务</button>
+    <div class="note">
+      最后一项会真实创建任务（Mock 模型，不产生费用）。创建后可在主界面看到它只跑到「拼接」，
+      并可在任务详情里点「补成最终成片」。
+    </div>
+  </div>
+</div>
+
+<script>
+const results = [];
+function add(boxId, status, name, detail) {
+  results.push({ status, name, detail });
+  const box = document.getElementById(boxId);
+  const cls = status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : 'info';
+  const label = status === 'pass' ? '通过' : status === 'fail' ? '失败' : '信息';
+  box.insertAdjacentHTML('beforeend',
+    `<div class="row"><span class="badge ${cls}">${label}</span>` +
+    `<span class="name">${name}</span><span class="detail">${detail || ''}</span></div>`);
+}
+function clearAll() {
+  results.length = 0;
+  ['sec-preset','sec-continue','sec-qc','sec-dom'].forEach(id => document.getElementById(id).innerHTML = '');
+}
+async function api(method, url, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(url, opt);
+  let j = null; try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, body: j };
+}
+
+async function run() {
+  clearAll();
+  document.getElementById('summary').textContent = '检测中…';
+
+  // ---------- 1. 档位 ----------
+  // 用一个必然失败的最小请求来验证「preset 会进任务」是困难且侵入的（会真的创建任务）。
+  // 改为：创建一个 mock 任务但立刻看它的 preset 字段 —— 这会留一条任务记录，
+  // 所以放到「手动创建」按钮里。这里只验证接口存在性。
+  try {
+    const r = await api('POST', '/api/tasks', {
+      prompt: '__selftest__', model: 'mock', clipCount: 1, clipDuration: 3, preset: 'quick'
+    });
+    if (r.ok && r.body && r.body.taskId) {
+      const id = r.body.taskId;
+      const d = await api('GET', `/api/tasks/${id}`);
+      const p = d.body && d.body.preset;
+      add('sec-preset', p === 'quick' ? 'pass' : 'fail',
+        'POST /api/tasks 传入 preset=quick',
+        p === 'quick' ? `任务 preset=${p}，stageSet ${Object.keys(d.body.stageSet || {}).length} 步` : `实际 preset=${p}`);
+      const steps = d.body && d.body.stageSet ? Object.keys(d.body.stageSet).length : -1;
+      add('sec-preset', steps === 4 ? 'pass' : 'fail', 'quick 档应为 4 步', `实际 ${steps} 步`);
+      // 顺手验证 continue-plan
+      const plan = await api('GET', `/api/tasks/${id}/continue-plan?preset=final`);
+      add('sec-continue', plan.ok ? 'pass' : 'fail', 'GET continue-plan',
+        plan.ok ? `pending=[${(plan.body.pending || []).join(',')}]` : `HTTP ${plan.status}`);
+      add('sec-continue', plan.ok && Array.isArray(plan.body.reused) ? 'pass' : 'fail',
+        '返回 reused 清单', plan.ok ? `reused=[${(plan.body.reused || []).join(',')}]` : '');
+      // 质检字段
+      add('sec-qc', d.body && d.body.qcTrusted !== undefined ? 'pass' : 'fail',
+        '详情含 qcTrusted', `qcTrusted=${d.body && d.body.qcTrusted}, qcVersion=${d.body && d.body.qcVersion}`);
+      add('sec-qc', d.body && d.body.qcVersionSource !== undefined ? 'pass' : 'fail',
+        '详情含 qcVersionSource', `source=${d.body && d.body.qcVersionSource}`);
+      // 记录这条测试任务 id，供页脚提示
+      window.__selftestTaskId = id;
+      add('sec-continue', 'info', '已创建自检任务', `${id}（可到主界面查看，或到 data/tasks 清理）`);
+    } else {
+      add('sec-preset', 'fail', 'POST /api/tasks', `HTTP ${r.status} ${JSON.stringify(r.body).slice(0,120)}`);
+    }
+  } catch (e) {
+    add('sec-preset', 'fail', 'POST /api/tasks 请求异常', e.message);
+  }
+
+  // 错误分支
+  try {
+    const bad = await api('POST', '/api/tasks/no_such_task/continue', { preset: 'bogus' });
+    add('sec-continue', bad.status === 400 ? 'pass' : 'fail', '非法档位应返回 400', `HTTP ${bad.status}`);
+  } catch (e) { add('sec-continue', 'fail', '非法档位请求异常', e.message); }
+
+  try {
+    const nf = await api('GET', '/api/tasks/no_such_task/continue-plan');
+    add('sec-continue', nf.status === 404 ? 'pass' : 'fail', '任务不存在应返回 404', `HTTP ${nf.status}`);
+  } catch (e) { add('sec-continue', 'fail', '404 检查异常', e.message); }
+
+  // ---------- 4. DOM 元素 ----------
+  // 同源策略允许我们读取 /index.html 的文本来检查元素是否存在。
+  try {
+    const html = await (await fetch('/index.html')).text();
+    const need = ['presetSelect','presetHint','customStagesWrap','detailPreset','detailQcTrust',
+                  'continueSection','continueHint','continueBtn'];
+    const missing = need.filter(id => !new RegExp(`id="${id}"`).test(html));
+    add('sec-dom', missing.length === 0 ? 'pass' : 'fail',
+      '新增 UI 元素全部存在于 index.html', missing.length ? `缺失: ${missing.join(', ')}` : `${need.length} 个齐全`);
+    const stageCount = (html.match(/data-stage="/g) || []).length;
+    add('sec-dom', stageCount === 8 ? 'pass' : 'fail', '自定义档位 8 个步骤勾选框', `实际 ${stageCount} 个`);
+    // 既有元素未被破坏
+    const legacy = ['modelSelect','promptInput','resolutionSelect','startBtn','historyDetailModal'];
+    const legacyMissing = legacy.filter(id => !new RegExp(`id="${id}"`).test(html));
+    add('sec-dom', legacyMissing.length === 0 ? 'pass' : 'fail',
+      '既有元素仍在', legacyMissing.length ? `缺失: ${legacyMissing.join(',')}` : `${legacy.length} 个齐全`);
+  } catch (e) {
+    add('sec-dom', 'fail', '读取 index.html 失败', e.message);
+  }
+
+  // ---------- 汇总 ----------
+  const pass = results.filter(r => r.status === 'pass').length;
+  const fail = results.filter(r => r.status === 'fail').length;
+  const sum = document.getElementById('summary');
+  sum.textContent = fail === 0
+    ? `全部通过：${pass} 项通过`
+    : `${fail} 项失败 / ${pass} 项通过`;
+  sum.style.background = fail === 0 ? '#15803d' : '#b91c1c';
+}
+
+document.getElementById('rerun').addEventListener('click', run);
+document.getElementById('makeQuick').addEventListener('click', async () => {
+  const r = await api('POST', '/api/tasks', {
+    prompt: '自检-极光雪山', model: 'mock', clipCount: 1, clipDuration: 3, preset: 'quick'
+  });
+  if (r.ok && r.body && r.body.taskId) {
+    alert('已创建 quick 档任务：' + r.body.taskId +
+      '\n\n请回主界面 → 历史记录，打开该任务详情，应看到：\n' +
+      '· 执行档位：快速验证\n' +
+      '· 「补成最终成片」按钮');
+  } else {
+    alert('创建失败：' + JSON.stringify(r.body));
+  }
+});
+
+run();
+</script>
+</body>
+</html>
