@@ -1566,7 +1566,9 @@ app.post('/api/tasks/:id/retry', (req, res) => {
 app.post('/api/tasks/:id/clips/:index/regenerate', async (req, res) => {
   const clipIndex = parseInt(req.params.index, 10);
   const prompt = (req.body && req.body.prompt) || '';
-  const result = await pipeline.regenerateClip(req.params.id, clipIndex, prompt);
+  // 旧任务落盘时 Key 被脱敏，必须接受前端带上来的当前设置，否则重启后重生成会降级 Mock
+  const runtimeConfig = (req.body && req.body.runtimeConfig) || null;
+  const result = await pipeline.regenerateClip(req.params.id, clipIndex, prompt, runtimeConfig);
   if (result.error) return res.status(400).json({ error: result.error });
   res.json(result);
 });
@@ -1589,7 +1591,8 @@ app.post('/api/tasks/:id/continue', async (req, res) => {
   const body = req.body || {};
   const result = await pipeline.continueTask(req.params.id, {
     preset: body.preset,
-    completed: Array.isArray(body.completed) ? body.completed : undefined
+    completed: Array.isArray(body.completed) ? body.completed : undefined,
+    runtimeConfig: body.runtimeConfig || null
   });
   if (!result.success) return res.status(400).json(result);
   res.json(result);

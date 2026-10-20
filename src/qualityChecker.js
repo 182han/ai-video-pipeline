@@ -952,15 +952,21 @@ class QualityChecker {
 
     // ---- 3. 多模态调用 ----
     let raw;
+    // 每次调用用自己的错误槽，避免并发检查多个片段时 404 被别的调用清成「超时」
+    const upstreamError = { value: null };
     try {
-      raw = await this._callNsfwMultimodal(frames, { apiKey, baseUrl, model, timeoutMs, fetchImpl: options.fetchImpl });
+      raw = await this._callNsfwMultimodal(frames, {
+        apiKey, baseUrl, model, timeoutMs,
+        fetchImpl: options.fetchImpl,
+        errorOut: upstreamError
+      });
     } catch (e) {
       return fail(`NSFW 检测未执行：多模态调用异常 ${e.message}`, { detectorError: true, frameCount: frames.length });
     }
     if (!raw) {
       // 不再一律报「失败/超时」：把上游状态码与报文带出来，否则 403 模型未授权
       // 会被误读成网络超时（实测踩过，用户完全无法定位）
-      const up = this._nsfwLastError;
+      const up = upstreamError.value || this._nsfwLastError;
       let detail = '多模态调用失败/超时（120s 内无有效响应）';
       if (up) {
         if (up.kind === 'http') {
@@ -1173,11 +1179,18 @@ class QualityChecker {
 
   // NSFW 专用多模态调用：与 _callMultimodal 的 prompt 语义完全不同，不复用。
   // 返回模型原始文本（字符串），失败/超时/非 2xx 返回 null。
-  async _callNsfwMultimodal(framesBase64, { apiKey, baseUrl, model, timeoutMs, fetchImpl }) {
+  async _callNsfwMultimodal(framesBase64, { apiKey, baseUrl, model, timeoutMs, fetchImpl, errorOut }) {
     const doFetch = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+    // 本地错误槽：并发检查多个片段时 this._nsfwLastError 会被别的调用清空/覆盖，
+    // 导致 404 被误报成「超时/无响应」。调用方拿到自己的那份，不再依赖共享状态。
+    const recordError = (up) => {
+      this._nsfwLastError = up;
+      if (errorOut) errorOut.value = up;
+    };
+    if (errorOut) errorOut.value = null;
     this._nsfwLastError = null;
     if (!doFetch) {
-      this._nsfwLastError = { kind: 'no-fetch', message: '运行环境没有可用的 fetch' };
+      recordError({ kind: 'no-fetch', message: '运行环境没有可用的 fetch' });
       console.error('NSFW 检测: 运行环境没有可用的 fetch');
       return null;
     }
@@ -1227,7 +1240,7 @@ class QualityChecker {
           if (resp && typeof resp.text === 'function') bodySnippet = String(await resp.text()).slice(0, 300);
         } catch (e) { /* 读不到 body 不影响判定 */ }
         const status = resp ? resp.status : 0;
-        this._nsfwLastError = { kind: 'http', status, message: bodySnippet || `HTTP ${status}` };
+        recordError({ kind: 'http', status, message: bodySnippet || `HTTP ${status}` });
         console.error(`NSFW 检测请求失败: HTTP ${status} ${bodySnippet.slice(0, 200)}`);
         return null;
       }
@@ -1236,18 +1249,18 @@ class QualityChecker {
         ? data.choices[0].message.content
         : '';
       if (!content) {
-        this._nsfwLastError = { kind: 'empty-content', status: 200, message: '响应中无 choices[0].message.content' };
+        recordError({ kind: 'empty-content', status: 200, message: '响应中无 choices[0].message.content' });
         console.error('NSFW 检测: 响应中无 choices[0].message.content');
         return null;
       }
       return String(content);
     } catch (e) {
       const aborted = e && (e.name === 'AbortError' || /aborted|timeout/i.test(e.message || ''));
-      this._nsfwLastError = {
+      recordError({
         kind: aborted ? 'timeout' : 'exception',
         status: 0,
         message: aborted ? `超时（${timeoutMs}ms 内无响应）` : (e.message || String(e)),
-      };
+      });
       console.error('NSFW 检测调用异常:', e.message);
       return null;
     } finally {

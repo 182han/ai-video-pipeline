@@ -74,7 +74,7 @@ class Pipeline {
   }
 
   // 重新生成单个失败片段（可带新提示词），成功后自动重拼成片
-  async regenerateClip(taskId, index, prompt) {
+  async regenerateClip(taskId, index, prompt, runtimeConfig) {
     if (this.runningTasks.has(taskId)) {
       return { error: '任务正在运行中，请稍后再试' };
     }
@@ -82,6 +82,13 @@ class Pipeline {
     const task = taskManager.getTask(taskId);
     if (!task) {
       return { error: '任务不存在' };
+    }
+
+    // 旧任务的 runtimeConfig 在落盘时被脱敏（Key 清空），服务重启后拿不到 Key。
+    // 前端把当前设置随请求带上，这里合并回内存态，避免静默降级 Mock / NSFW 必失败。
+    if (runtimeConfig) {
+      this._mergeRuntimeConfig(task, runtimeConfig);
+      taskManager.updateTaskStatus(taskId, task.status, { runtimeConfig: task.runtimeConfig });
     }
 
     const clip = task.clips[index];
@@ -92,6 +99,10 @@ class Pipeline {
       return { error: '仅支持重新生成已失败的片段' };
     }
 
+    // 旧文件可能是有价值的上一次产物（例如付费片段只是质检没过）：
+    // 不能只把 videoPath 清空就丢引用，记下路径便于事后找回。
+    const previousVideoPath = clip.videoPath || null;
+
     // 应用用户修改后的提示词（未传则用原提示词重跑）
     taskManager.updateClip(taskId, index, {
       prompt: (prompt && String(prompt).trim()) ? String(prompt).trim() : clip.prompt,
@@ -100,6 +111,7 @@ class Pipeline {
       qcResult: null,
       attempts: 0,
       videoPath: null,
+      previousVideoPath,
       completedAt: null
     });
 
@@ -129,6 +141,7 @@ class Pipeline {
     if (runtimeConfig.klingAccessKey) genConfig.accessKey = runtimeConfig.klingAccessKey;
     if (runtimeConfig.klingSecretKey) genConfig.secretKey = runtimeConfig.klingSecretKey;
     const generator = createGenerator(task.model, genConfig);
+    this._markMockFallback(taskId, task, generator);
 
     taskManager.recordStepStart(taskId, 'clip_generation');
     taskManager.updateTaskStatus(taskId, 'regenerating', { currentStep: `重新生成片段 ${index + 1}` });
@@ -538,6 +551,53 @@ class Pipeline {
     return null;
   }
 
+  // 本次实际渲染是否为合成素材：用户显式选 mock，或选了真实模型但没 Key 被降级 Mock。
+  // 降级必须被识别，否则 NSFW 会把 ffmpeg 测试图案当真实内容检测（没 Key 时必失败）。
+  _isSynthetic(task) {
+    return !!task && (task.model === 'mock' || !!task.mockFallback);
+  }
+
+  // 为每次生成/重新生成分配不覆盖的片段文件名。
+  // 历史事故：固定名 task_x_clip_1.mp4 让第 2 次尝试直接覆盖第 1 次的付费产物，
+  // 后续「重新生成」再覆盖一次，导致已付费片段无法找回。
+  _nextClipPath(taskId, index) {
+    const base = `${taskId}_clip_${index + 1}`;
+    const first = path.join(CLIPS_DIR, `${base}.mp4`);
+    if (!fs.existsSync(first)) return first;
+    for (let v = 2; v < 1000; v++) {
+      const candidate = path.join(CLIPS_DIR, `${base}_v${v}.mp4`);
+      if (!fs.existsSync(candidate)) return candidate;
+    }
+    return path.join(CLIPS_DIR, `${base}_${Date.now()}.mp4`);
+  }
+
+  // 把「重新生成 / 补跑」请求里带上的当前设置合并进任务内存态。
+  // Key 落盘会被 redact 清空，服务重启后旧任务拿不到 Key；不合并就会静默降级 Mock。
+  _mergeRuntimeConfig(task, runtimeConfig) {
+    if (!task || !runtimeConfig || typeof runtimeConfig !== 'object') return task;
+    const ALLOWED = [
+      'apiKey', 'apiBaseUrl', 'modelId', 'klingAccessKey', 'klingSecretKey',
+      'llmApiKey', 'llmBaseUrl', 'llmModel',
+      'multimodalApiKey', 'multimodalBaseUrl', 'multimodalModel',
+      'strictQcItems', 'visualQC'
+    ];
+    const next = { ...(task.runtimeConfig || {}) };
+    for (const k of ALLOWED) {
+      if (runtimeConfig[k] !== undefined) next[k] = runtimeConfig[k];
+    }
+    task.runtimeConfig = next;
+    return task;
+  }
+
+  // 记录 Mock 降级：任务仍显示用户选的模型，但 mockFallback 标明实际是合成画面。
+  _markMockFallback(taskId, task, generator) {
+    if (!task || !generator || !generator.fallbackToMock) return;
+    const requested = generator.requestedModel || task.model;
+    task.mockFallback = requested;
+    taskManager.updateTaskStatus(taskId, task.status || 'generating', { mockFallback: requested });
+    console.warn(`[${taskId}] ⚠️ 所选模型 ${requested} 未配置 API Key，本次实际为 Mock 合成画面`);
+  }
+
   // ===== 片段间转场：解析任务级覆盖 + 全局默认 =====
   //
   // 只决定「接缝要不要做交叉淡化」，不影响档位/片段数量。
@@ -749,7 +809,7 @@ class Pipeline {
       let qc;
       try {
         qc = await qualityChecker.checkClip(clip.videoPath, task.clipDuration, {
-          nsfw: { ...nsfw, syntheticSource: task.model === 'mock' },
+          nsfw: { ...nsfw, syntheticSource: this._isSynthetic(task) },
           strictItems: Array.isArray(rc.strictQcItems) && rc.strictQcItems.length
             ? rc.strictQcItems
             : undefined,
@@ -794,6 +854,13 @@ class Pipeline {
     }
     const task = taskManager.getTask(taskId);
     if (!task) return { success: false, error: '任务不存在' };
+
+    // 与「重新生成」一致：旧任务落盘时 Key 被脱敏，补跑必须接受前端带上来的当前设置，
+    // 否则重启后补跑会静默降级 Mock / NSFW 必失败。
+    if (options.runtimeConfig) {
+      this._mergeRuntimeConfig(task, options.runtimeConfig);
+      taskManager.updateTaskStatus(taskId, task.status, { runtimeConfig: task.runtimeConfig });
+    }
 
     const targetPreset = options.preset || task.preset || 'final';
     const completed = Array.isArray(options.completed) && options.completed.length
@@ -892,7 +959,7 @@ class Pipeline {
         baseUrl: rc.multimodalBaseUrl,
         model: rc.multimodalModel,
         // Mock 片段是合成图案，NSFW 对它不适用（与片段级判定一致）
-        syntheticSource: task.model === 'mock'
+        syntheticSource: this._isSynthetic(task)
       }
     };
   }
@@ -1116,6 +1183,7 @@ class Pipeline {
     if (runtimeConfig.klingSecretKey) genConfig.secretKey = runtimeConfig.klingSecretKey;
     
     const generator = createGenerator(task.model, genConfig);
+    this._markMockFallback(taskId, task, generator);
 
     const batchInfo = await this._batchGenerate(taskId, generator);
 
@@ -1710,7 +1778,8 @@ class Pipeline {
         let videoPath = result.videoUrl;
 
         if (videoPath && (videoPath.startsWith('http://') || videoPath.startsWith('https://'))) {
-          const localPath = path.join(CLIPS_DIR, `${taskId}_clip_${index + 1}.mp4`);
+          // 每次下载用不覆盖的新文件名：旧名会让第 2 次尝试覆盖第 1 次的付费产物。
+          const localPath = this._nextClipPath(taskId, index);
           console.log(`[${taskId}] 片段 ${index + 1} 下载中...`);
           try {
             const downloadResult = await this._downloadVideo(videoPath, localPath);
@@ -1743,7 +1812,7 @@ class Pipeline {
             // 对它做 NSFW 检测既无意义，又会在没配多模态 Key 时让整条演示链路全盘失败
             // （实测：10 片段任务全部 failed，错误「多模态调用失败/超时」）。
             // 传下去让 checkNSFW 走「合法跳过」（legitimateSkip）而不是「未执行→判 fail」。
-            syntheticSource: task.model === 'mock'
+            syntheticSource: this._isSynthetic(task)
           },
           // 用户勾选的「要紧项」；不传=全部要紧。NSFW 由 qualityChecker 内部锁定。
           strictItems: Array.isArray(qcRuntime.strictQcItems) && qcRuntime.strictQcItems.length
@@ -1775,7 +1844,7 @@ class Pipeline {
           qcResult.failedCount = (qcResult.failedCount || 0) + 1;
         }
 
-        const isMockRender = task.model === 'mock';
+        const isMockRender = this._isSynthetic(task);
         const userDisabled = rc.visualQC === false;
         let contentResult;
         if (isMockRender) {

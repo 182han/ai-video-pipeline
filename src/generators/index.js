@@ -64,7 +64,13 @@ function createGenerator(modelName, extraConfig = {}) {
     (extraConfig.accessKey && extraConfig.accessKey.length > 0);
   if (modelName !== 'mock' && modelConfig && !modelConfig.available && !hasRuntimeKey) {
     console.log(`[Generator] ${modelName} 未配置 API Key，使用 Mock 模式`);
-    return new MockGenerator({ failRate: 0.05, genTime: 2000 });
+    const fallback = new MockGenerator({ failRate: 0.05, genTime: 2000 });
+    // 明确标记「这不是用户选的模型」：pipeline 据此把产物按合成素材处理。
+    // 历史事故：降级后任务仍标 dashscope，NSFW 把 ffmpeg 测试图案当真实内容检测，
+    // 没配多模态 Key 时整条任务必失败，用户完全看不出「实际生成的是 Mock」。
+    fallback.fallbackToMock = true;
+    fallback.requestedModel = modelName;
+    return fallback;
   }
 
   const factory = generators[modelName];
