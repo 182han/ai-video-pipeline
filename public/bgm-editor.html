@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>添加配乐 · AI 视频流水线</title>
+<title>剪辑 · AI 视频流水线</title>
 <style>
   :root {
     --bg: #f5f5f7; --card: #fff; --border: #e5e5ea; --text: #1d1d1f;
@@ -49,7 +49,7 @@
   .editor.active { display: flex; }
   .editor-body { flex: 1; display: flex; min-height: 0; }
 
-  .stage { flex: 1; background: #111; display: flex; align-items: center; justify-content: center; min-width: 320px; }
+  .stage { flex: 1; background: #111; display: flex; align-items: center; justify-content: center; min-width: 320px; position: relative; }
   .stage video { max-width: 100%; max-height: 100%; }
 
   .side { width: 300px; background: var(--card); border-left: 1px solid var(--border);
@@ -93,6 +93,18 @@
   .clip .handle.right { right: 0; }
   .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff3b30; z-index: 8; pointer-events: none; }
 
+  /* ===== 视频轨（片段库成片） ===== */
+  .clip.video { background: #16181d; border-color: rgba(0,0,0,.45); }
+  .clip.video .vthumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .9; pointer-events: none; }
+  .clip.video .clip-name { color: #fff; background: rgba(0,0,0,.55); padding: 1px 6px; border-radius: 4px; left: 5px; top: 4px; }
+  .clip.video .vmeta { position: absolute; right: 6px; bottom: 4px; color: #fff; font-size: 10px;
+                       background: rgba(0,0,0,.55); padding: 1px 6px; border-radius: 4px; }
+  .clip.video.readonly { cursor: default; }
+  .mode-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+               color: #b8b8bd; font-size: 13px; text-align: center; padding: 24px; line-height: 1.8;
+               background: #16181d; z-index: 2; }
+  .master-bar { display: flex; align-items: center; gap: 6px; }
+
   /* ===== 属性面板 ===== */
   .props { padding: 12px; overflow-y: auto; }
   .field { margin-bottom: 10px; }
@@ -124,9 +136,11 @@
 <!-- 列表页 -->
 <div id="listView">
   <div class="topbar">
-    <h1>添加配乐</h1>
-    <span class="hint">选择一条已完成成片，为它编排配乐</span>
+    <h1>剪辑</h1>
+    <span class="hint">选择一条成片继续配乐，或从片段库挑片段拼一条新的</span>
     <div class="spacer"></div>
+    <button class="btn btn-primary" onclick="startNewFromLibrary()">＋ 新建剪辑</button>
+    <a class="btn" href="/clip-library.html">片段库</a>
     <button class="btn" onclick="location.href='/'">← 返回首页</button>
   </div>
   <div class="wrap">
@@ -139,8 +153,23 @@
 <div id="editorView" class="editor">
   <div class="topbar">
     <button class="btn" onclick="backToList()">← 返回列表</button>
-    <h1 id="editTitle">添加配乐</h1>
+    <h1 id="editTitle">剪辑</h1>
     <div class="spacer"></div>
+    <div class="master-bar" id="masterBar" style="display:none;">
+      <select id="masterRes" class="btn" title="目标分辨率">
+        <option value="480p">480p</option>
+        <option value="720p">720p</option>
+        <option value="1080p">1080p</option>
+        <option value="4K">4K</option>
+      </select>
+      <!-- 片段间转场：默认关闭。开启后相邻片段交叉淡化，成片短 (段数−1)×淡化时长 -->
+      <label class="btn" title="相邻片段之间做交叉淡化" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" id="transitionEnabled" style="margin:0;"> 转场
+      </label>
+      <input type="number" id="transitionDuration" class="btn" value="0.5" min="0.1" max="5" step="0.1"
+             title="淡化时长（秒）" style="width:64px;">
+      <button class="btn btn-primary" id="btnMaster" onclick="generateMaster()">生成母版</button>
+    </div>
     <button class="btn" id="btnPreview" onclick="startPreviewPlayback()">▶ 开始预览</button>
     <button class="btn btn-primary" id="btnExport" onclick="doExport()">导出并覆盖成片</button>
   </div>
@@ -148,12 +177,14 @@
   <div class="editor-body">
     <div class="stage">
       <video id="video" controls preload="metadata"></video>
+      <div class="mode-hint" id="stageHint" style="display:none;"></div>
     </div>
 
     <div class="side">
       <div class="side-tabs">
         <div class="side-tab active" data-cat="music" onclick="switchLib('music')">轻音乐</div>
         <div class="side-tab" data-cat="ambient" onclick="switchLib('ambient')">环境音</div>
+        <div class="side-tab" data-cat="library" onclick="switchLib('library')">片段库</div>
       </div>
       <div class="side-list" id="libList"></div>
     </div>
@@ -167,12 +198,17 @@
       <span class="hint" id="zoomHint">每秒 40px</span>
       <div class="spacer" style="flex:1"></div>
       <button class="btn btn-sm btn-danger" onclick="removeSelected()" id="btnDelClip" disabled>删除片段</button>
+      <button class="btn btn-sm" onclick="duplicateSelected()" id="btnDup" disabled>复制片段</button>
       <button class="btn btn-sm" onclick="splitAtPlayhead()">在播放头分割</button>
       <button class="btn btn-sm" onclick="resetPlan()">清空配乐</button>
     </div>
     <div class="tl-scroll" id="tlScroll">
       <div class="tl-inner" id="tlInner">
         <div class="ruler" id="ruler"><canvas id="rulerCanvas" height="24"></canvas></div>
+        <div class="track-row">
+          <div class="track-label"><div class="tl-name">视频</div><div id="videoTrackMeta">片段</div></div>
+          <div class="track-lane" id="laneVideo" data-kind="video" style="height:96px"></div>
+        </div>
         <div class="track-row">
           <div class="track-label"><div class="tl-name">轻音乐</div><div>music</div></div>
           <div class="track-lane" id="laneMusic" data-kind="music"></div>
@@ -213,6 +249,14 @@ let LIB_CAT = 'music';      // 素材面板当前分类
 let SELECTED = null;        // 选中的片段 id
 let WAVE_CACHE = new Map(); // trackId -> { peaks: Float32Array, duration }
 let pendingWave = new Map();
+// 剪辑页两种模式：
+//   task    —— 打开一条已有成片，视频轨是只读母版，编辑配乐
+//   library —— 从片段库新建，视频轨可排序/裁剪/分割，先生成母版再配乐
+let MODE = 'task';
+let VIDEO_SEQ = [];         // library 模式的视频段
+let TASK_VIDEO = null;      // task 模式的只读母版块
+let MASTER_POLL = null;     // 生成母版时的轮询定时器
+let LIB_ITEMS_CACHE = null; // 片段库素材缓存
 
 // 注意：不用 $ 作变量名——顶层 const 会占用全局标识符，容易与其他脚本冲突。
 const byId = id => document.getElementById(id);
@@ -278,11 +322,35 @@ async function openEditor(taskId) {
   INVENTORY = libRes.tracks || [];
   DURATION = Number(planRes.totalDuration) || 0;
 
+  // 成片模式：视频轨只读，展示母版块；配乐/预览/导出全部按原有逻辑
+  MODE = 'task';
+  VIDEO_SEQ = [];
+  TASK_VIDEO = {
+    id: 'master',
+    readonly: true,
+    name: '母版（成片）',
+    url: planRes.videoUrl,
+    timelineStart: 0,
+    timelineEnd: DURATION,
+    inSec: 0,
+    outSec: DURATION
+  };
+  byId('masterBar').style.display = 'none';
+  byId('stageHint').style.display = 'none';
+  byId('video').style.display = '';
+  byId('btnPreview').disabled = false;
+  byId('btnExport').disabled = false;
+  if (MASTER_POLL) { clearInterval(MASTER_POLL); MASTER_POLL = null; }
+
   const video = byId('video');
+  video.loop = false;
+  video.muted = false;
   video.src = planRes.videoUrl;
   video.onloadedmetadata = () => {
     if (!DURATION && video.duration) DURATION = video.duration;
+    if (TASK_VIDEO) TASK_VIDEO.timelineEnd = DURATION;
     layoutTimeline();
+    renderTimeline();
     // 元数据就绪后按当前比例重算播放头位置（缩放/切换片源都会走到这里）
     setPlayhead(video.currentTime || 0);
     setStatus('成片时长 ' + fmt(DURATION), 'ok');
@@ -303,7 +371,7 @@ async function openEditor(taskId) {
   }
   renderLibrary();
   renderTimeline();
-  byId('editTitle').textContent = '添加配乐 · ' + taskId;
+  byId('editTitle').textContent = '剪辑 · ' + taskId;
 }
 
 // 初次进入时给一份自动配乐作为起点（用户从零开始也可以直接清空）
@@ -323,13 +391,348 @@ function backToList() {
   // 恢复列表视图时清掉残留的 display:none（openEditor 里设置的）
   byId('listView').style.display = '';
   byId('video').pause();
+  if (MASTER_POLL) { clearInterval(MASTER_POLL); MASTER_POLL = null; }
   loadTasks();
+}
+
+// ============================================================
+// 2.5 片段库模式：从库里挑片段拼一条新成片
+// ============================================================
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function startNewFromLibrary() {
+  openLibraryEditor(true);
+}
+
+async function openLibraryEditor(clearSelection) {
+  MODE = 'library';
+  SELECTED = null;
+  PLAN = { music: [], ambient: [] };
+  VIDEO_SEQ = [];
+  TASK = null;
+  TASK_VIDEO = null;
+  if (MASTER_POLL) { clearInterval(MASTER_POLL); MASTER_POLL = null; }
+
+  byId('listView').style.display = 'none';
+  byId('editorView').classList.add('active');
+  byId('masterBar').style.display = 'flex';
+  byId('editTitle').textContent = '剪辑 · 新建成片';
+  byId('btnPreview').disabled = true;
+  byId('btnExport').disabled = true;
+  byId('btnMaster').disabled = false;
+  byId('stageHint').style.display = 'flex';
+  byId('stageHint').textContent = '先在视频轨排好片段，再点「生成母版」。生成母版后才能加配乐、预览与导出。';
+  const v = byId('video');
+  v.pause();
+  v.removeAttribute('src');
+  v.style.display = 'none';
+
+  let sel = [];
+  if (!clearSelection) {
+    try { sel = JSON.parse(sessionStorage.getItem('vs_clip_selection') || '[]'); } catch (e) { sel = []; }
+  }
+  setStatus('加载片段库…', 'busy');
+  LIB_CAT = 'library';
+  document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === 'library'));
+  try {
+    const data = await (await fetch('/api/library')).json();
+    LIB_ITEMS_CACHE = [];
+    for (const g of (data.groups || [])) for (const it of (g.items || [])) LIB_ITEMS_CACHE.push(it);
+  } catch (e) {
+    LIB_ITEMS_CACHE = [];
+  }
+  const map = new Map((LIB_ITEMS_CACHE || []).map(i => [i.id, i]));
+  let seq = 0;
+  for (const s of sel) {
+    const it = map.get(s.libraryId);
+    if (!it) continue;
+    const full = Number(it.durationSec) || 0;
+    VIDEO_SEQ.push({
+      id: 'v_' + Date.now().toString(36) + '_' + (seq++),
+      libraryId: it.id,
+      name: it.fileName || it.id,
+      url: it.url,
+      durationSec: full,
+      inSec: Number(s.inSec) || 0,
+      outSec: (s.outSec === null || s.outSec === undefined) ? full : Number(s.outSec),
+      width: it.width, height: it.height, fps: it.fps,
+      model: it.model, prompt: it.prompt
+    });
+  }
+  normalizeVideoTimeline();
+  updateMasterResOptions();
+  updateModeUI();
+  renderLibrary();
+  renderTimeline();
+  setStatus(VIDEO_SEQ.length
+    ? `已载入 ${VIDEO_SEQ.length} 段，可拖拽排序、拖两端裁剪`
+    : '从右侧「片段库」添加片段', 'ok');
+}
+
+function normalizeVideoTimeline() {
+  let t = 0;
+  for (const s of VIDEO_SEQ) {
+    s.timelineStart = round3(t);
+    t += Math.max(0.05, (Number(s.outSec) || 0) - (Number(s.inSec) || 0));
+    s.timelineEnd = round3(t);
+  }
+  DURATION = round3(t);
+}
+
+function updateMasterResOptions() {
+  const heights = VIDEO_SEQ.map(s => Number(s.height) || 0);
+  const maxH = Math.max(0, ...heights);
+  const target = !heights.length ? '720p'
+    : maxH >= 1800 ? '4K'
+    : maxH >= 900 ? '1080p'
+    : maxH >= 650 ? '720p' : '480p';
+  byId('masterRes').value = target;
+}
+
+function updateModeUI() {
+  const library = MODE === 'library';
+  byId('masterBar').style.display = library ? 'flex' : 'none';
+  byId('btnPreview').disabled = library;
+  byId('btnExport').disabled = library;
+  byId('btnDup').disabled = !(SELECTED && VIDEO_SEQ.some(s => s.id === SELECTED));
+  byId('btnDelClip').disabled = !SELECTED;
+}
+
+function buildVideoEl(seg) {
+  const node = el('div', 'clip video' + (seg.id === SELECTED ? ' selected' : '') + (seg.readonly ? ' readonly' : ''));
+  node.dataset.id = seg.id;
+  node.style.left = (seg.timelineStart * PX_PER_SEC) + 'px';
+  node.style.width = Math.max(8, (seg.timelineEnd - seg.timelineStart) * PX_PER_SEC) + 'px';
+
+  const thumb = el('video', 'vthumb');
+  thumb.src = seg.url + '#t=0.1';
+  thumb.muted = true;
+  thumb.preload = 'metadata';
+  thumb.playsInline = true;
+  node.appendChild(thumb);
+
+  const name = el('div', 'clip-name');
+  name.textContent = (seg.name || '片段').slice(0, 28);
+  node.appendChild(name);
+
+  const meta = el('div', 'vmeta');
+  meta.textContent = (seg.timelineEnd - seg.timelineStart).toFixed(1) + 's';
+  node.appendChild(meta);
+
+  if (!seg.readonly) {
+    const hl = el('div', 'handle left');
+    const hr = el('div', 'handle right');
+    node.appendChild(hl); node.appendChild(hr);
+    hl.onmousedown = e => { e.stopPropagation(); selectVideo(seg.id); startVideoDrag(e, seg, 'left', node); };
+    hr.onmousedown = e => { e.stopPropagation(); selectVideo(seg.id); startVideoDrag(e, seg, 'right', node); };
+    node.onmousedown = e => {
+      if (e.target.classList.contains('handle')) return;
+      selectVideo(seg.id);
+      startVideoDrag(e, seg, 'move', node);
+    };
+  }
+  return node;
+}
+
+function selectVideo(id) {
+  const seg = VIDEO_SEQ.find(s => s.id === id);
+  SELECTED = id;
+  document.querySelectorAll('.clip').forEach(n => n.classList.toggle('selected', n.dataset.id === id));
+  byId('btnDelClip').disabled = !seg;
+  byId('btnDup').disabled = !seg;
+  renderProps();
+  if (seg) {
+    const v = byId('video');
+    byId('stageHint').style.display = 'none';
+    v.style.display = '';
+    v.loop = true;
+    v.src = seg.url;
+    try { v.currentTime = Number(seg.inSec) || 0; } catch (e) {}
+    v.play().catch(() => {});
+    setStatus(`片段预览：${seg.name}`, 'ok');
+  }
+}
+
+function startVideoDrag(e, seg, mode, node) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const orig = { s: seg.timelineStart, e: seg.timelineEnd, sin: seg.inSec, sout: seg.outSec };
+  const dur = orig.sout - orig.sin;
+  const srcTotal = Number(seg.durationSec) || orig.sout;
+
+  function onMove(ev) {
+    const dt = (ev.clientX - startX) / PX_PER_SEC;
+    if (mode === 'move') {
+      seg.timelineStart = Math.max(0, round3(orig.s + dt));
+      seg.timelineEnd = round3(seg.timelineStart + dur);
+    } else if (mode === 'left') {
+      const delta = Math.max(-orig.sin, Math.min(dt, dur - 0.2));
+      seg.inSec = round3(orig.sin + delta);
+      seg.timelineStart = round3(orig.s + delta);
+      seg.timelineEnd = round3(seg.timelineStart + (orig.sout - seg.inSec));
+    } else {
+      const delta = Math.min(dt, srcTotal - orig.sout);
+      if (dur + delta < 0.2) return;
+      seg.outSec = round3(orig.sout + delta);
+      seg.timelineEnd = round3(orig.e + delta);
+    }
+    node.style.left = (seg.timelineStart * PX_PER_SEC) + 'px';
+    node.style.width = Math.max(8, (seg.timelineEnd - seg.timelineStart) * PX_PER_SEC) + 'px';
+  }
+  function onUp() {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    if (mode === 'move') reorderVideoByPosition(seg);
+    normalizeVideoTimeline();
+    renderTimeline();
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+
+function reorderVideoByPosition(seg) {
+  const others = VIDEO_SEQ.filter(x => x !== seg);
+  const center = (seg.timelineStart + seg.timelineEnd) / 2;
+  let at = others.findIndex(o => center < (o.timelineStart + o.timelineEnd) / 2);
+  if (at === -1) at = others.length;
+  VIDEO_SEQ = others.slice(0, at).concat([seg], others.slice(at));
+}
+
+function duplicateSelected() {
+  const seg = VIDEO_SEQ.find(s => s.id === SELECTED);
+  if (!seg) { setStatus('先选中视频轨上的一个片段', 'err'); return; }
+  const idx = VIDEO_SEQ.indexOf(seg);
+  const copy = { ...seg, id: 'v_' + Date.now().toString(36) + '_d' };
+  VIDEO_SEQ.splice(idx + 1, 0, copy);
+  normalizeVideoTimeline();
+  SELECTED = copy.id;
+  renderTimeline();
+  setStatus('已复制片段', 'ok');
+}
+
+function addVideoSegment(item) {
+  if (MODE !== 'library') {
+    setStatus('当前打开的是已有成片，视频轨只读；请到片段库「去剪辑」新建', 'err');
+    return;
+  }
+  const full = Number(item.durationSec) || 0;
+  VIDEO_SEQ.push({
+    id: 'v_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+    libraryId: item.id,
+    name: item.fileName || item.id,
+    url: item.url,
+    durationSec: full,
+    inSec: 0,
+    outSec: full,
+    width: item.width, height: item.height, fps: item.fps,
+    model: item.model, prompt: item.prompt
+  });
+  normalizeVideoTimeline();
+  updateMasterResOptions();
+  renderTimeline();
+  setStatus('已添加：' + (item.fileName || item.id), 'ok');
+}
+
+async function ensureLibraryCache() {
+  if (LIB_ITEMS_CACHE) return LIB_ITEMS_CACHE;
+  try {
+    const data = await (await fetch('/api/library')).json();
+    LIB_ITEMS_CACHE = [];
+    for (const g of (data.groups || [])) for (const it of (g.items || [])) LIB_ITEMS_CACHE.push(it);
+  } catch (e) {
+    LIB_ITEMS_CACHE = [];
+  }
+  return LIB_ITEMS_CACHE;
+}
+
+async function renderLibraryItems() {
+  const list = byId('libList');
+  const items = await ensureLibraryCache();
+  list.innerHTML = '';
+  if (!items.length) { list.innerHTML = '<div class="empty-hint">片段库还是空的</div>'; return; }
+  for (const it of items) {
+    const item = el('div', 'lib-item');
+    item.innerHTML = '<span class="add-hint">＋ 添加</span>' +
+      '<div class="lib-title">' + escHtml(it.fileName || it.id) + '</div>' +
+      '<div class="lib-meta">' + (it.width || '?') + '×' + (it.height || '?') + ' · ' +
+      (Math.round(Number(it.durationSec) || 0)) + 's · ' + escHtml(it.model || '') + '</div>';
+    item.onclick = () => addVideoSegment(it);
+    list.appendChild(item);
+  }
+}
+
+async function generateMaster() {
+  if (MODE !== 'library') return;
+  if (!VIDEO_SEQ.length) { alert('视频轨是空的，先从右侧「片段库」添加片段'); return; }
+  const segments = VIDEO_SEQ.map(s => ({
+    libraryId: s.libraryId,
+    inSec: round3(Number(s.inSec) || 0),
+    outSec: round3(Number(s.outSec) || 0)
+  }));
+  const resolution = byId('masterRes').value;
+  // 片段间转场：默认关闭。不勾选也显式传 enabled:false，覆盖 .env 全局默认。
+  const transEl = byId('transitionEnabled');
+  const transDurEl = byId('transitionDuration');
+  const transDur = transDurEl ? Number(transDurEl.value) : 0.5;
+  const transition = {
+    enabled: !!(transEl && transEl.checked),
+    duration: Number.isFinite(transDur) && transDur >= 0.1 && transDur <= 5 ? transDur : 0.5,
+    type: 'fade'
+  };
+  byId('btnMaster').disabled = true;
+  setStatus('正在创建母版任务…', 'busy');
+  try {
+    const r = await fetch('/api/assemble', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ segments, resolution, transition })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || '创建任务失败');
+    sessionStorage.removeItem('vs_clip_selection');
+    setStatus(`母版任务已启动（${resolution} · ${data.segmentCount} 段）`, 'busy');
+    pollMaster(data.taskId);
+  } catch (e) {
+    byId('btnMaster').disabled = false;
+    setStatus('生成母版失败: ' + e.message, 'err');
+    alert('生成母版失败: ' + e.message);
+  }
+}
+
+function pollMaster(taskId) {
+  if (MASTER_POLL) clearInterval(MASTER_POLL);
+  MASTER_POLL = setInterval(async () => {
+    try {
+      const r = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+      if (!r.ok) return;
+      const t = await r.json();
+      setStatus(`生成母版：${t.currentStep || t.status}`, 'busy');
+      if (['completed', 'partial', 'failed'].includes(t.status)) {
+        clearInterval(MASTER_POLL);
+        MASTER_POLL = null;
+        byId('btnMaster').disabled = false;
+        if (t.status === 'failed') {
+          setStatus('母版生成失败: ' + (t.error || '未知错误'), 'err');
+          alert('母版生成失败：' + (t.error || '未知错误'));
+          return;
+        }
+        setStatus('母版已生成，正在加载配乐编辑器…', 'ok');
+        await openEditor(taskId);
+      }
+    } catch (e) { /* 网络抖动，继续轮询 */ }
+  }, 2000);
 }
 
 // ============================================================
 // 3. 素材库
 // ============================================================
 function switchLib(cat) {
+  if (cat !== 'library' && MODE === 'library') {
+    setStatus('先生成母版，再加配乐', 'err');
+    return;
+  }
   LIB_CAT = cat;
   document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
   renderLibrary();
@@ -338,6 +741,7 @@ function switchLib(cat) {
 function renderLibrary() {
   const list = byId('libList');
   list.innerHTML = '';
+  if (LIB_CAT === 'library') { renderLibraryItems(); return; }
   const items = INVENTORY.filter(t => (t.category === 'ambient' ? 'ambient' : 'music') === LIB_CAT);
   if (!items.length) { list.innerHTML = '<div class="empty-hint">该分类暂无素材</div>'; return; }
   for (const t of items) {
@@ -396,6 +800,17 @@ function findClip(id) {
 
 function removeSelected() {
   if (!SELECTED) return;
+  // 视频轨片段
+  if (VIDEO_SEQ.some(s => s.id === SELECTED)) {
+    VIDEO_SEQ = VIDEO_SEQ.filter(s => s.id !== SELECTED);
+    SELECTED = null;
+    normalizeVideoTimeline();
+    renderTimeline();
+    const v = byId('video');
+    if (MODE === 'library') { v.pause(); v.removeAttribute('src'); v.style.display = 'none'; byId('stageHint').style.display = 'flex'; }
+    setStatus('已删除视频片段', 'ok');
+    return;
+  }
   const f = findClip(SELECTED);
   if (!f) return;
   PLAN[f.kind] = PLAN[f.kind].filter(x => x.id !== SELECTED);
@@ -406,9 +821,29 @@ function removeSelected() {
 
 function splitAtPlayhead() {
   if (!SELECTED) return;
+  // 视频轨：按舞台里该片段的本地播放时间换算成时间轴位置再切
+  const seg = VIDEO_SEQ.find(s => s.id === SELECTED);
+  if (seg) {
+    const local = Number(byId('video').currentTime) || 0;
+    const t = seg.timelineStart + Math.max(0, local - (Number(seg.inSec) || 0));
+    if (t <= seg.timelineStart + 0.1 || t >= seg.timelineEnd - 0.1) {
+      setStatus('播放头不在选中视频片段内', 'err'); return;
+    }
+    const ratio = (t - seg.timelineStart) / (seg.timelineEnd - seg.timelineStart);
+    const srcSplit = round3(seg.inSec + (seg.outSec - seg.inSec) * ratio);
+    const right = { ...seg, id: 'v_' + Date.now().toString(36) + 'r', inSec: srcSplit };
+    seg.outSec = srcSplit;
+    const idx = VIDEO_SEQ.indexOf(seg);
+    VIDEO_SEQ.splice(idx + 1, 0, right);
+    normalizeVideoTimeline();
+    renderTimeline();
+    setStatus('已在 ' + t.toFixed(2) + 's 处分割视频片段', 'ok');
+    return;
+  }
   const f = findClip(SELECTED);
-  const t = byId('video').currentTime;
+  if (!f) return;
   const c = f.clip;
+  const t = byId('video').currentTime;
   if (t <= c.timelineStart + 0.05 || t >= c.timelineEnd - 0.05) {
     setStatus('播放头不在选中片段内', 'err'); return;
   }
@@ -481,6 +916,17 @@ function drawRuler(total, width) {
 
 function renderTimeline() {
   layoutTimeline();
+  // 视频轨：task 模式一条只读母版；library 模式是可编辑片段
+  const laneV = byId('laneVideo');
+  laneV.innerHTML = '';
+  laneV.style.width = (Math.ceil((DURATION || 60) * PX_PER_SEC) + 120) + 'px';
+  if (MODE === 'task' && TASK_VIDEO) laneV.appendChild(buildVideoEl(TASK_VIDEO));
+  if (MODE === 'library') {
+    for (const seg of VIDEO_SEQ) laneV.appendChild(buildVideoEl(seg));
+  }
+  byId('videoTrackMeta').textContent = MODE === 'task'
+    ? '母版'
+    : (VIDEO_SEQ.length ? VIDEO_SEQ.length + ' 段' : '空');
   for (const kind of ['music', 'ambient']) {
     const lane = byId('lane' + (kind === 'music' ? 'Music' : 'Ambient'));
     lane.innerHTML = '';
@@ -489,6 +935,7 @@ function renderTimeline() {
   }
   renderProps();
   byId('btnDelClip').disabled = !SELECTED;
+  byId('btnDup').disabled = !(SELECTED && VIDEO_SEQ.some(s => s.id === SELECTED));
 }
 
 function buildClipEl(c, kind) {
@@ -722,6 +1169,21 @@ function startDrag(e, clip, kind, mode, node) {
 // ============================================================
 function renderProps() {
   const panel = byId('propsPanel');
+  // 视频轨片段：只读信息 + 操作提示（不涉及音量/关键帧）
+  const vseg = VIDEO_SEQ.find(s => s.id === SELECTED);
+  if (vseg) {
+    panel.style.display = 'block';
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;margin-bottom:8px;">
+        <strong style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(vseg.name)}</strong>
+        <button class="btn btn-sm" onclick="closeProps()">×</button>
+      </div>
+      <div class="field"><label>使用时长</label><div style="font-size:13px;">${(vseg.outSec - vseg.inSec).toFixed(2)}s</div></div>
+      <div class="field"><label>源区间</label><div style="font-size:12px;color:#666;">${(vseg.inSec || 0).toFixed(2)}s – ${(vseg.outSec || 0).toFixed(2)}s / 共 ${(vseg.durationSec || 0).toFixed(2)}s</div></div>
+      <div class="field"><label>规格</label><div style="font-size:12px;color:#666;">${vseg.width || '?'}×${vseg.height || '?'} · ${escHtml(vseg.model || '')}</div></div>
+      <div class="hint">拖两端裁剪；工具栏可复制、在播放头分割、删除。顺序直接拖拽视频块调整。</div>`;
+    return;
+  }
   const f = SELECTED ? findClip(SELECTED) : null;
   if (!f) { panel.style.display = 'none'; return; }
   const c = f.clip;
@@ -884,6 +1346,11 @@ function followPlayhead(sec) {
 
 // 点「开始预览」
 async function startPreviewPlayback() {
+  if (MODE !== 'task' || !TASK) {
+    setStatus('先生成母版，才能预览', 'err');
+    alert('请先点「生成母版」。预览播放的是服务端渲染后的成片，片段库模式下还没有成片。');
+    return;
+  }
   if (!PLAN.music.length && !PLAN.ambient.length) {
     alert('还没有添加任何配乐片段');
     return;
@@ -950,6 +1417,11 @@ async function startPreviewPlayback() {
 
 // 导出：服务端混音后覆盖原成片（先写临时文件，校验通过才替换）
 async function doExport() {
+  if (MODE !== 'task' || !TASK) {
+    setStatus('先生成母版，才能导出', 'err');
+    alert('请先点「生成母版」。导出会覆盖该任务的成片，片段库模式下还没有目标成片。');
+    return;
+  }
   if (!PLAN.music.length && !PLAN.ambient.length) {
     if (!confirm('当前没有任何配乐片段，导出将得到无配乐成片。继续？')) return;
   } else if (!confirm('导出会用新配乐覆盖原成片（先写临时文件，校验通过才替换）。继续？')) {
@@ -989,10 +1461,12 @@ function zoomBy(dir) {
 // 启动
 // ============================================================
 (async function init() {
-  await loadTasks();
   const q = new URLSearchParams(location.search);
   const taskId = q.get('task');
-  if (taskId) openEditor(taskId);
+  if (taskId) { await openEditor(taskId); return; }
+  const fromLib = q.get('from') === 'library' || !!sessionStorage.getItem('vs_clip_selection');
+  if (fromLib) { await openLibraryEditor(false); return; }
+  await loadTasks();
 })();
 </script>
 </body>

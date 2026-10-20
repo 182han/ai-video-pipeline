@@ -9,6 +9,7 @@ const taskManager = require('./taskManager');
 const { createGenerator } = require('./generators');
 const qualityChecker = require('./qualityChecker');
 const videoProcessor = require('./videoProcessor');
+const transitionMixer = require('./processors/transitionMixer');
 const promptOptimizer = require('./promptOptimizer');
 const { resolveResume } = require('./pipelineStages');
 const llmService = require('./services/llmService');
@@ -203,7 +204,15 @@ class Pipeline {
       }
     } else {
       concatPath = path.join(OUTPUT_DIR, `${taskId}_concat.mp4`);
-      const concatResult = await videoProcessor.concatenate(successClips, concatPath);
+      const trans = this._transitionOptions(task);
+      const concatResult = trans.enabled
+        ? await transitionMixer.concatWithTransitions(successClips, concatPath, {
+          duration: trans.duration,
+          type: trans.type,
+          resolution: task.resolution,
+          fps: 30
+        })
+        : await videoProcessor.concatenate(successClips, concatPath);
 
       if (!concatResult.success) {
         taskManager.recordStepComplete(taskId, 'concatenation', {
@@ -214,7 +223,9 @@ class Pipeline {
         throw new Error('拼接失败: ' + concatResult.error);
       }
 
-      const concatQC = await qualityChecker.checkConcat(concatPath, successClips.length, successClips);
+      const concatQC = await qualityChecker.checkConcat(concatPath, successClips.length, successClips, {
+        expectedDuration: concatResult.expectedDuration
+      });
       await this._sleep(300);
 
       taskManager.recordStepComplete(taskId, 'concatenation', {
@@ -527,6 +538,21 @@ class Pipeline {
     return null;
   }
 
+  // ===== 片段间转场：解析任务级覆盖 + 全局默认 =====
+  //
+  // 只决定「接缝要不要做交叉淡化」，不影响档位/片段数量。
+  // enabled=false 时调用方必须走原来的 concatenate（硬切），保证默认行为零变化。
+  _transitionOptions(task) {
+    const global = (config.TRANSITIONS && typeof config.TRANSITIONS === 'object') ? config.TRANSITIONS : {};
+    const t = (task && task.transition && typeof task.transition === 'object') ? task.transition : {};
+    const enabled = typeof t.enabled === 'boolean' ? t.enabled : !!global.enabled;
+    const duration = Number.isFinite(Number(t.duration)) && Number(t.duration) > 0
+      ? Number(t.duration)
+      : (Number.isFinite(Number(global.duration)) && Number(global.duration) > 0 ? Number(global.duration) : 0.5);
+    const type = (typeof t.type === 'string' && t.type) || global.type || 'fade';
+    return { enabled, duration, type };
+  }
+
   // ===== 流水线档位：某一步是否应当执行 =====
   //
   // stageSet 的形状是「只列出要执行的步骤」（{loop_processing:true, ...}），
@@ -635,7 +661,17 @@ class Pipeline {
     if (paths.length === 1) {
       fs.copyFileSync(paths[0], tmp);
     } else {
-      const r = await videoProcessor.concatenate(paths, tmp);
+      // 与新建路径同口径：转场开启时必须用同一个模块，否则重建母版比新建母版长
+      // (N−1)×F 秒——这正是 2026-10-19「重建母版漏了循环」同类缺陷的翻版。
+      const trans = this._transitionOptions(task);
+      const r = trans.enabled
+        ? await transitionMixer.concatWithTransitions(paths, tmp, {
+          duration: trans.duration,
+          type: trans.type,
+          resolution: task.resolution,
+          fps: 30
+        })
+        : await videoProcessor.concatenate(paths, tmp);
       if (!r.success) { cleanup(); return { success: false, error: '拼接母版失败: ' + r.error }; }
     }
 
@@ -1113,10 +1149,23 @@ class Pipeline {
         outSec: c.trim && c.trim.outSec !== undefined ? c.trim.outSec : null
       })).filter(s => s.path);
       console.log(`[${taskId}] 片段库拼接：${segs.length} 段，目标 ${task.resolution}`);
-      const concatResult = await videoProcessor.concatenateSegments(segs, concatPath, {
-        resolution: task.resolution,
-        fps: 30
-      });
+      const trans = this._transitionOptions(task);
+      let concatResult;
+      if (trans.enabled && segs.length > 1) {
+        // 转场模式：归一化 + 交叉淡化在本模块内一次做完。
+        concatResult = await transitionMixer.concatWithTransitions(segs, concatPath, {
+          duration: trans.duration,
+          type: trans.type,
+          resolution: task.resolution,
+          fps: 30
+        });
+        if (concatResult.success) concatResult.reencoded = true;
+      } else {
+        concatResult = await videoProcessor.concatenateSegments(segs, concatPath, {
+          resolution: task.resolution,
+          fps: 30
+        });
+      }
       if (!concatResult.success) {
         taskManager.recordStepComplete(taskId, 'concatenation', {
           status: 'failed',
@@ -1137,7 +1186,14 @@ class Pipeline {
           target: concatResult.target,
           durationCheck: concatResult.durationCheck,
           decodeCheck: concatResult.decodeCheck,
-          reencoded: !!concatResult.reencoded
+          reencoded: !!concatResult.reencoded,
+          transition: concatResult.transitionType
+            ? {
+              type: concatResult.transitionType,
+              fadeDuration: concatResult.fadeDuration,
+              transitions: concatResult.transitions
+            }
+            : null
         }
       });
     } else if (successClips.length === 1) {
@@ -1166,7 +1222,15 @@ class Pipeline {
       }
     } else {
       concatPath = path.join(OUTPUT_DIR, `${taskId}_concat.mp4`);
-      const concatResult = await videoProcessor.concatenate(successClips, concatPath);
+      const trans = this._transitionOptions(task);
+      const concatResult = trans.enabled
+        ? await transitionMixer.concatWithTransitions(successClips, concatPath, {
+          duration: trans.duration,
+          type: trans.type,
+          resolution: task.resolution,
+          fps: 30
+        })
+        : await videoProcessor.concatenate(successClips, concatPath);
 
       if (!concatResult.success) {
         taskManager.recordStepComplete(taskId, 'concatenation', {
@@ -1178,12 +1242,25 @@ class Pipeline {
       }
 
       // 拼接质检
-      const concatQC = await qualityChecker.checkConcat(concatPath, successClips.length, successClips);
+      const concatQC = await qualityChecker.checkConcat(concatPath, successClips.length, successClips, {
+        expectedDuration: concatResult.expectedDuration
+      });
       await this._sleep(300);
 
       taskManager.recordStepComplete(taskId, 'concatenation', {
         qcResult: concatQC.passed ? 'pass' : concatQC.level,
-        qcDetails: concatQC
+        qcDetails: concatResult.transitionType
+          ? {
+            ...concatQC,
+            transition: {
+              type: concatResult.transitionType,
+              fadeDuration: concatResult.fadeDuration,
+              transitions: concatResult.transitions,
+              durationCheck: concatResult.durationCheck,
+              decodeCheck: concatResult.decodeCheck
+            }
+          }
+          : concatQC
       });
     }
 

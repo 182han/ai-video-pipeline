@@ -92,21 +92,33 @@ function resolveTrack(trackArg) {
 function probeDuration(mediaPath) {
   return new Promise((resolve, reject) => {
     const ffprobe = config.FFPROBE_PATH || 'ffprobe';
-    execFile(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', mediaPath], (err, stdout) => {
-      if (!err) {
-        const dur = parseFloat(String(stdout).trim());
-        if (isNaN(dur)) return reject(new Error('无法解析时长: ' + mediaPath));
-        return resolve(dur);
-      }
-      // 仅对「环境限制」类错误做降级；文件不存在等真实错误直接抛
-      const code = err && (err.code || '');
-      if (code !== 'EPERM' && code !== 'EACCES') return reject(err);
+    const fallback = () => {
       try {
         resolve(_probeDurationFallback(ffprobe, mediaPath));
       } catch (e2) {
-        reject(err);
+        reject(new Error('无法读取时长（环境禁止子进程管道捕获）: ' + mediaPath));
       }
-    });
+    };
+    // 注意：受限环境里 execFile 可能「同步抛 EPERM」而不是走回调，
+    // 所以必须把它包在 try 里，否则 Promise 直接 reject，降级路径永远执行不到。
+    let child;
+    try {
+      child = execFile(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', mediaPath], (err, stdout) => {
+        if (!err) {
+          const dur = parseFloat(String(stdout).trim());
+          if (isNaN(dur)) return reject(new Error('无法解析时长: ' + mediaPath));
+          return resolve(dur);
+        }
+        // 仅对「环境限制」类错误做降级；文件不存在等真实错误直接抛
+        const code = err && (err.code || '');
+        if (code !== 'EPERM' && code !== 'EACCES') return reject(err);
+        fallback();
+      });
+    } catch (e) {
+      if (e && (e.code === 'EPERM' || e.code === 'EACCES')) return fallback();
+      return reject(e);
+    }
+    if (child && child.on) child.on('error', () => {});
   });
 }
 
@@ -142,12 +154,7 @@ const SILENCE_DB = -85;
 // 返回 { ok, out }：out 为 stdout+stderr 合并文本。
 function _runProbe(bin, args) {
   return new Promise((resolve) => {
-    execFile(bin, args, (err, stdout, stderr) => {
-      const out = String(stdout || '') + '\n' + String(stderr || '');
-      if (!err) return resolve({ ok: true, out });
-      const code = err && (err.code || '');
-      if (code !== 'EPERM' && code !== 'EACCES') return resolve({ ok: false, out });
-      // 降级路径
+    const fallback = () => {
       try {
         const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
         const outDir = path.join(__dirname, '..', '..', 'output');
@@ -160,7 +167,19 @@ function _runProbe(bin, args) {
       } catch (e4) {
         resolve({ ok: false, out: '' });
       }
-    });
+    };
+    try {
+      execFile(bin, args, (err, stdout, stderr) => {
+        const out = String(stdout || '') + '\n' + String(stderr || '');
+        if (!err) return resolve({ ok: true, out });
+        const code = err && (err.code || '');
+        if (code !== 'EPERM' && code !== 'EACCES') return resolve({ ok: false, out });
+        fallback();
+      });
+    } catch (e) {
+      if (e && (e.code === 'EPERM' || e.code === 'EACCES')) return fallback();
+      resolve({ ok: false, out: '' });
+    }
   });
 }
 
@@ -313,10 +332,28 @@ async function mixBgmPlan(inputVideo, outputPath, plan, opts = {}) {
 function runFfmpeg(args, totalDuration, onProgress) {
   return new Promise((resolve) => {
     const ffmpeg = config.FFMPEG_PATH || 'ffmpeg';
-    const proc = execFile(ffmpeg, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return resolve({ ok: false, error: (stderr && String(stderr).slice(-800)) || err.message });
-      resolve({ ok: true });
-    });
+    // 受限环境里 execFile 可能同步抛 EPERM（而不是回调），降级为同步执行。
+    // 代价是拿不到进度回调，但混音本身能完成。
+    const fallback = () => {
+      try {
+        const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+        execSync([q(ffmpeg)].concat(args.map(q)).join(' '), { stdio: 'ignore' });
+        resolve({ ok: true, fallback: true });
+      } catch (e) {
+        resolve({ ok: false, error: e.message });
+      }
+    };
+    let proc;
+    try {
+      proc = execFile(ffmpeg, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) return resolve({ ok: false, error: (stderr && String(stderr).slice(-800)) || err.message });
+        resolve({ ok: true });
+      });
+    } catch (e) {
+      if (e && (e.code === 'EPERM' || e.code === 'EACCES')) return fallback();
+      return resolve({ ok: false, error: e.message });
+    }
+    if (!proc || !proc.stderr) return;
     let stderrBuf = '';
     proc.stderr.on('data', (chunk) => {
       stderrBuf += chunk.toString();

@@ -37,6 +37,48 @@ class VideoProcessor {
   }
 
   // ===== 1. 拼接视频 =====
+  //
+  // 执行只关心成功/失败的 ffmpeg 命令。
+  // 本环境（DSH 沙箱）里 execSync 带 stdio:'pipe' 会 spawn EPERM（与 AGENTS.md §2.3 一致），
+  // 降级为 stdio:'ignore' 重跑；生产环境第一次就能成功，行为不变。
+  _runFFmpeg(cmd) {
+    try {
+      execSync(cmd, { stdio: 'pipe' });
+      return { success: true };
+    } catch (e) {
+      if (!(e && (e.code === 'EPERM' || /EPERM|EACCES/.test(String(e.message || ''))))) {
+        return { success: false, error: e.message };
+      }
+      try {
+        execSync(cmd, { stdio: 'ignore' });
+        return { success: true, fallback: true };
+      } catch (e2) {
+        return { success: false, error: e2.message };
+      }
+    }
+  }
+
+  // 需要读取 stderr 的命令（解码校验）：直接把 stderr 重定向到临时文件再读，
+  // 不依赖管道捕获，沙箱与生产环境行为一致。
+  _runCaptureStderr(cmd) {
+    const os = require('os');
+    const tmp = path.join(os.tmpdir(), `vp_err_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+    const readTmp = () => { try { return fs.readFileSync(tmp, 'utf8'); } catch (e) { return ''; } };
+    try {
+      execSync(`${cmd} 2> "${tmp}"`, { stdio: 'ignore' });
+      return { ok: true, stderr: readTmp() };
+    } catch (e) {
+      return {
+        ok: false,
+        stderr: readTmp() || String((e && e.stderr) || e.message || ''),
+        error: e.message
+      };
+    } finally {
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
+    }
+  }
+
+
   async concatenate(clips, outputPath) {
     if (this.hasFFmpeg) {
       return this._concatenateFFmpeg(clips, outputPath);
@@ -74,7 +116,8 @@ class VideoProcessor {
         const listContent = clips.map(c => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
         fs.writeFileSync(listPath, listContent, 'utf8');
         const cmd = `"${FFMPEG_PATH}" -y -f concat -safe 0 -i "${listPath}" -c copy "${outputPath}"`;
-        execSync(cmd, { stdio: 'pipe' });
+        const run = this._runFFmpeg(cmd);
+        if (!run.success) throw new Error(run.error || 'ffmpeg 拼接命令失败');
 
         // 改动点 2：退出码为 0 不代表拼全了（输入损坏时会静默只拼出前几段），必须实测时长
         const v = this._validateConcatDuration(outputPath, clips);
@@ -119,8 +162,8 @@ class VideoProcessor {
             const padded = `${outputPath}.pad${i}.mp4`;
             const padCmd = `"${FFMPEG_PATH}" -y -i "${clips[i]}" -f lavfi -i "anullsrc=r=44100:cl=stereo" `
               + `-shortest -map 0:v -map 1:a -c:v copy -c:a aac "${padded}"`;
-            execSync(padCmd, { stdio: 'pipe' });
-            if (!fs.existsSync(padded) || fs.statSync(padded).size === 0) {
+            const padRun = this._runFFmpeg(padCmd);
+            if (!padRun.success) throw new Error(padRun.error || 'ffmpeg 补静音命令失败');            if (!fs.existsSync(padded) || fs.statSync(padded).size === 0) {
               throw new Error(`第 ${i + 1} 个片段补静音失败`);
             }
             paddedTemps.push(padded);
@@ -144,7 +187,8 @@ class VideoProcessor {
       const filter = `${filterParts}concat=n=${concatInputs.length}:v=1:a=${needAudio ? 1 : 0}[outv]`
         + (needAudio ? '[outa]' : '');
       const cmd = `"${FFMPEG_PATH}" -y ${inputs} -filter_complex "${filter}" ${maps} "${outputPath}"`;
-      execSync(cmd, { stdio: 'pipe' });
+      const run = this._runFFmpeg(cmd);
+      if (!run.success) throw new Error(run.error || 'ffmpeg 重编码拼接命令失败');
 
       const v = this._validateConcatDuration(outputPath, clips);
       const cleanupTemps = () => {
@@ -181,7 +225,7 @@ class VideoProcessor {
   _probeDurationSec(mediaPath) {
     try {
       const cmd = `"${FFPROBE_PATH}" -v error -show_entries format=duration -of csv=p=0 "${mediaPath}"`;
-      const out = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const out = this._execText(cmd);
       const d = parseFloat(String(out).trim());
       return isFinite(d) && d > 0 ? d : 0;
     } catch (e) {
@@ -278,7 +322,8 @@ class VideoProcessor {
         const audio = detail.hasAudio ? '-c:a aac -ar 44100 -ac 2' : '-an';
         const cmd = `"${FFMPEG_PATH}" -y ${ss} -i "${seg.path}" ${tt} -vf "${vf}" `
           + `-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p ${audio} "${tmp}"`;
-        execSync(cmd, { stdio: 'pipe' });
+        const run = this._runFFmpeg(cmd);
+        if (!run.success) throw new Error(`第 ${i + 1} 段归一化失败: ${run.error || ''}`);
         if (!fs.existsSync(tmp) || fs.statSync(tmp).size === 0) {
           throw new Error(`第 ${i + 1} 段归一化失败（产物为空）`);
         }
@@ -376,18 +421,15 @@ class VideoProcessor {
   }
 
   _fullDecodeCheck(videoPath) {
-    try {
-      execSync(`"${FFMPEG_PATH}" -v error -i "${videoPath}" -f null -`, { stdio: 'pipe' });
-      return { ok: true, errors: 0 };
-    } catch (e) {
-      const stderr = String((e && (e.stderr || e.message)) || '');
-      const lines = stderr.split(/\r?\n/).filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l));
-      return {
-        ok: false,
-        errors: lines.length,
-        summary: lines.slice(0, 3).join(' / ').slice(0, 300)
-      };
-    }
+    const r = this._runCaptureStderr(`"${FFMPEG_PATH}" -v error -i "${videoPath}" -f null -`);
+    if (r.ok) return { ok: true, errors: 0 };
+    const stderr = String(r.stderr || '');
+    const lines = stderr.split(/\r?\n/).filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l));
+    return {
+      ok: false,
+      errors: lines.length,
+      summary: lines.slice(0, 3).join(' / ').slice(0, 300)
+    };
   }
 
   _mockConcatenate(clips, outputPath) {
@@ -422,7 +464,8 @@ class VideoProcessor {
     const cmd = `"${FFMPEG_PATH}" -y -i "${inputPath}" -vf "scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2" -c:v ${codec} -crf 23 -preset medium -r ${fps} -c:a aac -b:a 128k -pix_fmt yuv420p "${outputPath}"`;
 
     try {
-      execSync(cmd, { stdio: 'pipe' });
+      const run = this._runFFmpeg(cmd);
+      if (!run.success) return { success: false, error: run.error };
       return { success: true, outputPath, resolution, fps };
     } catch (e) {
       return { success: false, error: e.message };
@@ -581,7 +624,8 @@ class VideoProcessor {
     if (this.hasFFmpeg) {
       try {
         const cmd = `"${FFMPEG_PATH}" -y -ss ${frameTime} -i "${videoPath}" -vframes 1 "${outputPath}"`;
-        execSync(cmd, { stdio: 'pipe' });
+        const run = this._runFFmpeg(cmd);
+        if (!run.success) return { success: false, error: run.error };
         return { success: true, outputPath };
       } catch (e) {
         return { success: false, error: e.message };

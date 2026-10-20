@@ -96,6 +96,20 @@ function loopFadeDuration(fallback = 0.5) {
   return n;
 }
 
+// 片段间转场（交叉淡化）时长（秒）。必须 > 0 且有限。
+// 成片会比「各片段时长之和」短 (N−1)×该值，这是真融合的必然代价。
+// 0.5s 与循环淡化同口径：慢镜头风景里能看出「化过去」，又不至于明显双重曝光。
+function transitionDuration(fallback = 0.5) {
+  const raw = env('TRANSITION_DURATION');
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0.1 || n > 5) {
+    console.warn(`[config] TRANSITION_DURATION="${raw}" 非法（需 0.1~5 秒之间），已回退默认 ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 module.exports = {
   // ===== 视频生成模型 API Key =====
   // 留空的模型在页面上还是可以选，但会用 Mock 模式模拟
@@ -224,6 +238,21 @@ module.exports = {
     loopSsimThreshold: loopSsimThreshold(0.9),
     // 无缝循环交叉淡化时长（秒），.env 用 LOOP_FADE_DURATION 覆盖
     loopFadeDuration: loopFadeDuration(0.5)
+  },
+
+  // ===== 片段间转场（交叉淡化）=====
+  // 与「首尾循环」是两件事：循环处理的是成片尾部回绕到开头，
+  // 这里处理的是每两个相邻片段之间的接缝。
+  //
+  // 默认关闭（零回归）：开启后成片时长 = Σ片段 − (N−1)×duration，
+  // 与既有「Σ片段」口径不同，所有验收/展示都要按实际返回值走。
+  // 需要时在 .env 里设 TRANSITION_ENABLED=true，或按任务传 transition 配置。
+  TRANSITIONS: {
+    enabled: /^(1|true|yes)$/i.test(String(env('TRANSITION_ENABLED', 'false')).trim()),
+    // 淡化时长（秒），.env 用 TRANSITION_DURATION 覆盖
+    duration: transitionDuration(0.5),
+    // xfade 转场类型，.env 用 TRANSITION_TYPE 覆盖（默认 fade = 交叉淡化）
+    type: env('TRANSITION_TYPE', 'fade')
   },
 
   // ===== 存储配置 =====

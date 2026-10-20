@@ -32,6 +32,10 @@ function applyTaskDefaults(task) {
   if (task.bgmPlan === undefined) task.bgmPlan = null;
   if (task.bgmResult === undefined) task.bgmResult = null;
   if (task.masterPath === undefined) task.masterPath = null;
+  // 片段间转场（2026-10-20 引入）：老任务没有这个字段。
+  // 补成 null 而不是 { enabled:false }，语义是「未设置 → 由全局配置决定」，
+  // 这样用户在 .env 打开转场后，补跑老任务也能生效；补成 false 会静默锁死行为。
+  if (task.transition === undefined) task.transition = null;
 
   // 流水线档位：档位是在 2026-10-19 引入的，之前的任务没有这些字段。
   // 老任务当初是「8 步全量执行」，所以补成 final 才是如实还原；

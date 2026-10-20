@@ -866,15 +866,27 @@ const ASSISTANT_SYSTEM_PROMPT = `你是「视频提示词助手」，为用户�
 
 // 画面禁用项：与服务端 system prompt 对齐，作为 LLM 不听话时的硬兜底。
 // 命中即不返回可用提示词——宁可让用户再聊一轮，也不让跑题的提示词进流水线烧钱。
+//
+// 设计原则（2026-10-20 实测修订）：宁可放宽，也不要误杀真实风光。
+// 已修的误杀：
+//   - silhouette：原在人物列表里，导致 "mountain silhouettes"（山影）被判有人物。
+//     现改为只拦「人 + 剪影」组合。
+//   - face：原在人物列表里，导致 "rock face / cliff face"（岩壁）被判有人物。
+//     已移除——真有人脸时必然伴随 person/man/woman 等词，由那些词兜住。
+//   - table / bowl / plate：会误伤 "table mountain"（桌山）、"bowl-shaped valley"（盆状谷）、
+//     "tectonic plate"（板块）。现收窄成明确的器物组合。
 const ASSISTANT_FORBIDDEN = [
   { why: '人物',
-    re: /\b(people|person|persons|man|men|woman|women|child|children|girl|boy|baby|human|humans|face|faces|portrait|hand|hands|finger|fingers|crowd|silhouette|skin)\b/i },
+    re: /\b(people|person|persons|man|men|woman|women|child|children|girl|boy|baby|human|humans|portrait|hand|hands|finger|fingers|crowd|skin)\b/i },
+  // 人物剪影单独判：只有"人+silhouette"才算，山影/树影放行
+  { why: '人物',
+    re: /\b(?:person|people|humans?|man|woman|child|figure|body)\s+silhouettes?\b|\bsilhouettes?\s+of\s+(?:a\s+|an\s+|the\s+)?(?:person|people|humans?|man|woman|child|figure|body)\b/i },
   { why: '动物',
     re: /\b(animal|animals|dog|dogs|cat|cats|bird|birds|horse|horses|monkey|monkeys|deer|wildlife|fish|insect|insects|wolf|bear|elephant|tiger|lion)\b/i },
   { why: '室内场景',
     re: /\b(indoor|indoors|interior|room|rooms|cafe|teahouse|tearoom|restaurant|shop|store|office|classroom|kitchen|bedroom|library)\b/i },
   { why: '生活物件',
-    re: /\b(cup|cups|teapot|teacup|tea|coffee|mug|bottle|book|books|plate|bowl|table|desk|chair|chairs|furniture|vase)\b/i },
+    re: /\b(cup|cups|teapot|teacup|tea|coffee|mug|bottle|book|books|desk|chairs?|furniture|vase)\b|\b(?:dining|coffee|wooden|kitchen|side)\s+tables?\b|\bbowls?\s+of\b/i },
   { why: '文字或标识',
     re: /\b(text|texts|watermark|watermarks|logo|logos|sign|signs|signage|subtitle|subtitles|lettering|typography)\b/i },
   { why: '城市景观',
@@ -895,12 +907,21 @@ const ASSISTANT_FORBIDDEN = [
 // 检测前先剥掉「否定式负面词」。
 // 项目模板的收尾句就是 "No people, no vehicles — just the landscape holding still"，
 // 这类写法是在**要求不要出现**，不能当成违规内容误杀。
-// 正则从否定词起剥到该子句结束（逗号/分号/句号/破折号），这样
-// "No readable text or logos — ..." 这种「否定词 + 多个并列名词」也能整段剥掉。
+// 三层剥离，覆盖英文里所有常见的否定写法：
+//   1) no/without/zero/free of/free from + 名词短语（从否定词剥到子句结束）
+//   2) no-people / non-human 这类连字符否定前缀
+//   3) people-free / human-free（-free 后缀）与 peopleless / textless（-less 后缀）
 const NEGATION_RE = /\b(?:no|without|zero|free of|free from)\s+[^.;,—]{0,60}/gi;
+const HYPHEN_NEG_RE = /\b(?:no|non|anti)[-\s](?:people|persons?|humans?|animals?|texts?|logos?|watermarks?|signs?|cars?|vehicles?|buildings?|city|urban)\b/gi;
+const FREE_SUFFIX_RE = /\b(?:people|persons?|humans?|animals?|texts?|logos?|watermarks?|signs?|cars?|vehicles?|buildings?|city|urban)[-\s](?:free|less)\b/gi;
+const LESS_SUFFIX_RE = /\b(?:people|person|human|animal|text|logo|watermark|sign|car|vehicle|building)less\b/gi;
 
 function stripNegations(s) {
-  return String(s).replace(NEGATION_RE, ' ');
+  return String(s)
+    .replace(NEGATION_RE, ' ')
+    .replace(HYPHEN_NEG_RE, ' ')
+    .replace(FREE_SUFFIX_RE, ' ')
+    .replace(LESS_SUFFIX_RE, ' ');
 }
 
 // 检查顺序：越具体的排越前，命中提示更贴近用户看到的画面。
@@ -982,6 +1003,8 @@ app.post('/api/assistant/chat', async (req, res) => {
   if (prompt) {
     const hits = findForbidden(prompt);
     if (hits.length) {
+      // 留痕：出误杀时能凭日志还原「是哪个词触发的」，不要再靠猜
+      console.warn(`[assistant] 拦截 ${hits.join('、')} | prompt=${prompt.slice(0, 300)}`);
       return res.status(200).json({
         ok: true,
         ready: false,
@@ -1004,7 +1027,7 @@ app.post('/api/assistant/chat', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1082,6 +1105,9 @@ app.post('/api/tasks', (req, res) => {
     stages: Array.isArray(stages) ? stages : undefined,
     // 配乐：整片级配置（取代旧的逐段 clipTracks）
     bgm,
+    // 片段间转场：{ enabled, duration, type }。不传/传 null → 用 config.TRANSITIONS 全局默认。
+    // 注意：漏掉这一行会让前端勾选被静默忽略（与早前 preset 字段同样的坑）。
+    transition: (transition && typeof transition === 'object') ? transition : null,
     // 兼容：老前端仍传 clipTracks 时保留透传，由 createTask 收敛为整片主曲
     clipTracks: Array.isArray(clipTracks) ? clipTracks.slice(0, count) : undefined,
     // 保存前端传入的 API 配置（运行时使用）
@@ -1420,7 +1446,8 @@ app.post('/api/assemble', (req, res) => {
       return res.status(400).json({ error: '不支持的目标分辨率: ' + target });
     }
 
-    const task = taskManager.createLibraryTask({ segments, resolution: target });
+    const transition = (body.transition && typeof body.transition === 'object') ? body.transition : null;
+    const task = taskManager.createLibraryTask({ segments, resolution: target, transition });
     pipeline.startTask(task.taskId);
     res.json({
       success: true,

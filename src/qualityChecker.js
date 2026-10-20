@@ -312,7 +312,7 @@ class QualityChecker {
 
   // ========== 拼接质检 ==========
   // clipPaths：可选，传入各输入片段路径后，用实测时长之和作为期望值（改动点 4）
-  async checkConcat(videoPath, clipCount, clipPaths = []) {
+  async checkConcat(videoPath, clipCount, clipPaths = [], options = {}) {
     // 前置闸门：没有 ffmpeg 就没法测时长，此时不能假装通过。
     // 历史缺陷：下面的 catch 是空的，然后无条件 return passed:true，
     // 导致 ffmpeg 缺失时拼接质检永久「通过」，14s 截断产物也能过江。
@@ -340,6 +340,14 @@ class QualityChecker {
           if (d > 0) { sum += d; probed++; }
         }
         if (probed === clipPaths.length && sum > 0) expected = sum;
+      }
+
+      // 片段间转场（2026-10-20）：成片时长 = Σ片段 − (N−1)×淡化时长，
+      // 与「Σ片段」不同。调用方必须传 expectedDuration，否则会把正确的转场产物
+      // 误判成「拼接被截断」（这是加转场后最容易踩的假失败）。
+      const overrideExpected = Number(options.expectedDuration);
+      if (Number.isFinite(overrideExpected) && overrideExpected > 0) {
+        expected = overrideExpected;
       }
 
       if (expected !== null) {

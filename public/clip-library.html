@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>片段库 · AI 视频流水线</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --border: #e5e5ea; --text: #1d1d1f;
+    --text-2: #6e6e73; --text-3: #a1a1a6; --primary: #1a73e8; --primary-light: #eef4ff;
+    --ok: #1d7a35; --ok-bg: #e8f8ec; --warn: #a15c00; --warn-bg: #fff4e0; --err: #c73030; --err-bg: #fdecec;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; }
+  a { color: var(--primary); text-decoration: none; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; background: var(--card);
+            border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+  .topbar h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+  .topbar .hint { font-size: 12px; color: var(--text-2); }
+  .topbar .spacer { flex: 1; }
+  .btn { border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 8px;
+         padding: 7px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: #c7c7cc; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: #1765cc; }
+  .btn-danger { color: var(--err); border-color: #f0c4c4; }
+  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 6px; }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px 20px 90px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { border: 1px solid var(--border); background: #fff; color: var(--text-2); border-radius: 999px;
+         padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .tab .n { opacity: .75; margin-left: 4px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .filters select, .filters input { border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px;
+         font-size: 12px; background: #fff; color: var(--text); }
+  .filters input { width: 180px; }
+  .fav-toggle.active { background: #fff4e0; border-color: #f0c36d; color: #a15c00; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+          position: relative; display: flex; flex-direction: column; }
+  .card:hover { border-color: #c7c7cc; box-shadow: 0 6px 18px rgba(0,0,0,.05); }
+  .card.replaced { opacity: .62; }
+  .pick { position: absolute; top: 8px; left: 8px; z-index: 3; background: rgba(255,255,255,.9);
+          border-radius: 6px; padding: 2px 5px; display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .thumb { position: relative; aspect-ratio: 16/9; background: #000; overflow: hidden; }
+  .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .dur { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.65); color: #fff;
+                font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+  .thumb .qc { position: absolute; right: 8px; top: 8px; font-size: 11px; padding: 2px 7px; border-radius: 999px;
+               background: var(--ok-bg); color: var(--ok); }
+  .thumb .qc.unverified { background: var(--warn-bg); color: var(--warn); }
+  .thumb .qc.bad { background: var(--err-bg); color: var(--err); }
+  .thumb .replaced-badge { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.7); color: #fff;
+                           font-size: 11px; padding: 2px 7px; border-radius: 4px; }
+
+  .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .prompt { font-size: 13px; line-height: 1.45; max-height: 3.9em; overflow: hidden; cursor: pointer; }
+  .prompt.open { max-height: 14em; overflow: auto; }
+  .prompt .more { color: var(--primary); font-size: 12px; }
+  .meta { font-size: 11px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 8px; }
+  .money { font-size: 13px; font-weight: 600; }
+  .money .sub { font-weight: 400; font-size: 11px; color: var(--text-2); margin-left: 6px; }
+  .time { font-size: 11px; color: var(--text-2); }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: #f2f2f4; color: var(--text-2); }
+  .actions { display: flex; gap: 6px; margin-top: auto; padding-top: 6px; }
+  .actions .btn { flex: 0 0 auto; }
+  .actions .star { font-size: 15px; line-height: 1; padding: 4px 8px; }
+  .actions .star.on { color: #e8a400; border-color: #f0c36d; background: #fff8e8; }
+  .warn-line { font-size: 11px; color: var(--warn); background: var(--warn-bg); border-radius: 6px; padding: 4px 7px; }
+  .empty { text-align: center; color: var(--text-3); padding: 80px 20px; font-size: 13px; line-height: 1.8; }
+
+  .selbar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--border);
+            padding: 10px 20px; display: none; align-items: center; gap: 14px; z-index: 30;
+            box-shadow: 0 -4px 18px rgba(0,0,0,.06); }
+  .selbar.show { display: flex; }
+  .selbar .info { font-size: 13px; }
+  .selbar .spacer { flex: 1; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none;
+                   align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #fff; border-radius: 14px; padding: 20px; width: 560px; max-width: 94vw; max-height: 90vh; overflow: auto; }
+  .modal h3 { margin: 0 0 6px; font-size: 16px; }
+  .modal .tip { font-size: 12px; color: var(--text-2); line-height: 1.6; margin-bottom: 12px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 5px; }
+  .field textarea, .field select { width: 100%; border: 1px solid var(--border); border-radius: 8px;
+                                   padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  .field textarea { min-height: 130px; resize: vertical; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .est { font-size: 13px; background: var(--primary-light); color: #174ea6; border-radius: 8px; padding: 8px 10px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .toast { position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%); background: rgba(0,0,0,.82);
+           color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 13px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; z-index: 200; }
+  .toast.show { opacity: 1; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d6e4ff; border-top-color: var(--primary);
+             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 5px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>片段库</h1>
+  <span class="hint" id="summary">加载中…</span>
+  <span class="spacer"></span>
+  <a class="btn" href="/bgm-editor.html">打开剪辑</a>
+  <a class="btn" href="/">返回首页</a>
+</header>
+
+<div class="wrap">
+  <div class="toolbar">
+    <div class="tabs" id="resTabs"></div>
+    <div class="filters">
+      <select id="themeFilter"><option value="">全部主题</option></select>
+      <select id="modelFilter"><option value="">全部模型</option></select>
+      <input id="search" type="search" placeholder="搜索提示词…" />
+      <button class="btn btn-sm fav-toggle" id="favToggle">☆ 只看收藏</button>
+      <button class="btn btn-sm" id="selAll">全选当前</button>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none;">
+    还没有可用的片段。<br />
+    成功生成的片段会自动进入这里；Mock 测试片、黑屏/蓝屏测试画面不会入库。
+  </div>
+</div>
+
+<div class="selbar" id="selbar">
+  <span class="info" id="selInfo">已选 0 段</span>
+  <button class="btn btn-sm" id="selClear">清空</button>
+  <span class="spacer"></span>
+  <button class="btn btn-primary" id="goEdit">去剪辑 →</button>
+</div>
+
+<div class="modal-overlay" id="regenOverlay">
+  <div class="modal">
+    <h3>重新生成片段</h3>
+    <div class="tip" id="regenTip">会按新的提示词/模型/分辨率生成一条新片段；旧片段保留并标记「已被替代」。</div>
+    <div class="field">
+      <label>提示词（预填优化后的版本，可改）</label>
+      <textarea id="regenPrompt"></textarea>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>模型</label>
+        <select id="regenModel"></select>
+      </div>
+      <div class="field">
+        <label>分辨率</label>
+        <select id="regenResolution"></select>
+      </div>
+    </div>
+    <div class="est" id="regenEst">预计费用：—</div>
+    <div class="modal-actions">
+      <button class="btn" id="regenCancel">取消</button>
+      <button class="btn btn-primary" id="regenSubmit">开始重新生成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// 片段库页面：浏览 / 筛选 / 收藏 / 删除 / 重新生成 / 去剪辑
+// ============================================================
+const state = {
+  groups: [],
+  items: [],
+  facets: { resolutions: [], themes: [], models: [] },
+  totals: { count: 0, totalCost: 0, totalDurationSec: 0 },
+  resTab: 'all',
+  theme: '',
+  model: '',
+  q: '',
+  favOnly: false,
+  selected: new Map(), // id -> {libraryId, inSec, outSec}
+  models: [],
+  pricing: null,
+  regenEntry: null,
+  regenPolling: {}
+};
+
+const $ = id => document.getElementById(id);
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function fmtCny(n) { return '¥' + (Number(n) || 0).toFixed(2); }
+function fmtDur(sec) {
+  const s = Math.max(0, Number(sec) || 0);
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  return m > 0 ? `${m}分${r}秒` : `${r}秒`;
+}
+function fmtMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  return fmtDur(Math.round(Number(ms) / 1000));
+}
+function fmtClock(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const s = Math.max(0, Math.round(Number(ms) / 1000));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+function fmtSize(bytes) {
+  if (!bytes) return '—';
+  return (bytes / 1048576).toFixed(1) + 'MB';
+}
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ---------- 数据 ----------
+async function loadModels() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    state.models = (data.models || []).filter(m => m.id !== 'mock');
+  } catch (e) { state.models = []; }
+}
+async function loadPricing() {
+  try { state.pricing = await (await fetch('/api/pricing')).json(); } catch (e) { state.pricing = null; }
+}
+async function loadLibrary() {
+  const r = await fetch('/api/library');
+  if (!r.ok) throw new Error('接口 /api/library 返回 ' + r.status);
+  const data = await r.json();
+  state.groups = data.groups || [];
+  state.facets = data.facets || { resolutions: [], themes: [], models: [] };
+  state.totals = data.totals || { count: 0, totalCost: 0, totalDurationSec: 0 };
+  state.items = [];
+  for (const g of state.groups) {
+    for (const it of (g.items || [])) state.items.push(it);
+  }
+  state.items.sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')));
+  renderTabs();
+  renderFilters();
+  render();
+  renderSummary();
+}
+
+function renderSummary() {
+  const t = state.totals;
+  $('summary').textContent = `${t.count} 段 · 总费用 ${fmtCny(t.totalCost)} · 总时长 ${fmtDur(t.totalDurationSec)}`;
+}
+
+function renderTabs() {
+  const counts = new Map();
+  for (const it of state.items) {
+    const label = (it.tags && it.tags.resolution) || '其他';
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  const order = ['4K', '1080p', '720p', '480p', '其他'];
+  const labels = Array.from(counts.keys()).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const tabs = [{ key: 'all', label: '全部', n: state.items.length }]
+    .concat(labels.map(l => ({ key: l, label: l, n: counts.get(l) })));
+  $('resTabs').innerHTML = tabs.map(t =>
+    `<button class="tab ${state.resTab === t.key ? 'active' : ''}" data-res="${esc(t.key)}">${esc(t.label)}<span class="n">${t.n}</span></button>`
+  ).join('');
+  $('resTabs').querySelectorAll('.tab').forEach(btn => {
+    btn.onclick = () => { state.resTab = btn.dataset.res; renderTabs(); render(); };
+  });
+}
+
+function renderFilters() {
+  const themeSel = $('themeFilter');
+  const modelSel = $('modelFilter');
+  themeSel.innerHTML = '<option value="">全部主题</option>' +
+    state.facets.themes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  modelSel.innerHTML = '<option value="">全部模型</option>' +
+    state.facets.models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  themeSel.value = state.theme;
+  modelSel.value = state.model;
+  themeSel.onchange = () => { state.theme = themeSel.value; render(); };
+  modelSel.onchange = () => { state.model = modelSel.value; render(); };
+}
+
+function filteredItems() {
+  return state.items.filter(it => {
+    if (state.resTab !== 'all' && (it.tags && it.tags.resolution) !== state.resTab) return false;
+    if (state.theme && (it.tags && it.tags.theme) !== state.theme) return false;
+    if (state.model && (it.tags && it.tags.model) !== state.model) return false;
+    if (state.favOnly && !it.favorite) return false;
+    if (state.q && !String(it.prompt || '').toLowerCase().includes(state.q)) return false;
+    return true;
+  });
+}
+
+function qcBadge(it) {
+  const qc = it.qc || {};
+  if (qc.passed) return '<span class="qc">质检通过</span>';
+  if (qc.unverified) return '<span class="qc unverified">质检未验证</span>';
+  return '<span class="qc bad">质检记录异常</span>';
+}
+
+function timeText(it) {
+  const t = it.timing || {};
+  if (t.splitAvailable) {
+    return `${fmtMs(t.totalMs)}（生成 ${fmtClock(t.genMs)} / 质检 ${fmtClock(t.qcMs)}）`;
+  }
+  if (t.totalMs) return `${fmtMs(t.totalMs)}（历史记录，含下载+质检）`;
+  return '—';
+}
+function timeTitle(it) {
+  const t = it.timing || {};
+  if (t.splitAvailable) return '生成与质检分别计时';
+  return '历史任务没有分段计时，开始/结束之间可能包含暂停与重跑，只作参考';
+}
+
+function costHtml(it) {
+  const c = it.cost || {};
+  const detail = c.detail ? `${c.detail} × ${c.attempts || 1} 次` : '';
+  const backfilled = c.backfilled ? ' · 回算' : '';
+  return `<div class="money" title="${esc(detail + backfilled)}">${fmtCny(c.amount)}
+    <span class="sub">${esc(detail)}${backfilled}</span></div>`;
+}
+
+function cardHtml(it) {
+  const dur = Number(it.durationSec) || 0;
+  const fps = it.fps ? `${Math.round(it.fps * 100) / 100}fps` : '';
+  const dim = (it.width && it.height) ? `${it.width}×${it.height}` : (it.resolution || '');
+  const replaced = it.replacedBy ? ' replaced' : '';
+  const replacedBadge = it.replacedBy ? '<span class="replaced-badge">已被重新生成替代</span>' : '';
+  const checked = state.selected.has(it.id) ? 'checked' : '';
+  const lastRegen = it.lastRegenerate && it.lastRegenerate.status === 'failed'
+    ? `<div class="warn-line">上次重新生成失败：${esc(it.lastRegenerate.error || '')}${it.lastRegenerate.cost ? '（已花费 ' + fmtCny(it.lastRegenerate.cost) + '）' : ''}</div>`
+    : '';
+  const running = it.lastRegenerate && it.lastRegenerate.status === 'running'
+    ? `<div class="warn-line"><span class="spinner"></span>重新生成中…</div>`
+    : '';
+  const prompt = String(it.prompt || '').trim();
+  return `<article class="card${replaced}" data-id="${esc(it.id)}">
+    <label class="pick"><input type="checkbox" ${checked} data-pick="${esc(it.id)}" /> 选</label>
+    <div class="thumb">
+      <video src="${esc(it.url)}#t=0.1" preload="metadata" muted loop playsinline></video>
+      <span class="dur">${dur ? dur.toFixed(1) + 's' : '—'}</span>
+      ${qcBadge(it)}
+      ${replacedBadge}
+    </div>
+    <div class="body">
+      <div class="prompt" title="点击展开/收起">${esc(prompt)}</div>
+      <div class="meta"><span>${esc(it.model)}</span><span>${esc(dim)}${fps ? ' @ ' + esc(fps) : ''}</span><span>${fmtSize(it.sizeBytes)}</span></div>
+      ${costHtml(it)}
+      <div class="time" title="${esc(timeTitle(it))}">${esc(timeText(it))}</div>
+      <div class="chips">${it.tags && it.tags.theme ? `<span class="chip">${esc(it.tags.theme)}</span>` : ''}${it.tags && it.tags.resolution ? `<span class="chip">${esc(it.tags.resolution)}</span>` : ''}${it.favorite ? '<span class="chip">★ 收藏</span>' : ''}</div>
+      ${running}${lastRegen}
+      <div class="actions">
+        <button class="btn btn-sm star ${it.favorite ? 'on' : ''}" data-fav="${esc(it.id)}" title="收藏">${it.favorite ? '★' : '☆'}</button>
+        <button class="btn btn-sm" data-regen="${esc(it.id)}">重新生成</button>
+        <button class="btn btn-sm btn-danger" data-del="${esc(it.id)}">删除</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function render() {
+  const items = filteredItems();
+  $('grid').innerHTML = items.map(cardHtml).join('');
+  $('empty').style.display = items.length ? 'none' : 'block';
+  bindCards();
+  renderSelbar();
+}
+
+function bindCards() {
+  $('grid').querySelectorAll('video').forEach(v => {
+    v.addEventListener('mouseenter', () => { v.play().catch(() => {}); });
+    v.addEventListener('mouseleave', () => { v.pause(); v.currentTime = 0; });
+  });
+  $('grid').querySelectorAll('.prompt').forEach(el => {
+    el.onclick = () => el.classList.toggle('open');
+  });
+  $('grid').querySelectorAll('[data-pick]').forEach(cb => {
+    cb.onchange = () => {
+      const id = cb.dataset.pick;
+      if (cb.checked) {
+        const it = state.items.find(x => x.id === id);
+        state.selected.set(id, { libraryId: id, inSec: 0, outSec: null, durationSec: it ? it.durationSec : 0, cost: it && it.cost ? it.cost.amount : 0 });
+      } else {
+        state.selected.delete(id);
+      }
+      renderSelbar();
+    };
+  });
+  $('grid').querySelectorAll('[data-fav]').forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.dataset.fav;
+      const it = state.items.find(x => x.id === id);
+      try {
+        await fetch('/api/library/' + encodeURIComponent(id), {
+          method: 'PUT', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ favorite: !(it && it.favorite) })
+        });
+        await loadLibrary();
+      } catch (e) { toast('收藏失败: ' + e.message); }
+    };
+  });
+  $('grid').querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.dataset.del;
+      const it = state.items.find(x => x.id === id);
+      if (!confirm(`删除这个片段？\n\n${it ? it.fileName : id}\n\n注意：会同时删除 clips/ 里的源文件，已引用它的成片不受影响，但之后无法再复用。`)) return;
+      try {
+        const r = await fetch('/api/library/' + encodeURIComponent(id), { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || '删除失败');
+        state.selected.delete(id);
+        toast(data.fileDeleted ? '片段与源文件已删除' : '片段记录已删除（源文件不在 clips/ 或已被清理）');
+        await loadLibrary();
+      } catch (e) { alert('删除失败: ' + e.message); }
+    };
+  });
+  $('grid').querySelectorAll('[data-regen]').forEach(btn => {
+    btn.onclick = () => openRegen(btn.dataset.regen);
+  });
+}
+
+function renderSelbar() {
+  const bar = $('selbar');
+  const arr = Array.from(state.selected.values());
+  if (!arr.length) { bar.classList.remove('show'); return; }
+  const totalDur = arr.reduce((s, x) => s + (Number(x.durationSec) || 0), 0);
+  const totalCost = arr.reduce((s, x) => s + (Number(x.cost) || 0), 0);
+  $('selInfo').textContent = `已选 ${arr.length} 段 · ${fmtDur(totalDur)} · ${fmtCny(totalCost)}`;
+  bar.classList.add('show');
+}
+
+// ---------- 重新生成 ----------
+function runtimeConfigFor(model) {
+  let cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch (e) {}
+  const out = {
+    apiKey: '', apiBaseUrl: '', modelId: '', klingAccessKey: '', klingSecretKey: '',
+    llmApiKey: cfg.llmKey || '', llmBaseUrl: cfg.llmUrl || '', llmModel: cfg.llmModel || '',
+    multimodalApiKey: cfg.multimodalKey || '', multimodalBaseUrl: cfg.multimodalUrl || '', multimodalModel: cfg.multimodalModel || ''
+  };
+  if (model === 'siliconflow') { out.apiKey = cfg.siliconflowKey || ''; out.modelId = cfg.siliconflowModel || ''; }
+  else if (model === 'agnes') { out.apiKey = cfg.agnesKey || ''; out.apiBaseUrl = cfg.agnesBaseUrl || ''; }
+  else if (model === 'seedance') {
+    out.apiKey = cfg.seedanceKey || '';
+    out.modelId = cfg.seedanceModel || 'doubao-seedance-2.0-mini-250928';
+    out.apiBaseUrl = cfg.seedanceBaseUrl || 'https://ark.volcengine.com/api/v3';
+  } else if (model === 'kling') {
+    out.klingAccessKey = cfg.klingAk || ''; out.klingSecretKey = cfg.klingSk || '';
+    out.apiKey = out.klingAccessKey;
+  } else if (model === 'dashscope') {
+    out.apiKey = cfg.dashScopeKey || '';
+    const region = cfg.dashScopeRegion || 'cn-beijing';
+    const wid = String(cfg.dashScopeWorkspaceId || '').trim();
+    if (wid) out.apiBaseUrl = `https://${wid}.${region}.maas.aliyuncs.com/api/v1`;
+    out.modelId = cfg.dashScopeModel || 'wan3.0-video';
+  }
+  return out;
+}
+
+function estimateCost(model, resolution, durationSec) {
+  const p = state.pricing;
+  if (!p) return null;
+  if (model === 'mock') return 0;
+  if (p.perSecond && p.perSecond[model]) {
+    const conf = p.perSecond[model];
+    const key = String(resolution || '').toLowerCase();
+    const perSec = conf.prices && conf.prices[key] !== undefined ? conf.prices[key] : conf.fallback;
+    return { amount: Math.round(perSec * durationSec * 100) / 100, detail: `¥${perSec}/s × ${durationSec}s` };
+  }
+  if (model === 'seedance') {
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch (e) {}
+    const mid = cfg.seedanceModel || '';
+    const conf = (p.seedance && p.seedance[mid]) || { unit: 1 };
+    return { amount: conf.unit, detail: `一口价 ¥${conf.unit}/个` };
+  }
+  const conf = p.perClip && p.perClip[model];
+  return conf ? { amount: conf.unit, detail: `一口价 ¥${conf.unit}/个` } : null;
+}
+
+function openRegen(id) {
+  const it = state.items.find(x => x.id === id);
+  if (!it) return;
+  state.regenEntry = it;
+  $('regenPrompt').value = it.prompt || '';
+  $('regenTip').textContent = `会按新的提示词/模型/分辨率生成一条新片段（时长沿用 ${Math.round(it.durationSec || 0)} 秒）；旧片段保留并标记「已被替代」。`;
+  const modelSel = $('regenModel');
+  modelSel.innerHTML = state.models.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+  const fallbackModel = state.models.some(m => m.id === it.model) ? it.model : (state.models[0] && state.models[0].id);
+  modelSel.value = fallbackModel;
+  modelSel.onchange = () => { renderRegenResolutions(); updateEstimate(); };
+  renderRegenResolutions(it.resolution);
+  updateEstimate();
+  $('regenOverlay').classList.add('active');
+}
+
+function renderRegenResolutions(preferred) {
+  const model = $('regenModel').value;
+  const info = state.models.find(m => m.id === model);
+  const res = (info && info.resolutions) || [];
+  const sel = $('regenResolution');
+  sel.innerHTML = res.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  if (preferred && res.some(r => String(r).toLowerCase() === String(preferred).toLowerCase())) {
+    sel.value = res.find(r => String(r).toLowerCase() === String(preferred).toLowerCase());
+  }
+  sel.onchange = updateEstimate;
+}
+
+function updateEstimate() {
+  const it = state.regenEntry;
+  if (!it) return;
+  const model = $('regenModel').value;
+  const resolution = $('regenResolution').value;
+  const dur = Math.max(1, Math.round(Number(it.durationSec) || 5));
+  const est = estimateCost(model, resolution, dur);
+  $('regenEst').textContent = est
+    ? `预计费用：${fmtCny(est.amount)}（${est.detail}；按实际调用次数结算）`
+    : '预计费用：—（价目表里没有这个模型）';
+}
+
+async function submitRegen() {
+  const it = state.regenEntry;
+  if (!it) return;
+  const prompt = $('regenPrompt').value.trim();
+  if (!prompt) { alert('提示词不能为空'); return; }
+  const model = $('regenModel').value;
+  const resolution = $('regenResolution').value;
+  const runtime = runtimeConfigFor(model);
+  $('regenSubmit').disabled = true;
+  try {
+    const r = await fetch('/api/library/' + encodeURIComponent(it.id) + '/regenerate', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, model, resolution, ...runtime })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || '提交失败');
+    $('regenOverlay').classList.remove('active');
+    toast(`已提交重新生成（预计 ${fmtCny(data.estimatedCost && data.estimatedCost.amount)}），完成后自动刷新`);
+    state.regenPolling[it.id] = data.taskId;
+    // 立即刷新一次，让卡片显示「重新生成中」
+    await loadLibrary();
+    pollRegen(it.id, data.taskId);
+  } catch (e) {
+    alert('重新生成失败: ' + e.message);
+  } finally {
+    $('regenSubmit').disabled = false;
+  }
+}
+
+function pollRegen(entryId, taskId) {
+  const timer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+      if (!r.ok) return;
+      const t = await r.json();
+      if (['completed', 'partial', 'failed'].includes(t.status)) {
+        clearInterval(timer);
+        delete state.regenPolling[entryId];
+        if (t.status === 'failed') {
+          toast('重新生成失败：' + (t.error || '未知错误'));
+        } else {
+          toast('重新生成完成，已加入片段库');
+        }
+        await loadLibrary();
+      }
+    } catch (e) { /* 网络抖动，继续轮询 */ }
+  }, 2500);
+}
+
+// ---------- 事件 ----------
+$('search').addEventListener('input', e => {
+  state.q = e.target.value.trim().toLowerCase();
+  render();
+});
+$('favToggle').onclick = () => {
+  state.favOnly = !state.favOnly;
+  $('favToggle').classList.toggle('active', state.favOnly);
+  render();
+};
+$('selClear').onclick = () => { state.selected.clear(); render(); };
+$('selAll').onclick = () => {
+  const items = filteredItems();
+  const allPicked = items.length > 0 && items.every(it => state.selected.has(it.id));
+  if (allPicked) {
+    for (const it of items) state.selected.delete(it.id);
+  } else {
+    for (const it of items) {
+      state.selected.set(it.id, {
+        libraryId: it.id, inSec: 0, outSec: null,
+        durationSec: Number(it.durationSec) || 0,
+        cost: it.cost ? it.cost.amount : 0
+      });
+    }
+  }
+  render();
+};
+$('goEdit').onclick = () => {
+  const arr = Array.from(state.selected.values()).map(x => ({ libraryId: x.libraryId }));
+  if (!arr.length) return;
+  sessionStorage.setItem('vs_clip_selection', JSON.stringify(arr));
+  location.href = '/bgm-editor.html?from=library';
+};
+$('regenCancel').onclick = () => $('regenOverlay').classList.remove('active');
+$('regenSubmit').onclick = submitRegen;
+$('regenOverlay').addEventListener('click', e => {
+  if (e.target === $('regenOverlay')) $('regenOverlay').classList.remove('active');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $('regenOverlay').classList.remove('active');
+});
+
+(async function init() {
+  await Promise.all([loadModels(), loadPricing()]);
+  try {
+    await loadLibrary();
+  } catch (e) {
+    $('summary').textContent = '加载失败：' + e.message;
+    $('empty').style.display = 'block';
+    $('empty').innerHTML = '片段库加载失败：' + esc(e.message) +
+      '<br /><br />最常见原因：服务端还是旧进程（没有 /api/library 接口）。' +
+      '<br />请在运行服务的终端里停止后重新执行 <code>node server.js</code>，再刷新本页。';
+  }
+})();
+</script>
+</body>
+</html>

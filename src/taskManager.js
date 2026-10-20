@@ -213,6 +213,16 @@ class TaskManager {
       };
     });
 
+    // 片段间转场（2026-10-20）：按任务覆盖；未传的字段由 pipeline 回退到 config.TRANSITIONS。
+    // 存 undefined 时 JSON 序列化会丢字段，读回后按「未设置」处理，语义一致。
+    const transitionOption = (options.transition && typeof options.transition === 'object')
+      ? {
+        enabled: options.transition.enabled !== undefined ? !!options.transition.enabled : undefined,
+        duration: Number.isFinite(Number(options.transition.duration)) ? Number(options.transition.duration) : undefined,
+        type: typeof options.transition.type === 'string' ? options.transition.type : undefined
+      }
+      : null;
+
     const task = {
       taskId,
       status: 'pending',
@@ -235,6 +245,8 @@ class TaskManager {
       bgmPlan: null,
       bgmResult: null,
       masterPath: null,
+      // 片段间转场配置：{ enabled, duration, type } 或 null（null = 用全局配置）
+      transition: transitionOption,
       currentStep: 'created',
       currentStepKey: null,
       outputPath: null,
@@ -350,7 +362,9 @@ class TaskManager {
       prompts,
       preset: options.preset || 'custom',
       stages,
-      source: 'library'
+      source: 'library',
+      // 片段间转场：从 /api/assemble 透传；不传则用全局配置
+      transition: (options.transition && typeof options.transition === 'object') ? options.transition : null
     });
     this.setLibraryClips(task.taskId, segments);
     return this.getTask(task.taskId);

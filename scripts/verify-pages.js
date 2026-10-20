@@ -3,7 +3,7 @@ const BASE = process.env.BGM_TEST_BASE || 'http://127.0.0.1:3001';
 (async()=>{
   let fail=0; const check=(c,m)=>{console.log((c?'  PASS  ':'  FAIL  ')+m); if(!c)fail++;};
   // pages served
-  for (const p of ['/bgm-editor.html','/music-library.html','/']) {
+  for (const p of ['/bgm-editor.html','/music-library.html','/clip-library.html','/']) {
     const r = await fetch(BASE+p); const t = await r.text();
     check(r.ok && t.length>1000, 'GET '+p+' -> '+r.status+' '+t.length+'B');
   }

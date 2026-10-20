@@ -2463,9 +2463,13 @@ select {
           <span class="nav-icon ic-history"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
           <span>历史记录</span>
         </div>
+        <div class="nav-item" onclick="window.location.href='/clip-library.html'">
+          <span class="nav-icon ic-template"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg></span>
+          <span>片段库</span>
+        </div>
         <div class="nav-item" onclick="window.location.href='/bgm-editor.html'">
           <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-          <span>添加配乐</span>
+          <span>剪辑</span>
         </div>
         <div class="nav-item" onclick="window.location.href='/music-library.html'">
           <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
@@ -2573,7 +2577,7 @@ select {
               <option value="off">不添加配乐</option>
               <option value="auto">自动配乐（按成片时长铺满）</option>
             </select>
-            <div class="form-hint" id="bgmModeHint">勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「添加配乐」页面做精细调整（裁剪、变速、关键帧等）。</div>
+            <div class="form-hint" id="bgmModeHint">勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「剪辑」页面做精细调整（裁剪、变速、关键帧等）。</div>
           </div>
           <div id="bgmAssignSection" style="display:none;">
             <div class="form-hint" style="margin:4px 0 6px;">
@@ -2653,6 +2657,32 @@ select {
               <option value="custom">自定义（手动勾选环节）</option>
             </select>
             <div class="form-hint" id="presetHint">快速验证档只跑到拼接；之后可在任务详情里「补成最终成片」，片段不会重新生成。</div>
+          </div>
+          <!-- 片段间转场（2026-10-20）：默认关闭，勾选后相邻片段之间做交叉淡化。
+               成片时长 = 各段之和 −（段数−1）× 淡化时长；语义见 docs/spec/changelog.md -->
+          <div class="form-group">
+            <label class="form-label">片段间转场</label>
+            <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+              <input type="checkbox" id="transitionEnabled" style="margin:0;">
+              <span>交叉淡化（相邻片段之间）</span>
+            </label>
+            <div class="row" style="margin-top:8px;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label">淡化时长</label>
+                <div class="clip-count-input-wrapper">
+                  <input type="number" id="transitionDuration" value="0.5" min="0.1" max="5" step="0.1" class="clip-count-input">
+                  <span class="clip-count-unit">秒</span>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label">转场类型</label>
+                <select id="transitionType">
+                  <option value="fade" selected>交叉淡化 fade</option>
+                  <option value="dissolve">溶解 dissolve</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-hint" id="transitionHint">默认不开启；开启后拼接改为整片重编码（更慢），成片时长 = 各段之和 −（段数−1）× 淡化时长。</div>
           </div>
           <div class="form-group" id="customStagesWrap" style="display:none;">
             <label class="form-label">选择要执行的环节</label>
@@ -3064,7 +3094,7 @@ select {
     <div class="modal-section" id="bgmDetailSection" style="display:none;">
       <div class="modal-section-title">配乐</div>
       <div class="form-hint" style="margin-bottom:8px;" id="bgmDetailSummary">-</div>
-      <button class="btn btn-secondary" style="font-size:13px;" onclick="openBgmEditor(currentDetailTask && currentDetailTask.taskId)">去「添加配乐」编辑 →</button>
+      <button class="btn btn-secondary" style="font-size:13px;" onclick="openBgmEditor(currentDetailTask && currentDetailTask.taskId)">去「剪辑」编辑 →</button>
     </div>
 
     <div class="modal-section" id="errorAnalysisSection" style="display:none;">
@@ -4570,6 +4600,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         clipDuration,
         resolution,
         preset,
+        transition: collectTransitionConfig(),
         ...(customStages ? { stages: customStages } : {}),
         bgm: collectBgmConfig(),
         apiKey,
@@ -5367,6 +5398,20 @@ async function togglePauseGen() {
 const QC_STRICT_KEY = 'vs_qc_strict';
 
 // 收集用户勾选的「要紧项」；全选时返回 null（后端按全部严格处理）
+// 片段间转场配置（与后端 transition 字段同形）。
+// 不勾选也显式传 enabled:false —— 否则用户无法覆盖 .env 里的全局默认。
+function collectTransitionConfig() {
+  const enabledEl = document.getElementById('transitionEnabled');
+  const durationEl = document.getElementById('transitionDuration');
+  const typeEl = document.getElementById('transitionType');
+  const duration = durationEl ? Number(durationEl.value) : 0.5;
+  return {
+    enabled: !!(enabledEl && enabledEl.checked),
+    duration: Number.isFinite(duration) && duration >= 0.1 && duration <= 5 ? duration : 0.5,
+    type: typeEl ? typeEl.value : 'fade'
+  };
+}
+
 function collectStrictQcItems() {
   const list = document.getElementById('qcStrictList');
   if (!list) return null;
@@ -5944,7 +5989,7 @@ async function showTaskDetail(taskId) {
     document.getElementById('detailTitle').textContent = data.prompt ? data.prompt.substring(0, 40) + (data.prompt.length > 40 ? '...' : '') : '任务详情';
     document.getElementById('detailSubtitle').textContent = data.taskId || '';
     document.getElementById('detailStatus').innerHTML = `<span class="history-status status-${data.status}">${statusText(data.status)}</span>`;
-    document.getElementById('detailModel').textContent = data.model || '-';
+    document.getElementById('detailModel').textContent = modelLabel(data.model);
     document.getElementById('detailClips').textContent = data.total ? `${data.success || 0} / ${data.total}` : '-';
     document.getElementById('detailResolution').textContent = data.resolution || '720p';
     document.getElementById('detailCreated').textContent = data.startedAt ? new Date(data.startedAt).toLocaleString('zh-CN') : '-';
@@ -6150,6 +6195,15 @@ async function renderClipList(taskId) {
 
       const sizeTxt = c.sizeBytes ? (c.sizeBytes / 1048576).toFixed(2) + 'MB' : '-';
       const durTxt = c.duration ? c.duration.toFixed(1) + 's' : '';
+      // 单片段费用/耗时：任务详情直接可见（片段库成片任务也有）
+      const costTxt = c.cost
+        ? '¥' + Number(c.cost.amount || 0).toFixed(2) + (Number(c.cost.attempts) > 1 ? `（${c.cost.attempts}次调用）` : '')
+        : '';
+      const timeTxt = clipTimeText(c.timing);
+      const costTimeTxt = [costTxt, timeTxt].filter(Boolean).join(' · ');
+      const costTimeHtml = costTimeTxt
+        ? `<div style="font-size:11px;color:#8a8a8e;line-height:1.5;">${costTimeTxt}</div>`
+        : '';
 
       const actions = c.url
         ? `<div class="clip-actions">
@@ -6168,6 +6222,7 @@ async function renderClipList(taskId) {
         <div class="clip-meta">
           <div class="clip-name">${c.fileName || '第' + idx + '段'}</div>
           <div>${sizeTxt}${durTxt ? ' · ' + durTxt : ''}</div>
+          ${costTimeHtml}
           ${actions}
         </div>
       </div>`;
@@ -6257,6 +6312,35 @@ async function resumeGeneration() {
 function statusText(s) {
   const map = { pending: '等待中', generating: '生成中', regenerating: '重新生成中', paused: '已暂停', completed: '已完成', failed: '失败', partial: '部分完成' };
   return map[s] || s;
+}
+
+// 模型显示名（片段库成片任务没有真实生成模型，单独标注）
+function modelLabel(m) {
+  const map = {
+    mock: 'Mock 测试',
+    siliconflow: 'Wan 2.2（硅基流动）',
+    agnes: 'Agnes 2.5',
+    seedance: 'Seedance 2.5',
+    kling: '可灵 3.0',
+    dashscope: 'Wan 3.0',
+    library: '片段库成片'
+  };
+  return map[m] || m || '-';
+}
+
+// 片段耗时：新片段有「生成/质检」两段；历史片段只有起止时间
+function fmtClipMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const s = Math.max(0, Math.round(Number(ms) / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${m}分${String(r).padStart(2, '0')}秒` : `${r}秒`;
+}
+function clipTimeText(t) {
+  if (!t) return '';
+  if (t.splitAvailable) return `生成 ${fmtClipMs(t.genMs)} / 质检 ${fmtClipMs(t.qcMs)}`;
+  if (t.totalMs) return `耗时 ${fmtClipMs(t.totalMs)}（历史）`;
+  return '';
 }
 
 function escapeHtml(str) {

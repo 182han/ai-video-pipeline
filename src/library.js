@@ -162,7 +162,9 @@ function buildTiming(clip) {
     genMs,
     qcMs,
     // 历史片段没有分段记录：明确标出来，避免前端把 totalMs 冒充「生成耗时」
-    splitAvailable: !!(genMs !== null && qcMs !== null)
+    splitAvailable: !!(genMs !== null && qcMs !== null),
+    // 历史记录的开始/结束可能跨暂停与重跑，只能作参考
+    historical: !(genMs !== null && qcMs !== null)
   };
 }
 
