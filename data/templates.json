@@ -3,59 +3,65 @@
     "name": "自然风景",
     "emoji": "🏔",
     "keywords": [
-      "mountain",
-      "lake",
-      "forest",
-      "sunset",
-      "sunrise",
-      "river",
-      "valley",
-      "meadow"
+      "山",
+      "湖",
+      "森林",
+      "日落",
+      "日出",
+      "河",
+      "山谷",
+      "草甸"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。雾气与云层缓慢流动，丁达尔柔光，植被纹理丰富，清新色调，宁静松弛。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "电影感光线",
+      "黄金时刻",
+      "超高清",
+      "细腻细节",
+      "史诗氛围",
+      "缓慢运镜",
+      "摄影级写实"
     ],
-    "negative": "people, text, watermark, logo",
+    "negative": "人物, 文字, 水印, logo",
     "structure": {
       "subjectPool": [
-        "terraced rice fields cascading down a mountainside",
-        "a misty valley of layered mountain ridges",
-        "an alpine meadow dotted with wildflowers",
-        "a winding river cutting through a green canyon"
+        "层层叠叠的梯田顺着山势铺到谷底",
+        "云海漫过层叠山脊，只露出几座峰顶",
+        "开满野花的高山草甸一直铺到雪线",
+        "一条河在绿色峡谷里绕出连续的弯"
       ],
       "movementPool": [
-        "clouds drifting slowly across the peaks",
-        "mist rolling through the valley floor",
-        "grass swaying in a soft breeze",
-        "water glinting as it threads through the rocks"
+        "云在峰顶缓慢翻涌",
+        "雾气贴着谷底流动",
+        "草甸被风推出一层层波纹",
+        "水面把光揉成缓慢移动的碎金"
       ],
       "cameraPool": [
-        "slow aerial push-in on a simulated IMAX film camera",
-        "gentle orbital shot, Panavision C-series 35mm lens, f/4",
-        "high-altitude lateral tracking shot",
-        "static locked-off telephoto shot with shallow depth of field"
+        "极慢的航拍推进，模拟大画幅电影摄影机",
+        "缓慢横移，200mm 长焦压缩，前后山脊分层",
+        "高空侧向航拍，保持地平线水平",
+        "静态锁定机位，85mm，浅景深"
       ],
       "lightingPool": [
-        "golden hour backlight with long soft shadows",
-        "blue hour ambient light, cool and even",
-        "volumetric god rays breaking through low clouds",
-        "soft diffused overcast light"
+        "黄金时刻侧逆光，长而柔的阴影",
+        "蓝调时刻的冷青环境光，均匀干净",
+        "云隙光斜插进山谷，形成光柱",
+        "阴天漫射光，低反差、显纹理"
       ],
       "atmospherePool": [
-        "serene and majestic",
-        "tranquil and expansive",
-        "awe-inspiring stillness",
-        "quiet dawn calm"
+        "安静而辽阔",
+        "庄严而克制",
+        "清晨的静",
+        "开阔而通透"
       ],
       "quality": [
-        "cinematic color grading",
-        "fine 35mm film grain",
-        "natural contrast",
-        "subtle atmospheric haze"
+        "电影级调色",
+        "细腻胶片颗粒",
+        "自然对比度",
+        "轻微空气感薄雾"
       ],
       "endingPool": [
-        "No people, no vehicles — just the landscape holding still as the light shifts",
-        "End on an empty horizon, nothing enters frame"
+        "画面停在层叠山脊上，没有新元素进入",
+        "收在空白的地平线上，什么都不再变化"
       ]
     }
   },
@@ -63,54 +69,59 @@
     "name": "宇宙星空",
     "emoji": "🌌",
     "keywords": [
-      "nebula",
-      "stars",
-      "galaxy",
-      "planet",
-      "cosmic dust",
-      "supernova",
-      "black hole",
-      "asteroid"
+      "星云",
+      "恒星",
+      "银河",
+      "宇宙尘埃",
+      "超新星",
+      "黑洞",
+      "小行星"
     ],
     "styleEnhancers": [
-      "深空延时，三脚架固定机位，画面稳定，推荐 Zoom=0。星云缓缓流动，星点微光闪烁，天文纪实质感，细节细腻，色彩克制，宏大宁静。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "深空",
+      "高动态范围",
+      "超精细",
+      "电影感",
+      "缓慢推进",
+      "宏大尺度",
+      "真实色彩"
     ],
-    "negative": "people, earth, text",
+    "negative": "人物, 地球, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "a spiral galaxy slowly rotating",
-        "a nebula field of dust and stars",
-        "a planet's terminator line against a starfield"
+        "缓慢旋转的旋涡星系",
+        "尘埃与恒星交织的星云场",
+        "行星的明暗交界线压在星海上"
       ],
       "movementPool": [
-        "stars drifting in a long-exposure feel",
-        "nebula dust subtly shifting",
-        "slow parallax against the starfield"
+        "星点以长曝的感觉缓慢漂移",
+        "星云尘埃细微翻卷",
+        "缓慢视差划过星海"
       ],
       "cameraPool": [
-        "very slow dolly through the field, simulated IMAX",
-        "static locked-off, Panavision 35mm",
-        "slow orbital around the planet"
+        "极慢推进穿过星场，模拟大画幅电影",
+        "静态锁定，35mm 电影镜头",
+        "缓慢环绕行星"
       ],
       "lightingPool": [
-        "self-luminous nebula glow",
-        "harsh sunlight rim on a planet",
-        "faint starlight"
+        "星云自发的辉光",
+        "行星边缘的强烈日光",
+        "微弱的星光"
       ],
       "atmospherePool": [
-        "vast and silent",
-        "awe-inspiring",
-        "cold and endless"
+        "浩瀚无声",
+        "令人敬畏",
+        "寒冷而无尽"
       ],
       "quality": [
-        "cinematic grade",
-        "deep-space detail",
-        "natural contrast",
-        "fine grain"
+        "电影级调色",
+        "深空细节",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No spacecraft, no text — just the field holding",
-        "End on an empty starfield"
+        "画面停在星场上，无航天器、无文字",
+        "收在空白的星海里，没有新元素进入"
       ]
     }
   },
@@ -118,54 +129,60 @@
     "name": "极光",
     "emoji": "✨",
     "keywords": [
-      "northern lights",
-      "aurora borealis",
-      "green lights",
-      "purple lights",
-      "snow mountain",
-      "frozen lake",
-      "pine trees",
-      "night sky"
+      "极光",
+      "北极光",
+      "绿光",
+      "紫光",
+      "雪山",
+      "冰湖",
+      "针叶林",
+      "夜空"
     ],
     "styleEnhancers": [
-      "夜景延时，三脚架固定机位，画面稳定，推荐 Zoom=0。极光流光缓慢舞动，苔原细节清晰，天文纪实风格，色彩自然，静谧宏大。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切"
+      "舞动的光",
+      "雪面反光",
+      "梦幻氛围",
+      "电影感",
+      "缓慢运动",
+      "超高清",
+      "鲜艳而干净"
     ],
-    "negative": "people, buildings, city",
+    "negative": "人物, 建筑, 城市, 文字",
     "structure": {
       "subjectPool": [
-        "aurora curtains rippling over a frozen lake",
-        "green and violet lights above a snow ridge",
-        "a dense star field behind dancing aurora"
+        "极光帘幕在冰湖上方起伏",
+        "绿紫色光带压在雪脊之上",
+        "密集星场背后是舞动的极光"
       ],
       "movementPool": [
-        "aurora ribbons slowly folding and unfolding",
-        "stars rotating in a long-exposure feel",
-        "reflections shimmering on the ice"
+        "极光丝带缓慢折叠展开",
+        "星点以长曝的感觉转动",
+        "冰面反光微微颤动"
       ],
       "cameraPool": [
-        "static locked-off wide, simulated long-exposure",
-        "very slow aerial drift, simulated IMAX",
-        "low-angle tracking over the ice"
+        "静态锁定广角，模拟长曝",
+        "极慢横移，24mm 广角",
+        "低机位仰拍，保留地平线"
       ],
       "lightingPool": [
-        "aurora green-violet emission against cold night sky",
-        "moonlight on snow",
-        "faint horizon glow"
+        "极光自身的绿紫辉光",
+        "雪面被极光染成青色",
+        "地平线残留的微弱暖光"
       ],
       "atmospherePool": [
-        "dreamlike and silent",
-        "vast and cold",
-        "quietly magical"
+        "寂静而神秘",
+        "冷冽清透",
+        "梦一样的夜"
       ],
       "quality": [
-        "cinematic grade",
-        "low-noise night detail",
-        "natural contrast",
-        "fine grain"
+        "夜色层次",
+        "细腻颗粒",
+        "自然对比",
+        "干净暗部"
       ],
       "endingPool": [
-        "No people — just the lights and the ice",
-        "End on the aurora fading, nothing enters frame"
+        "收在极光与冰面上，无人、无建筑",
+        "画面停在雪脊上，没有新元素进入"
       ]
     }
   },
@@ -173,56 +190,58 @@
     "name": "海洋",
     "emoji": "🌊",
     "keywords": [
-      "ocean waves",
-      "coral reef",
-      "tropical fish",
-      "underwater",
-      "sunlight rays",
-      "sea turtle",
-      "jellyfish",
-      "deep blue"
+      "海",
+      "浪",
+      "海岸",
+      "礁石",
+      "潮",
+      "海蚀柱",
+      "海雾"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。海面轻缓起伏，云层缓慢漂移，光影渐变，国家地理质感，层次丰富，松弛治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "海浪细节",
+      "湿润质感",
+      "电影感",
+      "缓慢运镜",
+      "超高清",
+      "自然色彩"
     ],
-    "negative": "people, boats, text",
+    "negative": "人物, 船, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "turquoise waves breaking over dark volcanic rocks",
-        "a vast open sea under a low cloud ceiling",
-        "distant cargo ships on the horizon line",
-        "a rocky island silhouetted in sea mist"
+        "青绿色浪头砸在黑色火山岩上",
+        "长曝下化成雾的海面",
+        "海蚀柱站在退潮的礁盘上"
       ],
       "movementPool": [
-        "waves rolling in and dissolving into white foam",
-        "the sea surface glittering and shifting",
-        "distant ships barely drifting",
-        "spray lifting off the rocks in slow motion"
+        "浪在礁石上炸开后缓慢退去",
+        "潮水漫过礁盘",
+        "云影在海面上移动"
       ],
       "cameraPool": [
-        "high-altitude aerial push-in, simulated IMAX camera",
-        "slow lateral tracking at wave height, Panavision 35mm, f/5.6",
-        "static locked-off wide shot"
+        "高空航拍推进，模拟大画幅电影",
+        "低机位静态，慢门",
+        "横向滑轨跟随海岸线"
       ],
       "lightingPool": [
-        "golden hour glint raking across the water",
-        "cold overcast silver light",
-        "dawn light breaking across the swell"
+        "日出低角度侧光，浪尖发亮",
+        "蓝调时刻的冷青",
+        "阴天漫射光下的高饱和"
       ],
       "atmospherePool": [
-        "vast and elemental",
-        "calm and endless",
-        "quietly powerful"
+        "空旷而有力量",
+        "潮湿清冷",
+        "平静下的暗涌"
       ],
       "quality": [
-        "cinematic grade",
-        "natural sea spray",
-        "fine film grain",
-        "realistic water detail"
+        "电影级调色",
+        "湿润质感",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No boats entering frame, no birds — just the horizon holding",
-        "End on open water, nothing changes"
+        "收在空白地平线上，无船、无鸟",
+        "画面停在海面上，没有新元素进入"
       ]
     }
   },
@@ -230,54 +249,57 @@
     "name": "雪山",
     "emoji": "❄️",
     "keywords": [
-      "snow covered peaks",
-      "alpine mountains",
-      "glaciers",
-      "rocky cliffs",
-      "clouds",
-      "mist",
-      "sunrise summit",
-      "icy slopes"
+      "雪山",
+      "冰川",
+      "山峰",
+      "雪原",
+      "日照金山",
+      "云海"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。云海缓慢翻涌，积雪纹理清晰，阳光扫过雪峰，通透体积光，庄严治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "日照金山",
+      "高光受控",
+      "电影感",
+      "缓慢运镜",
+      "超高清",
+      "细腻雪质"
     ],
-    "negative": "people, buildings, text",
+    "negative": "人物, 旗帜, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "snow-capped peaks piercing a sea of clouds",
-        "a glacier tongue descending into a dark valley",
-        "sharp granite ridges under thin high-altitude air"
+        "锥形雪峰刺破云海",
+        "冰川舌顺着山谷铺下来",
+        "雪脊上被风刻出的雪纹"
       ],
       "movementPool": [
-        "clouds flowing over the summit like water",
-        "snow plumes streaming off the ridge",
-        "mist shifting in the valleys below"
+        "云海在山腰翻涌",
+        "风雪从峰脊被吹出细线",
+        "冰面反光缓慢移动"
       ],
       "cameraPool": [
-        "slow aerial reveal rising above the cloud layer, simulated IMAX",
-        "high-altitude lateral tracking, Panavision 35mm, f/4",
-        "static telephoto compression shot"
+        "极慢航拍升起越过云层，模拟大画幅电影",
+        "200mm 长焦压缩，层叠山脊",
+        "静态锁定机位，地平线水平"
       ],
       "lightingPool": [
-        "golden sunrise rim light on the summit",
-        "cold blue pre-dawn light",
-        "harsh high-altitude noon light with deep shadows"
+        "日照金山，峰顶粉金、山谷冷蓝",
+        "日出侧逆光，雪面留冷",
+        "蓝调时刻的均匀冷光"
       ],
       "atmospherePool": [
-        "majestic and austere",
-        "silent and immense",
-        "awe-inspiring isolation"
+        "庄严而寂静",
+        "稀薄清冽",
+        "令人屏息"
       ],
       "quality": [
-        "cinematic grade",
-        "crisp snow texture",
-        "natural contrast",
-        "fine grain"
+        "高光受控",
+        "细腻雪质",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No climbers, no flags — just the peak standing in the wind",
-        "End on an empty ridge line"
+        "收在峰顶上，无登山者、无旗帜",
+        "画面停在雪脊上，没有新元素进入"
       ]
     }
   },
@@ -285,55 +307,57 @@
     "name": "沙漠",
     "emoji": "🏜️",
     "keywords": [
-      "desert",
-      "sand dunes",
-      "camel caravan",
-      "mirage",
-      "golden sand",
-      "arid landscape",
-      "oasis",
-      "wind ripples"
+      "沙漠",
+      "沙丘",
+      "荒漠",
+      "沙纹",
+      "风蚀",
+      "雅丹"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。沙丘轮廓柔和，薄沙雾缓慢流动，阳光缓慢推移，沙粒纹理细腻，空旷宁静。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "沙纹锐利",
+      "高光受控",
+      "极低侧光",
+      "电影感",
+      "超高清",
+      "暖冷对撞"
     ],
-    "negative": "people, water, buildings, text",
+    "negative": "人物, 车辆, 足迹, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "endless sand dunes with razor-sharp crests",
-        "wind-carved ripples stretching to the horizon",
-        "a lone oasis ringed by palms",
-        "distant rock mesas under heat haze"
+        "刃口锐利的沙丘脊线",
+        "风在沙面刻出的一层层波纹",
+        "背风坡落进深蓝阴影"
       ],
       "movementPool": [
-        "sand streaming off the dune crests",
-        "heat shimmer distorting the horizon",
-        "ripples shifting in the wind"
+        "沙粒被风从脊线吹起",
+        "阴影边缘随太阳缓慢移动",
+        "远处热气轻微抖动"
       ],
       "cameraPool": [
-        "sweeping aerial over the dune field, simulated IMAX",
-        "low-angle ground-level push-in, Panavision 35mm, f/4",
-        "static wide shot with telephoto compression"
+        "航拍掠过沙丘群，模拟大画幅电影",
+        "400mm 长焦压缩，脊线斜置",
+        "静态锁定机位"
       ],
       "lightingPool": [
-        "golden hour raking light carving deep dune shadows",
-        "harsh midday light with stark contrast",
-        "cool blue hour over warm sand"
+        "日落前的极低侧光，亮面暖、暗面冷",
+        "日出前的冷蓝",
+        "正午硬光下的强烈明暗"
       ],
       "atmospherePool": [
-        "vast and silent",
-        "austere and timeless",
-        "quietly epic"
+        "沉默而荒凉",
+        "干燥灼热",
+        "无人的静"
       ],
       "quality": [
-        "cinematic grade",
-        "fine sand texture",
-        "natural warm tones",
-        "subtle film grain"
+        "沙纹锐利",
+        "高光受控",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No caravans, no figures — just the dunes holding still",
-        "End on an empty dune crest"
+        "收在空荡的沙脊上，无脚印、无车辙",
+        "画面停在脊线上，没有新元素进入"
       ]
     }
   },
@@ -341,54 +365,57 @@
     "name": "瀑布",
     "emoji": "💦",
     "keywords": [
-      "waterfall",
-      "cascade",
-      "mist spray",
-      "cliff drop",
-      "rainbow",
-      "plunge pool",
-      "rocky gorge",
-      "jungle waterfall"
+      "瀑布",
+      "水雾",
+      "溪流",
+      "峡谷",
+      "慢门",
+      "跌水"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。水流平缓下落，水雾林间飘散，柔和漫射光，植被细节丰富，静谧治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "水雾层次",
+      "慢门质感",
+      "电影感",
+      "缓慢运镜",
+      "超高清",
+      "逆光光柱"
     ],
-    "negative": "people, buildings, text",
+    "negative": "人物, 栈道, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "a thundering waterfall dropping into a misty plunge pool",
-        "a thin cascade threading down a mossy cliff",
-        "a jungle waterfall framed by ferns"
+        "瀑布砸进雾气弥漫的深潭",
+        "帘状水流从崖顶垂落",
+        "溪流在石缝间分成多股"
       ],
       "movementPool": [
-        "water plunging and dissolving into spray",
-        "mist rising and drifting through the gorge",
-        "droplets catching the light in slow motion"
+        "水雾从潭底持续升起",
+        "水流在慢门下化成绸缎",
+        "水珠在光里飞散"
       ],
       "cameraPool": [
-        "slow push-in toward the base of the falls, simulated IMAX",
-        "static locked-off wide, Panavision 35mm, f/5.6",
-        "gentle arc around the plunge pool"
+        "极慢推进到瀑布底部",
+        "静态锁定，慢门",
+        "侧向横移跟随水流"
       ],
       "lightingPool": [
-        "sunlight breaking through the spray into a faint rainbow",
-        "soft diffused light deep in the gorge",
-        "backlit mist glowing"
+        "逆光穿过水雾形成光柱",
+        "阴天漫射，显出水丝纹理",
+        "侧光打亮水雾边缘"
       ],
       "atmospherePool": [
-        "powerful and verdant",
-        "cool and enveloping",
-        "serene and wild"
+        "湿润而清凉",
+        "轰鸣中的静",
+        "雾气弥漫"
       ],
       "quality": [
-        "cinematic grade",
-        "realistic water and mist",
-        "fine grain",
-        "natural greens"
+        "水雾层次",
+        "慢门质感",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No people — just the water falling and the mist drifting",
-        "End on the plunge pool, nothing enters frame"
+        "收在水雾里，无人、无栈道",
+        "画面停在跌水上，没有新元素进入"
       ]
     }
   },
@@ -396,54 +423,57 @@
     "name": "湖泊",
     "emoji": "🏞️",
     "keywords": [
-      "lake",
-      "calm water",
-      "mirror reflection",
-      "mountain reflection",
-      "morning mist",
-      "still surface",
-      "lakeside forest",
-      "sunrise over lake"
+      "湖",
+      "倒影",
+      "镜面",
+      "晨雾",
+      "湖岸",
+      "静水"
     ],
     "styleEnhancers": [
-      "风光延时，三脚架固定机位，画面稳定，Zoom0~0.05。湖面静谧，薄雾漂浮，倒影轻晃，光影缓慢变化，通透空气感，安宁治愈。无人物、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切"
+      "镜面倒影",
+      "晨雾",
+      "电影感",
+      "缓慢运镜",
+      "超高清",
+      "冷调分层"
     ],
-    "negative": "people, boats, buildings, text",
+    "negative": "人物, 船, 鸟, 文字, 水印",
     "structure": {
       "subjectPool": [
-        "a mirror-calm lake reflecting snow peaks",
-        "a misty lake at dawn ringed by forest",
-        "a high alpine tarn under a still sky"
+        "无风的镜面湖倒映雪峰",
+        "湖岸线切过画面下三分之一",
+        "晨雾贴着水面缓慢平移"
       ],
       "movementPool": [
-        "mist drifting low across the surface",
-        "gentle ripples breaking the reflection",
-        "light shifting slowly on the water"
+        "雾气在水面缓慢平移",
+        "倒影被一丝风揉皱",
+        "光斑在水面移动"
       ],
       "cameraPool": [
-        "static locked-off wide, Panavision 35mm, f/4",
-        "very slow aerial push-in, simulated IMAX",
-        "low-level tracking just above the surface"
+        "静态锁定广角",
+        "极低机位贴水面推进",
+        "200mm 压缩岸线"
       ],
       "lightingPool": [
-        "golden sunrise glow spreading on the water",
-        "soft blue hour light",
-        "dawn mist catching the first light"
+        "蓝调时刻的均匀冷光",
+        "日出侧光把远山染暖",
+        "阴天散射，低反差"
       ],
       "atmospherePool": [
-        "serene and still",
-        "quiet and vast",
-        "meditative calm"
+        "静得能听见空气",
+        "清冷通透",
+        "清晨的安静"
       ],
       "quality": [
-        "cinematic grade",
-        "perfect reflection detail",
-        "natural tones",
-        "fine grain"
+        "镜面锐利",
+        "冷调分层",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No boats, no birds — just the reflection holding",
-        "End on still water, nothing changes"
+        "收在倒影里，无船、无鸟",
+        "画面停在水面上，没有新元素进入"
       ]
     }
   },
@@ -451,53 +481,56 @@
     "name": "城市夜景",
     "emoji": "🎬",
     "keywords": [
-      "city",
-      "skyline",
-      "night",
-      "neon lights",
-      "urban",
-      "street",
-      "rain"
+      "城市",
+      "天际线",
+      "夜景",
+      "霓虹",
+      "街道",
+      "雨"
     ],
     "styleEnhancers": [
-      "城市延时，三脚架固定机位，画面稳定，Zoom0~0.05。车流光轨缓慢延展，云层缓缓流动，天际线干净，色彩克制，安静治愈。无人群、广告牌、字幕、水印、UI。禁止摇镜、快速推拉、抖动、硬切。"
+      "电影感",
+      "都市",
+      "霓虹色彩",
+      "反射真实",
+      "超高清"
     ],
-    "negative": "people, readable text, logos",
+    "negative": "人物, 可读文字, logo, 水印",
     "structure": {
       "subjectPool": [
-        "a neon-soaked skyline across a river",
-        "wet streets reflecting signage",
-        "distant towers half-lost in low cloud"
+        "河对岸的霓虹天际线",
+        "雨后湿街把招牌倒映出来",
+        "低云里只剩半截塔楼"
       ],
       "movementPool": [
-        "light reflections shifting on wet pavement",
-        "clouds drifting behind the towers",
-        "traffic light trails streaking below"
+        "湿路面上的光斑缓慢移动",
+        "云从楼群后流过",
+        "车灯拖出光轨"
       ],
       "cameraPool": [
-        "slow aerial push-in, simulated IMAX",
-        "low-angle tracking along the street",
-        "static telephoto compression"
+        "航拍缓慢推进，模拟大画幅电影",
+        "低角度沿街横移",
+        "静态长焦压缩"
       ],
       "lightingPool": [
-        "neon magenta-teal glow",
-        "cold blue hour light",
-        "warm window grids"
+        "品红与青色的霓虹对撞",
+        "蓝调时刻的冷光",
+        "窗格里的暖光"
       ],
       "atmospherePool": [
-        "moody and electric",
-        "quiet after rain",
-        "cinematic urban calm"
+        "潮湿而克制",
+        "雨后的静",
+        "城市里难得的安静"
       ],
       "quality": [
-        "cinematic grade",
-        "realistic reflections",
-        "natural contrast",
-        "fine grain"
+        "反射真实",
+        "暗部干净",
+        "自然对比",
+        "细腻颗粒"
       ],
       "endingPool": [
-        "No readable text or logos — just the lights holding",
-        "End on the skyline, nothing enters frame"
+        "收在天际线上，无文字、无 logo",
+        "画面停在楼群上，没有新元素进入"
       ]
     }
   }

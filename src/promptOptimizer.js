@@ -459,9 +459,22 @@ const DEFAULT_TEMPLATES = {
   }
 };
 
+// 中文词池覆盖层（2026-10-20）
+// 把内置英文词池替换为中文，让「模板优化」路径也输出纯中文。
+// 覆盖 keywords / styleEnhancers / negative / structure 七池；name 与 emoji 沿用内置定义。
+const ZH_TEMPLATES = require('./templates.zh');
+for (const [id, zh] of Object.entries(ZH_TEMPLATES)) {
+  const tpl = DEFAULT_TEMPLATES[id];
+  if (!tpl) continue;
+  if (zh.keywords) tpl.keywords = zh.keywords;
+  if (zh.styleEnhancers) tpl.styleEnhancers = zh.styleEnhancers;
+  if (zh.negative) tpl.negative = zh.negative;
+  if (zh.structure) tpl.structure = zh.structure;
+}
+
 // 默认优化规则
 const DEFAULT_RULES = `你是一个专业的AI视频提示词优化师。
-你的任务是把用户的简单描述，扩写成高质量的英文视频生成提示词。
+你的任务是把用户的简单描述，扩写成高质量的中文视频生成提示词。
 
 优化规则：
 1. 补充环境和场景细节（时间、天气、角度）
@@ -469,7 +482,7 @@ const DEFAULT_RULES = `你是一个专业的AI视频提示词优化师。
 3. 添加运镜方式（缓慢推进/环绕/平移等）
 4. 添加画质描述（4K、电影级、高细节）
 5. 添加氛围描述（宁静/史诗/梦幻等）
-6. 用英文输出，长度100-200字
+6. 用中文输出，长度100-200字
 7. 不要出现人物
 8. 输出只包含优化后的提示词，不要其他解释`;
 
@@ -797,7 +810,7 @@ class PromptOptimizer {
 - 光影池：${(s.lightingPool || []).join(' | ')}
 - 氛围池：${(s.atmospherePool || []).join(' | ')}
 - 质感：${(s.quality || []).join(', ')}
-要求：按「用户场景 + 运镜 + 光影 + 氛围 + 质感」公式组织，结尾用留白句收束（如 "No people — just the landscape holding still"），全英文输出。` : '';
+要求：按「用户场景 + 运镜 + 光影 + 氛围 + 质感」公式组织，结尾用留白句收束（如 "画面停在脊线上，没有新元素进入"），全中文输出。` : '';
 
       systemPrompt = `
 ${this.rules}

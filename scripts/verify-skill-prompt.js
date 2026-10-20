@@ -115,6 +115,45 @@ function section(title) {
   ok('模板优化仍返回 optimized', typeof tpl.optimized === 'string' && tpl.optimized.length > 0);
   ok('模板优化不包含 skill 段', !tpl.optimized.includes(MARKER));
 
+  // ---------- 7. 全中文输出 ----------
+  section('7. 全中文输出（指令 + 词池 + 磁盘模板）');
+  const srcFile = fs.readFileSync(path.join(APP_DIR, 'src', 'promptOptimizer.js'), 'utf-8');
+  ok('DEFAULT_RULES 要求中文输出', srcFile.includes('用中文输出'));
+  ok('structureRef 要求全中文输出', srcFile.includes('全中文输出'));
+  ok('源码不再要求英文输出', !srcFile.includes('用英文输出') && !srcFile.includes('全英文输出'));
+
+  const zhPool = require(path.join(APP_DIR, 'src', 'templates.zh.js'));
+  ok('中文词池模块覆盖 9 个主题', Object.keys(zhPool).length === 9);
+
+  // 只扫「字符串值」，不要把对象键名（landscape / subjectPool…）当成英文残留
+  const collectStrings = (v, out = []) => {
+    if (typeof v === 'string') out.push(v);
+    else if (v && typeof v === 'object') Object.values(v).forEach((x) => collectStrings(x, out));
+    return out;
+  };
+
+  const poolAscii = [...new Set((collectStrings(zhPool).join(' ').match(/[A-Za-z]{2,}/g) || []))]
+    .filter((w) => !['mm', 'logo'].includes(w));
+  ok('中文词池无英文残留（允许 mm/logo）', poolAscii.length === 0, poolAscii.join(','));
+
+  const tplFile = path.join(APP_DIR, 'data', 'templates.json');
+  ok('磁盘 templates.json 存在', fs.existsSync(tplFile));
+  if (fs.existsSync(tplFile)) {
+    const disk = JSON.parse(fs.readFileSync(tplFile, 'utf-8'));
+    const diskSubject = (disk.landscape.structure || {}).subjectPool || [];
+    ok('磁盘模板主体池已中文化', /[\u4e00-\u9fa5]/.test(diskSubject[0] || ''), diskSubject[0]);
+    // 只校验内置 9 个主题的池内容，避免把 name/emoji 等字段算进去
+    const diskPools = Object.values(disk).filter((t) => t && t.structure).map((t) => t.structure);
+    const structAscii = [...new Set((collectStrings(diskPools).join(' ').match(/[A-Za-z]{2,}/g) || []))]
+      .filter((w) => !['mm', 'logo'].includes(w));
+    ok('磁盘模板池无英文残留（允许 mm/logo）', structAscii.length === 0, structAscii.join(','));
+  }
+
+  const zhOut = optimizer.optimizeWithTemplate('沙丘上的日落', 'desert', { seed: 2 });
+  const outAscii = [...new Set((zhOut.optimized.match(/[A-Za-z]{2,}/g) || []))].filter((w) => !['mm', 'logo'].includes(w));
+  ok('模板优化输出无英文残留', outAscii.length === 0, outAscii.join(','));
+  ok('模板优化输出含中文', /[\u4e00-\u9fa5]/.test(zhOut.optimized));
+
   // ---------- 汇总 ----------
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   if (fail) {
