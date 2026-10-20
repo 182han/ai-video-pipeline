@@ -1595,6 +1595,25 @@ app.post('/api/tasks/:id/continue', async (req, res) => {
   res.json(result);
 });
 
+// 重新质检：对「已生成但质检失败」的片段只重跑质检，不重新生成视频。
+// 通过后片段转 success + 入片段库，随后可用 /continue 补跑复用（省钱）。
+// Key 只走请求体、不落日志、不写任务文件（与其他任务接口一致）。
+app.post('/api/tasks/:id/recheck-clips', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const result = await pipeline.recheckClips(req.params.id, {
+      multimodalApiKey: body.multimodalApiKey,
+      multimodalBaseUrl: body.multimodalBaseUrl,
+      multimodalModel: body.multimodalModel,
+    });
+    if (!result.success) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    console.error('[recheck-clips] 失败:', e.message);
+    res.status(500).json({ success: false, error: '重新质检失败：' + e.message });
+  }
+});
+
 // 预览：补跑到目标档位还需要跑哪些步骤（只读，不改任务状态）
 app.get('/api/tasks/:id/continue-plan', (req, res) => {
   const task = taskManager.getTask(req.params.id);

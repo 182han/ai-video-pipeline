@@ -705,6 +705,89 @@ class Pipeline {
   // 已完成步骤自动从 task.steps 推断（completed / reused），也可用 completed 显式覆盖。
   // 依赖校验交给 resolveResume：链路不完整（例如声称转码完成却从没生成片段）直接判失败，
   // 不硬跑——那会在没有输入的情况下产出坏片。
+  // 对「已生成但质检失败」的片段只重跑质检，不重新生成视频。
+  //
+  // 场景（2026-10-21 实测）：片段生成成功并落盘，但 NSFW 多模态端点不可用 → checkClip 判 fail
+  // → 片段 status=failed → 任务 failed、片段库不收（library 只收 success）
+  // → 钱花了、视频在磁盘上，却哪都用不了，只能重新生成再花钱。
+  //
+  // 合规不放松：真的重新执行 checkClip（含 NSFW），不是"跳过质检"。
+  // 通过后：片段转 success + 入片段库，随后 continueTask 可复用这些片段拼成片。
+  async recheckClips(taskId, options = {}) {
+    if (this.runningTasks.has(taskId)) {
+      return { success: false, error: '任务正在运行中，请稍后再试' };
+    }
+    const task = taskManager.getTask(taskId);
+    if (!task) return { success: false, error: '任务不存在' };
+
+    const rc = task.runtimeConfig || {};
+    const nsfw = {
+      apiKey: options.multimodalApiKey || rc.multimodalApiKey || '',
+      baseUrl: options.multimodalBaseUrl || rc.multimodalBaseUrl || '',
+      model: options.multimodalModel || rc.multimodalModel || '',
+    };
+    if (!nsfw.apiKey) {
+      return { success: false, error: '未配置多模态 API Key：请先在设置里填写并保存（NSFW 检测要用）' };
+    }
+
+    const clips = Array.isArray(task.clips) ? task.clips : [];
+    const results = [];
+    let checked = 0;
+    let passed = 0;
+
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      if (clip.status === 'success') {
+        results.push({ index: i, skipped: 'already-success' });
+        continue;
+      }
+      if (!clip.videoPath || !fs.existsSync(clip.videoPath)) {
+        results.push({ index: i, error: '片段文件不存在' });
+        continue;
+      }
+      checked++;
+      let qc;
+      try {
+        qc = await qualityChecker.checkClip(clip.videoPath, task.clipDuration, {
+          nsfw: { ...nsfw, syntheticSource: task.model === 'mock' },
+          strictItems: Array.isArray(rc.strictQcItems) && rc.strictQcItems.length
+            ? rc.strictQcItems
+            : undefined,
+        });
+      } catch (e) {
+        results.push({ index: i, error: '质检异常: ' + e.message });
+        continue;
+      }
+
+      if (qc && qc.passed) {
+        passed++;
+        taskManager.updateClip(taskId, i, { status: 'success', qcResult: qc, error: null });
+        try {
+          library.ingestClip(task, { ...clip, status: 'success' });
+        } catch (e) {
+          console.warn(`[${taskId}] 片段 ${i + 1} 入库失败: ${e.message}`);
+        }
+        results.push({ index: i, passed: true });
+      } else {
+        const why = (qc && qc.reason) || '未通过';
+        taskManager.updateClip(taskId, i, { qcResult: qc, error: `质检未通过: ${why}` });
+        results.push({ index: i, passed: false, reason: why });
+      }
+    }
+
+    const updated = taskManager.getTask(taskId);
+    const clipsNow = (updated && updated.clips) || [];
+    const allPassed = clipsNow.length > 0 && clipsNow.every((c) => c.status === 'success');
+    if (allPassed) {
+      taskManager.updateTaskStatus(taskId, updated.status, {
+        error: '片段已全部通过重新质检，请点「补跑」继续拼接成片',
+      });
+    }
+
+    console.log(`[${taskId}] 重新质检完成：${passed}/${checked} 通过`);
+    return { success: true, checked, passed, allPassed, results };
+  }
+
   async continueTask(taskId, options = {}) {
     if (this.runningTasks.has(taskId)) {
       return { success: false, error: '任务正在运行中，请稍后再试' };
