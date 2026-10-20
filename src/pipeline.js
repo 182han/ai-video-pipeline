@@ -999,14 +999,21 @@ class Pipeline {
     // 多提示词模式（§10B）：遍历 clips 按各自主题逐行优化，结果写回 clips[i].prompt
     if (task.isMultiPrompt && task.clips.length > 0) {
       const llmCfg = task.runtimeConfig || {};
+      // 服务端兜底：任务里没带 LLM 配置时用 .env（OPENAI_API_KEY/BASE_URL/MODEL）。
+      // 为什么加：Key 只存在浏览器 localStorage，换 origin（localhost↔127.0.0.1）、
+      // 换端口、清站点数据都会丢，用户被迫反复重填。写进 .env 一次即可长期生效；
+      // 页面里填的仍然优先。
+      const llmKey = llmCfg.llmApiKey || config.OPENAI_API_KEY || '';
+      const llmBase = llmCfg.llmBaseUrl || config.OPENAI_BASE_URL || '';
+      const llmModel = llmCfg.llmModel || config.OPENAI_MODEL || '';
       let worstQC = { passed: true };
       for (const clip of task.clips) {
         const theme = clip.theme ?? task.theme;
-        const optResult = (llmCfg.llmApiKey)
+        const optResult = (llmKey)
           ? await promptOptimizer.optimizeWithAI(clip.prompt, theme, {
-              apiKey: llmCfg.llmApiKey,
-              baseUrl: llmCfg.llmBaseUrl,
-              model: llmCfg.llmModel
+              apiKey: llmKey,
+              baseUrl: llmBase,
+              model: llmModel
             })
           : promptOptimizer.optimizeWithTemplate(clip.prompt, theme, { seed: clip.index });
 
@@ -1055,10 +1062,11 @@ class Pipeline {
     } else {
       // 单提示词模式：LLM 真分镜把主题拆成 N 段差异化场景，写回 clips[i].prompt
       const llmCfg = task.runtimeConfig || {};
+      // 同上游：任务没带就用 .env 兜底，避免 Key 只活在浏览器里
       const scenes = await llmService.storyboard(task.prompt, task.totalClips, {
-        apiKey: llmCfg.llmApiKey,
-        baseUrl: llmCfg.llmBaseUrl,
-        model: llmCfg.llmModel
+        apiKey: llmCfg.llmApiKey || config.OPENAI_API_KEY || '',
+        baseUrl: llmCfg.llmBaseUrl || config.OPENAI_BASE_URL || '',
+        model: llmCfg.llmModel || config.OPENAI_MODEL || ''
       });
       if (scenes && scenes.length > 0) {
         // §4.5 方案 A：LLM 负责差异化场景内容，模板负责结构化（运镜/光影/氛围/结尾）
