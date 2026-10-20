@@ -53,3 +53,4 @@ _e2e_*.js
 Thumbs.db
 .idea/
 .vscode/
+data/keep/
