@@ -15,6 +15,9 @@ clips/
 output/
 data/tasks/
 data/trash/
+# 素材库元数据（每个片段一个 json）与波形缓存（音频峰值），均为运行时生成
+data/library/
+data/waveforms/
 *.mp4
 *.mp4.txt
 *.log
@@ -26,6 +29,9 @@ data/trash/
 assets/bgm/**/*.mp3
 assets/bgm/**/*.wav
 assets/bgm/**/*.m4a
+
+# BGM 播放器偏好（运行时状态，每台机器不同）
+assets/bgm/prefs.json
 
 # ===== 项目内自带的 ffmpeg 二进制（约 640MB，不进仓库）=====
 # 放进 app/tools/ffmpeg/bin/ 后 config.js 会自动优先使用它，
