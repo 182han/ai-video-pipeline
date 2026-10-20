@@ -727,6 +727,18 @@ app.post('/api/test-api-key', async (req, res) => {
 
       if (status === 401 || status === 403) {
         // 401/403 是鉴权失败，Key 无效
+        // LLM 场景最常见的原因是「Key 与地址不匹配」：地址留空会回落到 .env 的 OpenAI，
+        // 于是 DeepSeek 的 Key 被发到 api.openai.com，必然 401。把实际请求地址带出来。
+        if (type === 'llm') {
+          const used = url.replace(/\/models$/, '');
+          return res.json({
+            success: false,
+            error: errorMsg
+              + '｜提示：地址与 Key 必须同属一家。本次实际请求 ' + used
+              + '（地址留空会回落到 OpenAI）；DeepSeek 的 Key 需配 https://api.deepseek.com/v1 + deepseek-chat。',
+            urlUsed: used,
+          });
+        }
         res.json({ success: false, error: errorMsg });
       } else if (/workspace endpoint is invalid|invalid endpoint|接入点无效/i.test(errorMsg)) {
         // 业务空间 ID / Region 配错：请求没走到鉴权，配置本身就是错的
