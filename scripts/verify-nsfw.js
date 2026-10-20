@@ -99,6 +99,22 @@ async function main() {
   check('HTTP 500 -> passed=false', http500.passed === false);
   check('HTTP 500 -> reason 提到失败', /失败|未执行/.test(http500.reason), http500.reason);
 
+  // 403 模型未授权：必须把状态码与上游报文带出来，
+  // 否则会被误读成「网络超时」（实测踩过：用户以为是网络问题，实际是模型没开通）
+  const http403 = await qc.checkNSFW(VIDEO, {
+    apiKey: 'k',
+    baseUrl: 'https://wid.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    fetchImpl: fakeFetch({
+      status: 403,
+      body: JSON.stringify({ error: { message: 'Model access denied.', type: 'Model.AccessDenied' } })
+    })
+  });
+  check('HTTP 403 -> passed=false', http403.passed === false);
+  check('403 的 reason 带出状态码', /HTTP 403/.test(http403.reason), http403.reason);
+  check('403 的 reason 带出上游报文', /access denied|AccessDenied/i.test(http403.reason), http403.reason);
+  check('403 附带模型未授权提示', typeof http403.hint === 'string' && /开通|授权/.test(http403.hint), http403.hint);
+  check('403 的 upstream 记录了状态码', !!http403.upstream && http403.upstream.status === 403);
+
   const netErr = await qc.checkNSFW(VIDEO, {
     apiKey: 'k',
     fetchImpl: fakeFetch({ throwError: new Error('ECONNREFUSED') })

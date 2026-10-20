@@ -47,6 +47,10 @@ const NSFW_TIMEOUT_MS = 120000;
 
 class QualityChecker {
   constructor(options = {}) {
+    // 最近一次 NSFW 多模态调用的失败原因（HTTP 状态 / 上游报文 / 超时）。
+    // 目的：原先失败只报「调用失败/超时」，403 Model.AccessDenied 这类可定位的错误被吞掉，
+    // 用户无法判断是 Key、地址还是模型权限问题。只在内存里留最后一次，不落盘、不含 Key。
+    this._nsfwLastError = null;
     this.options = {
       blackFrameMinDuration: 0.5,
       blackFrameThreshold: 0.95,
@@ -954,9 +958,28 @@ class QualityChecker {
       return fail(`NSFW 检测未执行：多模态调用异常 ${e.message}`, { detectorError: true, frameCount: frames.length });
     }
     if (!raw) {
-      return fail('NSFW 检测未执行：多模态调用失败/超时（120s 内无有效响应）', {
+      // 不再一律报「失败/超时」：把上游状态码与报文带出来，否则 403 模型未授权
+      // 会被误读成网络超时（实测踩过，用户完全无法定位）
+      const up = this._nsfwLastError;
+      let detail = '多模态调用失败/超时（120s 内无有效响应）';
+      if (up) {
+        if (up.kind === 'http') {
+          detail = `多模态调用失败 HTTP ${up.status}：${String(up.message || '').slice(0, 160)}`;
+        } else if (up.kind === 'timeout') {
+          detail = `多模态调用超时（${timeoutMs}ms 内无响应）`;
+        } else {
+          detail = `多模态调用失败：${String(up.message || '').slice(0, 160)}`;
+        }
+      }
+      const hint = up && up.kind === 'http' && up.status === 403
+        ? '模型未授权：确认多模态地址是 https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1，'
+          + '并在百炼控制台「模型广场」开通该视觉模型（或换 qwen-vl-plus / qwen-vl-max）'
+        : undefined;
+      return fail(`NSFW 检测未执行：${detail}`, {
         detectorUnavailable: true,
-        frameCount: frames.length
+        frameCount: frames.length,
+        upstream: up || null,
+        ...(hint ? { hint } : {}),
       });
     }
 
@@ -1152,7 +1175,9 @@ class QualityChecker {
   // 返回模型原始文本（字符串），失败/超时/非 2xx 返回 null。
   async _callNsfwMultimodal(framesBase64, { apiKey, baseUrl, model, timeoutMs, fetchImpl }) {
     const doFetch = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+    this._nsfwLastError = null;
     if (!doFetch) {
+      this._nsfwLastError = { kind: 'no-fetch', message: '运行环境没有可用的 fetch' };
       console.error('NSFW 检测: 运行环境没有可用的 fetch');
       return null;
     }
@@ -1195,7 +1220,15 @@ class QualityChecker {
         signal: controller.signal
       });
       if (!resp || !resp.ok) {
-        console.error(`NSFW 检测请求失败: HTTP ${resp ? resp.status : 'no-response'}`);
+        // 把上游状态码与报文留下来：403 Model.AccessDenied 与 401 InvalidApiKey
+        // 的处理方式完全不同，不能都归成「调用失败」
+        let bodySnippet = '';
+        try {
+          if (resp && typeof resp.text === 'function') bodySnippet = String(await resp.text()).slice(0, 300);
+        } catch (e) { /* 读不到 body 不影响判定 */ }
+        const status = resp ? resp.status : 0;
+        this._nsfwLastError = { kind: 'http', status, message: bodySnippet || `HTTP ${status}` };
+        console.error(`NSFW 检测请求失败: HTTP ${status} ${bodySnippet.slice(0, 200)}`);
         return null;
       }
       const data = await resp.json();
@@ -1203,11 +1236,18 @@ class QualityChecker {
         ? data.choices[0].message.content
         : '';
       if (!content) {
+        this._nsfwLastError = { kind: 'empty-content', status: 200, message: '响应中无 choices[0].message.content' };
         console.error('NSFW 检测: 响应中无 choices[0].message.content');
         return null;
       }
       return String(content);
     } catch (e) {
+      const aborted = e && (e.name === 'AbortError' || /aborted|timeout/i.test(e.message || ''));
+      this._nsfwLastError = {
+        kind: aborted ? 'timeout' : 'exception',
+        status: 0,
+        message: aborted ? `超时（${timeoutMs}ms 内无响应）` : (e.message || String(e)),
+      };
       console.error('NSFW 检测调用异常:', e.message);
       return null;
     } finally {
