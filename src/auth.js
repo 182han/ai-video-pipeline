@@ -254,7 +254,7 @@ function randomPassword(len = 12) {
  * 优先用 .env 的 AUTH_USER / AUTH_PASSWORD；缺密码则随机生成并打印一次。
  * @returns {Promise<{created:boolean, username?:string, password?:string, count:number}>}
  */
-async function bootstrap() {
+async function doBootstrap() {
   if (!isEnabled()) {
     console.log('[auth] AUTH_ENABLED=false，登录墙未启用（任何人都能直接访问）');
     return { created: false, count: 0, skipped: true };
@@ -297,6 +297,34 @@ async function bootstrap() {
   return { created: true, username: user.username, password: generated ? password : undefined, count: 1 };
 }
 
+let bootstrapPromise = null;
+
+/**
+ * 启动时调用：没有任何账号时创建第一个。
+ * 幂等并要求被登录路由 await —— 否则存在「服务已启动、账号还没建完」的窗口，
+ * 用户在这个窗口里打开浏览器会看到「账号或密码错误」（实测踩到过）。
+ * 失败时清空缓存，允许下次重试（例如数据库临时不可用）。
+ */
+function bootstrap() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = doBootstrap().catch(e => {
+      bootstrapPromise = null;
+      throw e;
+    });
+  }
+  return bootstrapPromise;
+}
+
+/** 登录路由用：等首次建号结束；失败不抛，交给后续存储错误处理 */
+async function awaitBootstrap() {
+  if (!bootstrapPromise) return null;
+  try {
+    return await bootstrapPromise;
+  } catch (e) {
+    return null;
+  }
+}
+
 module.exports = {
   COOKIE_NAME,
   isEnabled,
@@ -322,5 +350,6 @@ module.exports = {
   findUserByUsername,
   markLogin,
   bootstrap,
+  awaitBootstrap,
   randomPassword
 };

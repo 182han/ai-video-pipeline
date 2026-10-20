@@ -118,6 +118,9 @@ app.post('/api/auth/login', async (req, res) => {
 
   let user = null;
   try {
+    // 首次启动时账号是异步创建的：先等它结束，
+    // 否则「服务已就绪、账号还没建完」的窗口里登录会被判成「账号或密码错误」。
+    await auth.awaitBootstrap();
     user = await auth.findUserByUsername(username);
   } catch (e) {
     // 关键：存储不可用时返回 503，绝不 fail-open
