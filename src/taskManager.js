@@ -8,6 +8,8 @@ const config = require('../config');
 const wsManager = require('./wsManager');
 const storage = require('./storage');
 const redact = require('./utils/redact');
+const { applyTaskDefaults } = require('./taskDefaults');
+const { resolveStages } = require('./pipelineStages');
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'tasks');
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
@@ -27,6 +29,8 @@ const PIPELINE_STEPS = [
   { key: 'clip_generation', name: '视频片段生成', qcKey: 'clip_qc', qcName: '片段质检（黑帧/模糊/重复/时长）', category: 'clip' },
   { key: 'concatenation', name: '视频拼接', qcKey: 'concat', qcName: '拼接质检', category: 'post' },
   { key: 'loop_processing', name: '无缝循环处理', qcKey: 'loop', qcName: '循环质检', category: 'post' },
+  // 配乐混音：整片一次性混入（替代旧的逐片段混音）
+  { key: 'audio_mix', name: '配乐混音', qcKey: 'audio_mix', qcName: '混音校验', category: 'post' },
   { key: 'transcoding', name: '转码导出', qcKey: 'transcode', qcName: '转码质检', category: 'post' },
   { key: 'final_qc', name: '最终综合质检', qcKey: 'final', qcName: '最终质检', category: 'final' }
 ];
@@ -98,6 +102,22 @@ class TaskManager {
   // 创建新任务
   createTask(prompt, options = {}) {
     const taskId = this._generateId();
+
+    // 解析档位（默认 final = 全部步骤，保持接入前行为）。
+    // 非法档位/非法自定义勾选不让创建任务失败——退回 final 并记日志，
+    // 因为「档位写错」不应该让用户丢掉整个任务；真正的错误在 stagePlan.notes 里可见。
+    const presetResolution = (() => {
+      const rawPreset = options.preset === undefined || options.preset === null
+        ? 'final'
+        : String(options.preset);
+      const r = resolveStages(rawPreset, options.stages);
+      if (r.ok) return r;
+      console.warn(`[${taskId}] 档位解析失败（${r.error}），已回退 final 全量执行`);
+      const fallback = resolveStages('final');
+      fallback.notes = [`档位解析失败（${r.error}），已回退 final 全量执行`];
+      return fallback;
+    })();
+
     // 多提示词模式（§10A）：元素为 { text, theme } 对象，theme 可能为 null（用全局主题）
     const prompts = Array.isArray(options.prompts) && options.prompts.length > 0
       ? options.prompts
@@ -131,8 +151,7 @@ class TaskManager {
         status: 'pending',
         attempts: 0,
         videoPath: null,
-        // 片段配乐音轨 id（§6 配乐）：null/'' 表示该段不配乐
-        trackId: null,
+        // 说明：片段级配乐（trackId）已下线。配乐改为整片多轨时间轴，见 task.bgmPlan。
         duration: 0,
         qcResult: null,
         error: null,
@@ -140,11 +159,39 @@ class TaskManager {
         completedAt: null
       });
     }
-    // 片段级配乐分配：clipTracks[i] 命中则写入对应片段（用于提示词环节预览分配的落库）
-    if (Array.isArray(options.clipTracks)) {
-      clips.forEach((c, i) => {
-        if (options.clipTracks[i]) c.trackId = options.clipTracks[i];
-      });
+    // ===== 配乐配置（整片级，替代旧的逐片段 clipTracks）=====
+    // 向后兼容：老前端仍可能传 clipTracks。若全段音轨相同，收敛成整片主曲；
+    // 若不一致，取首条并记录迁移痕迹（旧语义已无法表达）。
+    const bgmOpt = (options.bgm && typeof options.bgm === 'object') ? options.bgm : {};
+    const bgm = {
+      enabled: bgmOpt.enabled !== undefined ? !!bgmOpt.enabled : (!!bgmOpt.mode && bgmOpt.mode !== 'off'),
+      mode: ['auto', 'manual', 'off'].includes(bgmOpt.mode) ? bgmOpt.mode : (bgmOpt.enabled ? 'auto' : 'off'),
+      trackId: bgmOpt.trackId || null,
+      // 自动配乐时用户勾选的轨道：轻音乐 / 环境音 可任选其一或都选
+      wantMusic: bgmOpt.wantMusic === undefined ? true : !!bgmOpt.wantMusic,
+      wantAmbient: !!bgmOpt.wantAmbient,
+      // 环境音自动配乐时循环播放的那一首（null = 随机）
+      ambientTrackId: bgmOpt.ambientTrackId || null,
+      fadeInSec: Number.isFinite(Number(bgmOpt.fadeInSec)) ? Number(bgmOpt.fadeInSec) : 2,
+      fadeOutSec: Number.isFinite(Number(bgmOpt.fadeOutSec)) ? Number(bgmOpt.fadeOutSec) : 2,
+      crossfadeSec: Number.isFinite(Number(bgmOpt.crossfadeSec)) ? Number(bgmOpt.crossfadeSec) : 1.5,
+      volume: Number.isFinite(Number(bgmOpt.volume)) ? Number(bgmOpt.volume) : -20,
+      ambientVolume: Number.isFinite(Number(bgmOpt.ambientVolume)) ? Number(bgmOpt.ambientVolume) : 0.125,
+      migratedFromClipTracks: false
+    };
+    if (Array.isArray(options.clipTracks) && options.clipTracks.length > 0) {
+      const uniq = [...new Set(options.clipTracks.filter(Boolean))];
+      if (uniq.length === 1) {
+        bgm.enabled = true;
+        bgm.mode = 'auto';
+        bgm.trackId = uniq[0];
+      } else if (uniq.length > 1) {
+        bgm.enabled = true;
+        bgm.mode = 'auto';
+        bgm.trackId = uniq[0];
+        console.warn('[' + taskId + '] 收到逐段 clipTracks（' + uniq.length + ' 种音轨），已收敛为整片主曲 ' + uniq[0] + '；旧的逐段配乐语义已下线');
+      }
+      bgm.migratedFromClipTracks = true;
     }
 
     // 初始化步骤时间追踪
@@ -182,11 +229,36 @@ class TaskManager {
       totalDuration: totalClips * clipDuration,
       clips,
       steps,
+      // 配乐：整片多轨时间轴。bgmPlan 为编辑结果（见 processors/bgmPlan.js），
+      // bgmResult 为最近一次混音结果；masterPath 是无声母版，改配乐时在它上面重混。
+      bgm,
+      bgmPlan: null,
+      bgmResult: null,
+      masterPath: null,
       currentStep: 'created',
       currentStepKey: null,
       outputPath: null,
       s3Url: null,
+      // 流水线档位（见 src/pipelineStages.js）。
+      // preset 决定「要跑哪些步骤」，stageSet 是解析后的 { stepKey: true }。
+      // **默认 final = 全部 8 步**，与接入档位之前的行为完全一致（零回归）；
+      // 只有显式传 preset（quick / daily / clips_only / custom）才会裁剪步骤。
+      preset: presetResolution.preset,
+      stageSet: presetResolution.stageSet,
+      stagePlan: {
+        stages: presetResolution.stages,
+        notes: presetResolution.notes
+      },
       runtimeConfig: options.runtimeConfig || {},
+      // 任务来源：
+      //   generation 普通生成任务
+      //   library    片段库选片成片（片段是现成的，跳过提示词/分镜/生成）
+      //   regenerate 片段库单片段重新生成（隐藏任务，不进主历史）
+      source: options.source || 'generation',
+      // 隐藏任务：只在片段库看进度，不出现在任务历史/统计里
+      hidden: options.hidden === true,
+      // 重新生成：指向被替代的库条目 id
+      regeneratedFrom: options.regeneratedFrom || null,
       createdAt: new Date().toISOString(),
       startedAt: null,
       completedAt: null,
@@ -200,14 +272,105 @@ class TaskManager {
     return task;
   }
 
+  // ===== 片段库成片 =====
+  // 用一个现成片段列表替换任务里的 clips。
+  // 这些片段已经是 success 状态、文件在库目录里，流水线会跳过生成直接拼接。
+  setLibraryClips(taskId, segments) {
+    const task = this.tasks[taskId];
+    if (!task) return null;
+    const list = Array.isArray(segments) ? segments : [];
+    task.clips = list.map((seg, i) => {
+      const full = Number(seg.durationSec) || 0;
+      const inSec = Math.max(0, Number(seg.inSec) || 0);
+      const outSec = (seg.outSec !== undefined && seg.outSec !== null)
+        ? Math.max(0, Number(seg.outSec))
+        : null;
+      const dur = outSec !== null
+        ? Math.max(0.05, outSec - inSec)
+        : Math.max(0.05, full - inSec);
+      const trimmed = inSec > 0.02 || outSec !== null;
+      return {
+        index: i,
+        prompt: seg.prompt || '',
+        theme: seg.theme || null,
+        themeTag: null,
+        themeMatched: true,
+        status: 'success',
+        attempts: 0,
+        videoPath: seg.filePath,
+        duration: Math.round(dur * 1000) / 1000,
+        qcResult: null,
+        error: null,
+        createdAt: null,
+        completedAt: null,
+        libraryId: seg.libraryId || null,
+        trim: trimmed ? { inSec, outSec } : null,
+        // 记录规格，拼接时做归一化判断用（没有也能 ffprobe，属于加速信息）
+        spec: {
+          width: seg.width || null,
+          height: seg.height || null,
+          fps: seg.fps || null,
+          codec: seg.codec || null
+        },
+        cost: seg.cost || null
+      };
+    });
+    task.totalClips = task.clips.length;
+    task.totalDuration = Math.round(task.clips.reduce((s, c) => s + (Number(c.duration) || 0), 0) * 100) / 100;
+    task.isMultiPrompt = true;
+    task.librarySegments = true;
+    task.model = 'library';
+    task.status = 'pending';
+    task.updatedAt = new Date().toISOString();
+    this._saveTask(taskId);
+    return task;
+  }
+
+  // 创建「片段库成片」任务：片段现成，只跑拼接/循环/转码（配乐与终检留给剪辑页导出）
+  createLibraryTask(options = {}) {
+    const segments = Array.isArray(options.segments) ? options.segments.filter(s => s && s.filePath) : [];
+    if (segments.length === 0) throw new Error('没有可用的片段');
+    const resolution = options.resolution || '720p';
+    const totalDuration = segments.reduce((s, seg) => {
+      const full = Number(seg.durationSec) || 0;
+      const inSec = Math.max(0, Number(seg.inSec) || 0);
+      const outSec = (seg.outSec !== undefined && seg.outSec !== null) ? Number(seg.outSec) : full;
+      return s + Math.max(0.05, outSec - inSec);
+    }, 0);
+    const prompt = segments.map(s => s.prompt).filter(Boolean).join('\n') || '片段库成片';
+    const prompts = segments.map(s => ({ text: s.prompt || '', theme: s.theme || null }));
+    const stages = Array.isArray(options.stages) && options.stages.length
+      ? options.stages
+      : ['concatenation', 'loop_processing', 'transcoding'];
+    const task = this.createTask(prompt, {
+      model: 'library',
+      totalClips: segments.length,
+      clipDuration: Math.max(1, Math.round(totalDuration / segments.length)),
+      resolution,
+      prompts,
+      preset: options.preset || 'custom',
+      stages,
+      source: 'library'
+    });
+    this.setLibraryClips(task.taskId, segments);
+    return this.getTask(task.taskId);
+  }
+
   // 获取任务
+  // 历史任务是在配乐改造之前创建的，没有 bgm / bgmPlan / bgmResult / masterPath 字段。
+  // 统一补齐默认值，保证调用方拿到的数据形状一致（否则各处都要写 undefined 判断）。
+  // 注意：同一份补全逻辑也挂在 src/storage/index.js 上——storage.getTask() 走的是驱动，
+  // 不经过本文件，两处不共用就会出现「taskManager 读到有 bgm、storage 读到没有」的不一致。
   getTask(taskId) {
-    return this.tasks[taskId] || null;
+    return applyTaskDefaults(this.tasks[taskId]);
   }
 
   // 获取所有任务
-  getAllTasks() {
-    return Object.values(this.tasks).sort((a, b) =>
+  // 默认排除隐藏任务（片段库的「重新生成」单片段任务）：
+  // 它们只在片段库出现，不应污染任务历史与生产统计。
+  getAllTasks(options = {}) {
+    const list = Object.values(this.tasks).filter(t => options.includeHidden === true || !t.hidden);
+    return list.sort((a, b) =>
       new Date(b.createdAt) - new Date(a.createdAt)
     );
   }
@@ -501,8 +664,9 @@ class TaskManager {
       storyboard: 5,
       clip_generation: 60,
       concatenation: 8,
-      loop_processing: 7,
-      transcoding: 10,
+      loop_processing: 5,
+      audio_mix: 6,
+      transcoding: 8,
       final_qc: 5
     };
 
@@ -571,14 +735,20 @@ class TaskManager {
         error: c.error,
         theme: c.theme,
         themeTag: c.themeTag,
-        themeMatched: c.themeMatched,
-        trackId: c.trackId || null
+        themeMatched: c.themeMatched
+        // 注：片段级 trackId 已下线，配乐改为整片级，见下方 bgm / bgmPlan
       })),
+      // 整片配乐：配置、编辑计划、最近一次混音结果（前端「添加配乐」页面据此渲染时间轴）
+      bgm: task.bgm || null,
+      bgmPlan: task.bgmPlan || null,
+      bgmResult: task.bgmResult || null,
+      masterPath: task.masterPath || null,
       // 预估时间
       estimatedRemaining: estimated ? estimated.remainingMs : null,
       estimatedTotal: estimated ? estimated.totalEstimatedMs : null,
       elapsedTime: task.startedAt ? Date.now() - new Date(task.startedAt).getTime() : 0,
       outputPath: task.outputPath,
+      totalDurationSec: task.totalDuration || null,
       s3Url: task.s3Url,
       error: task.error,
       startedAt: task.startedAt,

@@ -19,7 +19,94 @@
 
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
+const tls = require('tls');
+const http = require('http');
+const https = require('https');
 const config = require('../../config');
+
+// ===== 代理支持 =====
+// Node 内置 fetch 不读 HTTPS_PROXY 环境变量（这是 Node 的已知行为），
+// 所以这里自己实现「CONNECT 隧道 + TLS」的代理请求，
+// 保证设了 HTTPS_PROXY 时上传也能走代理。
+function getProxyUrl() {
+  return (config.HTTPS_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy
+    || process.env.HTTP_PROXY || process.env.http_proxy || '').trim();
+}
+
+/** 通过 HTTP 代理发起请求（支持 CONNECT 隧道，用于 HTTPS） */
+function proxiedRequest(urlStr, options = {}) {
+  const proxy = new URL(getProxyUrl());
+  const target = new URL(urlStr);
+  const isHttps = target.protocol === 'https:';
+  const targetPort = target.port || (isHttps ? 443 : 80);
+
+  return new Promise((resolve, reject) => {
+    // 1. 连代理，建隧道
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: proxy.port || 8080,
+      method: 'CONNECT',
+      path: `${target.hostname}:${targetPort}`,
+      headers: { Host: `${target.hostname}:${targetPort}` },
+      timeout: 20000
+    });
+
+    connectReq.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return reject(new Error('代理隧道失败 HTTP ' + res.statusCode));
+      }
+      // 2. 在隧道里做 TLS 握手
+      const tlsSock = isHttps
+        ? tls.connect({ socket, servername: target.hostname })
+        : socket;
+
+      const reqOptions = {
+        hostname: target.hostname,
+        port: targetPort,
+        path: target.pathname + target.search,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        createConnection: () => tlsSock
+      };
+
+      const dataChunks = [];
+      let size = 0;
+      const req = https.request(reqOptions, (r) => {
+        r.on('data', (c) => { dataChunks.push(c); size += c.length; });
+        r.on('end', () => {
+          resolve({
+            ok: r.statusCode >= 200 && r.statusCode < 300,
+            status: r.statusCode,
+            headers: r.headers,
+            text: async () => Buffer.concat(dataChunks).toString('utf8'),
+            json: async () => JSON.parse(Buffer.concat(dataChunks).toString('utf8'))
+          });
+        });
+      });
+      req.on('error', reject);
+      if (options.body) req.write(options.body);
+      req.end();
+    });
+
+    connectReq.on('timeout', () => { connectReq.destroy(); reject(new Error('代理连接超时')); });
+    connectReq.on('error', reject);
+    connectReq.end();
+  });
+}
+
+/** 统一请求：有代理走代理，没代理用原生 fetch */
+async function doFetch(urlStr, options = {}) {
+  if (getProxyUrl()) {
+    try {
+      return await proxiedRequest(urlStr, options);
+    } catch (e) {
+      throw Object.assign(new Error(e.message), { code: e.code || 'PROXY_ERROR', isProxy: true });
+    }
+  }
+  return fetch(urlStr, options);
+}
 
 let client = null;
 let s3Mod = null;
@@ -193,11 +280,12 @@ async function uploadViaRest(localPath, key, cred, opts = {}) {
   const url = `${base}/storage/v1/object/${cred.bucket}/${key}`;
   const body = fs.readFileSync(localPath);
 
-  const res = await fetch(url, {
+  const res = await doFetch(url, {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + cred.secretAccessKey,
       'Content-Type': opts.contentType || 'video/mp4',
+      'Content-Length': String(body.length),
       'x-upsert': 'true',
       'cache-control': 'max-age=31536000'
     },
@@ -240,7 +328,7 @@ async function healthCheck() {
   if (driver === 'supabase' && !cred.isLegacyJwt) {
     const base = String(config.SUPABASE_URL || '').replace(/\/+$/, '');
     try {
-      const res = await fetch(`${base}/storage/v1/bucket`, {
+      const res = await doFetch(`${base}/storage/v1/bucket`, {
         headers: { Authorization: 'Bearer ' + cred.secretAccessKey }
       });
       if (!res.ok) {

@@ -46,6 +46,9 @@ create table if not exists tasks (
   current_step_key  text,
   error             text,
   final_qc          jsonb,
+  -- 质检结论版本：>=2 才可信；null/1 = 修复前产生，属「历史未验证」
+  -- 详见 src/storage/qcVersion.js 与 docs/spec/changelog.md
+  qc_version        integer,
   estimated_total_time integer,
   -- 时间戳
   created_at        timestamptz default now(),
@@ -76,6 +79,8 @@ create table if not exists clips (
   track_id      text,
   duration      numeric default 0,
   qc_result     jsonb,
+  -- 片段质检结论版本：>=2 才可信；null/1 = 历史未验证
+  qc_version    integer,
   error         text,
   created_at    timestamptz default now(),
   updated_at    timestamptz default now(),
@@ -84,6 +89,32 @@ create table if not exists clips (
 
 create index if not exists idx_clips_task    on clips (task_id);
 create index if not exists idx_clips_status  on clips (status);
+
+-- ==========================================
+-- 2.5 增量补列（已有库升级用，幂等）
+-- ==========================================
+-- create table if not exists 对「表已存在」是静默跳过的，
+-- 所以给老库补新列必须单独写 ALTER，否则 upgraded 的库会缺列、写入直接报错。
+alter table tasks add column if not exists qc_version integer;
+alter table clips add column if not exists qc_version integer;
+
+create index if not exists idx_tasks_qc_version on tasks (qc_version);
+create index if not exists idx_clips_qc_version on clips (qc_version);
+
+-- 历史记录明确标记为「未验证」（版本 1），不要标 2！
+-- 这一步只影响 qc_version 为 null 的行；已经打过标的行不会被改写。
+-- 注意：本语句只做标记，不改动 final_qc / qc_result 的内容。
+update tasks set qc_version = 1 where qc_version is null and final_qc is not null;
+update clips set qc_version = 1 where qc_version is null and qc_result is not null;
+
+-- ==========================================
+-- 2.6 配乐改造：任务级配乐计划（整片多轨时间轴）
+-- ==========================================
+-- 背景：配乐从「逐片段混音」改为「整片多轨时间轴」，编辑结果以 plan 形式存任务级。
+-- bgm_plan 结构见 src/processors/bgmPlan.js 顶部注释；bgm_result 记录最近一次混音结果。
+-- 单独 ALTER 补列，保证已升级的库也能拿到这两列（幂等）。
+alter table tasks add column if not exists bgm_plan   jsonb;
+alter table tasks add column if not exists bgm_result jsonb;
 
 -- ==========================================
 -- 3. 提示词库：沉淀可复用的提示词

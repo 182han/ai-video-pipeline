@@ -68,6 +68,34 @@ function nsfwThreshold(fallback = 0.8) {
   return n;
 }
 
+// 循环质检首尾相似度阈值：必须是 [0,1] 内的有限小数。
+// 口径见 qualityChecker.checkLoop：测的是「产物末尾 vs 产物开头」的 SSIM。
+// 实测参考（35s 样片）：直通 ≈0.50；真淡化 0.5s ≈0.95。
+function loopSsimThreshold(fallback = 0.9) {
+  const raw = env('QC_LOOP_SSIM_THRESHOLD');
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    console.warn(`[config] QC_LOOP_SSIM_THRESHOLD="${raw}" 非法（需 0~1 之间的数），已回退默认 ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
+// 无缝循环交叉淡化时长（秒）。必须 > 0 且有限；成片会比拼接产物短这个时长。
+// 0.5s 是实测选定的默认值：能看出是「化过去」而非「跳过去」，
+// 同时不至于让首尾两张差异大的画面出现明显双重曝光。
+function loopFadeDuration(fallback = 0.5) {
+  const raw = env('LOOP_FADE_DURATION');
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n > 10) {
+    console.warn(`[config] LOOP_FADE_DURATION="${raw}" 非法（需 0~10 秒之间），已回退默认 ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 module.exports = {
   // ===== 视频生成模型 API Key =====
   // 留空的模型在页面上还是可以选，但会用 Mock 模式模拟
@@ -117,7 +145,11 @@ module.exports = {
   OPENAI_BASE_URL: env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
   OPENAI_MODEL: env('OPENAI_MODEL', 'gpt-4o-mini'),
 
-  // 多模态模型（§9B 视觉内容质检用，需支持图像输入）
+  // 多模态模型（§9B 视觉内容质检 / NSFW 检测用，必须支持图像输入）
+  // 注意：文本模型和视觉模型常常不是同一家厂商（例如 DeepSeek 文本 + 阿里云 Qwen-VL 视觉），
+  // 所以 key / baseUrl / model 三者都可以单独覆盖；留空则回退到上面的 OPENAI_*。
+  MULTIMODAL_API_KEY: env('MULTIMODAL_API_KEY'),
+  MULTIMODAL_BASE_URL: env('MULTIMODAL_BASE_URL'),
   OPENAI_MULTIMODAL_MODEL: env('OPENAI_MULTIMODAL_MODEL', env('OPENAI_MODEL', 'gpt-4o-mini')),
 
   // 也可以用国内模型（比如 DeepSeek、智谱等）
@@ -125,6 +157,10 @@ module.exports = {
   // 例如 DeepSeek:
   //   OPENAI_BASE_URL=https://api.deepseek.com/v1
   //   OPENAI_MODEL=deepseek-chat
+  // 再单独配视觉模型（NSFW 检测要用，DeepSeek 不支持图像输入）：
+  //   MULTIMODAL_API_KEY=sk-阿里云百炼的key
+  //   MULTIMODAL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+  //   OPENAI_MULTIMODAL_MODEL=qwen-vl-plus
 
   // ===== 数据库 =====
   // 留空则继续使用本地 JSON 文件存储（向后兼容）
@@ -179,7 +215,15 @@ module.exports = {
   // 同时给 NSFW 检测一项独立的、可被 .env 覆盖的参数容器。
   QC: {
     // 合规红线：NSFW 置信度阈值，.env 里用 QC_NSFW_THRESHOLD 覆盖
-    nsfwThreshold: nsfwThreshold(0.8)
+    nsfwThreshold: nsfwThreshold(0.8),
+    // ⚠️ 应急演示开关（默认 false）：未配置多模态 Key 时是否放行 NSFW 检测。
+    // 开启后「检测未执行」会被当成通过——**生产环境必须保持关闭**，
+    // 否则等于没有合规检测。仅供演示/答辩临时使用。
+    nsfwAllowUnconfigured: /^(1|true|yes)$/i.test(String(process.env.QC_NSFW_ALLOW_UNCONFIGURED || '').trim()),
+    // 循环质检：产物末尾 vs 开头的 SSIM 阈值，.env 用 QC_LOOP_SSIM_THRESHOLD 覆盖
+    loopSsimThreshold: loopSsimThreshold(0.9),
+    // 无缝循环交叉淡化时长（秒），.env 用 LOOP_FADE_DURATION 覆盖
+    loopFadeDuration: loopFadeDuration(0.5)
   },
 
   // ===== 存储配置 =====
@@ -201,8 +245,10 @@ module.exports = {
 
   // ===== 服务器配置 =====
   SERVER: {
-    // 云平台会注入 PORT，本地默认 3000
-    port: parseInt(env('PORT', '3000'), 10),
+    // 云平台会注入 PORT；本地默认 3001。
+    // 注意：默认值必须与 app/.env 的 PORT、启动.bat / 启动.ps1 里硬编码的端口、
+    // 以及 AGENTS.md 的说明保持一致，否则会出现「服务起在 A 端口、脚本打开 B 端口」的空页面问题。
+    port: parseInt(env('PORT', '3001'), 10),
     // 是否启用 WebSocket
     websocket: env('WEBSOCKET', 'true') === 'true',
     // 访问口令（留空=不鉴权；公网部署强烈建议设置）

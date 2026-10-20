@@ -687,37 +687,22 @@ class PromptOptimizer {
 
   // ===== 提示词质检 =====
 
-  validatePrompt(prompt, theme = 'landscape') {
+  // 2026-10-19 按用户要求放宽：取消长度提示、取消"建议用英文"、
+  // 取消人物/文字关键词提示。现在只校验「不能为空」。
+  // 这些提示原本只影响展示、不阻止生成，但会对正常的中文提示词造成干扰。
+  validatePrompt(prompt) {
     const issues = [];
     const warnings = [];
 
-    // 长度检查
-    if (!prompt || prompt.trim().length === 0) {
+    if (!prompt || !String(prompt).trim()) {
       issues.push('提示词不能为空');
-    } else if (prompt.trim().length < 5) {
-      warnings.push('提示词太短，建议增加更多细节描述');
-    }
-
-    // 中文检测（视频生成模型通常需要英文提示词）
-    if (/[\u4e00-\u9fa5]/.test(prompt)) {
-      warnings.push('检测到中文，建议使用英文提示词以获得更好效果');
-    }
-
-    // 检查是否包含人物
-    if (/people|person|man|woman|child|girl|boy|human/i.test(prompt)) {
-      warnings.push('包含人物描述，部分模型可能生成效果不佳');
-    }
-
-    // 检查是否包含文字/水印
-    if (/text|watermark|logo|subtitle/i.test(prompt)) {
-      warnings.push('包含文字/水印关键词，建议添加到负面提示词中');
     }
 
     return {
       valid: issues.length === 0,
       issues,
       warnings,
-      score: Math.max(0, 100 - issues.length * 30 - warnings.length * 10)
+      score: issues.length === 0 ? 100 : 70
     };
   }
 

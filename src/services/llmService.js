@@ -78,6 +78,48 @@ class LLMService {
 
   // 提示词增强链已移除（§4.5 采用方案 A：LLM 分镜 + 模板结构化，无需独立增强链）
 
+  // ==========================================
+  // 多轮对话（提示词助手悬浮球用）
+  // 与 _chat 的区别：接收完整 messages 历史而非单条 user 消息。
+  // 失败返回 null（与 _chat 约定一致），不抛异常。
+  // ==========================================
+  async chatMulti(systemPrompt, messages, options = {}) {
+    const { apiKey, baseUrl, model } = this._resolve(options);
+    if (!apiKey) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...messages
+          ],
+          temperature: 0.8
+        }),
+        signal: controller.signal
+      });
+      if (!resp.ok) {
+        console.error(`[assistant] LLM 请求失败: HTTP ${resp.status}`);
+        return null;
+      }
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content?.trim() || null;
+    } catch (e) {
+      console.error('[assistant] LLM 调用异常:', e.message);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // 解析并规范化分镜 JSON：容错 markdown 代码块、字段缺失、数量不符
   _parseStoryboard(content, count) {
     let text = String(content).trim();

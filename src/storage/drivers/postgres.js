@@ -8,6 +8,14 @@
 
 // 注意层级：src/storage/drivers/ -> ../../.. 才是项目根（app/）
 const config = require('../../../config');
+const qcVersionUtil = require('../qcVersion');
+
+// 从一条质检结论里取 qcVersion（没有就 null），用于写库
+function qcVersionOfQC(qc, fallback) {
+  if (!qc || typeof qc !== 'object') return qcVersionUtil.normalize(fallback);
+  const own = qcVersionUtil.qcVersionOf(qc);
+  return own !== null ? own : qcVersionUtil.normalize(fallback);
+}
 
 let pool = null;
 
@@ -66,7 +74,12 @@ function rowToTask(row, clips) {
     s3Url: row.s3_url,
     runtimeConfig: row.runtime_config || {},
     error: row.error,
-    finalQC: row.final_qc,
+    // finalQC 带上可信度标注：qc_version < 2 的历史结论会被标成 legacy_unverified
+    finalQC: row.final_qc ? qcVersionUtil.annotateQC(row.final_qc, row.qc_version) : row.final_qc,
+    qcVersion: qcVersionUtil.normalize(row.qc_version),
+    // 整片配乐计划与最近一次混音结果（见 src/processors/bgmPlan.js）
+    bgmPlan: row.bgm_plan || null,
+    bgmResult: row.bgm_result || null,
     estimatedTotalTime: row.estimated_total_time,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -88,7 +101,8 @@ function rowToClip(row) {
     videoPath: row.video_path,
     trackId: row.track_id,
     duration: Number(row.duration) || 0,
-    qcResult: row.qc_result,
+    qcResult: row.qc_result ? qcVersionUtil.annotateQC(row.qc_result, row.qc_version) : row.qc_result,
+    qcVersion: qcVersionUtil.normalize(row.qc_version),
     error: row.error
   };
 }
@@ -123,11 +137,13 @@ module.exports = {
           task_id, status, prompt, optimized_prompt, is_multi_prompt,
           model, theme, total_clips, clip_duration, resolution, total_duration,
           output_path, s3_url, runtime_config, steps, current_step, current_step_key,
-          error, final_qc, estimated_total_time,
+          error, final_qc, qc_version, estimated_total_time,
+          bgm_plan, bgm_result,
           created_at, started_at, completed_at, updated_at, deleted_at
         ) values (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-          coalesce($21, now()),$22,$23, now(),$24
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+          $22,$23,
+          coalesce($24, now()),$25,$26, now(),$27
         )
         on conflict (task_id) do update set
           status = excluded.status,
@@ -148,6 +164,9 @@ module.exports = {
           current_step_key = excluded.current_step_key,
           error = excluded.error,
           final_qc = excluded.final_qc,
+          qc_version = excluded.qc_version,
+          bgm_plan = excluded.bgm_plan,
+          bgm_result = excluded.bgm_result,
           estimated_total_time = excluded.estimated_total_time,
           started_at = excluded.started_at,
           completed_at = excluded.completed_at,
@@ -161,7 +180,11 @@ module.exports = {
         JSON.stringify(task.runtimeConfig || {}), JSON.stringify(task.steps || {}),
         task.currentStep || null, task.currentStepKey || null, task.error || null,
         task.finalQC ? JSON.stringify(task.finalQC) : null,
-        task.estimatedTotalTime || null, task.createdAt || null,
+        qcVersionOfQC(task.finalQC, task.qcVersion),
+        task.estimatedTotalTime || null,
+        task.bgmPlan ? JSON.stringify(task.bgmPlan) : null,
+        task.bgmResult ? JSON.stringify(task.bgmResult) : null,
+        task.createdAt || null,
         task.startedAt || null, task.completedAt || null,
         task.deletedAt || null
       ]);
@@ -173,13 +196,14 @@ module.exports = {
         await client.query(`
           insert into clips (
             task_id, clip_index, prompt, theme, theme_tag, theme_matched,
-            status, attempts, video_path, track_id, duration, qc_result, error
-          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            status, attempts, video_path, track_id, duration, qc_result, qc_version, error
+          ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         `, [
           task.taskId, c.index ?? 0, c.prompt || '', c.theme || null,
           c.themeTag || null, c.themeMatched !== false, c.status || 'pending',
           c.attempts || 0, c.videoPath || null, c.trackId || null,
           c.duration || 0, c.qcResult ? JSON.stringify(c.qcResult) : null,
+          qcVersionOfQC(c.qcResult, c.qcVersion ?? task.qcVersion),
           c.error || null
         ]);
       }

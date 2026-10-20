@@ -10,6 +10,9 @@
 // ==========================================
 
 const config = require('../../config');
+// 质检结论可信度判定：与具体驱动无关，三种驱动共用同一份规则
+const qcVersionUtil = require('./qcVersion');
+const { applyTaskDefaults } = require('../taskDefaults');
 
 let driver = null;
 
@@ -53,17 +56,17 @@ async function saveTask(task) {
   return getDriver().saveTask(task);
 }
 
-/** 读取单个任务 */
+/** 读取单个任务（质检结论已带可信度标注 + 历史任务字段补全） */
 async function getTask(taskId) {
-  return getDriver().getTask(taskId);
+  const t = await getDriver().getTask(taskId);
+  return t ? applyTaskDefaults(annotateTaskQC(t)) : t;
 }
 
-/** 读取全部任务 */
+/** 读取全部任务（质检结论已带可信度标注 + 历史任务字段补全） */
 async function getAllTasks() {
-  return getDriver().getAllTasks();
-}
-
-/** 删除任务 */
+  const tasks = await getDriver().getAllTasks();
+  return Array.isArray(tasks) ? tasks.map(t => applyTaskDefaults(annotateTaskQC(t))) : tasks;
+}/** 删除任务 */
 async function deleteTask(taskId) {
   return getDriver().deleteTask(taskId);
 }
@@ -113,6 +116,26 @@ async function saveRules(rules) {
 }
 async function getRules() {
   return getDriver().getRules();
+}
+
+// ===== 质检结论版本（qcVersion）=====
+// 历史缺陷修复前落库的质检结论都是伪造的 pass，靠版本号区分：
+//   >= 2 可信；null / < 2 = 历史未验证。
+// API 层调用 annotateTaskQC / annotateQC 给返回的 JSON 补上 qcTrusted / qcLabel 字段。
+
+/** 判断一条质检结论是否可信（>=2） */
+function isTrustedQC(qc, fallbackVersion) {
+  return qcVersionUtil.isTrustedQC(qc, fallbackVersion);
+}
+
+/** 给单条质检结论补可信度标注（不改原对象） */
+function annotateQC(qc, fallbackVersion) {
+  return qcVersionUtil.annotateQC(qc, fallbackVersion);
+}
+
+/** 给整个任务对象补可信度标注（含 finalQC 与各片段 qcResult） */
+function annotateTaskQC(task) {
+  return qcVersionUtil.annotateTask(task);
 }
 
 // ===== 迁移 =====
@@ -177,5 +200,11 @@ module.exports = {
   deleteTemplate,
   saveRules,
   getRules,
-  migrateFromJsonFiles
+  migrateFromJsonFiles,
+  // 质检结论版本
+  QC_VERSION: qcVersionUtil.QC_VERSION,
+  QC_TRUSTED_FROM: qcVersionUtil.TRUSTED_FROM,
+  isTrustedQC,
+  annotateQC,
+  annotateTaskQC
 };

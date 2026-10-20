@@ -376,6 +376,18 @@ textarea { resize: vertical; min-height: 100px; }
   color: var(--accent);
   background: var(--accent-bg);
 }
+.prompt-draft-status {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+  margin-right: 8px;
+  opacity: 0;
+  transition: opacity .25s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.prompt-draft-status.show { opacity: 1; }
+.prompt-draft-status.saved { color: #15803d; }
 #promptInput {
   min-height: 240px;
   line-height: 1.6;
@@ -879,6 +891,66 @@ select {
   border-bottom: none;
 }
 
+.gen-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gen-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+.gen-paused-banner {
+  background: #fff8e6;
+  border: 1px solid #f0c36d;
+  color: #8a6d1f;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.qc-strict-block {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border-light);
+}
+.qc-strict-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.qc-strict-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  cursor: pointer;
+  background: var(--bg-secondary);
+  transition: all .15s;
+  user-select: none;
+}
+.qc-strict-item:hover { border-color: var(--border); }
+.qc-strict-item input { margin: 0; cursor: pointer; }
+.qc-strict-item.locked {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.qc-strict-item:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
 .clips-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
@@ -1168,6 +1240,7 @@ select {
 .status-generating { background: #fff8e0; color: #b8860b; }
 .status-failed { background: #ffecec; color: #c73030; }
 .status-pending { background: #e8e8ed; color: #86868b; }
+.status-paused { background: #fff8e6; color: #8a6d1f; border: 1px dashed #f0c36d; }
 .status-partial { background: #fff4e0; color: #b8650b; }
 .history-actions {
   display: flex;
@@ -2133,60 +2206,192 @@ select {
 }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
 
-/* ===== 配乐分配（提示词环节逐段配乐） ===== */
-.bgm-assign-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
-.bgm-assign-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border, #e5e5ea);
-  border-radius: 10px; background: var(--bg-card, #fff);
+/* ===== 配乐轨道勾选 ===== */
+.bgm-check {
+  display: flex; align-items: baseline; gap: 6px; padding: 6px 0;
+  font-size: 13px; color: var(--text-primary, #1d1d1f); cursor: pointer;
 }
-.bgm-assign-row:hover { border-color: #c7c7cc; }
-.bgm-assign-seg {
-  flex: 0 0 40px; text-align: center; font-size: 12px; font-weight: 600;
-  color: var(--text-secondary, #6e6e73); background: var(--bg-sub, #f5f5f7);
-  border-radius: 6px; padding: 4px 0;
-}
-.bgm-assign-theme { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary, #6e6e73); max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bgm-assign-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
-.bgm-assign-row.is-manual .bgm-assign-seg { background: #e8f2ff; color: #1a73e8; }
-.bgm-mode-chip {
-  display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
-  padding: 2px 8px; border-radius: 999px; font-size: 11px;
-  background: var(--primary-light, #eef4ff); color: #1a73e8;
-}
-/* 配乐模式开关：把下拉改成分段选择 */
-.bgm-mode-segments { display: flex; gap: 8px; flex-wrap: wrap; }
-.bgm-mode-segment {
-  padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 8px;
-  font-size: 12px; cursor: pointer; user-select: none; color: var(--text-secondary, #6e6e73);
-}
-.bgm-mode-segment.selected { background: var(--primary-light, #eef4ff); border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
+.bgm-check input[type=checkbox] { margin: 0; cursor: pointer; }
+.bgm-check-hint { font-size: 11px; color: var(--text-tertiary, #86868b); line-height: 1.5; }
 
-/* ===== 提示词内【主题】内联联想 ===== */
-.theme-suggest-wrap { position: relative; }
-.theme-suggest {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
-  background: #fff; border: 1px solid var(--border, #e5e5ea); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); max-height: 220px; overflow-y: auto;
-}
-.theme-suggest-item {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
-  font-size: 13px; color: var(--text-primary, #1d1d1f);
-}
-.theme-suggest-item .suggest-emoji { font-size: 15px; }
-.theme-suggest-item .suggest-desc { color: var(--text-tertiary, #86868b); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.theme-suggest-item:hover, .theme-suggest-item.active { background: var(--primary-light, #eef4ff); }
-.theme-suggest-empty { padding: 10px 12px; font-size: 12px; color: var(--text-tertiary, #86868b); }
+/* 说明：逐段配乐的样式（bgm-assign-* / bgm-detail-*）已随功能下线移除，
+   配乐编辑在独立页面 bgm-editor.html 中，样式也在该页面内。 */
 
-/* ===== 任务详情：逐段配乐 ===== */
-.bgm-detail-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
-.bgm-detail-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border, #e5e5ea); border-radius: 10px; }
-.bgm-detail-seg { flex: 0 0 48px; font-size: 12px; font-weight: 600; color: var(--text-secondary, #6e6e73); }
-.bgm-detail-theme { flex: 0 0 90px; font-size: 12px; color: var(--text-secondary, #6e6e73); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bgm-detail-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
-.bgm-detail-status { flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary, #a1a1a6); min-width: 46px; text-align: right; }
-.bgm-detail-status.done { color: #34c759; }
-.bgm-detail-status.fail { color: #c73030; }
+/* ===== 提示词助手悬浮球（幽灵形态 · 冷白金） =====
+   规格来源：design/ui-ux/assistant-ball-preview.html（配色 1）
+   契约：docs/requirements/提示词助手悬浮球-需求.md */
+#assistantBall {
+  position: fixed;
+  left: 0; top: 0;
+  width: 96px; height: 96px;
+  z-index: 1900;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform .28s cubic-bezier(.34,1.56,.64,1);
+  will-change: transform;
+  -webkit-tap-highlight-color: transparent;
+}
+#assistantBall svg { width: 96px; height: 96px; display: block; pointer-events: none; }
+#assistantBall:hover { transform: scale(1.12) rotate(-6deg); }   /* 悬停：放大 + 微旋转 */
+#assistantBall.dragging { cursor: grabbing; transition: none; transform: scale(1.06); }
+#assistantBall.open { transform: scale(1.12) rotate(-6deg); }    /* 对话中：保持放大倾斜 */
+
+/* 思考中：眼睛上移的小幅浮动 */
+@keyframes asst-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+#assistantBall.thinking svg { animation: asst-float 1.6s ease-in-out infinite; }
+
+/* ===== 面板 ===== */
+#assistantPanel {
+  position: fixed;
+  width: min(360px, 92vw);
+  height: min(520px, 72vh);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 1901;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13.5px;
+}
+#assistantPanel.show { display: flex; }
+.assistant-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.assistant-head-title { font-size: 14px; font-weight: 600; }
+.assistant-head-sub { font-size: 11px; color: var(--text-tertiary); }
+.assistant-close {
+  margin-left: auto;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-secondary); font-size: 12px;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+}
+.assistant-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.assistant-msgs {
+  flex: 1; overflow-y: auto;
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-primary);
+}
+.assistant-msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+}
+.assistant-msg.bot {
+  align-self: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  border-bottom-left-radius: 3px;
+}
+.assistant-msg.me {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.assistant-msg.sys {
+  align-self: center;
+  background: none; color: var(--text-tertiary);
+  font-size: 11.5px; text-align: center; max-width: 100%;
+}
+.assistant-prompt-box {
+  align-self: stretch;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.assistant-prompt-box .cap {
+  font-size: 11px; color: var(--text-tertiary);
+  margin-bottom: 5px; display: block;
+}
+.assistant-prompt-box pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--text-primary);
+  margin-bottom: 9px;
+}
+.assistant-use {
+  width: 100%;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  padding: 7px 10px; font-size: 12.5px; cursor: pointer;
+  font-family: inherit;
+}
+.assistant-use:hover { background: var(--accent-hover); }
+
+.assistant-typing { display: flex; gap: 4px; align-items: center; padding: 3px 0; }
+.assistant-typing i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: asst-dot 1.3s infinite ease-in-out;
+}
+.assistant-typing i:nth-child(2) { animation-delay: .18s; }
+.assistant-typing i:nth-child(3) { animation-delay: .36s; }
+@keyframes asst-dot {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30%           { opacity: 1;  transform: translateY(-3px); }
+}
+
+.assistant-input {
+  display: flex; gap: 8px; align-items: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+#assistantInput {
+  flex: 1; resize: none;
+  min-height: 34px; max-height: 96px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px; font-family: inherit; line-height: 1.5;
+  background: var(--bg-secondary); color: var(--text-primary);
+}
+#assistantInput:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+#assistantSend {
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  padding: 8px 14px; font-size: 13px; cursor: pointer;
+  font-family: inherit; flex-shrink: 0;
+}
+#assistantSend:hover { background: var(--accent-hover); }
+#assistantSend:disabled { opacity: .5; cursor: not-allowed; }
+
+.assistant-nokey {
+  padding: 18px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px; line-height: 1.7;
+}
+.assistant-nokey button {
+  margin-top: 12px;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  padding: 8px 18px; font-size: 13px; cursor: pointer;
+  font-family: inherit;
+}
+.assistant-nokey button:hover { background: var(--accent-hover); }
 </style>
 </head>
 <body>
@@ -2224,8 +2429,12 @@ select {
           <span class="nav-icon ic-history"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
           <span>历史记录</span>
         </div>
-        <div class="nav-item" onclick="window.location.href='/music-library.html'">
+        <div class="nav-item" onclick="window.location.href='/bgm-editor.html'">
           <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span>添加配乐</span>
+        </div>
+        <div class="nav-item" onclick="window.location.href='/music-library.html'">
+          <span class="nav-icon ic-music"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
           <span>配乐库存</span>
         </div>
       </div>
@@ -2291,6 +2500,7 @@ select {
           <div class="form-group theme-suggest-wrap">
             <div class="label-row">
               <label class="form-label">提示词</label>
+              <span class="prompt-draft-status" id="promptDraftStatus"></span>
               <button type="button" class="expand-btn" id="expandPromptBtn" title="全屏编辑（Ctrl+Shift+E）">⤢ 放大编辑</button>
             </div>
             <textarea id="promptInput" rows="12" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
@@ -2322,16 +2532,29 @@ select {
             <label class="form-label">配乐模式</label>
             <select id="bgmModeSelect" onchange="onBgmModeChange()">
               <option value="off">不添加配乐</option>
-              <option value="auto">自动配乐（按每段主题推荐轻音乐/环境音）</option>
+              <option value="auto">自动配乐（按成片时长铺满）</option>
             </select>
-            <div class="form-hint" id="bgmModeHint">开启后，系统将按每段主题自动分配音轨，你可在此逐段预览与手动更换；无可用音轨时自动跳过配乐。</div>
+            <div class="form-hint" id="bgmModeHint">勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「添加配乐」页面做精细调整（裁剪、变速、关键帧等）。</div>
           </div>
           <div id="bgmAssignSection" style="display:none;">
-            <div class="form-hint" style="margin:4px 0 2px;">
+            <div class="form-hint" style="margin:4px 0 6px;">
               <span id="bgmTrackCountText">已加载 0 条音轨</span>
-              <span class="bgm-mode-chip">自动分配（按主题匹配 mood）</span>
             </div>
-            <div class="bgm-assign-list" id="bgmAssignList"></div>
+            <div class="form-group">
+              <label class="form-label">配乐内容</label>
+              <label class="bgm-check"><input type="checkbox" id="bgmWantMusic" checked onchange="onBgmTracksChange()"> <span>轻音乐</span><span class="bgm-check-hint">按库存顺序一首接一首铺满全片</span></label>
+              <label class="bgm-check"><input type="checkbox" id="bgmWantAmbient" onchange="onBgmTracksChange()"> <span>环境音</span><span class="bgm-check-hint">选一首整片循环垫底；与轻音乐同时开启时自动压低到 -18dB</span></label>
+            </div>
+            <div class="form-group" id="bgmMusicGroup">
+              <label class="form-label">开场曲</label>
+              <select id="bgmStartTrack" class="form-input"></select>
+              <div class="form-hint">不选则随机开始。</div>
+            </div>
+            <div class="form-group" id="bgmAmbientGroup" style="display:none;">
+              <label class="form-label">环境音曲目</label>
+              <select id="bgmAmbientTrack" class="form-input"></select>
+              <div class="form-hint">不选则随机选一首，整片循环播放。</div>
+            </div>
           </div>
         </div>
 
@@ -2377,6 +2600,48 @@ select {
                 <option value="4K">4K 超清（可灵 Kling 3.0）</option>
               </select>
               <div class="form-hint" id="resHint" style="display:none;"></div>
+            </div>
+          </div>
+          <!-- 流水线档位：核心链必选 + 增强层可选。默认 final 与旧行为一致。
+               契约见 docs/spec/frontend-integration-spec.md -->
+          <div class="form-group">
+            <label class="form-label">执行档位</label>
+            <select id="presetSelect">
+              <option value="quick">快速验证（核心链 + 拼接）—— 先看风格对不对，最省</option>
+              <option value="daily">日常交付（加循环 / 转码 / 配乐，不含终检）</option>
+              <option value="final" selected>最终成片（全部环节，含终检）</option>
+              <option value="clips_only">片段包（仅核心链，不产出成片，供人工精剪）</option>
+              <option value="custom">自定义（手动勾选环节）</option>
+            </select>
+            <div class="form-hint" id="presetHint">快速验证档只跑到拼接；之后可在任务详情里「补成最终成片」，片段不会重新生成。</div>
+          </div>
+          <div class="form-group" id="customStagesWrap" style="display:none;">
+            <label class="form-label">选择要执行的环节</label>
+            <div class="form-hint" style="margin-bottom:8px;">核心链（提示词 / 分镜 / 片段生成）始终必选；依赖会自动补齐。</div>
+            <div class="qc-strict-list" id="customStagesList">
+              <label class="qc-strict-item locked" title="核心链必选"><input type="checkbox" checked disabled data-stage="prompt_optimize"><span>提示词优化</span></label>
+              <label class="qc-strict-item locked" title="核心链必选"><input type="checkbox" checked disabled data-stage="storyboard"><span>分镜头生成</span></label>
+              <label class="qc-strict-item locked" title="核心链必选"><input type="checkbox" checked disabled data-stage="clip_generation"><span>视频片段生成</span></label>
+              <label class="qc-strict-item"><input type="checkbox" checked data-stage="concatenation"><span>视频拼接</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-stage="loop_processing"><span>无缝循环</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-stage="transcoding"><span>转码导出</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-stage="audio_mix"><span>配乐混音</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-stage="final_qc"><span>最终综合质检</span></label>
+            </div>
+          </div>
+          <div class="qc-strict-block">
+            <label class="form-label">质检严格度</label>
+            <div class="form-hint" style="margin-bottom:8px;">勾选的项没通过 = 该片段判失败并重试；不勾的项没通过 = 只记警告，片段仍算成功。</div>
+            <div class="qc-strict-list" id="qcStrictList">
+              <label class="qc-strict-item locked" title="合规红线，不可关闭">
+                <input type="checkbox" checked disabled data-qc-locked="nsfw">
+                <span>NSFW 合规（锁定）</span>
+              </label>
+              <label class="qc-strict-item"><input type="checkbox" checked data-qc="blackFrame"><span>黑帧检测</span></label>
+              <label class="qc-strict-item"><input type="checkbox" checked data-qc="duration"><span>时长校验</span></label>
+              <label class="qc-strict-item"><input type="checkbox" checked data-qc="blur"><span>模糊检测</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-qc="duplicate"><span>重复帧检测</span></label>
+              <label class="qc-strict-item"><input type="checkbox" data-qc="contentMatch"><span>视觉内容匹配</span></label>
             </div>
           </div>
         </div>
@@ -2458,9 +2723,14 @@ select {
 
         <!-- 有任务时的进度视图 -->
         <div id="genProgressState" style="display:none;">
-        <div class="page-header">
-          <h1 class="page-title">生成中</h1>
-          <p class="page-desc">AI 正在为你创作视频，请稍候...</p>
+        <div class="page-header gen-page-header">
+          <div>
+            <h1 class="page-title" id="genPageTitle">生成中</h1>
+            <p class="page-desc" id="genPageDesc">AI 正在为你创作视频，请稍候...</p>
+          </div>
+          <div class="gen-header-actions">
+            <button class="btn btn-secondary" id="pauseGenBtn" onclick="togglePauseGen()" style="display:none;">⏸ 暂停</button>
+          </div>
         </div>
 
         <!-- 顶部进度和时间信息 -->
@@ -2727,7 +2997,24 @@ select {
           <div class="detail-label">耗时</div>
           <div class="detail-value" id="detailDuration">-</div>
         </div>
+        <div class="detail-item">
+          <div class="detail-label">执行档位</div>
+          <div class="detail-value" id="detailPreset">-</div>
+        </div>
+        <div class="detail-item">
+          <div class="detail-label">质检可信度</div>
+          <div class="detail-value" id="detailQcTrust">-</div>
+        </div>
       </div>
+    </div>
+
+    <!-- 补跑：按目标档位补齐剩余环节，已成功片段不重新生成。
+         契约见 docs/spec/frontend-integration-spec.md -->
+    <div class="modal-section" id="continueSection" style="display:none;">
+      <div class="modal-section-title">补跑</div>
+      <div class="form-hint" id="continueHint" style="margin-bottom:8px;">-</div>
+      <button class="btn btn-primary" style="font-size:13px;" id="continueBtn">补成最终成片</button>
+      <div class="form-hint" style="margin-top:6px;">片段不会重新生成，只补做缺少的环节。</div>
     </div>
 
     <div class="modal-section">
@@ -2736,9 +3023,9 @@ select {
     </div>
 
     <div class="modal-section" id="bgmDetailSection" style="display:none;">
-      <div class="modal-section-title">片段配乐</div>
-      <div class="form-hint" style="margin-bottom:8px;">对单段更换或移除配乐，仅重混该片段并快速重出片，不影响其他片段与视频本身。改动后可重新下载视频。</div>
-      <div class="bgm-detail-list" id="bgmDetailList"></div>
+      <div class="modal-section-title">配乐</div>
+      <div class="form-hint" style="margin-bottom:8px;" id="bgmDetailSummary">-</div>
+      <button class="btn btn-secondary" style="font-size:13px;" onclick="openBgmEditor(currentDetailTask && currentDetailTask.taskId)">去「添加配乐」编辑 →</button>
     </div>
 
     <div class="modal-section" id="errorAnalysisSection" style="display:none;">
@@ -2918,11 +3205,16 @@ select {
       </div>
 
       <div class="form-group">
-        <label class="form-label">多模态 API Key（§9B 视觉质检，可选）</label>
+        <label class="form-label">多模态 API Key（NSFW 合规检测 / 视觉质检）</label>
         <div class="password-input-wrapper">
           <input type="password" id="keyMultimodal" placeholder="留空则复用上方 LLM Key">
           <span class="toggle-pw" onclick="togglePw('keyMultimodal', this)">显示</span>
         </div>
+        <div class="test-key-row">
+          <button type="button" class="btn btn-secondary test-key-btn" id="testMultimodalBtn" style="padding:6px 14px;font-size:12px;">测试连接</button>
+          <span class="test-result" id="multimodalTestResult"></span>
+        </div>
+        <div class="form-hint">⚠️ 必须支持图像输入（如 qwen-vl-plus / glm-4v-flash）。DeepSeek 等纯文本模型不能用于此项。</div>
       </div>
       <div class="form-group">
         <label class="form-label">多模态 API 地址（可选）</label>
@@ -3067,6 +3359,8 @@ let themeSuggestionIndex = -1;
 let ws = null;
 let editingTemplateId = null;
 let currentPage = 'create';
+// 生成暂停状态（全局区声明，避免 TDZ）
+let isGenPaused = false;
 
 // 主题 emoji 映射
 const themeEmojis = {
@@ -3122,9 +3416,11 @@ function switchPage(pageName) {
 const settingsModal = document.getElementById('settingsModal');
 const templateEditModal = document.getElementById('templateEditModal');
 const infoModal = document.getElementById('infoModal');
+// 这个漏了会导致下方数组引用时 ReferenceError，整个脚本中断（点生成无反应）
+const historyDetailModal = document.getElementById('historyDetailModal');
 
 document.getElementById('cancelSettings').addEventListener('click', () => settingsModal.classList.remove('show'));
-document.getElementById('saveSettings').addEventListener('click', saveSettings);
+document.getElementById('saveSettings').addEventListener('click', closeAndApplySettings);
 
 // 测试 Agnes API Key
 // 通用测试函数
@@ -3153,7 +3449,9 @@ async function testApiKey(type, keyInputId, resultId, baseUrlInputId) {
     const data = await res.json();
     
     if (data.success) {
-      resultEl.textContent = '✅ ' + data.message + '，记得点下方「保存」按钮生效';
+      // 测试通过即自动落盘，避免「测通了但忘记保存」导致生成时仍报未配置
+      const saved = persistSettingsSilently();
+      resultEl.textContent = '✅ ' + data.message + (saved ? '（已自动保存）' : '，请手动点保存');
       resultEl.className = data.warning ? 'test-result' : 'test-result success';
       if (data.warning) resultEl.style.color = '#f59e0b';
     } else {
@@ -3194,7 +3492,8 @@ async function testApiKeyWithModel(type, keyInputId, resultId, baseUrl, model) {
     const data = await res.json();
 
     if (data.success) {
-      resultEl.textContent = '✅ ' + data.message + '，记得点下方「保存」按钮生效';
+            const __saved = persistSettingsSilently();
+      resultEl.textContent = '✅ ' + data.message + (__saved ? '（已自动保存）' : '，请手动点保存');
       resultEl.className = data.warning ? 'test-result' : 'test-result success';
       if (data.warning) resultEl.style.color = '#f59e0b';
     } else {
@@ -3272,6 +3571,67 @@ document.getElementById('testDashScopeBtn').addEventListener('click', () => {
 document.getElementById('testLLMBtn').addEventListener('click', () => {
   testApiKey('llm', 'keyLLM', 'llmTestResult', 'keyLLMUrl');
 });
+
+// 多模态（NSFW 检测）测试：留空的多项分别回退到 LLM 的对应值
+document.getElementById('testMultimodalBtn').addEventListener('click', () => {
+  const mmKey = document.getElementById('keyMultimodal').value.trim();
+  const llmKey = document.getElementById('keyLLM').value.trim();
+  const key = mmKey || llmKey;
+  const baseUrl = document.getElementById('keyMultimodalUrl').value.trim()
+    || document.getElementById('keyLLMUrl').value.trim();
+  const model = document.getElementById('keyMultimodalModel').value.trim()
+    || '';
+  testMultimodalConnection(key, baseUrl, model);
+});
+
+// 多模态连接测试：先用 /models 验证 key，再发一张最小图片验证「能看图」
+async function testMultimodalConnection(key, baseUrl, model) {
+  const resultEl = document.getElementById('multimodalTestResult');
+  if (!resultEl) return;
+  if (!key) {
+    resultEl.textContent = '请先输入多模态 API Key';
+    resultEl.className = 'test-result error';
+    return;
+  }
+  resultEl.textContent = '测试中（验证 key + 图像能力）...';
+  resultEl.className = 'test-result';
+  try {
+    const res = await fetch('/api/test-api-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'multimodal', apiKey: key, baseUrl, model })
+    });
+    const data = await res.json();
+    if (data.success) {
+      // 测试通过即自动写入 localStorage。
+      // 否则用户很容易「测试通过 → 忘记点保存 → 生成时仍报未配置」。
+      let autoSaved = false;
+      try {
+        const cfg = JSON.parse(localStorage.getItem('vs_config') || '{}');
+        cfg.multimodalKey = document.getElementById('keyMultimodal').value.trim();
+        cfg.multimodalUrl = document.getElementById('keyMultimodalUrl').value.trim();
+        cfg.multimodalModel = document.getElementById('keyMultimodalModel').value.trim();
+        localStorage.setItem('vs_config', JSON.stringify(cfg));
+        autoSaved = true;
+      } catch (e) {}
+      resultEl.textContent = '✅ ' + data.message + (autoSaved ? '（已自动保存）' : '，请手动点保存');
+      resultEl.className = 'test-result success';
+      resultEl.style.color = '';
+    } else {
+      resultEl.textContent = '❌ ' + data.error;
+      resultEl.className = 'test-result error';
+      // 失败时把账号下的模型列出来，方便直接挑一个填进「模型名称」
+      if (data.models && data.models.length) {
+        const pick = data.models.filter(m => /-vl-|-vl$|vl-max|vl-plus|vision|4v/i.test(m));
+        const list = (pick.length ? pick : data.models).slice(0, 12);
+        resultEl.textContent += '｜可选视觉模型：' + list.join(', ');
+      }
+    }
+  } catch (e) {
+    resultEl.textContent = '❌ 请求失败: ' + e.message;
+    resultEl.className = 'test-result error';
+  }
+}
 document.getElementById('cancelTemplateEdit').addEventListener('click', () => templateEditModal.classList.remove('show'));
 document.getElementById('saveTemplateEdit').addEventListener('click', saveTemplate);
 document.getElementById('closeInfo').addEventListener('click', () => infoModal.classList.remove('show'));
@@ -3428,6 +3788,21 @@ function saveSettings() {
     multimodalModel: document.getElementById('keyMultimodalModel').value.trim()
   };
   localStorage.setItem('vs_config', JSON.stringify(cfg));
+  return cfg;
+}
+
+// 只写 localStorage，不关闭弹窗 —— 供「测试连接通过后自动保存」复用
+function persistSettingsSilently() {
+  try {
+    saveSettings();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function closeAndApplySettings() {
+  saveSettings();
   settingsModal.classList.remove('show');
   loadModels();
   updateStatus();
@@ -3485,6 +3860,34 @@ function syncResolutionOptions(modelId) {
 document.getElementById('modelSelect').addEventListener('change', () => {
   syncResolutionOptions(document.getElementById('modelSelect').value);
 });
+
+// ==========================================
+// 执行档位联动
+// ==========================================
+// 仅 custom 档显示「环节勾选」区域。其余档位由后端 resolveStages 决定，
+// 前端不重复计算依赖（避免与后端规则漂移）。
+(function initPresetUI() {
+  const sel = document.getElementById('presetSelect');
+  const wrap = document.getElementById('customStagesWrap');
+  const hint = document.getElementById('presetHint');
+  if (!sel || !wrap) return;
+
+  const HINTS = {
+    quick: '快速验证档只跑到拼接；之后可在任务详情里「补成最终成片」，片段不会重新生成。',
+    daily: '日常交付档含循环/转码/配乐，但不做最终综合质检。',
+    final: '最终成片档执行全部环节，与旧行为一致。',
+    clips_only: '片段包档只产出片段、不生成成片，适合人工精剪。',
+    custom: '核心链（提示词/分镜/片段生成）始终必选；勾选的环节若缺前置依赖，后端会自动补齐。'
+  };
+
+  function sync() {
+    const v = sel.value;
+    wrap.style.display = v === 'custom' ? 'block' : 'none';
+    if (hint) hint.textContent = HINTS[v] || '';
+  }
+  sel.addEventListener('change', sync);
+  sync();
+})();
 
 // ==========================================
 // 模板管理
@@ -3719,6 +4122,84 @@ function themeSuggestPick(index) {
 (function initPromptBox() {
   var ta = document.getElementById('promptInput');
   if (!ta) return;
+
+  // ===== 草稿自动保存：切换页面/刷新后不丢失 =====
+  var DRAFT_KEY = 'vs_prompt_draft';
+  var DRAFT_TS_KEY = 'vs_prompt_draft_ts';
+  var statusEl = document.getElementById('promptDraftStatus');
+  var saveTimer = null;
+  var lastSaved = '';
+
+  function showStatus(text, ok) {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.classList.add('show');
+    statusEl.classList.toggle('saved', !!ok);
+    clearTimeout(statusEl._hideTimer);
+    statusEl._hideTimer = setTimeout(function () {
+      statusEl.classList.remove('show');
+    }, 2500);
+  }
+
+  function saveDraft(immediate) {
+    var v = ta.value;
+    if (v === lastSaved) return;
+    try {
+      if (v) {
+        localStorage.setItem(DRAFT_KEY, v);
+        localStorage.setItem(DRAFT_TS_KEY, String(Date.now()));
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+        localStorage.removeItem(DRAFT_TS_KEY);
+      }
+      lastSaved = v;
+      if (immediate) showStatus('草稿已保存', true);
+    } catch (e) {
+      // localStorage 满或不可用时静默失败
+    }
+  }
+
+  // 恢复草稿（仅在输入框为空时，避免覆盖已有内容）
+  try {
+    var draft = localStorage.getItem(DRAFT_KEY);
+    var ts = parseInt(localStorage.getItem(DRAFT_TS_KEY) || '0', 10);
+    if (draft && !ta.value) {
+      ta.value = draft;
+      lastSaved = draft;
+      if (ts) {
+        var mins = Math.round((Date.now() - ts) / 60000);
+        var when = mins < 1 ? '刚刚' : (mins < 60 ? mins + ' 分钟前' : Math.round(mins / 60) + ' 小时前');
+        showStatus('已恢复 ' + when + ' 的草稿', true);
+      }
+      // 触发已有的 input 监听，让多段提示、配乐等联动刷新
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  } catch (e) {}
+
+  // 输入时防抖保存（停止输入 400ms 后写入）
+  ta.addEventListener('input', function () {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { saveDraft(false); }, 400);
+  });
+
+  // 页面隐藏/关闭前立即保存
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveDraft(true);
+  });
+  window.addEventListener('beforeunload', function () { saveDraft(false); });
+
+  // 供"清空草稿"按钮调用
+  window.__clearPromptDraft = function () {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(DRAFT_TS_KEY);
+    } catch (e) {}
+    lastSaved = '';
+    ta.value = '';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    showStatus('已清空', true);
+  };
+
   var STORAGE_KEY = 'vs_prompt_height';
   var MIN_H = 240;
   try {
@@ -3873,6 +4354,20 @@ document.getElementById('startBtn').addEventListener('click', async () => {
   const clipDuration = parseInt(document.getElementById('clipDurationInput').value) || 15;
   const resolution = document.getElementById('resolutionSelect').value;
 
+  // 执行档位：custom 时收集勾选的环节；其余档位只传 preset
+  const presetEl = document.getElementById('presetSelect');
+  const preset = presetEl ? presetEl.value : 'final';
+  let customStages;
+  if (preset === 'custom') {
+    customStages = Array.from(document.querySelectorAll('#customStagesList input[data-stage]'))
+      .filter(el => el.checked)
+      .map(el => el.dataset.stage);
+    if (customStages.length === 0) {
+      alert('自定义档位至少要选一个环节（核心链会自动加入）');
+      return;
+    }
+  }
+
   // 校验
   if (clipCount < 1 || clipCount > 200) {
     alert('片段数量必须在 1-200 之间');
@@ -3996,7 +4491,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         clipCount,
         clipDuration,
         resolution,
-        clipTracks: collectClipTracks(),
+        preset,
+        ...(customStages ? { stages: customStages } : {}),
+        bgm: collectBgmConfig(),
         apiKey,
         apiBaseUrl,
         modelId,
@@ -4007,7 +4504,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         llmModel: settings.llmModel || '',
         multimodalApiKey: settings.multimodalKey || '',
         multimodalBaseUrl: settings.multimodalUrl || '',
-        multimodalModel: settings.multimodalModel || ''
+        multimodalModel: settings.multimodalModel || '',
+        // 用户勾选的「要紧质检项」；null=全部要紧
+        strictQcItems: collectStrictQcItems()
       })
     });
     const data = await res.json();
@@ -4188,6 +4687,10 @@ function showProgressView() {
   // 更新侧边栏状态点
   const dot = document.getElementById('genStatusDot');
   if (dot) dot.classList.add('active');
+
+  // 暂停按钮：进入进度页即按当前任务状态初始化
+  const st = (latestProgress && latestProgress.status) || 'generating';
+  updatePauseButton(st);
 }
 
 // ==========================================
@@ -4297,11 +4800,14 @@ const QC_ITEMS = {
 };
 
 // 片段级质检项（4项）
+// key 必须与后端 qualityChecker.checkClip 的 results 键一致，否则取不到数据
 const CLIP_QC_ITEMS = [
-  { key: 'black_frame', name: '黑帧检测', icon: '⬛' },
-  { key: 'blur', name: '模糊检测', icon: '🌫' },
-  { key: 'duplicate_frame', name: '重复帧检测', icon: '♊' },
-  { key: 'duration_check', name: '时长校验', icon: '⏱' }
+  { key: 'blackFrame', name: '黑帧检测' },
+  { key: 'blur', name: '模糊检测' },
+  { key: 'duplicate', name: '重复帧检测' },
+  { key: 'duration', name: '时长校验' },
+  { key: 'nsfw', name: 'NSFW 合规检测' },
+  { key: 'contentMatch', name: '视觉内容匹配' }
 ];
 
 // QC 结果图标映射
@@ -4338,6 +4844,9 @@ function getQcResultClass(result) {
 function updateProgress(data) {
   // 累积数据，确保部分更新不会丢失已有字段
   latestProgress = { ...latestProgress, ...data };
+
+  // 同步暂停按钮的可用性与文案
+  if (data.status) updatePauseButton(data.status);
 
   // 记录开始时间
   if (data.startedAt && !startTime) {
@@ -4735,6 +5244,85 @@ function renderQcOverview() {
 }
 
 // ===== 片段网格 =====
+// ===== 生成暂停 / 继续 =====
+function updatePauseButton(status) {
+  const btn = document.getElementById('pauseGenBtn');
+  const title = document.getElementById('genPageTitle');
+  const desc = document.getElementById('genPageDesc');
+  if (!btn) return;
+  // 只在「片段生成」这类可暂停状态显示按钮
+  const canPause = ['generating', 'paused'].includes(status);
+  btn.style.display = canPause ? '' : 'none';
+  if (!canPause) return;
+  isGenPaused = status === 'paused';
+  btn.textContent = isGenPaused ? '▶ 继续' : '⏸ 暂停';
+  btn.classList.toggle('btn-primary', isGenPaused);
+  btn.classList.toggle('btn-secondary', !isGenPaused);
+  if (title) title.textContent = isGenPaused ? '已暂停' : '生成中';
+  if (desc) desc.textContent = isGenPaused
+    ? '已暂停。正在生成的片段会跑完，然后停下等你继续。'
+    : 'AI 正在为你创作视频，请稍候...';
+}
+
+async function togglePauseGen() {
+  if (!currentTask || !currentTask.taskId) return;
+  const btn = document.getElementById('pauseGenBtn');
+  if (btn) btn.disabled = true;
+  const action = isGenPaused ? 'unpause' : 'pause';
+  try {
+    const res = await fetch(`/api/tasks/${currentTask.taskId}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert((isGenPaused ? '继续失败: ' : '暂停失败: ') + (data.error || '未知错误'));
+      return;
+    }
+    isGenPaused = !isGenPaused;
+    updatePauseButton(isGenPaused ? 'paused' : 'generating');
+  } catch (e) {
+    alert('操作失败: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ===== 质检严格度：读取 / 保存 / 收集 =====
+const QC_STRICT_KEY = 'vs_qc_strict';
+
+// 收集用户勾选的「要紧项」；全选时返回 null（后端按全部严格处理）
+function collectStrictQcItems() {
+  const list = document.getElementById('qcStrictList');
+  if (!list) return null;
+  const picked = [];
+  list.querySelectorAll('input[data-qc]').forEach(cb => { if (cb.checked) picked.push(cb.dataset.qc); });
+  const all = Array.from(list.querySelectorAll('input[data-qc]')).map(cb => cb.dataset.qc);
+  // 锁定项始终要紧，由后端 ALWAYS_STRICT 保证，这里不用加
+  if (picked.length === all.length) return null; // 全勾 = 默认严格
+  return picked;
+}
+
+function saveQcStrict() {
+  const list = document.getElementById('qcStrictList');
+  if (!list) return;
+  const picked = [];
+  list.querySelectorAll('input[data-qc]').forEach(cb => { if (cb.checked) picked.push(cb.dataset.qc); });
+  try { localStorage.setItem(QC_STRICT_KEY, JSON.stringify(picked)); } catch (e) {}
+}
+
+function restoreQcStrict() {
+  const list = document.getElementById('qcStrictList');
+  if (!list) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(QC_STRICT_KEY) || 'null'); } catch (e) {}
+  if (Array.isArray(saved)) {
+    list.querySelectorAll('input[data-qc]').forEach(cb => {
+      cb.checked = saved.includes(cb.dataset.qc);
+    });
+  }
+  list.querySelectorAll('input[data-qc]').forEach(cb => {
+    cb.addEventListener('change', saveQcStrict);
+  });
+}
+
 function renderClips(clips) {
   const grid = document.getElementById('clipsGrid');
   if (!grid) return;
@@ -4875,17 +5463,20 @@ function openClipDetail(index, clip) {
   } else {
     qcContainer.innerHTML = CLIP_QC_ITEMS.map(item => {
       const detail = qcItems[item.key] || {};
-      const result = detail.result || detail.status || 'pending';
-      const message = detail.message || detail.desc || '';
-      const value = detail.value !== undefined ? detail.value : '';
+      // 后端字段是 passed/reason/level；旧代码找的是 result/message，所以永远取不到值
+      let result;
+      if (detail.passed === true) result = 'pass';
+      else if (detail.passed === false) result = detail.skipped ? 'skip' : 'fail';
+      else result = detail.result || detail.status || 'pending';
+      const message = detail.reason || detail.message || detail.desc || '';
+      const missing = !Object.keys(detail).length;
       return `
         <div class="clip-qc-item">
           <div class="clip-qc-status-icon ${getQcResultClass(result)}">${QC_ICONS[result] || '·'}</div>
           <div class="clip-qc-info">
             <div class="clip-qc-name">${item.name}</div>
-            ${message ? `<div class="clip-qc-detail">${message}</div>` : ''}
+            ${missing ? '<div class="clip-qc-detail" style="color:var(--text-tertiary);">本次未记录该项</div>' : (message ? `<div class="clip-qc-detail">${message}</div>` : '')}
           </div>
-          ${value ? `<div class="clip-qc-value">${value}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -5290,6 +5881,91 @@ async function showTaskDetail(taskId) {
       document.getElementById('detailDuration').textContent = '-';
     }
 
+    // ===== 档位 / 质检可信度 / 补跑（需要完整任务对象，/progress 不含这些字段）=====
+    // 垃圾箱视图不提供这些能力（回收站任务不参与补跑）。
+    const presetLabel = { quick: '快速验证', daily: '日常交付', final: '最终成片', clips_only: '片段包', custom: '自定义' };
+    const presetEl = document.getElementById('detailPreset');
+    const qcEl = document.getElementById('detailQcTrust');
+    const contSection = document.getElementById('continueSection');
+    if (presetEl) presetEl.textContent = '-';
+    if (qcEl) qcEl.textContent = '-';
+    if (contSection) contSection.style.display = 'none';
+
+    if (!isTrashView) {
+      try {
+        const fullRes = await fetch(`/api/tasks/${taskId}`);
+        const full = fullRes.ok ? await fullRes.json() : null;
+        if (full) {
+          if (presetEl) {
+            const p = full.preset || 'final';
+            const frag = full.fragmentOnly ? '（片段包，无成片）' : '';
+            presetEl.textContent = (presetLabel[p] || p) + frag;
+          }
+          if (qcEl) {
+            // qcLabel: verified = 修复后真实执行；legacy_unverified = 历史未验证
+            if (full.qcTrusted === true) {
+              qcEl.innerHTML = '<span style="color:#15803d;">已核验</span>';
+              qcEl.title = `质检结论版本 v${full.qcVersion}（来源：${full.qcVersionSource || '未知'}）`;
+            } else if (full.qcVersion !== null && full.qcVersion !== undefined) {
+              qcEl.innerHTML = '<span style="color:#b45309;">历史未验证</span>';
+              qcEl.title = '该结论产生于质检修复之前，未真实执行检测，不能当作通过';
+            } else {
+              qcEl.innerHTML = '<span style="color:var(--text-tertiary);">无质检结论</span>';
+            }
+          }
+          // 补跑区：仅在任务已完成、且档位不是 final 时出现
+          if (contSection && full.status === 'completed' && (full.preset || 'final') !== 'final') {
+            try {
+              const planRes = await fetch(`/api/tasks/${taskId}/continue-plan?preset=final`);
+              if (planRes.ok) {
+                const plan = await planRes.json();
+                if (plan.ok && Array.isArray(plan.pending) && plan.pending.length > 0) {
+                  const STEP_LABEL = {
+                    prompt_optimize: '提示词优化', storyboard: '分镜头生成', clip_generation: '片段生成',
+                    concatenation: '拼接', loop_processing: '无缝循环', transcoding: '转码导出',
+                    audio_mix: '配乐混音', final_qc: '最终质检'
+                  };
+                  const pendingText = plan.pending.map(s => STEP_LABEL[s] || s).join('、');
+                  const hintEl = document.getElementById('continueHint');
+                  if (hintEl) hintEl.textContent = `当前「${presetLabel[full.preset] || full.preset}」档，补成最终成片还需：${pendingText}`;
+                  contSection.style.display = 'block';
+                  const btn = document.getElementById('continueBtn');
+                  if (btn) {
+                    btn.onclick = async () => {
+                      if (!confirm(`将补跑：${pendingText}\n\n已生成的片段不会重新生成，不会重复产生生成费用。\n确定继续？`)) return;
+                      btn.disabled = true;
+                      btn.textContent = '补跑中...';
+                      try {
+                        const r = await fetch(`/api/tasks/${taskId}/continue`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ preset: 'final' })
+                        });
+                        const j = await r.json();
+                        if (!r.ok || !j.success) {
+                          alert('补跑失败：' + (j.error || '未知错误'));
+                          btn.disabled = false;
+                          btn.textContent = '补成最终成片';
+                          return;
+                        }
+                        alert(j.alreadyDone ? '该档位步骤均已完成，无需补跑' : '已开始补跑，请到「生成进度」页查看');
+                        document.getElementById('historyDetailModal').classList.remove('show');
+                        if (typeof switchPage === 'function') switchPage('generating');
+                      } catch (e) {
+                        alert('补跑请求失败：' + e.message);
+                        btn.disabled = false;
+                        btn.textContent = '补成最终成片';
+                      }
+                    };
+                  }
+                }
+              }
+            } catch (e) { /* 预览失败不阻塞详情展示 */ }
+          }
+        }
+      } catch (e) { /* 完整任务拉取失败不影响基础详情 */ }
+    }
+
     // 完整多段提示词：优先持久化 prompts，老任务回退 optimizedPrompt/prompt
     const promptLines = (data.prompts && data.prompts.length > 0)
       ? data.prompts.map(p => (p && p.text) || p)
@@ -5348,7 +6024,7 @@ async function showTaskDetail(taskId) {
       errorSection.style.display = 'none';
     }
 
-    renderTaskBgmDetail(data);
+    renderBgmSummary(data);
 
     // 片段列表（异步加载，不阻塞弹窗显示）
     renderClipList(taskId);
@@ -5501,7 +6177,7 @@ async function resumeGeneration() {
 }
 
 function statusText(s) {
-  const map = { pending: '等待中', generating: '生成中', regenerating: '重新生成中', completed: '已完成', failed: '失败', partial: '部分完成' };
+  const map = { pending: '等待中', generating: '生成中', regenerating: '重新生成中', paused: '已暂停', completed: '已完成', failed: '失败', partial: '部分完成' };
   return map[s] || s;
 }
 
@@ -5646,98 +6322,18 @@ async function updateStatus() {
 }
 
 // ==========================================
-// 配乐自动分配（提示词环节逐段配乐 + 制作后逐段改配乐）
 // ==========================================
+// 配乐（自动配乐：创建任务时勾选轨道；精细编辑在「添加配乐」页面）
+// ==========================================
+// 说明：按主题自动选曲已下线（一段成片通常包含多个主题，单主题反推不可靠）。
+// 这里只负责「自动配乐」的开关、轨道勾选与开场曲；时间轴编辑见 bgm-editor.html。
 
-let bgmInventory = [];      // /api/bgm 返回的全部音轨（含 category）
-let bgmAssignManual = {};   // 每段手动覆盖：{ 段索引: trackId | '' }
-const CATEGORY_NAMES = { music: '轻音乐', ambient: '环境音' };
-const MOOD_NAMES = { calm: '舒缓宁静', epic: '壮阔史诗', ethereal: '空灵梦幻', nature: '自然声景' };
-
-// 与后端 audioMixer.THEME_MOOD_MAP 保持一致：主题 id 关键词 → mood
-const BGM_THEME_MOOD = {
-  mountain: 'epic', ice: 'epic', glacier: 'epic', snow: 'epic',
-  aurora: 'ethereal', space: 'ethereal', starry: 'ethereal', night: 'ethereal', galaxy: 'ethereal',
-  ocean: 'nature', waterfall: 'nature', rain: 'nature', coast: 'nature', sea: 'nature', wave: 'nature',
-  lake: 'calm', forest: 'calm', desert: 'calm', landscape: 'calm', meadow: 'calm', mist: 'calm'
-};
-
-function bgmMoodForTheme(themeId) {
-  if (!themeId) return null; // 无主题 → 无 mood 依据，不静默沉底
-  const key = String(themeId).toLowerCase();
-  if (BGM_THEME_MOOD[key]) return BGM_THEME_MOOD[key];
-  // 关键词兜底匹配（主题 id 未命中时，用中文关键词匹配模板）
-  for (const t of themes) {
-    if (t.id === key) {
-      for (const kw of (t.keywords || [])) {
-        const lower = String(kw).toLowerCase();
-        if (BGM_THEME_MOOD[lower]) return BGM_THEME_MOOD[lower];
-      }
-    }
-  }
-  return 'calm';
-}
-
-// 行尾【主题】标签解析（与后端 parseThemeTag 对齐：模板名精确 → 关键词最长包含）
-// 无标签 → themeId null（无主题）；未识别标签 → themeId null + matched:false
-function bgmResolveLineTheme(line, globalTheme) {
-  const trimmed = (line || '').trim();
-  const m = trimmed.match(/[【\[]([^】\]]+)[】\]]$/);
-  if (!m) return { themeId: globalTheme ?? null, tag: null, matched: true };
-  const tag = m[1].trim();
-  let themeId = (themes.find(t => t.name && tag === t.name) || {}).id;
-  if (!themeId) {
-    let best = 0;
-    for (const t of themes) {
-      for (const kw of (t.keywords || [])) {
-        if (kw && tag.includes(kw) && kw.length > best) { themeId = t.id; best = kw.length; }
-      }
-    }
-  }
-  if (!themeId) return { themeId: null, tag, matched: false };
-  return { themeId, tag, matched: true };
-}
-
-// 获取当前提示词对应的分段（多行=每行一段；单行=clipCount 段同主题）
-function bgmCurrentSegments() {
-  const raw = (document.getElementById('promptInput').value || '').trim();
-  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-  const globalTheme = null; // 无全局主题：不写【】= 无主题
-  const isMulti = lines.length > 1;
-  if (isMulti) {
-    return lines.map((ln, i) => {
-      const t = bgmResolveLineTheme(ln, globalTheme);
-      return { index: i, themeId: t.themeId, themeName: bgmThemeName(t.themeId), tag: t.tag, matched: t.matched, text: ln };
-    });
-  }
-  const count = parseInt(document.getElementById('clipCountInput').value) || 10;
-  return Array.from({ length: count }, (_, i) => ({
-    index: i, themeId: globalTheme, themeName: bgmThemeName(globalTheme), tag: null, matched: true
-  }));
-}
-
-function bgmThemeName(themeId) {
-  if (!themeId) return '未选主题';
-  const t = themes.find(x => x.id === themeId);
-  if (!t) return themeId;
-  return (t.emoji ? t.emoji + ' ' : '') + t.name;
-}
-
-// 第 idx 段选曲：优先匹配主题 mood 池，轮转取曲避免相邻重复；无主题 → 不自动推荐
-function bgmPickTrack(themeId, idx) {
-  const mood = bgmMoodForTheme(themeId);
-  if (!mood) return null;
-  const pool = bgmInventory.filter(t => (t.mood || []).includes(mood));
-  const any = pool.length > 0 ? pool : bgmInventory;
-  if (any.length === 0) return null;
-  return any[idx % any.length];
-}
+let bgmInventory = [];      // /api/bgm 返回的全部音轨（含 category/order/defaultTrackId）
 
 function bgmOptionLabel(t) {
-  const cat = CATEGORY_NAMES[t.category] || t.category || '';
-  const moods = (t.mood || []).map(x => MOOD_NAMES[x] || x).join(' · ');
-  const style = [cat, moods].filter(Boolean).join(' · ');
-  return `${t.title}（${t.id}${style ? ' · ' + style : ''}）`;
+  const cat = t.category === 'ambient' ? '环境音' : '轻音乐';
+  const dur = t.durationSec ? Math.round(t.durationSec) + 's' : '时长未知';
+  return t.title + '（' + t.id + ' · ' + cat + ' · ' + dur + '）';
 }
 
 async function loadBgmInventory() {
@@ -5747,210 +6343,98 @@ async function loadBgmInventory() {
       const data = await res.json();
       bgmInventory = Array.isArray(data.tracks) ? data.tracks : [];
       const el = document.getElementById('bgmTrackCountText');
-      if (el) el.textContent = `已加载 ${bgmInventory.length} 条音轨`;
-      updateBgmAssignment();
+      if (el) el.textContent = '已加载 ' + bgmInventory.length + ' 条音轨';
+      renderBgmTrackSelects(data.defaultTrackId || '');
     }
   } catch (e) { console.error('加载配乐库存失败:', e); }
+}
+
+// 渲染两个下拉：开场曲（轻音乐）/ 环境音曲目
+function renderBgmTrackSelects(defaultId) {
+  const musicSel = document.getElementById('bgmStartTrack');
+  const ambSel = document.getElementById('bgmAmbientTrack');
+  const music = bgmInventory.filter(t => t.category !== 'ambient');
+  const ambient = bgmInventory.filter(t => t.category === 'ambient');
+
+  if (musicSel) {
+    musicSel.innerHTML = '<option value="">随机开场</option>' +
+      music.map(t => '<option value="' + t.id + '">' + bgmOptionLabel(t) + '</option>').join('');
+    if (defaultId && music.some(t => t.id === defaultId)) musicSel.value = defaultId;
+  }
+  if (ambSel) {
+    ambSel.innerHTML = '<option value="">随机选曲</option>' +
+      ambient.map(t => '<option value="' + t.id + '">' + bgmOptionLabel(t) + '</option>').join('');
+  }
 }
 
 function onBgmModeChange() {
   const mode = document.getElementById('bgmModeSelect').value;
   const section = document.getElementById('bgmAssignSection');
-  section.style.display = mode === 'auto' ? 'block' : 'none';
-  if (mode === 'auto') {
-    bgmAssignManual = {};
-    updateBgmAssignment();
+  if (section) section.style.display = mode === 'auto' ? 'block' : 'none';
+  if (mode === 'auto') onBgmTracksChange();
+}
+
+// 勾选变化：至少保留一项；未勾选的轨道隐藏其下拉
+function onBgmTracksChange() {
+  const wantMusic = document.getElementById('bgmWantMusic').checked;
+  const wantAmbient = document.getElementById('bgmWantAmbient').checked;
+  const musicGroup = document.getElementById('bgmMusicGroup');
+  const ambientGroup = document.getElementById('bgmAmbientGroup');
+  if (musicGroup) musicGroup.style.display = wantMusic ? 'block' : 'none';
+  if (ambientGroup) ambientGroup.style.display = wantAmbient ? 'block' : 'none';
+  const hint = document.getElementById('bgmModeHint');
+  if (hint && !wantMusic && !wantAmbient) {
+    hint.textContent = '请至少勾选「轻音乐」或「环境音」其中一项。';
+  } else if (hint) {
+    hint.textContent = '勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「添加配乐」页面做精细调整（裁剪、变速、关键帧等）。';
   }
 }
 
-function onBgmAssignChange(index, value) {
-  if (value === '__random__') {
-    // 随机兜底（无主题片段）：随机挑一条音轨并落为实际 id，避免把占位值传给后端
-    if (bgmInventory.length > 0) {
-      const track = bgmInventory[Math.floor(Math.random() * bgmInventory.length)];
-      bgmAssignManual[index] = track.id;
-      const rowEl = document.getElementById('bgm-assign-row-' + index);
-      const selectEl = rowEl ? rowEl.querySelector('select') : null;
-      if (selectEl) selectEl.value = track.id;
-    } else {
-      bgmAssignManual[index] = '';
-    }
-  } else {
-    bgmAssignManual[index] = value; // '' 表示该段不配乐
-  }
-  const row = document.getElementById('bgm-assign-row-' + index);
-  if (row) row.classList.toggle('is-manual', !!bgmAssignManual[index]);
-}
-
-function updateBgmAssignment() {
+// 生成时收集配乐配置（整片级，含轨道勾选）
+function collectBgmConfig() {
   const mode = document.getElementById('bgmModeSelect').value;
-  const list = document.getElementById('bgmAssignList');
-  if (!list) return;
-  if (mode !== 'auto') { list.innerHTML = ''; return; }
-
-  const segments = bgmCurrentSegments();
-  const options = bgmInventory.map(t =>
-    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
-  ).join('');
-
-  list.innerHTML = segments.map(seg => {
-    const suggested = bgmPickTrack(seg.themeId, seg.index);
-    const current = (bgmAssignManual[seg.index] !== undefined)
-      ? bgmAssignManual[seg.index]
-      : (suggested ? suggested.id : '');
-    const themeBadge = seg.themeId
-      ? (seg.tag
-          ? (seg.matched ? `${bgmThemeName(seg.themeId)}` : `⚠️ ${seg.tag}（未识别→${bgmThemeName(seg.themeId)}）`)
-          : bgmThemeName(seg.themeId))
-      : (seg.tag ? `⚠️ ${seg.tag}（未识别→未选主题）` : '未选主题 · 手动选或随机');
-    return `
-      <div class="bgm-assign-row ${current ? 'is-manual' : ''}" id="bgm-assign-row-${seg.index}">
-        <div class="bgm-assign-seg" title="片段 ${seg.index + 1}">#${seg.index + 1}</div>
-        <div class="bgm-assign-theme" title="${themeBadge}">${themeBadge}</div>
-        <select class="bgm-assign-select" onchange="onBgmAssignChange(${seg.index}, this.value)">
-          <option value="">不配乐</option>
-          <option value="__random__">🎲 随机</option>
-          ${options}
-        </select>
-      </div>
-    `;
-  }).join('');
-
-  // 回填当前值（含自动推荐）
-  list.querySelectorAll('select').forEach((sel, i) => {
-    const s = segments[i];
-    const value = (bgmAssignManual[s.index] !== undefined)
-      ? bgmAssignManual[s.index]
-      : (s && bgmPickTrack(s.themeId, s.index) ? bgmPickTrack(s.themeId, s.index).id : '');
-    sel.value = value;
-    const row = document.getElementById('bgm-assign-row-' + s.index);
-    if (row) row.classList.toggle('is-manual', !!value);
-  });
+  if (mode !== 'auto') return { enabled: false, mode: 'off' };
+  const musicChk = document.getElementById('bgmWantMusic');
+  const ambChk = document.getElementById('bgmWantAmbient');
+  const wantMusic = !!(musicChk && musicChk.checked);
+  const wantAmbient = !!(ambChk && ambChk.checked);
+  const musicSel = document.getElementById('bgmStartTrack');
+  const ambSel = document.getElementById('bgmAmbientTrack');
+  return {
+    enabled: true,
+    mode: 'auto',
+    wantMusic,
+    wantAmbient,
+    trackId: (wantMusic && musicSel && musicSel.value) || null,
+    ambientTrackId: (wantAmbient && ambSel && ambSel.value) || null
+  };
 }
 
-// 生成时收集片段配乐：off → undefined（不配乐）；auto → 读 DOM 逐段选择
-function collectClipTracks() {
-  const mode = document.getElementById('bgmModeSelect').value;
-  if (mode !== 'auto') return undefined;
-  const selList = Array.from(document.querySelectorAll('#bgmAssignList select'));
-  return selList.map(s => s.value || null);
-}
+// 兼容旧函数名（别处可能仍调用）
+function collectClipTracks() { return undefined; }
+function scheduleBgmAssignment() { /* 已无逐段预览，保留空实现以兼容旧调用 */ }
 
-// 配乐重算节流
-let _bgmRefreshTimer = null;
-function scheduleBgmAssignment() {
-  clearTimeout(_bgmRefreshTimer);
-  _bgmRefreshTimer = setTimeout(updateBgmAssignment, 200);
-}
-
-// ===== 任务详情：逐段配乐 =====
-async function renderTaskBgmDetail(data) {
+// 任务详情里的配乐摘要（真正编辑在「添加配乐」页面）
+function renderBgmSummary(data) {
   const section = document.getElementById('bgmDetailSection');
-  const list = document.getElementById('bgmDetailList');
-  if (!section || !list) return;
-  const clips = Array.isArray(data.clips) ? data.clips : [];
-  const editable = clips.filter(c => c.status === 'success').sort((a, b) => a.index - b.index);
-  if (editable.length === 0 || !bgmInventory || bgmInventory.length === 0) {
-    if (editable.length > 0 && (!bgmInventory || bgmInventory.length === 0)) {
-      await loadBgmInventory();
-    }
+  const summary = document.getElementById('bgmDetailSummary');
+  if (!section || !summary) return;
+  const r = data && data.bgmResult;
+  if (!r) {
+    summary.textContent = '该成片尚未应用配乐。';
+  } else if (r.applied) {
+    summary.textContent = '已应用整片配乐（' + (r.segments || 0) + ' 段' +
+      (r.meanVolumeDb ? '，平均音量 ' + r.meanVolumeDb + 'dB' : '') + '）' +
+      (r.warnings && r.warnings.length ? '；提示：' + r.warnings.join('；') : '');
+  } else {
+    summary.textContent = '配乐未应用：' + (r.error || '未启用');
   }
-  if (editable.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
-
-  const options = bgmInventory.map(t =>
-    `<option value="${t.id}">${bgmOptionLabel(t)}</option>`
-  ).join('');
-
-  list.innerHTML = editable.map(c => {
-    const themeName = bgmThemeName(c.theme || data.theme || '');
-    const hasTrack = !!c.trackId;
-    return `
-      <div class="bgm-detail-row" id="bgm-detail-row-${c.index}">
-        <div class="bgm-detail-seg">#${c.index + 1}</div>
-        <div class="bgm-detail-theme" title="${themeName}">${themeName}</div>
-        <select class="bgm-detail-select" data-index="${c.index}">
-          <option value="">不配乐</option>
-          ${options}
-        </select>
-        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="applyClipBgm('${data.taskId}', ${c.index}, this)">应用</button>
-        <span class="bgm-detail-status" id="bgm-detail-status-${c.index}">${hasTrack ? '已配乐' : '无配乐'}</span>
-      </div>
-    `;
-  }).join('');
-
-  // 回填当前已配音轨
-  editable.forEach(c => {
-    const sel = list.querySelector(`select[data-index="${c.index}"]`);
-    if (sel) sel.value = c.trackId || '';
-  });
 }
 
-// 单段改配乐：调后端只重混该片段并重建，不影响其他片段与视频本身
-async function applyClipBgm(taskId, index, btn) {
-  const row = document.getElementById('bgm-detail-row-' + index);
-  const sel = row ? row.querySelector('select') : null;
-  const statusEl = document.getElementById('bgm-detail-status-' + index);
-  if (!sel || !statusEl) return;
-  const trackId = sel.value || null;
-
-  btn.disabled = true;
-  sel.disabled = true;
-  statusEl.className = 'bgm-detail-status';
-  statusEl.textContent = '处理中…';
-
-  try {
-    const res = await fetch(`/api/tasks/${taskId}/clips/${index}/audio`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trackId })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || '改配乐失败');
-    }
-    statusEl.className = 'bgm-detail-status done';
-    statusEl.textContent = '✓ 已更新';
-    // 更新成片播放地址（新 final 文件）
-    if (data.outputUrl) {
-      const videoEl = document.getElementById('detailVideo');
-      const wrapper = document.getElementById('videoPlayerWrapper');
-      const noVideo = document.getElementById('noVideoPlaceholder');
-      if (videoEl && wrapper && noVideo) {
-        videoEl.src = data.outputUrl;
-        wrapper.style.display = 'block';
-        noVideo.style.display = 'none';
-        const downloadBtn = document.getElementById('downloadVideoBtn');
-        if (downloadBtn) {
-          downloadBtn.style.display = 'block';
-          downloadBtn.onclick = () => {
-            const a = document.createElement('a');
-            a.href = data.outputUrl;
-            a.download = data.outputUrl.split('/').pop();
-            a.click();
-          };
-        }
-      }
-    }
-    // 刷新片段配乐状态（重取任务进度，获取最新各 clip.trackId）
-    try {
-      const freshRes = await fetch(`/api/tasks/${taskId}/progress`);
-      if (freshRes.ok) {
-        const fresh = await freshRes.json();
-        currentDetailTask = fresh;
-        document.getElementById('detailStatus').innerHTML = `<span class="history-status status-${fresh.status}">${statusText(fresh.status)}</span>`;
-        renderTaskBgmDetail(fresh);
-      }
-    } catch (e) { console.error('刷新配乐状态失败:', e); }
-  } catch (e) {
-    statusEl.className = 'bgm-detail-status fail';
-    statusEl.textContent = '失败';
-    btn.disabled = false;
-    sel.disabled = false;
-    alert('改配乐失败: ' + e.message);
-  }
+function openBgmEditor(taskId) {
+  window.location.href = '/bgm-editor.html' + (taskId ? ('?task=' + encodeURIComponent(taskId)) : '');
 }
-
 // ==========================================
 // 初始化
 // ==========================================
@@ -5960,6 +6444,7 @@ loadTemplates();
 updateStatus();
 loadBgmInventory();
 updateContinueTaskSummary();
+restoreQcStrict();
 
 // 定时更新状态
 setInterval(updateStatus, 10000);
@@ -5980,6 +6465,433 @@ async function checkRunningTask() {
     }
   } catch (e) {}
 }
+</script>
+
+<!-- ===== 提示词助手：悬浮幽灵 + 微信式对话面板 ===== -->
+<div id="assistantBall" title="提示词助手" role="button" tabindex="0" aria-label="打开提示词助手"></div>
+<div id="assistantPanel" role="dialog" aria-label="提示词助手">
+  <div class="assistant-head">
+    <span class="assistant-head-title">提示词助手</span>
+    <span class="assistant-head-sub">不知道写什么？问我</span>
+    <button class="assistant-close" id="assistantClose" type="button">收起</button>
+  </div>
+  <div class="assistant-msgs" id="assistantMsgs"></div>
+  <div class="assistant-input">
+    <textarea id="assistantInput" rows="1" placeholder="说说你想拍什么…" spellcheck="false"></textarea>
+    <button id="assistantSend" type="button">发送</button>
+  </div>
+</div>
+
+<script>
+// ==========================================
+// 提示词助手：悬浮幽灵 + 微信式对话
+// 规格：design/ui-ux/assistant-ball-preview.html（幽灵造型 · 配色 1 冷白金）
+// 契约：docs/requirements/提示词助手悬浮球-需求.md
+// ==========================================
+(function initAssistant() {
+  'use strict';
+
+  var BALL = document.getElementById('assistantBall');
+  var PANEL = document.getElementById('assistantPanel');
+  var MSGS = document.getElementById('assistantMsgs');
+  var INPUT = document.getElementById('assistantInput');
+  var SEND = document.getElementById('assistantSend');
+  var CLOSE = document.getElementById('assistantClose');
+  if (!BALL || !PANEL) return;
+
+  var POS_KEY = 'vs_assistant_pos';
+  var BALL_SIZE = 96;
+  var EDGE = 8;
+
+  // ===== 幽灵身体路径（与预览页一致：圆顶头 + 两侧圆钝角 + 3 道波浪尾）=====
+  var BODY_PATH = [
+    'M48 8',
+    'C 67 8 78 19 80 28',
+    'Q 88.5 22.5 86.5 30',
+    'Q 86.5 39 79 45',
+    'C 78 51 77 54 76 57.5',
+    'C 73 66 62 66 59 57.5',
+    'C 56 66 45 66 42 57.5',
+    'C 39 66 28 66 25 57.5',
+    'C 24 54 23 51 22 45',
+    'Q 9.5 22.5 11.5 30',
+    'Q 11.5 39 17 45',
+    'C 18 19 29 8 48 8',
+    'Z'
+  ].join(' ');
+
+  // ===== 配色 1 · 冷白金 =====
+  var P = {
+    soft: '#FFFFFF', deep: '#E8E2D2',
+    glow: 'rgba(214,178,74,0.30)',
+    shade: 'rgba(201,168,90,0.20)',
+    highlight: 'rgba(255,255,255,0.95)',
+    rim: 'rgba(201,168,90,0.35)'
+  };
+
+  // ===== 四种表情的五官 =====
+  function faceFor(mood) {
+    if (mood === 'hover') {
+      return ''
+        + '<ellipse cx="36.2" cy="46.5" rx="5.6" ry="6.6" fill="#3D3A34"/>'
+        + '<circle cx="38" cy="44.3" r="2.1" fill="#FFFFFF"/>'
+        + '<circle cx="34.3" cy="49.4" r="1.1" fill="#FFFFFF" opacity="0.85"/>'
+        + '<ellipse cx="58.8" cy="45.6" rx="6.9" ry="8.1" fill="#3D3A34"/>'
+        + '<circle cx="61.2" cy="42.7" r="2.7" fill="#FFFFFF"/>'
+        + '<circle cx="56.4" cy="48.9" r="1.35" fill="#FFFFFF" opacity="0.85"/>'
+        + '<ellipse cx="48" cy="60.5" rx="4.1" ry="4.9" fill="none" stroke="#3D3A34" stroke-width="3"/>';
+    }
+    if (mood === 'think') {
+      return ''
+        + '<ellipse cx="36.2" cy="46.5" rx="5.7" ry="6.8" fill="#FFFFFF" stroke="#3D3A34" stroke-width="1.6"/>'
+        + '<ellipse cx="36.6" cy="43.6" rx="3.5" ry="4.1" fill="#3D3A34"/>'
+        + '<circle cx="37.9" cy="42.1" r="1.5" fill="#FFFFFF"/>'
+        + '<ellipse cx="58.8" cy="45.8" rx="6.3" ry="4.5" fill="#FFFFFF" stroke="#3D3A34" stroke-width="1.6"/>'
+        + '<ellipse cx="59.4" cy="43.9" rx="3.9" ry="3.1" fill="#3D3A34"/>'
+        + '<circle cx="60.9" cy="42.6" r="1.6" fill="#FFFFFF"/>'
+        + '<path d="M44.5 60.2 L48 61.6 L51.5 60.2" stroke="#3D3A34" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>';
+    }
+    if (mood === 'talk') {
+      return ''
+        + '<ellipse cx="36.2" cy="46.5" rx="5.2" ry="6.2" fill="#3D3A34"/>'
+        + '<circle cx="37.8" cy="44.4" r="2" fill="#FFFFFF"/>'
+        + '<ellipse cx="58.8" cy="45.8" rx="6.1" ry="7.2" fill="#3D3A34"/>'
+        + '<circle cx="60.9" cy="43.1" r="2.4" fill="#FFFFFF"/>'
+        + '<path d="M41.5 57.5 Q48 56.4 54.5 57.5 Q54 65.6 48 65.6 Q42 65.6 41.5 57.5 Z" fill="#3D3A34"/>'
+        + '<path d="M44.6 62.6 Q48 60.4 51.4 62.6 Q51.4 65.2 48 65.2 Q44.6 65.2 44.6 62.6 Z" fill="#F08A9E" opacity="0.85"/>';
+    }
+    return ''
+      + '<path d="M31 47 Q36.5 40.5 42 47" stroke="#3D3A34" stroke-width="3.4" stroke-linecap="round" fill="none"/>'
+      + '<path d="M52 46.2 Q58.2 38.6 64.4 46.2" stroke="#3D3A34" stroke-width="3.8" stroke-linecap="round" fill="none"/>'
+      + '<path d="M42 58 Q48 63.5 54 58" stroke="#3D3A34" stroke-width="3" stroke-linecap="round" fill="none"/>';
+  }
+
+  function ghostSVG(mood) {
+    return '<svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">'
+      + '<defs>'
+      +   '<radialGradient id="asstG" cx="34%" cy="28%" r="78%">'
+      +     '<stop offset="0%" stop-color="' + P.soft + '"/>'
+      +     '<stop offset="52%" stop-color="#FFFFFF"/>'
+      +     '<stop offset="100%" stop-color="' + P.deep + '"/>'
+      +   '</radialGradient>'
+      +   '<radialGradient id="asstS" cx="50%" cy="88%" r="46%">'
+      +     '<stop offset="0%" stop-color="' + P.shade + '"/>'
+      +     '<stop offset="100%" stop-color="' + P.shade + '" stop-opacity="0"/>'
+      +   '</radialGradient>'
+      +   '<radialGradient id="asstH" cx="50%" cy="50%" r="50%">'
+      +     '<stop offset="0%" stop-color="' + P.highlight + '"/>'
+      +     '<stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>'
+      +   '</radialGradient>'
+      +   '<filter id="asstF" x="-30%" y="-30%" width="160%" height="160%">'
+      +     '<feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="' + P.glow + '"/>'
+      +   '</filter>'
+      +   '<clipPath id="asstC"><use href="#asstBody"/></clipPath>'
+      + '</defs>'
+      + '<path id="asstBody" d="' + BODY_PATH + '" fill="url(#asstG)" filter="url(#asstF)"/>'
+      + '<g clip-path="url(#asstC)"><circle cx="48" cy="56" r="42" fill="url(#asstS)"/></g>'
+      + '<use href="#asstBody" fill="none" stroke="' + P.rim + '" stroke-width="1.3" opacity="0.75"/>'
+      + '<ellipse cx="35" cy="30" rx="12.5" ry="8.2" fill="url(#asstH)" transform="rotate(-28 35 30)"/>'
+      + '<circle cx="28.5" cy="35" r="2.6" fill="#FFFFFF" opacity="0.85"/>'
+      + '<ellipse cx="29.5" cy="56" rx="6.2" ry="4.2" fill="#FFB3C1" opacity="0.55" transform="rotate(-8 29.5 56)"/>'
+      + '<ellipse cx="66.5" cy="55.6" rx="6.2" ry="4.2" fill="#FFB3C1" opacity="0.55" transform="rotate(8 66.5 55.6)"/>'
+      + faceFor(mood)
+      + '</svg>';
+  }
+
+  // ===== 状态机：idle / hover / think / talk =====
+  var open = false;
+  var busy = false;
+  var dragging = false;
+
+  function setFace(mood) {
+    if (BALL.dataset.face === mood) return;
+    BALL.dataset.face = mood;
+    BALL.innerHTML = ghostSVG(mood);
+  }
+  function refreshFace() {
+    if (open) return setFace(busy ? 'think' : 'talk');
+    if (BALL.matches(':hover')) return setFace('hover');
+    setFace('idle');
+  }
+  BALL.addEventListener('mouseenter', refreshFace);
+  BALL.addEventListener('mouseleave', refreshFace);
+
+  // ===== 定位与拖拽 =====
+  function clamp(x, y) {
+    var maxX = window.innerWidth - BALL_SIZE - EDGE;
+    var maxY = window.innerHeight - BALL_SIZE - EDGE;
+    return { x: Math.max(EDGE, Math.min(x, maxX)), y: Math.max(EDGE, Math.min(y, maxY)) };
+  }
+  function applyPos(x, y, save) {
+    BALL.style.left = x + 'px';
+    BALL.style.top = y + 'px';
+    if (save) {
+      try { localStorage.setItem(POS_KEY, JSON.stringify({ x: x, y: y })); } catch (e) {}
+    }
+    if (open) placePanel();
+  }
+  (function restorePos() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) {}
+    var p = (saved && typeof saved.x === 'number' && typeof saved.y === 'number')
+      ? clamp(saved.x, saved.y)
+      : clamp(window.innerWidth - BALL_SIZE - 24, window.innerHeight - BALL_SIZE - 24);
+    applyPos(p.x, p.y, false);
+  })();
+
+  var startX = 0, startY = 0, originX = 0, originY = 0, moved = false;
+
+  BALL.addEventListener('pointerdown', function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    dragging = true;
+    moved = false;
+    startX = e.clientX; startY = e.clientY;
+    originX = BALL.offsetLeft; originY = BALL.offsetTop;
+    BALL.classList.add('dragging');
+    try { BALL.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+
+  BALL.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - startX;
+    var dy = e.clientY - startY;
+    if (!moved && Math.abs(dx) + Math.abs(dy) > 5) moved = true;
+    if (!moved) return;
+    var p = clamp(originX + dx, originY + dy);
+    applyPos(p.x, p.y, false);
+  });
+
+  BALL.addEventListener('pointerup', function (e) {
+    if (!dragging) return;
+    dragging = false;
+    BALL.classList.remove('dragging');
+    try { BALL.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (moved) applyPos(BALL.offsetLeft, BALL.offsetTop, true);
+    else togglePanel();
+  });
+  BALL.addEventListener('pointercancel', function () {
+    dragging = false;
+    BALL.classList.remove('dragging');
+  });
+  BALL.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePanel(); }
+  });
+
+  window.addEventListener('resize', function () {
+    var p = clamp(BALL.offsetLeft, BALL.offsetTop);
+    applyPos(p.x, p.y, false);
+  });
+
+  // ===== 面板定位 =====
+  function placePanel() {
+    var rect = BALL.getBoundingClientRect();
+    var pw = PANEL.offsetWidth || 360;
+    var ph = PANEL.offsetHeight || 520;
+    var gap = 12;
+
+    var left = rect.right + gap;
+    if (left + pw > window.innerWidth - EDGE) left = rect.left - pw - gap;
+    if (left < EDGE) left = Math.max(EDGE, Math.min(rect.left, window.innerWidth - pw - EDGE));
+
+    var top = rect.top;
+    if (top + ph > window.innerHeight - EDGE) top = window.innerHeight - ph - EDGE;
+    if (top < EDGE) top = EDGE;
+
+    PANEL.style.left = left + 'px';
+    PANEL.style.top = top + 'px';
+  }
+
+  // ===== 对话 =====
+  var history = [];
+
+  function addMsg(role, text) {
+    var el = document.createElement('div');
+    el.className = 'assistant-msg ' + (role === 'user' ? 'me' : role === 'sys' ? 'sys' : 'bot');
+    el.textContent = text;
+    MSGS.appendChild(el);
+    MSGS.scrollTop = MSGS.scrollHeight;
+    return el;
+  }
+
+  function showTyping() {
+    var el = document.createElement('div');
+    el.className = 'assistant-msg bot';
+    el.id = 'asstTyping';
+    el.innerHTML = '<div class="assistant-typing"><i></i><i></i><i></i></div>';
+    MSGS.appendChild(el);
+    MSGS.scrollTop = MSGS.scrollHeight;
+  }
+  function hideTyping() {
+    var el = document.getElementById('asstTyping');
+    if (el) el.remove();
+  }
+
+  function addPromptBox(promptText) {
+    var box = document.createElement('div');
+    box.className = 'assistant-prompt-box';
+
+    var cap = document.createElement('span');
+    cap.className = 'cap';
+    cap.textContent = '生成好的提示词';
+
+    var pre = document.createElement('pre');
+    pre.textContent = promptText;
+
+    var btn = document.createElement('button');
+    btn.className = 'assistant-use';
+    btn.type = 'button';
+    btn.textContent = '使用这段提示词';
+    btn.addEventListener('click', function () { usePrompt(promptText); });
+
+    box.appendChild(cap);
+    box.appendChild(pre);
+    box.appendChild(btn);
+    MSGS.appendChild(box);
+    MSGS.scrollTop = MSGS.scrollHeight;
+  }
+
+  // 填入提示词框：必须派发 input 事件，否则批量提示与配乐分配不刷新
+  function usePrompt(text) {
+    var ta = document.getElementById('promptInput');
+    if (!ta) return;
+    ta.value = text;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    closePanel();
+    if (typeof switchPage === 'function') switchPage('create');
+    var page = document.getElementById('page-create');
+    if (page && page.scrollIntoView) page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function getCfg() {
+    try { return JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch (e) { return {}; }
+  }
+
+  function renderNoKey() {
+    MSGS.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'assistant-nokey';
+    box.innerHTML = '<div>还没配置 LLM Key，助手暂时没法聊天。</div>'
+      + '<div style="font-size:12px;color:var(--text-tertiary);margin-top:6px;">'
+      + '在「设置 → LLM」里填一个 Key 就能用了。</div>';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '去设置';
+    btn.addEventListener('click', function () {
+      closePanel();
+      if (typeof openSettings === 'function') openSettings();
+    });
+    box.appendChild(btn);
+    MSGS.appendChild(box);
+  }
+
+  // ===== 开合 =====
+  function openPanel() {
+    open = true;
+    PANEL.classList.add('show');
+    BALL.classList.add('open');
+    refreshFace();
+    placePanel();
+
+    var cfg = getCfg();
+    if (!cfg.llmKey) { renderNoKey(); return; }
+    if (!history.length) {
+      addMsg('bot', '你好，我是提示词助手 ✨\n'
+        + '不知道拍什么、或者不知道怎么写提示词都没关系。\n'
+        + '随便说一句就行，比如「想拍个极光」或者「随便帮我出个主意」。');
+      history.push({ role: 'assistant', content: '你好，我是提示词助手。随便说说你想拍什么吧。' });
+    }
+    setTimeout(function () { INPUT.focus(); }, 60);
+  }
+
+  function closePanel() {
+    open = false;
+    PANEL.classList.remove('show');
+    BALL.classList.remove('open');
+    refreshFace();
+  }
+
+  function togglePanel() { if (open) closePanel(); else openPanel(); }
+
+  CLOSE.addEventListener('click', closePanel);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && open) closePanel();
+  });
+
+  // ===== 发送 =====
+  async function send() {
+    if (busy) return;
+    var cfg = getCfg();
+    if (!cfg.llmKey) { renderNoKey(); return; }
+
+    var text = INPUT.value.trim();
+    if (!text) text = '我还没想好拍什么，给我几个方向吧。';
+
+    INPUT.value = '';
+    INPUT.style.height = 'auto';
+
+    addMsg('user', text);
+    history.push({ role: 'user', content: text });
+
+    busy = true;
+    SEND.disabled = true;
+    refreshFace();
+    BALL.classList.add('thinking');
+    showTyping();
+
+    var payload = {
+      messages: history.slice(-20),
+      llmApiKey: cfg.llmKey || '',
+      llmBaseUrl: cfg.llmUrl || '',
+      llmModel: cfg.llmModel || ''
+    };
+
+    try {
+      var res = await fetch('/api/assistant/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      var data = await res.json();
+      hideTyping();
+
+      if (!data.ok) {
+        if (data.error === 'NO_LLM_KEY') {
+          history.pop();
+          renderNoKey();
+        } else {
+          addMsg('sys', '⚠ ' + (data.message || '助手没有响应，请重试'));
+          history.pop();
+        }
+      } else {
+        addMsg('bot', data.message);
+        history.push({ role: 'assistant', content: data.message });
+        if (data.ready && data.prompt) addPromptBox(data.prompt);
+      }
+    } catch (e) {
+      hideTyping();
+      addMsg('sys', '⚠ 网络异常：' + e.message);
+      history.pop();
+    }
+
+    busy = false;
+    SEND.disabled = false;
+    BALL.classList.remove('thinking');
+    refreshFace();
+    MSGS.scrollTop = MSGS.scrollHeight;
+  }
+
+  SEND.addEventListener('click', send);
+  INPUT.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  INPUT.addEventListener('input', function () {
+    INPUT.style.height = 'auto';
+    INPUT.style.height = Math.min(INPUT.scrollHeight, 96) + 'px';
+  });
+
+  setFace('idle');
+  BALL.dataset.face = 'idle';
+})();
 </script>
 </body>
 </html>

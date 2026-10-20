@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>添加配乐 · AI 视频流水线</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --border: #e5e5ea; --text: #1d1d1f;
+    --text-2: #6e6e73; --text-3: #a1a1a6; --primary: #1a73e8; --primary-light: #eef4ff;
+    --music: #1a73e8; --ambient: #34c759; --track-h: 76px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; }
+
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; background: var(--card);
+            border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+  /* 注意：h1 在 flex 容器里会按内容宽度撑开，必须显式 flex:0 0 auto 且不换行，
+     否则会把紧随其后的 .hint 挤到下一行、与标题重叠（实测截图确认过）。 */
+  .topbar h1 { font-size: 16px; margin: 0; font-weight: 600; flex: 0 0 auto; white-space: nowrap; }
+  .topbar .hint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .spacer { flex: 1 1 auto; }
+  .btn { border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 8px;
+         padding: 7px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: #c7c7cc; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: #1765cc; }
+  .btn-danger { color: #c73030; border-color: #f0c4c4; }
+  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 6px; }
+
+  /* ===== 任务卡片列表 ===== */
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 22px 20px 60px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .task-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+               cursor: pointer; transition: .15s; }
+  .task-card:hover { border-color: #c7c7cc; box-shadow: 0 6px 20px rgba(0,0,0,.06); transform: translateY(-1px); }
+  .task-thumb { width: 100%; aspect-ratio: 16/9; background: #000; object-fit: cover; display: block; }
+  .task-body { padding: 12px; }
+  .task-title { font-size: 13px; font-weight: 600; line-height: 1.4; max-height: 2.8em; overflow: hidden; }
+  .task-meta { margin-top: 6px; font-size: 12px; color: var(--text-2); display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; }
+  .badge-ok { background: #e8f8ec; color: #1d7a35; }
+  .badge-none { background: #f2f2f4; color: var(--text-2); }
+
+  /* ===== 编辑器 ===== */
+  .editor { display: none; flex-direction: column; height: 100vh; }
+  .editor.active { display: flex; }
+  .editor-body { flex: 1; display: flex; min-height: 0; }
+
+  .stage { flex: 1; background: #111; display: flex; align-items: center; justify-content: center; min-width: 320px; }
+  .stage video { max-width: 100%; max-height: 100%; }
+
+  .side { width: 300px; background: var(--card); border-left: 1px solid var(--border);
+          display: flex; flex-direction: column; min-height: 0; }
+  .side-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .side-tab { flex: 1; padding: 10px; text-align: center; font-size: 13px; cursor: pointer; color: var(--text-2); }
+  .side-tab.active { color: var(--primary); border-bottom: 2px solid var(--primary); font-weight: 600; }
+  .side-list { flex: 1; overflow-y: auto; padding: 10px; }
+  .lib-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; cursor: pointer; }
+  .lib-item:hover { border-color: var(--primary); background: var(--primary-light); }
+  .lib-title { font-size: 13px; font-weight: 600; }
+  .lib-meta { font-size: 11px; color: var(--text-2); margin-top: 3px; }
+  .lib-item .add-hint { float: right; font-size: 11px; color: var(--primary); }
+
+  /* ===== 时间轴 ===== */
+  .timeline { background: var(--card); border-top: 1px solid var(--border); height: 300px;
+              display: flex; flex-direction: column; }
+  .tl-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+  .tl-scroll { flex: 1; overflow: auto; position: relative; }
+  .tl-inner { position: relative; min-height: 100%; }
+  .ruler { height: 24px; position: sticky; top: 0; background: var(--card); z-index: 6;
+           border-bottom: 1px solid var(--border); }
+  .ruler canvas { display: block; }
+  .track-row { display: flex; border-bottom: 1px solid #f0f0f2; }
+  .track-label { width: 92px; flex: 0 0 92px; padding: 8px 10px; font-size: 12px; color: var(--text-2);
+                 border-right: 1px solid var(--border); background: #fafafa; position: sticky; left: 0; z-index: 5; }
+  .track-label .tl-name { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .track-lane { position: relative; height: var(--track-h); flex: 1 0 auto; }
+  .clip { position: absolute; top: 4px; height: calc(var(--track-h) - 10px); border-radius: 6px;
+          overflow: hidden; cursor: grab; user-select: none; border: 1px solid rgba(0,0,0,.12); }
+  .clip.music { background: rgba(26,115,232,.16); border-color: rgba(26,115,232,.45); }
+  .clip.ambient { background: rgba(52,199,89,.16); border-color: rgba(52,199,89,.45); }
+  .clip.selected { box-shadow: 0 0 0 2px var(--primary); }
+  .clip canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .clip .clip-name { position: absolute; left: 6px; top: 3px; font-size: 10px; font-weight: 600;
+                     color: rgba(0,0,0,.65); pointer-events: none; max-width: 90%; overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }
+  .clip .handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: rgba(0,0,0,.12); }
+  .clip .handle:hover { background: var(--primary); }
+  .clip .handle.left { left: 0; }
+  .clip .handle.right { right: 0; }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff3b30; z-index: 8; pointer-events: none; }
+
+  /* ===== 属性面板 ===== */
+  .props { padding: 12px; overflow-y: auto; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  .field input[type=number], .field input[type=text], .field select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px;
+  }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+  .empty-hint { color: var(--text-3); font-size: 12px; text-align: center; padding: 24px 10px; line-height: 1.7; }
+
+  .status-bar { padding: 6px 14px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--border);
+                background: #fafafa; display: flex; align-items: center; gap: 12px; }
+  .status-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+  .status-bar.busy .dot { background: #ff9f0a; }
+  .status-bar.ok .dot { background: #34c759; }
+  .status-bar.err .dot { background: #ff3b30; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none;
+                   align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #fff; border-radius: 14px; padding: 20px; width: 420px; max-width: 92vw; }
+  .modal h3 { margin: 0 0 12px; font-size: 16px; }
+  .modal video { width: 100%; border-radius: 8px; background: #000; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<!-- 列表页 -->
+<div id="listView">
+  <div class="topbar">
+    <h1>添加配乐</h1>
+    <span class="hint">选择一条已完成成片，为它编排配乐</span>
+    <div class="spacer"></div>
+    <button class="btn" onclick="location.href='/'">← 返回首页</button>
+  </div>
+  <div class="wrap">
+    <div id="taskGrid" class="grid"></div>
+    <div id="listEmpty" class="empty-hint" style="display:none;">还没有已完成的任务</div>
+  </div>
+</div>
+
+<!-- 编辑器 -->
+<div id="editorView" class="editor">
+  <div class="topbar">
+    <button class="btn" onclick="backToList()">← 返回列表</button>
+    <h1 id="editTitle">添加配乐</h1>
+    <div class="spacer"></div>
+    <button class="btn" id="btnPreview" onclick="startPreviewPlayback()">▶ 开始预览</button>
+    <button class="btn btn-primary" id="btnExport" onclick="doExport()">导出并覆盖成片</button>
+  </div>
+
+  <div class="editor-body">
+    <div class="stage">
+      <video id="video" controls preload="metadata"></video>
+    </div>
+
+    <div class="side">
+      <div class="side-tabs">
+        <div class="side-tab active" data-cat="music" onclick="switchLib('music')">轻音乐</div>
+        <div class="side-tab" data-cat="ambient" onclick="switchLib('ambient')">环境音</div>
+      </div>
+      <div class="side-list" id="libList"></div>
+    </div>
+  </div>
+
+  <!-- 时间轴 -->
+  <div class="timeline">
+    <div class="tl-toolbar">
+      <button class="btn btn-sm" onclick="zoomBy(-1)">－ 缩小</button>
+      <button class="btn btn-sm" onclick="zoomBy(1)">＋ 放大</button>
+      <span class="hint" id="zoomHint">每秒 40px</span>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn btn-sm btn-danger" onclick="removeSelected()" id="btnDelClip" disabled>删除片段</button>
+      <button class="btn btn-sm" onclick="splitAtPlayhead()">在播放头分割</button>
+      <button class="btn btn-sm" onclick="resetPlan()">清空配乐</button>
+    </div>
+    <div class="tl-scroll" id="tlScroll">
+      <div class="tl-inner" id="tlInner">
+        <div class="ruler" id="ruler"><canvas id="rulerCanvas" height="24"></canvas></div>
+        <div class="track-row">
+          <div class="track-label"><div class="tl-name">轻音乐</div><div>music</div></div>
+          <div class="track-lane" id="laneMusic" data-kind="music"></div>
+        </div>
+        <div class="track-row">
+          <div class="track-label"><div class="tl-name">环境音</div><div>ambient</div></div>
+          <div class="track-lane" id="laneAmbient" data-kind="ambient"></div>
+        </div>
+        <div class="playhead" id="playhead" style="left:0"></div>
+      </div>
+    </div>
+    <div class="status-bar" id="statusBar"><span class="dot"></span><span id="statusText">就绪</span></div>
+  </div>
+
+  <!-- 属性面板（选中片段时浮在右侧上方） -->
+  <div class="props" id="propsPanel" style="display:none; position:fixed; right:14px; bottom:310px; width:300px;
+       background:#fff; border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 28px rgba(0,0,0,.12);
+       max-height:calc(100vh - 420px);"></div>
+</div>
+
+<script>
+// ============================================================
+// 添加配乐 · 多轨音频时间轴
+// ------------------------------------------------------------
+// 设计要点（重要，改代码前先读）：
+// 1. 浏览器**不做任何音频计算**，只负责编辑与生成 plan(JSON)。
+// 2. 预览与导出都由服务端 ffmpeg 用同一套参数执行，
+//    因此"听到的"与"导出的"天然一致（这是产品的硬要求）。
+// 3. 音频解码只用于**画波形**（Web Audio），不解码就不影响出片。
+// ============================================================
+
+let TASK = null;            // 当前任务
+let DURATION = 0;           // 成片时长（秒）
+let PX_PER_SEC = 40;        // 缩放
+let PLAN = { music: [], ambient: [] };
+let INVENTORY = [];         // 音轨清单
+let LIB_CAT = 'music';      // 素材面板当前分类
+let SELECTED = null;        // 选中的片段 id
+let WAVE_CACHE = new Map(); // trackId -> { peaks: Float32Array, duration }
+let pendingWave = new Map();
+
+// 注意：不用 $ 作变量名——顶层 const 会占用全局标识符，容易与其他脚本冲突。
+const byId = id => document.getElementById(id);
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+
+// ---------- 工具 ----------
+function fmt(sec) {
+  sec = Math.max(0, sec || 0);
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+function setStatus(text, kind) {
+  const bar = byId('statusBar');
+  bar.className = 'status-bar' + (kind ? ' ' + kind : '');
+  byId('statusText').textContent = text;
+}
+
+// ============================================================
+// 1. 列表页
+// ============================================================
+async function loadTasks() {
+  try {
+    const res = await fetch('/api/tasks/completed');
+    const data = await res.json();
+    const grid = byId('taskGrid');
+    grid.innerHTML = '';
+    const tasks = data.tasks || [];
+    if (!tasks.length) { byId('listEmpty').style.display = 'block'; return; }
+    for (const t of tasks) {
+      const card = el('div', 'task-card');
+      card.onclick = () => openEditor(t.taskId);
+      const v = el('video', 'task-thumb');
+      v.src = t.outputUrl + '#t=0.5';
+      v.muted = true; v.preload = 'metadata';
+      const body = el('div', 'task-body');
+      const title = el('div', 'task-title');
+      title.textContent = (t.prompt || '(无提示词)').slice(0, 60);
+      const meta = el('div', 'task-meta');
+      meta.innerHTML = '<span>' + fmt(t.totalDuration) + '</span><span>' + (t.resolution || '') + '</span>' +
+        '<span class="badge ' + (t.hasBgm ? 'badge-ok' : 'badge-none') + '">' + (t.hasBgm ? '已配乐' : '无配乐') + '</span>';
+      body.appendChild(title); body.appendChild(meta);
+      card.appendChild(v); card.appendChild(body);
+      grid.appendChild(card);
+    }
+  } catch (e) {
+    setStatus('加载任务失败: ' + e.message, 'err');
+  }
+}
+
+// ============================================================
+// 2. 打开编辑器
+// ============================================================
+async function openEditor(taskId) {
+  byId('listView').style.display = 'none';
+  byId('editorView').classList.add('active');
+  setStatus('加载中…', 'busy');
+
+  const [planRes, libRes] = await Promise.all([
+    fetch('/api/tasks/' + encodeURIComponent(taskId) + '/bgm-plan').then(r => r.json()),
+    fetch('/api/bgm').then(r => r.json())
+  ]);
+  TASK = planRes;
+  INVENTORY = libRes.tracks || [];
+  DURATION = Number(planRes.totalDuration) || 0;
+
+  const video = byId('video');
+  video.src = planRes.videoUrl;
+  video.onloadedmetadata = () => {
+    if (!DURATION && video.duration) DURATION = video.duration;
+    layoutTimeline();
+    // 元数据就绪后按当前比例重算播放头位置（缩放/切换片源都会走到这里）
+    setPlayhead(video.currentTime || 0);
+    setStatus('成片时长 ' + fmt(DURATION), 'ok');
+  };
+  video.ontimeupdate = () => {
+    // 播放头 + 自动跟随滚动（长视频也能全程看到播到哪）
+    setPlayhead(video.currentTime);
+  };
+  video.onended = () => {
+    setStatus('预览播放结束', 'ok');
+  };
+
+  // 已有计划就用它；否则用自动配乐初始计划
+  if (planRes.plan) {
+    PLAN = { music: planRes.plan.music || [], ambient: planRes.plan.ambient || [] };
+  } else {
+    await buildAutoPlan();
+  }
+  renderLibrary();
+  renderTimeline();
+  byId('editTitle').textContent = '添加配乐 · ' + taskId;
+}
+
+// 初次进入时给一份自动配乐作为起点（用户从零开始也可以直接清空）
+async function buildAutoPlan() {
+  try {
+    const res = await fetch('/api/tasks/' + encodeURIComponent(TASK.taskId) + '/bgm-auto-plan', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok && data.plan) {
+      PLAN = data.plan;
+      setStatus('已生成自动配乐草稿，可自由修改', 'ok');
+    }
+  } catch (e) { /* 生成失败则保持空白，用户手动添加 */ }
+}
+
+function backToList() {
+  byId('editorView').classList.remove('active');
+  // 恢复列表视图时清掉残留的 display:none（openEditor 里设置的）
+  byId('listView').style.display = '';
+  byId('video').pause();
+  loadTasks();
+}
+
+// ============================================================
+// 3. 素材库
+// ============================================================
+function switchLib(cat) {
+  LIB_CAT = cat;
+  document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  renderLibrary();
+}
+
+function renderLibrary() {
+  const list = byId('libList');
+  list.innerHTML = '';
+  const items = INVENTORY.filter(t => (t.category === 'ambient' ? 'ambient' : 'music') === LIB_CAT);
+  if (!items.length) { list.innerHTML = '<div class="empty-hint">该分类暂无素材</div>'; return; }
+  for (const t of items) {
+    const item = el('div', 'lib-item');
+    item.innerHTML = '<span class="add-hint">＋ 添加</span>' +
+      '<div class="lib-title">' + t.title + '</div>' +
+      '<div class="lib-meta">' + t.id + ' · ' + (t.durationSec ? Math.round(t.durationSec) + 's' : '时长未知') + '</div>';
+    item.onclick = () => addClip(t);
+    list.appendChild(item);
+  }
+}
+
+// ============================================================
+// 4. 增删改片段
+// ============================================================
+function addClip(track) {
+  const kind = (track.category === 'ambient') ? 'ambient' : 'music';
+  const trackDur = Number(track.durationSec) || 30;
+  // 放到该轨末尾（不重叠），超出成片则裁到剩余空间
+  const lane = PLAN[kind];
+  let start = 0;
+  for (const c of lane) start = Math.max(start, c.timelineEnd);
+  if (DURATION && start >= DURATION - 0.5) start = 0;
+  let end = start + Math.min(trackDur, DURATION ? (DURATION - start) : trackDur);
+  if (end - start < 0.5) { setStatus('成片剩余空间不足，无法添加', 'err'); return; }
+
+  const clip = {
+    id: kind + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    trackId: track.id,
+    timelineStart: round3(start),
+    timelineEnd: round3(end),
+    sourceIn: 0,
+    sourceOut: round3(end - start),
+    volume: 1,
+    fadeIn: 0,
+    fadeOut: 0,
+    speed: 1,
+    fillMode: 'none',
+    keyframes: []
+  };
+  lane.push(clip);
+  SELECTED = clip.id;
+  renderTimeline();
+  setStatus('已添加：' + track.title, 'ok');
+}
+
+function round3(v) { return Math.round(v * 1000) / 1000; }
+
+function findClip(id) {
+  for (const kind of ['music', 'ambient']) {
+    const c = PLAN[kind].find(x => x.id === id);
+    if (c) return { clip: c, kind };
+  }
+  return null;
+}
+
+function removeSelected() {
+  if (!SELECTED) return;
+  const f = findClip(SELECTED);
+  if (!f) return;
+  PLAN[f.kind] = PLAN[f.kind].filter(x => x.id !== SELECTED);
+  SELECTED = null;
+  renderTimeline();
+  setStatus('已删除片段', 'ok');
+}
+
+function splitAtPlayhead() {
+  if (!SELECTED) return;
+  const f = findClip(SELECTED);
+  const t = byId('video').currentTime;
+  const c = f.clip;
+  if (t <= c.timelineStart + 0.05 || t >= c.timelineEnd - 0.05) {
+    setStatus('播放头不在选中片段内', 'err'); return;
+  }
+  // 分割：前半保留，后半新建（源区间按比例切分）
+  const ratio = (t - c.timelineStart) / (c.timelineEnd - c.timelineStart);
+  const srcSplit = c.sourceIn + (c.sourceOut - c.sourceIn) * ratio;
+  const right = {
+    ...c,
+    id: f.kind + '_' + Date.now().toString(36) + 'r',
+    timelineStart: round3(t),
+    sourceIn: round3(srcSplit),
+    fadeIn: 0
+  };
+  c.timelineEnd = round3(t);
+  c.sourceOut = round3(srcSplit);
+  c.fadeOut = 0;
+  PLAN[f.kind].push(right);
+  renderTimeline();
+  setStatus('已在 ' + t.toFixed(2) + 's 处分割', 'ok');
+}
+
+function resetPlan() {
+  if (!confirm('清空所有配乐片段？')) return;
+  PLAN = { music: [], ambient: [] };
+  SELECTED = null;
+  renderTimeline();
+  setStatus('已清空', 'ok');
+}
+
+// ============================================================
+// 5. 渲染时间轴
+// ============================================================
+function layoutTimeline() {
+  const total = Math.max(DURATION || 60, 10);
+  const width = Math.ceil(total * PX_PER_SEC) + 120; // 右侧留白便于拖到片尾
+  byId('tlInner').style.width = (width + 92) + 'px';
+  byId('zoomHint').textContent = '每秒 ' + PX_PER_SEC + 'px';
+  drawRuler(total, width);
+}
+
+function drawRuler(total, width) {
+  const c = byId('rulerCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  c.width = width * dpr; c.height = 24 * dpr;
+  c.style.width = width + 'px'; c.style.height = '24px';
+  const ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, 24);
+  ctx.fillStyle = '#f7f7f9'; ctx.fillRect(0, 0, width, 24);
+  ctx.fillStyle = '#86868b'; ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle';
+  // 刻度间隔随缩放自适应
+  let step = 1;
+  if (PX_PER_SEC < 20) step = 5;
+  else if (PX_PER_SEC < 40) step = 2;
+  else if (PX_PER_SEC >= 120) step = 0.5;
+  for (let t = 0; t <= total + 1; t += step) {
+    const x = t * PX_PER_SEC;
+    ctx.strokeStyle = '#dcdce0';
+    ctx.beginPath(); ctx.moveTo(x, 14); ctx.lineTo(x, 24); ctx.stroke();
+    if (t % (step * 2) === 0 || step >= 1) ctx.fillText(fmt(t), x + 3, 8);
+  }
+  // 片尾标记：左移 1px 让 2px 宽的线整体落在可见区域内，避免被裁掉只露半条
+  if (DURATION) {
+    const xe = Math.max(1, DURATION * PX_PER_SEC - 1);
+    ctx.strokeStyle = '#ff9f0a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(xe, 0); ctx.lineTo(xe, 24); ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+}
+
+function renderTimeline() {
+  layoutTimeline();
+  for (const kind of ['music', 'ambient']) {
+    const lane = byId('lane' + (kind === 'music' ? 'Music' : 'Ambient'));
+    lane.innerHTML = '';
+    lane.style.width = (Math.ceil((DURATION || 60) * PX_PER_SEC) + 120) + 'px';
+    for (const c of PLAN[kind]) lane.appendChild(buildClipEl(c, kind));
+  }
+  renderProps();
+  byId('btnDelClip').disabled = !SELECTED;
+}
+
+function buildClipEl(c, kind) {
+  const node = el('div', 'clip ' + kind + (c.id === SELECTED ? ' selected' : ''));
+  node.dataset.id = c.id;
+  node.style.left = (c.timelineStart * PX_PER_SEC) + 'px';
+  node.style.width = Math.max(8, (c.timelineEnd - c.timelineStart) * PX_PER_SEC) + 'px';
+
+  const name = el('div', 'clip-name');
+  const t = INVENTORY.find(x => x.id === c.trackId);
+  name.textContent = (t ? t.title : c.trackId) + (c.speed !== 1 ? ' · ' + c.speed + 'x' : '') +
+    (c.fillMode === 'loop' ? ' · 循环' : c.fillMode === 'stretch' ? ' · 拉伸' : '');
+  node.appendChild(name);
+
+  // 波形
+  // 注意：此时 node 还没挂到文档里，clientWidth/clientHeight 为 0，
+  // 立刻绘制会得到 0×0 的 canvas（实测波形空白）。改用下一帧再画，
+  // 并记录已绘制的宽度，尺寸变化时（缩放）自动重绘。
+  const wave = el('canvas');
+  node.appendChild(wave);
+  requestAnimationFrame(() => {
+    if (!node.isConnected) return;
+    wave.dataset.drawnW = String(Math.round(node.clientWidth || 0));
+    drawWave(wave, c, kind).catch(() => {});
+  });
+
+  // 左右拖拽手柄
+  const hl = el('div', 'handle left');
+  const hr = el('div', 'handle right');
+  node.appendChild(hl); node.appendChild(hr);
+
+  // 选中
+  node.onmousedown = (e) => {
+    if (e.target.classList.contains('handle')) return;
+    selectClip(c.id);
+    startDrag(e, c, kind, 'move', node);
+  };
+  hl.onmousedown = (e) => { e.stopPropagation(); selectClip(c.id); startDrag(e, c, kind, 'left', node); };
+  hr.onmousedown = (e) => { e.stopPropagation(); selectClip(c.id); startDrag(e, c, kind, 'right', node); };
+
+  return node;
+}
+
+function selectClip(id) {
+  SELECTED = id;
+  document.querySelectorAll('.clip').forEach(n => n.classList.toggle('selected', n.dataset.id === id));
+  byId('btnDelClip').disabled = false;
+  renderProps();
+}
+
+// ---------- 波形绘制（min/max 包络）----------
+async function drawWave(canvas, clip, kind) {
+  const track = INVENTORY.find(x => x.id === clip.trackId);
+  if (!track) return;
+  const peaks = await getPeaks(track);
+  // 尺寸来源优先级：canvas 自身 -> 父节点 .clip 的布局尺寸 -> 兜底值。
+  // 说明：canvas 是 position:absolute; inset:0，在某些布局下 clientWidth/Height 会先返回 0，
+  // 所以必须逐级兜底，否则会得到 0×0 画布（实测波形空白）。
+  const host = canvas.parentElement;
+  const rect = host && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+  const w = canvas.clientWidth || (host ? host.clientWidth : 0) || (rect ? Math.round(rect.width) : 0) || 100;
+  const h = canvas.clientHeight || (host ? host.clientHeight : 0) || (rect ? Math.round(rect.height) : 0) || 60;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, w * dpr); canvas.height = Math.max(1, h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!peaks || !peaks.length) {
+    // 波形数据不可用（浏览器音频解码受环境限制时会发生）。
+    // 退化为「等宽能量条」示意：仍能看出片段范围、能正常拖拽裁剪，
+    // 并在 title 里说明原因。音频本身不受影响——混音完全在服务端完成。
+    const cached = WAVE_CACHE.get(clip.trackId);
+    const barColor = kind === 'ambient' ? 'rgba(29,122,53,.35)' : 'rgba(26,115,232,.35)';
+    ctx.strokeStyle = barColor; ctx.fillStyle = barColor;
+    // 画一条中轴线
+    ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+    // 按固定间隔画等宽能量条，视觉上仍是一段音频
+    const BW = 3, GAP = 3;
+    for (let x = 2; x + BW < w; x += BW + GAP) {
+      const amp = (0.35 + 0.25 * Math.sin(x * 0.35)) * (h / 2 - 3);
+      ctx.fillRect(x, h / 2 - amp, BW, amp * 2);
+    }
+    if (canvas.parentElement) {
+      canvas.parentElement.title = (cached && cached.reason
+        ? '波形不可用（' + cached.reason + '）'
+        : '波形加载中') + ' — 不影响编辑与导出，配乐在服务端混音';
+    }
+    return;
+  }
+
+  const srcDur = track.durationSec || (peaks.length ? peaks.length : 1);
+  const from = clip.sourceIn / (srcDur || 1);
+  const to = clip.sourceOut / (srcDur || 1);
+  const startIdx = Math.floor(from * peaks.length);
+  const endIdx = Math.ceil(to * peaks.length);
+  const span = Math.max(1, endIdx - startIdx);
+  const mid = h / 2;
+  const color = kind === 'ambient' ? 'rgba(29,122,53,.75)' : 'rgba(26,115,232,.75)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  // 注意：peaks 是「振幅大小」（0..1），不是带符号的样本值。
+  // 因此以中线为轴对称绘制：上方到 +amp，下方到 -amp。
+  // （早期版本把 peaks 当作 -1..1 的样本，用 min/max 取范围，
+  //   遇到全正数时会退化成一条贴顶的线，看起来就像空白。）
+  for (let x = 0; x < w; x++) {
+    const i0 = startIdx + Math.floor((x / w) * span);
+    const i1 = startIdx + Math.floor(((x + 1) / w) * span);
+    let amp = 0;
+    for (let i = i0; i < Math.max(i1, i0 + 1) && i < peaks.length; i++) {
+      const v = peaks[i];
+      if (v > amp) amp = v;
+    }
+    if (amp <= 0) continue;
+    const half = Math.max(0.5, amp * (h / 2 - 3));
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, mid - half);
+    ctx.lineTo(x + 0.5, mid + half);
+    ctx.stroke();
+  }
+}
+
+// 获取峰值数据：优先用服务端算好的（ffmpeg 解码，任何环境都能出），
+// 浏览器解码只作为后备（服务端接口挂掉时）。
+// 说明：早期版本完全依赖 Web Audio 的 decodeAudioData，在无头浏览器/缺解码组件的
+// 环境里会永久挂起，波形一片空白——所以改成以服务端为准。
+async function getPeaks(track) {
+  if (WAVE_CACHE.has(track.id)) return WAVE_CACHE.get(track.id).peaks;
+  if (pendingWave.has(track.id)) return pendingWave.get(track.id);
+
+  const p = (async () => {
+    // 1) 服务端峰值（首选）
+    try {
+      const res = await fetch('/api/bgm/waveform/' + encodeURIComponent(track.id));
+      if (res.ok) {
+        const j = await res.json();
+        if (j && j.ok && Array.isArray(j.peaks) && j.peaks.length) {
+          // 统一成 0..1 的浮点，供 drawWave 直接使用
+          const peaks = new Float32Array(j.peaks.length);
+          for (let i = 0; i < j.peaks.length; i++) peaks[i] = j.peaks[i] / 255;
+          const rec = { peaks, duration: j.durationSec || track.durationSec || 0, source: 'server' };
+          WAVE_CACHE.set(track.id, rec);
+          return peaks;
+        }
+      }
+    } catch (e) {
+      console.warn('服务端波形获取失败，尝试浏览器解码', track.id, e.message);
+    }
+
+    // 2) 浏览器解码（后备）
+    try {
+      const url = '/bgm/' + encodeURIComponent(track.file).replace(/%2F/g, '/');
+      const res = await fetch(url);
+      const buf = await res.arrayBuffer();
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new Ctx();
+      const audio = await Promise.race([
+        ctx.decodeAudioData(buf),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('decodeAudioData 超时')), 10000))
+      ]);
+      const ch = audio.getChannelData(0);
+      const BUCKETS = 1600;
+      const step = Math.max(1, Math.floor(ch.length / BUCKETS));
+      const peaks = new Float32Array(BUCKETS);
+      for (let i = 0; i < BUCKETS; i++) {
+        let mx = 0;
+        const s = i * step;
+        for (let j = s; j < Math.min(s + step, ch.length); j += 8) {
+          const v = Math.abs(ch[j]);
+          if (v > mx) mx = v;
+        }
+        peaks[i] = mx;
+      }
+      ctx.close();
+      WAVE_CACHE.set(track.id, { peaks, duration: audio.duration, source: 'browser' });
+      return peaks;
+    } catch (e) {
+      console.warn('浏览器波形解码也失败', track.id, e.message);
+      WAVE_CACHE.set(track.id, { peaks: null, duration: 0, failed: true, reason: e.message });
+      return null;
+    } finally {
+      pendingWave.delete(track.id);
+    }
+  })();
+
+  pendingWave.set(track.id, p);
+  return p;
+}
+
+// ============================================================
+// 6. 拖拽（移动 / 左右裁剪）
+// ============================================================
+function startDrag(e, clip, kind, mode, node) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const orig = { s: clip.timelineStart, e: clip.timelineEnd, sin: clip.sourceIn, sout: clip.sourceOut };
+  const maxDur = DURATION || 1e9;
+
+  function onMove(ev) {
+    const dt = (ev.clientX - startX) / PX_PER_SEC;
+    if (mode === 'move') {
+      let ns = orig.s + dt;
+      ns = Math.max(0, Math.min(ns, maxDur - (orig.e - orig.s)));
+      clip.timelineStart = round3(ns);
+      clip.timelineEnd = round3(ns + (orig.e - orig.s));
+    } else if (mode === 'left') {
+      // 左边缘：同时调整 timelineStart 与 sourceIn（保持速度）
+      let ns = Math.max(0, Math.min(orig.s + dt, orig.e - 0.1));
+      const delta = ns - orig.s;
+      clip.timelineStart = round3(ns);
+      clip.sourceIn = round3(Math.max(0, orig.sin + delta * (clip.speed || 1)));
+    } else if (mode === 'right') {
+      let ne = Math.max(orig.s + 0.1, Math.min(orig.e + dt, maxDur));
+      const delta = ne - orig.e;
+      clip.timelineEnd = round3(ne);
+      clip.sourceOut = round3(Math.max(clip.sourceIn + 0.1, orig.sout + delta * (clip.speed || 1)));
+    }
+    node.style.left = (clip.timelineStart * PX_PER_SEC) + 'px';
+    node.style.width = Math.max(8, (clip.timelineEnd - clip.timelineStart) * PX_PER_SEC) + 'px';
+  }
+  function onUp() {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    renderTimeline();
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+
+// ============================================================
+// 7. 属性面板
+// ============================================================
+function renderProps() {
+  const panel = byId('propsPanel');
+  const f = SELECTED ? findClip(SELECTED) : null;
+  if (!f) { panel.style.display = 'none'; return; }
+  const c = f.clip;
+  const track = INVENTORY.find(x => x.id === c.trackId);
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;margin-bottom:8px;">
+      <strong style="font-size:13px;flex:1;">${track ? track.title : c.trackId}</strong>
+      <button class="btn btn-sm" onclick="closeProps()">×</button>
+    </div>
+    <div class="field"><label>基础音量（1.0 = 原始音量）</label>
+      <input type="number" step="0.05" min="0" max="4" value="${c.volume}" oninput="updateClip('volume', this.value)"></div>
+    <div class="row2">
+      <div class="field"><label>淡入（秒）</label>
+        <input type="number" step="0.1" min="0" value="${c.fadeIn}" oninput="updateClip('fadeIn', this.value)"></div>
+      <div class="field"><label>淡出（秒）</label>
+        <input type="number" step="0.1" min="0" value="${c.fadeOut}" oninput="updateClip('fadeOut', this.value)"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>变速（0.5–2，保音高）</label>
+        <input type="number" step="0.05" min="0.5" max="2" value="${c.speed}" oninput="updateClip('speed', this.value)"></div>
+      <div class="field"><label>素材不足时</label>
+        <select onchange="updateClip('fillMode', this.value)">
+          <option value="none" ${c.fillMode === 'none' ? 'selected' : ''}>不填充</option>
+          <option value="loop" ${c.fillMode === 'loop' ? 'selected' : ''}>循环填充</option>
+          <option value="stretch" ${c.fillMode === 'stretch' ? 'selected' : ''}>匀速拉伸</option>
+        </select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>起点（秒）</label>
+        <input type="number" step="0.1" min="0" value="${c.timelineStart}" oninput="updateClip('timelineStart', this.value)"></div>
+      <div class="field"><label>终点（秒）</label>
+        <input type="number" step="0.1" min="0" value="${c.timelineEnd}" oninput="updateClip('timelineEnd', this.value)"></div>
+    </div>
+    <div class="field"><label>关键帧音量曲线</label>
+      <div id="kfList"></div>
+      <button class="btn btn-sm" style="margin-top:6px;" onclick="addKeyframe()">在播放头加关键帧</button>
+      <div class="hint" style="margin-top:6px;">关键帧之间线性渐变，可实现渐强/渐弱。</div>
+    </div>
+  `;
+  renderKeyframes(c);
+}
+
+function renderKeyframes(c) {
+  const box = byId('kfList');
+  if (!box) return;
+  const kfs = (c.keyframes || []).slice().sort((a, b) => a.t - b.t);
+  if (!kfs.length) { box.innerHTML = '<div class="hint">暂无关键帧</div>'; return; }
+  box.innerHTML = kfs.map((k, i) =>
+    `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+       <span style="font-size:11px;color:#6e6e73;width:52px;">${k.t.toFixed(2)}s</span>
+       <input type="number" step="0.05" min="0" max="4" value="${k.v}"
+              style="flex:1;padding:3px 6px;border:1px solid #e5e5ea;border-radius:6px;font-size:12px;"
+              oninput="updateKeyframe(${i}, this.value)">
+       <button class="btn btn-sm btn-danger" onclick="removeKeyframe(${i})">删</button>
+     </div>`).join('');
+}
+
+function addKeyframe() {
+  const f = findClip(SELECTED); if (!f) return;
+  const c = f.clip;
+  const tRel = Math.max(0, Math.min(byId('video').currentTime - c.timelineStart, c.timelineEnd - c.timelineStart));
+  c.keyframes = (c.keyframes || []).concat([{ t: round3(tRel), v: 1 }]);
+  renderProps();
+}
+
+function updateKeyframe(i, val) {
+  const f = findClip(SELECTED); if (!f) return;
+  const kfs = (f.clip.keyframes || []).slice().sort((a, b) => a.t - b.t);
+  // 注意：sorted 后的索引与原始顺序可能不同，这里按排序后的索引更新原始项
+  const target = kfs[i];
+  const idx = f.clip.keyframes.indexOf(target);
+  if (idx >= 0) f.clip.keyframes[idx].v = Math.max(0, Number(val) || 0);
+}
+
+function removeKeyframe(i) {
+  const f = findClip(SELECTED); if (!f) return;
+  const kfs = (f.clip.keyframes || []).slice().sort((a, b) => a.t - b.t);
+  const target = kfs[i];
+  f.clip.keyframes = f.clip.keyframes.filter(x => x !== target);
+  renderProps();
+}
+
+function updateClip(field, val) {
+  const f = findClip(SELECTED); if (!f) return;
+  const c = f.clip;
+  c[field] = typeof val === 'string' && !isNaN(Number(val)) && val !== '' ? Number(val) : val;
+  // 约束
+  if (field === 'timelineStart' && c.timelineStart >= c.timelineEnd) c.timelineStart = Math.max(0, c.timelineEnd - 0.1);
+  if (field === 'timelineEnd' && c.timelineEnd <= c.timelineStart) c.timelineEnd = c.timelineStart + 0.1;
+  if (field === 'speed') c.speed = Math.min(2, Math.max(0.5, c.speed));
+  if (field === 'volume') c.volume = Math.max(0, c.volume);
+  renderTimeline();
+}
+
+function closeProps() { SELECTED = null; renderProps(); byId('btnDelClip').disabled = true;
+  document.querySelectorAll('.clip').forEach(n => n.classList.remove('selected')); }
+
+// ============================================================
+// 8. 预览 / 导出
+// ============================================================
+function collectPlan() {
+  return {
+    music: PLAN.music.map(s => ({ ...s })),
+    ambient: PLAN.ambient.map(s => ({ ...s }))
+  };
+}
+
+async function savePlan() {
+  const res = await fetch('/api/tasks/' + encodeURIComponent(TASK.taskId) + '/bgm-plan', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ plan: collectPlan() })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '保存失败');
+  return data;
+}
+
+// ============================================================
+// 预览播放
+// ------------------------------------------------------------
+// 设计（用户确认）：
+//  1) 点「开始预览」先由服务端渲染出带配乐的成片（必须，保证听到的=导出的），
+//     渲染期间按钮显示进度、时间轴不动；渲染完自动从头播放。
+//  2) 播放头随视频移动，并自动跟随滚动，全程能看到播到哪。
+//  3) 不再弹小窗：直接用上方大画布播放，视线不用离开时间轴。
+// ============================================================
+
+let PREVIEW_URL = null;      // 已渲染好的预览地址（同一份 plan 可复用）
+let PREVIEW_SIG = null;      // 生成该预览时的 plan 指纹，plan 变了要重渲染
+let renderTimer = null;
+
+function planSignature() {
+  return JSON.stringify(collectPlan());
+}
+
+// 把播放头挪到指定秒，并在需要时自动滚动时间轴
+function setPlayhead(sec) {
+  const ph = byId('playhead');
+  if (ph) ph.style.left = (sec * PX_PER_SEC + 0) + 'px';
+  followPlayhead(sec);
+}
+
+// 播放跟随：播放头接近视口右侧时，让时间轴整体左移，保持可见
+function followPlayhead(sec) {
+  const scroller = byId('tlScroll');
+  if (!scroller) return;
+  const x = sec * PX_PER_SEC;          // 相对内容区左侧
+  const labelW = 92;                    // 左侧轨道名列宽（sticky）
+  const viewW = scroller.clientWidth - labelW;
+  const viewLeft = scroller.scrollLeft;
+  const visibleRight = viewLeft + viewW;
+  // 播放头超出可视区右侧 10% 时，滚动让它回到左侧 20% 处
+  if (x > visibleRight - viewW * 0.1) {
+    scroller.scrollLeft = Math.max(0, x - viewW * 0.2);
+  } else if (x < viewLeft) {
+    scroller.scrollLeft = Math.max(0, x - viewW * 0.2);
+  }
+}
+
+// 点「开始预览」
+async function startPreviewPlayback() {
+  if (!PLAN.music.length && !PLAN.ambient.length) {
+    alert('还没有添加任何配乐片段');
+    return;
+  }
+  const video = byId('video');
+  const btn = byId('btnPreview');
+
+  const sig = planSignature();
+  // 已经为这份计划渲染过 → 直接播，不重复等
+  if (PREVIEW_URL && PREVIEW_SIG === sig) {
+    video.src = PREVIEW_URL;
+    video.currentTime = 0;
+    try { await video.play(); } catch (e) { /* 浏览器可能拒绝自动播放，用户可手动点 */ }
+    setStatus('正在预览（已就绪）', 'ok');
+    return;
+  }
+
+  // 渲染：按钮显示进度，时间轴不动
+  btn.disabled = true;
+  let pct = 0;
+  btn.textContent = '渲染中… 0%';
+  setStatus('服务端正在混音，请稍候…', 'busy');
+  clearInterval(renderTimer);
+  renderTimer = setInterval(() => {
+    // 进度条是估算值：真实进度由服务端一次性返回，这里只做视觉反馈
+    pct = Math.min(95, pct + Math.max(1, Math.round((95 - pct) * 0.12)));
+    btn.textContent = '渲染中… ' + pct + '%';
+  }, 350);
+
+  try {
+    await savePlan();
+    const res = await fetch('/api/tasks/' + encodeURIComponent(TASK.taskId) + '/bgm-preview', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ plan: collectPlan() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '预览渲染失败');
+
+    PREVIEW_URL = data.previewUrl + '?t=' + Date.now();
+    PREVIEW_SIG = sig;
+    btn.textContent = '▶ 开始预览';
+
+    // 用大画布直接播放，从头开始
+    video.src = PREVIEW_URL;
+    video.currentTime = 0;
+    const onReady = () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      setPlayhead(0);
+      video.play().catch(() => {});
+    };
+    video.addEventListener('loadedmetadata', onReady);
+    setStatus('预览就绪，正在播放（未覆盖原成片）', 'ok');
+  } catch (e) {
+    btn.textContent = '▶ 开始预览';
+    setStatus('预览失败: ' + e.message, 'err');
+    alert('预览失败: ' + e.message);
+  } finally {
+    clearInterval(renderTimer);
+    renderTimer = null;
+    btn.disabled = false;
+    if (btn.textContent.indexOf('渲染中') === 0) btn.textContent = '▶ 开始预览';
+  }
+}
+
+// 导出：服务端混音后覆盖原成片（先写临时文件，校验通过才替换）
+async function doExport() {
+  if (!PLAN.music.length && !PLAN.ambient.length) {
+    if (!confirm('当前没有任何配乐片段，导出将得到无配乐成片。继续？')) return;
+  } else if (!confirm('导出会用新配乐覆盖原成片（先写临时文件，校验通过才替换）。继续？')) {
+    return;
+  }
+  byId('btnExport').disabled = true;
+  setStatus('正在导出（服务端 ffmpeg 混音）…', 'busy');
+  try {
+    await savePlan();
+    const res = await fetch('/api/tasks/' + encodeURIComponent(TASK.taskId) + '/audio', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ plan: collectPlan() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '导出失败');
+    // 导出后成片已换：作废预览缓存，下次预览要重新渲染
+    PREVIEW_URL = null;
+    PREVIEW_SIG = null;
+    byId('video').src = data.outputUrl + '?t=' + Date.now();
+    setStatus('导出完成：' + (data.duration || 0).toFixed(2) + 's', 'ok');
+    alert('配乐已导出并覆盖成片。');
+  } catch (e) {
+    setStatus('导出失败: ' + e.message, 'err');
+    alert('导出失败: ' + e.message);
+  } finally { byId('btnExport').disabled = false; }
+}
+
+// ============================================================
+// 9. 缩放
+// ============================================================
+function zoomBy(dir) {
+  PX_PER_SEC = Math.max(8, Math.min(240, PX_PER_SEC * (dir > 0 ? 1.4 : 1 / 1.4)));
+  renderTimeline();
+}
+
+// ============================================================
+// 启动
+// ============================================================
+(async function init() {
+  await loadTasks();
+  const q = new URLSearchParams(location.search);
+  const taskId = q.get('task');
+  if (taskId) openEditor(taskId);
+})();
+</script>
+</body>
+</html>

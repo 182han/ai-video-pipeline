@@ -14,6 +14,14 @@ const fs = require('fs');
 
 // 注意层级：src/storage/drivers/ -> ../../.. 才是项目根（app/）
 const config = require('../../../config');
+const qcVersionUtil = require('../qcVersion');
+
+// 从一条质检结论里取 qcVersion（没有就 null），用于写库
+function qcVersionOfQC(qc, fallback) {
+  if (!qc || typeof qc !== 'object') return qcVersionUtil.normalize(fallback);
+  const own = qcVersionUtil.qcVersionOf(qc);
+  return own !== null ? own : qcVersionUtil.normalize(fallback);
+}
 
 let db = null;
 
@@ -40,6 +48,9 @@ const SQLITE_SCHEMA = [
     current_step_key text,
     error text,
     final_qc text,
+    qc_version integer,
+    bgm_plan text,
+    bgm_result text,
     estimated_total_time integer,
     created_at text,
     started_at text,
@@ -62,6 +73,7 @@ const SQLITE_SCHEMA = [
     track_id text,
     duration real default 0,
     qc_result text,
+    qc_version integer,
     error text,
     created_at text,
     updated_at text,
@@ -112,6 +124,15 @@ function nowIso() { return new Date().toISOString(); }
 function genId(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function j(v, fallback) { try { return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
 
+// 给已存在的老库补列。SQLite 没有 add column if not exists，
+// 只能先查 pragma table_info 再决定要不要 ALTER。
+function ensureColumn(database, table, column, ddl) {
+  const cols = database.prepare(`pragma table_info(${table})`).all();
+  if (cols.some(c => c.name === column)) return false;
+  database.exec(`alter table ${table} add column ${column} ${ddl}`);
+  return true;
+}
+
 function rowToClip(r) {
   return {
     index: r.clip_index,
@@ -124,7 +145,8 @@ function rowToClip(r) {
     videoPath: r.video_path,
     trackId: r.track_id,
     duration: r.duration || 0,
-    qcResult: j(r.qc_result, null),
+    qcResult: r.qc_result ? qcVersionUtil.annotateQC(j(r.qc_result, null), r.qc_version) : j(r.qc_result, null),
+    qcVersion: qcVersionUtil.normalize(r.qc_version),
     error: r.error
   };
 }
@@ -151,7 +173,11 @@ function rowToTask(r, clips) {
     s3Url: r.s3_url,
     runtimeConfig: j(r.runtime_config, {}),
     error: r.error,
-    finalQC: j(r.final_qc, null),
+    finalQC: r.final_qc ? qcVersionUtil.annotateQC(j(r.final_qc, null), r.qc_version) : j(r.final_qc, null),
+    qcVersion: qcVersionUtil.normalize(r.qc_version),
+    // 整片配乐计划与最近一次混音结果（见 src/processors/bgmPlan.js）
+    bgmPlan: j(r.bgm_plan, null),
+    bgmResult: j(r.bgm_result, null),
     estimatedTotalTime: r.estimated_total_time,
     createdAt: r.created_at,
     startedAt: r.started_at,
@@ -176,6 +202,21 @@ module.exports = {
     db = new Database(file);
     db.pragma('journal_mode = WAL');
     for (const stmt of SQLITE_SCHEMA) db.exec(stmt);
+
+    // 老库补列（幂等）：新库这里什么都不会做
+    const added = [];
+    if (ensureColumn(db, 'tasks', 'qc_version', 'integer')) added.push('tasks.qc_version');
+    if (ensureColumn(db, 'clips', 'qc_version', 'integer')) added.push('clips.qc_version');
+    // 配乐改造：任务级配乐计划与混音结果（整片多轨时间轴）
+    if (ensureColumn(db, 'tasks', 'bgm_plan', 'text')) added.push('tasks.bgm_plan');
+    if (ensureColumn(db, 'tasks', 'bgm_result', 'text')) added.push('tasks.bgm_result');
+    if (added.length) {
+      console.log(`[storage:sqlite] 已补列: ${added.join(', ')}`);
+      // 有历史质检结论但版本为空的记录，标记为 1（历史未验证）——不要标 2
+      const t = db.prepare('update tasks set qc_version = 1 where qc_version is null and final_qc is not null').run();
+      const c = db.prepare('update clips set qc_version = 1 where qc_version is null and qc_result is not null').run();
+      console.log(`[storage:sqlite] 历史质检结论已标记为未验证: tasks ${t.changes} 行, clips ${c.changes} 行`);
+    }
   },
 
   async close() {
@@ -188,9 +229,10 @@ module.exports = {
       db.prepare(`insert into tasks (
         task_id,status,prompt,optimized_prompt,is_multi_prompt,model,theme,
         total_clips,clip_duration,resolution,total_duration,output_path,s3_url,
-        runtime_config,steps,current_step,current_step_key,error,final_qc,
+        runtime_config,steps,current_step,current_step_key,error,final_qc,qc_version,
+        bgm_plan,bgm_result,
         estimated_total_time,created_at,started_at,completed_at,updated_at,deleted_at
-      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       on conflict(task_id) do update set
         status=excluded.status, prompt=excluded.prompt, optimized_prompt=excluded.optimized_prompt,
         is_multi_prompt=excluded.is_multi_prompt, model=excluded.model, theme=excluded.theme,
@@ -199,7 +241,8 @@ module.exports = {
         output_path=excluded.output_path, s3_url=excluded.s3_url,
         runtime_config=excluded.runtime_config, steps=excluded.steps,
         current_step=excluded.current_step, current_step_key=excluded.current_step_key,
-        error=excluded.error, final_qc=excluded.final_qc,
+        error=excluded.error, final_qc=excluded.final_qc, qc_version=excluded.qc_version,
+        bgm_plan=excluded.bgm_plan, bgm_result=excluded.bgm_result,
         estimated_total_time=excluded.estimated_total_time,
         started_at=excluded.started_at, completed_at=excluded.completed_at,
         updated_at=excluded.updated_at, deleted_at=excluded.deleted_at`).run(
@@ -210,6 +253,9 @@ module.exports = {
         JSON.stringify(task.runtimeConfig || {}), JSON.stringify(task.steps || {}),
         task.currentStep || null, task.currentStepKey || null, task.error || null,
         task.finalQC ? JSON.stringify(task.finalQC) : null,
+        qcVersionOfQC(task.finalQC, task.qcVersion),
+        task.bgmPlan ? JSON.stringify(task.bgmPlan) : null,
+        task.bgmResult ? JSON.stringify(task.bgmResult) : null,
         task.estimatedTotalTime || null, task.createdAt || nowIso(),
         task.startedAt || null, task.completedAt || null, nowIso(),
         task.deletedAt || null
@@ -217,13 +263,15 @@ module.exports = {
       db.prepare('delete from clips where task_id = ?').run(task.taskId);
       const ins = db.prepare(`insert into clips (
         task_id,clip_index,prompt,theme,theme_tag,theme_matched,status,attempts,
-        video_path,track_id,duration,qc_result,error,created_at,updated_at
-      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        video_path,track_id,duration,qc_result,qc_version,error,created_at,updated_at
+      ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       for (const c of (task.clips || [])) {
         ins.run(task.taskId, c.index ?? 0, c.prompt || '', c.theme || null,
           c.themeTag || null, c.themeMatched !== false ? 1 : 0, c.status || 'pending',
           c.attempts || 0, c.videoPath || null, c.trackId || null, c.duration || 0,
-          c.qcResult ? JSON.stringify(c.qcResult) : null, c.error || null, nowIso(), nowIso());
+          c.qcResult ? JSON.stringify(c.qcResult) : null,
+          qcVersionOfQC(c.qcResult, c.qcVersion ?? task.qcVersion),
+          c.error || null, nowIso(), nowIso());
       }
     });
     tx();
