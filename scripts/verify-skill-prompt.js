@@ -201,7 +201,7 @@ function section(title) {
   ok('useOptimizedPrompt 走追加',
     /function useOptimizedPrompt[\s\S]{0,240}appendToPromptInput/.test(htmlSrc));
   ok('助手 usePrompt 走追加',
-    /function usePrompt\(text\)[\s\S]{0,360}cur \+ '\\n' \+ text/.test(htmlSrc));
+    /function usePrompt\(text\)[\s\S]{0,700}cur \+ '\\n' \+ text/.test(htmlSrc));
   ok('按钮文案为「添加到提示词框」', (htmlSrc.match(/添加到提示词框/g) || []).length >= 2);
   ok('优化请求带上 LLM 配置', htmlSrc.includes('llmApiKey: cfg.llmKey'));
   ok('不再用旧写法整段覆盖提示词框', !htmlSrc.includes("getElementById('promptInput').value = text;"));

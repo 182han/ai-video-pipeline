@@ -4457,6 +4457,12 @@ function appendToPromptInput(text) {
   const ta = document.getElementById('promptInput');
   if (!ta || !text) return false;
   const cur = ta.value.trim();
+  const t = text.trim();
+  // 已存在同一行就不重复添加（连点两次会加两遍）
+  if (cur && cur.split('\n').some((line) => line.trim() === t)) {
+    ta.focus();
+    return false;
+  }
   ta.value = cur ? cur + '\n' + text : text;
   ta.dispatchEvent(new Event('input', { bubbles: true }));
   ta.scrollTop = ta.scrollHeight;
@@ -6947,6 +6953,13 @@ async function checkRunningTask() {
     var ta = document.getElementById('promptInput');
     if (!ta) return;
     var cur = ta.value.trim();
+    var t = String(text || '').trim();
+    // 已存在同一行就不重复添加
+    if (cur && cur.split('\n').some(function (line) { return line.trim() === t; })) {
+      closePanel();
+      if (typeof switchPage === 'function') switchPage('create');
+      return;
+    }
     ta.value = cur ? cur + '\n' + text : text;
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     closePanel();
