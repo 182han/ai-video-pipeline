@@ -366,8 +366,11 @@ body {
   justify-content: space-between;
   gap: 16px;
   margin-top: 20px;
-  padding: 12px 2px 14px;
+  padding: 12px 128px 14px 2px;   /* 右侧留出悬浮助手球的位置，避免盖住「开始生成」 */
   background: linear-gradient(to top, var(--bg-primary) 62%, rgba(247, 246, 243, 0));
+}
+@media (max-width: 900px) {
+  .create-actionbar { padding-right: 2px; }
 }
 .create-actionbar::before {
   content: "";
@@ -659,8 +662,8 @@ select {
   background: var(--accent-bg);
 }
 .chip.chip-small {
-  padding: 3px 10px;
-  font-size: 11px;
+  padding: 2px 7px;
+  font-size: 10.5px;
 }
 
 /* ===== 按钮 ===== */
@@ -668,6 +671,7 @@ select {
   padding: 7px 16px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  text-decoration: none;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -1144,6 +1148,17 @@ select {
 .result-card {
   text-align: center;
   padding: 40px 28px;
+}
+.result-video-wrap {
+  margin: 0 auto 24px;
+  max-width: 860px;
+}
+.result-video-wrap video {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  background: #000;
+  display: block;
+  max-height: 60vh;
 }
 .result-icon {
   font-size: 48px;
@@ -1836,7 +1851,7 @@ select {
 }
 .gen-layout {
   display: grid;
-  grid-template-columns: 40% 60%;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 16px;
 }
 .gen-left, .gen-right {
@@ -2017,6 +2032,237 @@ select {
 }
 .pipeline-step.completed::before {
   background: var(--success);
+}
+
+/* ===== 流水线步骤条：横向（2026-10-21 重构）=====
+   竖向时间线改横向步骤条：一眼看到跑到第几步，连接线随完成进度变绿。
+   旧规则里 .pipeline-step::before 是竖线，这里关掉并改用 ::after 画横线。 */
+.pipeline-timeline {
+  position: static;
+  padding-left: 0;
+  padding-bottom: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.pipeline-step {
+  position: relative;
+  flex: 1 0 118px;
+  min-width: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 12px;
+  margin-bottom: 0;
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+.pipeline-step::before { display: none; }
+.pipeline-step::after {
+  content: "";
+  position: absolute;
+  top: 22px;
+  left: calc(50% + 16px);
+  right: calc(-50% + 16px);
+  height: 2px;
+  background: var(--border-light);
+  z-index: 1;
+}
+.pipeline-step:last-child::after { display: none; }
+.pipeline-step.completed::after { background: var(--success); }
+.pipeline-step-dot {
+  position: static;
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+.pipeline-step.completed .pipeline-step-dot { background: var(--success); color: #fff; }
+.pipeline-step.current .pipeline-step-dot { background: var(--accent); color: #fff; }
+.pipeline-step.failed .pipeline-step-dot { background: var(--danger); color: #fff; }
+.pipeline-step-name {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  margin: 0;
+  line-height: 1.3;
+}
+.pipeline-step-meta { margin-top: 0; justify-content: center; }
+.pipeline-step-qc { justify-content: center; }
+.pipeline-step-duration {
+  display: block;
+  margin-left: 0;
+  font-size: 10.5px;
+}
+@media (max-width: 1200px) {
+  .pipeline-step { flex-basis: 96px; min-width: 96px; padding-left: 4px; padding-right: 4px; }
+  .pipeline-step-name { font-size: 11.5px; }
+  .qc-badge { font-size: 10px; padding: 1px 6px; }
+}
+
+/* 步骤卡头部 + 点击展开的详情面板 */
+.gen-steps-card { margin-bottom: 16px; }
+.gen-steps-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.gen-steps-hint { font-size: 12px; color: var(--text-secondary); }
+.gen-step-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-light);
+}
+.gen-step-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.gen-step-detail-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.gen-step-detail-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ===== 片段墙：出来一个看一个 ===== */
+.clips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+.clip-card {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #141416;
+  border: 1px solid var(--border-light);
+  cursor: default;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.clip-card.has-video { cursor: pointer; }
+.clip-card.has-video:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(15,15,15,.14); }
+.clip-media { position: absolute; inset: 0; }
+.clip-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.clip-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8a8a90;
+  background: linear-gradient(135deg, #26262a 0%, #17171a 100%);
+}
+.clip-card.generating .clip-placeholder { color: #f0b45c; }
+.clip-card.failed .clip-placeholder,
+.clip-card.qc_failed .clip-placeholder { color: #ff8f85; }
+.clip-ph-icon { font-size: 18px; line-height: 1; }
+.clip-card.generating .clip-ph-icon { display: inline-block; animation: clip-spin 1.4s linear infinite; }
+@keyframes clip-spin { to { transform: rotate(360deg); } }
+.clip-index {
+  position: absolute;
+  left: 8px; top: 8px;
+  z-index: 3;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.55);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.clip-status {
+  position: absolute;
+  right: 8px; top: 8px;
+  z-index: 3;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.55);
+  color: #e8e8ea;
+}
+.clip-status.success { background: rgba(15,123,15,.9); color: #fff; }
+.clip-status.failed,
+.clip-status.qc_failed { background: rgba(224,62,62,.9); color: #fff; }
+.clip-status.generating { background: rgba(203,145,47,.92); color: #fff; }
+.clip-play-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: rgba(255,255,255,.92);
+  background: rgba(0,0,0,.18);
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+}
+.clip-card.has-video:hover .clip-play-hint { opacity: 1; }
+.gen-clips-hint { font-size: 12px; color: var(--text-tertiary); margin-left: 8px; margin-right: auto; }
+.gen-right .stats-grid {
+  margin-bottom: 0;
+  grid-template-columns: repeat(2, 1fr);
+}
+.clip-card.qc-bad { border-color: rgba(224, 62, 62, .45); }
+/* 主题徽标在片段卡上挪到右下角（原来是 36px 小格子的右上角） */
+.clip-card .clip-theme-badge {
+  top: auto;
+  bottom: 6px;
+  right: 8px;
+  font-size: 13px;
+  z-index: 3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+}
+.clip-card .clip-theme-badge.unmatched {
+  bottom: 4px;
+  font-size: 10px;
+  text-shadow: none;
+}
+
+/* 成片播放卡 */
+.gen-final-card { margin-top: 16px; }
+.gen-final-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.gen-final-meta { font-size: 12px; color: var(--text-secondary); }
+.gen-final-card video {
+  width: 100%;
+  max-height: 62vh;
+  border-radius: var(--radius-lg);
+  background: #000;
+  display: block;
+}
+.gen-final-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
 }
 
 /* ===== 质检详情面板 ===== */
@@ -2950,22 +3196,25 @@ select {
           </div>
         </div>
 
-        <div class="gen-layout">
-          <!-- 左侧：流水线时间线 -->
-          <div class="gen-left">
-            <div class="card pipeline-card">
-              <div class="card-title">流水线质检</div>
-              <div class="pipeline-timeline" id="pipelineTimeline">
-                <!-- 步骤由 JS 动态渲染 -->
-              </div>
-            </div>
+        <!-- 横向流水线：一眼看到跑到第几步，点任意步骤看质检详情 -->
+        <div class="card gen-steps-card">
+          <div class="gen-steps-head">
+            <div class="card-title" style="margin:0;">流水线进度</div>
+            <div class="gen-steps-hint" id="genStepsHint">等待开始…</div>
           </div>
+          <div class="pipeline-timeline" id="pipelineTimeline">
+            <!-- 步骤由 JS 动态渲染 -->
+          </div>
+          <div class="gen-step-detail" id="pipelineStepDetail" style="display:none;"></div>
+        </div>
 
-          <!-- 右侧：片段网格和统计 -->
-          <div class="gen-right">
+        <div class="gen-layout">
+          <!-- 左：片段墙，出来一个看一个 -->
+          <div class="gen-left">
             <div class="card">
               <div class="section-title">
-                <span>片段状态</span>
+                <span>片段</span>
+                <span class="gen-clips-hint">每完成一个就能点开看</span>
                 <span style="font-weight:400;color:var(--text-tertiary);" id="clipCountText">0 / 0</span>
               </div>
               <div class="error-box" id="errorBox" style="display:none;">
@@ -2974,7 +3223,10 @@ select {
               </div>
               <div class="clips-grid" id="clipsGrid"></div>
             </div>
+          </div>
 
+          <!-- 右：统计 + 质检概览 -->
+          <div class="gen-right">
             <div class="card">
               <div class="stats-grid">
                 <div class="stat-card">
@@ -3004,6 +3256,20 @@ select {
             </div>
           </div>
         </div>
+
+        <!-- 成片：任务完成后直接在这里播放，不用去历史里翻 -->
+        <div class="card gen-final-card" id="finalVideoCard" style="display:none;">
+          <div class="gen-final-head">
+            <div class="card-title" style="margin:0;">成片</div>
+            <div class="gen-final-meta" id="finalVideoMeta"></div>
+          </div>
+          <video id="finalVideo" controls playsinline preload="metadata"></video>
+          <div class="gen-final-actions">
+            <a class="btn btn-primary" id="finalDownload" download>下载成片</a>
+            <button class="btn btn-secondary" onclick="showResultPage()">成片摘要</button>
+            <button class="btn btn-secondary" onclick="switchPage('create')">再做一个</button>
+          </div>
+        </div>
         </div><!-- /genProgressState -->
       </div>
 
@@ -3018,6 +3284,10 @@ select {
           <div class="result-icon">🎉</div>
           <div class="result-title">视频生成成功</div>
           <div class="result-desc">所有片段已通过质检并完成拼接</div>
+
+          <div class="result-video-wrap" id="resultVideoWrap" style="display:none;">
+            <video id="resultVideo" controls playsinline preload="metadata"></video>
+          </div>
 
           <div class="result-details">
             <div class="result-detail-item">
@@ -3036,7 +3306,7 @@ select {
 
           <div style="display: flex; gap: 10px;">
             <button class="btn btn-secondary" style="flex:1;" id="newTaskBtn">新建任务</button>
-            <button class="btn btn-primary" style="flex:1;">下载视频</button>
+            <a class="btn btn-primary" style="flex:1;" id="resultDownload" download>下载视频</a>
           </div>
         </div>
       </div>
@@ -3138,6 +3408,19 @@ select {
     </div>
 
     <button class="btn btn-secondary btn-block" onclick="closeClipDetail()">关闭</button>
+  </div>
+</div>
+
+<!-- ===== 片段视频预览弹窗（点片段卡片直接看） ===== -->
+<div class="modal-overlay" id="clipPreviewModal">
+  <div class="modal" style="max-width:880px;">
+    <h2 id="clipPreviewTitle">片段</h2>
+    <p class="modal-subtitle" id="clipPreviewSub"></p>
+    <video id="clipPreviewVideo" controls playsinline style="width:100%;border-radius:12px;background:#000;"></video>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <a class="btn btn-secondary" style="flex:1;" id="clipPreviewDownload" download>下载该片段</a>
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeClipPreview()">关闭</button>
+    </div>
   </div>
 </div>
 
@@ -4870,6 +5153,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     startTime = null;
     estimatedRemainingMs = 0;
     stopTimerTick();
+    resetFinalVideo();
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4910,6 +5194,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
 
     if (data.taskId) {
       currentTask = { taskId: data.taskId };
+      try { sessionStorage.setItem('vs_lastTaskId', data.taskId); } catch (e) {}
       // 重置状态
       latestProgress = {};
       pipelineSteps = {};
@@ -4975,6 +5260,7 @@ document.getElementById('newTaskBtn').addEventListener('click', () => {
   expandedStepKey = null;
   startTime = null;
   estimatedRemainingMs = 0;
+  resetFinalVideo();
   // 重置侧边栏状态点
   const dot = document.getElementById('genStatusDot');
   if (dot) dot.classList.remove('active');
@@ -4997,10 +5283,11 @@ async function checkGenerationStatus() {
       const res = await fetch(`/api/tasks/${currentTask.taskId}/progress`);
       if (res.ok) {
         const data = await res.json();
-        if (data.status === 'completed') {
-          // 任务已完成，显示空状态（用户可以在历史记录里查看结果）
-          currentTask = null;
-          showEmptyView();
+        if (data.status === 'completed' || data.status === 'partial') {
+          // 任务已完成：留在进度页直接播成片，不再跳到「空状态」
+          showProgressView();
+          updateProgress(data);
+          showFinalVideo(data);
           return;
         }
         if (data.status === 'failed') {
@@ -5028,6 +5315,27 @@ async function checkGenerationStatus() {
     }
   }
 
+  // 刷新页面后，本次会话最后一个任务还能直接看到（尤其是刚跑完的成片）
+  try {
+    const lastId = sessionStorage.getItem('vs_lastTaskId');
+    if (!currentTask && lastId) {
+      const res = await fetch(`/api/tasks/${lastId}/progress`);
+      if (res.ok) {
+        const data = await res.json();
+        currentTask = { taskId: lastId };
+        showProgressView();
+        updateProgress(data);
+        if (!['completed', 'partial', 'failed'].includes(data.status)) {
+          renderDefaultPipeline();
+          renderQcOverview();
+          connectWS(lastId);
+        }
+        return;
+      }
+      sessionStorage.removeItem('vs_lastTaskId');
+    }
+  } catch (e) { /* sessionStorage 不可用时忽略 */ }
+
   // 没有 currentTask，检查是否有正在运行的任务
   try {
     const res = await fetch('/api/tasks');
@@ -5039,6 +5347,7 @@ async function checkGenerationStatus() {
 
     if (runningTask) {
       currentTask = { taskId: runningTask.taskId };
+      try { sessionStorage.setItem('vs_lastTaskId', runningTask.taskId); } catch (e) {}
       showProgressView();
       renderDefaultPipeline();
       renderQcOverview();
@@ -5064,6 +5373,7 @@ function showEmptyView() {
   const progressState = document.getElementById('genProgressState');
   if (emptyState) emptyState.style.display = '';
   if (progressState) progressState.style.display = 'none';
+  resetFinalVideo();
 
   // 更新侧边栏状态点
   const dot = document.getElementById('genStatusDot');
@@ -5302,13 +5612,26 @@ function updateProgress(data) {
 
   // 片段网格
   if (data.clips && data.clips.length > 0) {
-    clipsData = data.clips.slice();
+    // 进度推送里没有可播放地址：保留上一轮同步到的 url，避免每秒重建卡片时视频闪没
+    const prevClips = clipsData;
+    clipsData = data.clips.map((c, i) => {
+      const old = prevClips[i] || {};
+      return {
+        ...c,
+        url: c.url || old.url,
+        duration: c.duration || old.duration,
+        sizeBytes: c.sizeBytes || old.sizeBytes
+      };
+    });
     renderClips(clipsData);
     const total = latestProgress.total || data.clips.length;
     const success = latestProgress.success !== undefined ? latestProgress.success :
       data.clips.filter(c => c && c.status === 'success').length;
     document.getElementById('clipCountText').textContent = `${success} / ${total}`;
+    // 有成功的片段就去补一次视频地址（节流，不会每秒打一次）
+    if (success > 0) scheduleClipUrlSync();
   }
+  renderStepsHint();
 
   // 完成 - 用累积的完整数据
   if (latestProgress.status === 'completed' && (latestProgress.total > 0 || (latestProgress.success && latestProgress.success > 0))) {
@@ -5317,10 +5640,20 @@ function updateProgress(data) {
     // 更新侧边栏状态点
     const dot = document.getElementById('genStatusDot');
     if (dot) dot.classList.remove('active');
-    // 只有当前在生成进度页才自动跳转结果页
-    if (currentPage === 'generating') {
-      setTimeout(() => showResultPage(latestProgress), 500);
-    }
+    // 不再自动跳结果页：成片直接在当前页播放，片段墙也留在视野里
+    showFinalVideo(latestProgress);
+    scheduleClipUrlSync();
+    const fillEl = document.getElementById('progressFill');
+    const pctEl = document.getElementById('progressPercent');
+    if (fillEl) fillEl.style.width = '100%';
+    if (pctEl) pctEl.textContent = '100%';
+    const titleEl = document.getElementById('genPageTitle');
+    const descEl = document.getElementById('genPageDesc');
+    if (titleEl) titleEl.textContent = '生成完成';
+    if (descEl) descEl.textContent = '成片在下方，可直接播放或下载；片段墙里每一段也都能点开看';
+    estimatedRemainingMs = 0;
+    const remainEl = document.getElementById('timeRemaining');
+    if (remainEl) remainEl.textContent = '已完成';
   }
 
   // 失败 - 显示错误分析
@@ -5446,8 +5779,10 @@ function renderPipelineTimeline() {
 
   container.innerHTML = pipelineStepKeys.map((key, idx) => {
     const step = pipelineSteps[key] || { key, status: 'pending', name: key };
-    const status = step.status || 'pending';
-    const isCurrent = status === 'in_progress';
+    let status = step.status || 'pending';
+    const taskDone = latestProgress.status === 'completed' || latestProgress.status === 'partial';
+    const isCurrent = !taskDone && (status === 'in_progress' || latestProgress.currentStepKey === key);
+    if (isCurrent && status !== 'completed' && status !== 'failed') status = 'in_progress';
     const isCompleted = status === 'completed';
     const isFailed = status === 'failed';
     const isExpanded = expandedStepKey === key;
@@ -5466,15 +5801,22 @@ function renderPipelineTimeline() {
     
     // 质检结果
     const qcResult = step.qcResult || 'pending';
-    const qcName = step.qcName || '质检';
+    // 后端 qcName 有长句（如「片段质检（黑帧/模糊/重复/时长）」），
+    // 横排步骤条里必须用短名，否则徽标换行、每格高度不齐。
+    const QC_SHORT = {
+      prompt_optimize: '提示词', storyboard: '分镜头', clip_generation: '片段',
+      concatenation: '拼接', loop_processing: '循环', audio_mix: '混音',
+      transcoding: '转码', final_qc: '终检'
+    };
+    const qcName = QC_SHORT[key] || step.qcName || '质检';
     
     // 步骤序号或图标
     let dotContent = idx + 1;
     if (isCompleted) dotContent = '✓';
     if (isFailed) dotContent = '✗';
     
-    // 质检详情（展开时显示）
-    const detailHtml = isExpanded ? renderStepDetail(step) : '';
+    // 质检详情移到步骤条下方的独立面板（横向排列时放不进单个步骤）
+    const detailHtml = '';
     
     return `
       <div class="pipeline-step ${status} ${isCurrent ? 'current' : ''} ${isExpanded ? 'expanded' : ''}" 
@@ -5487,25 +5829,26 @@ function renderPipelineTimeline() {
         </div>
         <div class="pipeline-step-meta">
           <div class="pipeline-step-qc">
-            <span class="qc-badge ${getQcResultClass(qcResult)}">
-              ${QC_ICONS[qcResult] || '·'} ${qcName}
-            </span>
+            <span class="qc-badge ${getQcResultClass(qcResult)}" title="${step.qcName || qcName}">${QC_ICONS[qcResult] || '·'} ${qcName}</span>
           </div>
         </div>
-        <div class="pipeline-step-detail">${detailHtml}</div>
       </div>
     `;
   }).join('');
+
+  renderStepDetailPanel();
+  renderStepsHint();
 }
 
 function renderDefaultPipeline() {
-  // 默认7个步骤的占位（在收到数据前显示）
+  // 默认8个步骤的占位（在收到数据前显示）
   const defaultSteps = [
     { key: 'prompt_optimize', name: '提示词优化', qcName: '提示词质检' },
     { key: 'storyboard', name: '分镜头生成', qcName: '分镜头质检' },
     { key: 'clip_generation', name: '片段生成', qcName: '片段质检' },
     { key: 'concatenation', name: '视频拼接', qcName: '拼接质检' },
     { key: 'loop_processing', name: '循环处理', qcName: '循环质检' },
+    { key: 'audio_mix', name: '配乐混音', qcName: '混音校验' },
     { key: 'transcoding', name: '转码输出', qcName: '转码质检' },
     { key: 'final_qc', name: '最终质检', qcName: '综合质检' }
   ];
@@ -5529,13 +5872,48 @@ function renderDefaultPipeline() {
   `).join('');
 }
 
+// 横向步骤条右侧的一句状态：「当前：视频片段生成 · 片段 3/10」
+function renderStepsHint() {
+  const el = document.getElementById('genStepsHint');
+  if (!el) return;
+  const st = latestProgress.status;
+  if (st === 'completed') { el.textContent = '全部完成'; return; }
+  if (st === 'failed') { el.textContent = '任务失败'; return; }
+  const cur = latestProgress.currentStepKey && pipelineSteps[latestProgress.currentStepKey];
+  const name = (cur && cur.name) || latestProgress.currentStep || '';
+  const total = latestProgress.total || 0;
+  const success = latestProgress.success || 0;
+  el.textContent = (name ? '当前：' + name : '准备中') + (total ? ` · 片段 ${success}/${total}` : '');
+}
+
+// 点击步骤后，质检详情显示在步骤条下方（横向布局里塞不进单个步骤）
+function renderStepDetailPanel() {
+  const box = document.getElementById('pipelineStepDetail');
+  if (!box) return;
+  if (!expandedStepKey) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  const step = pipelineSteps[expandedStepKey] || { key: expandedStepKey, name: expandedStepKey };
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="gen-step-detail-head">
+      <span>${step.name || expandedStepKey} · 质检详情</span>
+      <button class="gen-step-detail-close" onclick="toggleStepDetail('${expandedStepKey}')" title="收起">×</button>
+    </div>
+    ${renderStepDetail(step)}
+  `;
+}
+
 function highlightCurrentStep(stepKey) {
+  // 任务已完成/失败时不再高亮「当前步」，否则最后一步会一直亮着蓝框
+  const done = latestProgress.status === 'completed' || latestProgress.status === 'partial' || latestProgress.status === 'failed';
   const steps = document.querySelectorAll('.pipeline-step');
   steps.forEach(el => {
     el.classList.remove('current');
-    if (el.dataset.step === stepKey) {
+    if (!done && el.dataset.step === stepKey) {
       el.classList.add('current');
-      // 如果是 in_progress，移除其他状态的 done/completed
     }
   });
 }
@@ -5549,47 +5927,107 @@ function toggleStepDetail(stepKey) {
   renderPipelineTimeline();
 }
 
+// 步骤详情里的字段中文名（后端 qcDetails 是扁平结构：passed/level/reason/...）
+const QC_FIELD_LABELS = {
+  passed: '是否通过', level: '级别', reason: '原因', normalized: '归一化结果',
+  target: '目标规格', expectedDuration: '期望时长', actualDuration: '实际时长',
+  durationCheck: '时长校验', decodeCheck: '解码校验', reencoded: '已重编码',
+  blackFrame: '黑帧检测', blur: '模糊检测', duplicate: '重复帧检测',
+  nsfw: 'NSFW 合规', contentMatch: '内容匹配'
+};
+function qcFieldLabel(key) { return QC_FIELD_LABELS[key] || key; }
+
+// 汇总型质检里的对象字段：{ok,actual,expected,reason} / {passed,reason}
+function fmtQcDetailValue(v) {
+  if (typeof v.width === 'number' && typeof v.height === 'number') {
+    return { result: '', value: `${v.width}×${v.height}` + (v.fps ? ` @${v.fps}fps` : '') + (v.label ? ` · ${v.label}` : '') };
+  }
+  const hasOk = typeof v.ok === 'boolean';
+  const hasPassed = typeof v.passed === 'boolean';
+  if (!hasOk && !hasPassed) return { result: '', value: escapeHtml(JSON.stringify(v)).slice(0, 160) };
+  const ok = hasOk ? v.ok : v.passed;
+  const bits = [];
+  if (v.actual !== undefined && v.expected !== undefined) bits.push(`实际 ${v.actual} / 期望 ${v.expected}`);
+  if (v.errors !== undefined) bits.push(`错误 ${v.errors}`);
+  if (v.reason) bits.push(escapeHtml(String(v.reason)));
+  return { result: ok ? 'pass' : 'fail', value: (ok ? '通过' : '未通过') + (bits.length ? ' · ' + bits.join(' · ') : '') };
+}
+
 function renderStepDetail(step) {
   if (!step) return '';
-  
+
   let html = '';
-  
-  // 质检详情
-  if (step.qcDetails && Object.keys(step.qcDetails).length > 0) {
-    html += `<div class="qc-detail-section">
-      <div class="qc-detail-section-title">质检详情</div>`;
-    
-    for (const [key, detail] of Object.entries(step.qcDetails)) {
-      const result = detail.result || detail.status || 'pending';
-      const desc = detail.message || detail.desc || detail.value || '';
-      const value = detail.value !== undefined ? detail.value : '';
-      html += `
-        <div class="qc-item">
-          <div class="qc-item-icon ${getQcResultClass(result)}">${QC_ICONS[result] || '·'}</div>
-          <div class="qc-item-content">
-            <div class="qc-item-name">${detail.name || key}</div>
-            ${desc ? `<div class="qc-item-desc">${desc}</div>` : ''}
-          </div>
-          ${value ? `<div class="qc-item-value">${value}</div>` : ''}
+  const details = (step.qcDetails && typeof step.qcDetails === 'object') ? step.qcDetails : null;
+  const entries = details ? Object.entries(details) : [];
+  // 两种形状：逐项质检 {blackFrame:{result,name}} / 汇总结果 {passed,level,reason,durationCheck}
+  const perItem = entries.some(([, v]) => v && typeof v === 'object' && (v.result || v.status || v.name));
+
+  if (entries.length) {
+    html += `<div class="qc-detail-section"><div class="qc-detail-section-title">${perItem ? '质检详情' : '质检结果'}</div>`;
+
+    if (!perItem) {
+      const qc = step.qcResult || 'pending';
+      const qcText = ({ pass: '通过', warn: '警告', fail: '未通过', skip: '跳过', pending: '未执行' })[qc] || qc;
+      html += `<div class="qc-item">
+        <div class="qc-item-icon ${getQcResultClass(qc)}">${QC_ICONS[qc] || '·'}</div>
+        <div class="qc-item-content"><div class="qc-item-name">结论</div></div>
+        <div class="qc-item-value">${qcText}</div>
+      </div>`;
+    }
+
+    for (const [key, detail] of entries) {
+      if (!perItem && ['name', 'result', 'status', 'passed', 'level'].includes(key)) continue;
+      if (detail === null || detail === undefined) continue;
+
+      let result = '';
+      let name = key;
+      let desc = '';
+      let value = '';
+
+      if (perItem && typeof detail === 'object') {
+        result = detail.result || detail.status || 'pending';
+        name = detail.name || key;
+        desc = detail.message || detail.desc || '';
+        value = detail.value !== undefined ? detail.value : '';
+      } else if (typeof detail === 'boolean') {
+        // false 不是「失败」，只是属性为否，用中性图标
+        name = qcFieldLabel(key);
+        value = detail ? '是' : '否';
+      } else if (typeof detail === 'object') {
+        name = qcFieldLabel(key);
+        const f = fmtQcDetailValue(detail);
+        result = f.result;
+        value = f.value;
+      } else {
+        name = qcFieldLabel(key);
+        value = escapeHtml(String(detail));
+      }
+
+      html += `<div class="qc-item">
+        <div class="qc-item-icon ${getQcResultClass(result)}">${QC_ICONS[result] || '·'}</div>
+        <div class="qc-item-content">
+          <div class="qc-item-name">${name}</div>
+          ${desc ? `<div class="qc-item-desc">${escapeHtml(desc)}</div>` : ''}
         </div>
-      `;
+        ${value ? `<div class="qc-item-value">${value}</div>` : ''}
+      </div>`;
     }
     html += `</div>`;
   }
-  
+
   // 错误信息
   if (step.error) {
     html += `<div class="qc-detail-section">
       <div class="qc-detail-section-title">错误信息</div>
-      <div class="clip-detail-error">${step.error}</div>
+      <div class="clip-detail-error">${escapeHtml(step.error)}</div>
     </div>`;
   }
-  
+
   // 如果没有详情，显示提示
   if (!html) {
     html = `<div style="font-size:12px;color:var(--text-tertiary);text-align:center;padding:8px 0;">暂无详细信息</div>`;
   }
-  
+
   return html;
 }
 
@@ -5729,15 +6167,50 @@ function restoreQcStrict() {
   });
 }
 
+// ===== 片段墙：每完成一个，卡片上直接能看 =====
+const CLIP_STATUS_TEXT = {
+  pending: '排队中',
+  generating: '生成中',
+  processing: '处理中',
+  success: '成功',
+  failed: '失败',
+  qc_failed: '质检未过'
+};
+
 function renderClips(clips) {
   const grid = document.getElementById('clipsGrid');
   if (!grid) return;
-  
+
   if (grid.children.length !== clips.length) {
-    grid.innerHTML = clips.map((_, i) =>
-      `<div class="clip-cell pending" id="clip-${i}" onclick="onClipClick(${i})">${i+1}</div>`
-    ).join('');
+    grid.innerHTML = clips.map((_, i) => `
+      <div class="clip-card pending" id="clip-${i}" onclick="onClipCardClick(${i})">
+        <div class="clip-media">
+          <div class="clip-placeholder">
+            <span class="clip-ph-icon"></span>
+            <span class="clip-ph-text">排队中</span>
+          </div>
+        </div>
+        <span class="clip-index">#${i + 1}</span>
+        <span class="clip-status pending">排队中</span>
+        <span class="clip-play-hint">▶</span>
+      </div>
+    `).join('');
+
+    // 悬停即播：移入播放、移出暂停（只绑一次，避免每次渲染重复挂）
+    grid.onmouseover = (e) => {
+      const card = e.target && e.target.closest ? e.target.closest('.clip-card') : null;
+      if (!card) return;
+      const v = card.querySelector('video');
+      if (v) v.play().catch(() => {});
+    };
+    grid.onmouseout = (e) => {
+      const card = e.target && e.target.closest ? e.target.closest('.clip-card') : null;
+      if (!card) return;
+      const v = card.querySelector('video');
+      if (v) v.pause();
+    };
   }
+
   clips.forEach((c, i) => {
     updateSingleClip(i, c);
   });
@@ -5746,46 +6219,204 @@ function renderClips(clips) {
 function updateSingleClip(index, clipData) {
   const el = document.getElementById('clip-' + index);
   if (!el || !clipData) return;
-  
+
   const status = clipData.status || 'pending';
-  el.className = 'clip-cell ' + status;
-  
+  const hasVideo = !!clipData.url;
+  const qc = clipData.qcResult;
+  const qcBad = !!(qc && (qc === 'fail' || qc === 'warn' || qc.passed === false));
+  el.className = 'clip-card ' + status + (hasVideo ? ' has-video' : '') + (qcBad ? ' qc-bad' : '');
+
+  // 媒体区：有地址就挂 <video>，没有就显示状态占位
+  const media = el.querySelector('.clip-media');
+  if (media) {
+    if (hasVideo) {
+      if (!media.querySelector('video')) {
+        media.innerHTML = `<video src="${clipData.url}" muted playsinline preload="metadata"></video>`;
+      }
+    } else if (media.querySelector('video')) {
+      media.querySelector('video').remove();
+    }
+    if (!hasVideo) {
+      if (!media.querySelector('.clip-placeholder')) {
+        media.innerHTML = '<div class="clip-placeholder"><span class="clip-ph-icon">·</span><span class="clip-ph-text"></span></div>';
+      }
+      const icon = media.querySelector('.clip-ph-icon');
+      const text = media.querySelector('.clip-ph-text');
+      if (icon) icon.textContent = status === 'generating' ? '◌' : ((status === 'failed' || status === 'qc_failed') ? '✕' : '');
+      if (text) text.textContent = CLIP_STATUS_TEXT[status] || status;
+    }
+  }
+
+  // 状态徽标
+  const badge = el.querySelector('.clip-status');
+  if (badge) {
+    badge.className = 'clip-status ' + status;
+    badge.textContent = CLIP_STATUS_TEXT[status] || status;
+    if (status === 'success' && clipData.duration) {
+      badge.textContent = '成功 · ' + Number(clipData.duration).toFixed(1) + 's';
+    }
+  }
+
   // 主题徽标（§10B：行级主题标签）
   const theme = clipData.theme;
-  let badge = el.querySelector('.clip-theme-badge');
+  let tBadge = el.querySelector('.clip-theme-badge');
   if (theme) {
     const tpl = (typeof themes !== 'undefined' && themes.find) ? themes.find(t => t.id === theme) : null;
     const isUnmatched = clipData.themeTag && clipData.themeMatched === false;
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'clip-theme-badge';
-      el.appendChild(badge);
+    if (!tBadge) {
+      tBadge = document.createElement('span');
+      tBadge.className = 'clip-theme-badge';
+      el.appendChild(tBadge);
     }
-    badge.textContent = (tpl && tpl.emoji) ? tpl.emoji : (isUnmatched ? '⚠' : '');
-    badge.title = (tpl ? tpl.name : theme) + (isUnmatched ? `（未识别标签「${clipData.themeTag}」，已用全局主题）` : '');
-    badge.classList.toggle('unmatched', !!isUnmatched);
-  } else if (badge) {
-    badge.remove();
+    tBadge.textContent = (tpl && tpl.emoji) ? tpl.emoji : (isUnmatched ? '⚠' : '');
+    tBadge.title = (tpl ? tpl.name : theme) + (isUnmatched ? `（未识别标签「${clipData.themeTag}」，已用全局主题）` : '');
+    tBadge.classList.toggle('unmatched', !!isUnmatched);
+  } else if (tBadge) {
+    tBadge.remove();
   }
-  
-  // 失败或有质检问题的片段可点击
-  if (status === 'failed' || (clipData.qcResult && clipData.qcResult !== 'pass')) {
+
+  // 有视频 → 点击预览；失败/质检不过 → 点击看详情
+  if (!hasVideo && (status === 'failed' || qcBad)) {
     el.classList.add('clickable');
   } else {
     el.classList.remove('clickable');
   }
 }
 
-function onClipClick(index) {
+function onClipCardClick(index) {
   const clip = clipsData[index];
   if (!clip) return;
-  
-  // 只有失败或有质检问题的才显示详情
-  if (clip.status !== 'failed' && (!clip.qcResult || clip.qcResult === 'pass')) {
-    return;
+
+  // 有视频 → 直接播；没有视频（失败/质检不过）→ 看详情
+  if (clip.url) { openClipPreview(index); return; }
+  if (clip.status === 'failed' || clip.qcResult) {
+    openClipDetail(index, clip);
   }
-  
-  openClipDetail(index, clip);
+}
+
+// 兼容旧调用名（历史代码里还有 onClipClick 引用）
+function onClipClick(index) { onClipCardClick(index); }
+
+// ===== 片段预览弹窗 =====
+function openClipPreview(index) {
+  const clip = clipsData[index];
+  if (!clip || !clip.url) return;
+  const modal = document.getElementById('clipPreviewModal');
+  const video = document.getElementById('clipPreviewVideo');
+  if (!modal || !video) return;
+
+  document.getElementById('clipPreviewTitle').textContent = '片段 #' + (index + 1);
+  const parts = [];
+  if (clip.duration) parts.push(Number(clip.duration).toFixed(1) + ' 秒');
+  if (clip.sizeBytes) parts.push((clip.sizeBytes / 1048576).toFixed(1) + ' MB');
+  if (clip.qcResult) {
+    const qc = clip.qcResult;
+    const passed = qc === 'pass' || qc.passed === true;
+    parts.push(passed ? '质检通过' : '质检：' + (qc === 'pass' ? '通过' : (qc === 'fail' ? '未通过' : (qc.passed === false ? '未通过' : ''))));
+  }
+  document.getElementById('clipPreviewSub').textContent = parts.filter(Boolean).join(' · ');
+
+  video.src = clip.url;
+  const dl = document.getElementById('clipPreviewDownload');
+  if (dl) {
+    dl.href = clip.url;
+    dl.download = clip.url.split('/').pop() || ('clip-' + (index + 1) + '.mp4');
+  }
+  modal.classList.add('show');
+  video.play().catch(() => {});
+}
+
+function closeClipPreview() {
+  const modal = document.getElementById('clipPreviewModal');
+  const video = document.getElementById('clipPreviewVideo');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (modal) modal.classList.remove('show');
+}
+
+// ===== 片段地址同步 =====
+// 进度推送里只带片段状态，不带可播放地址；地址在 /api/tasks/:id/clips 里。
+// 有片段成功时拉一次，把 url 合进 clipsData，卡片立刻就能播。
+let clipUrlSyncTimer = null;
+let clipUrlLastSyncAt = 0;
+function scheduleClipUrlSync(force) {
+  if (clipUrlSyncTimer) return;
+  const need = force || clipsData.some(c => c && c.status === 'success' && !c.url);
+  if (!need) return;
+  // 最少隔 3 秒拉一次：进度推送很密，别把 /clips 打爆
+  const wait = Math.max(200, 3000 - (Date.now() - clipUrlLastSyncAt));
+  clipUrlSyncTimer = setTimeout(async () => {
+    clipUrlSyncTimer = null;
+    clipUrlLastSyncAt = Date.now();
+    const tid = currentTask && currentTask.taskId;
+    if (!tid) return;
+    try {
+      const res = await fetch(`/api/tasks/${tid}/clips`);
+      if (!res.ok) return;
+      const list = await res.json();
+      if (!Array.isArray(list)) return;
+      let changed = false;
+      list.forEach(c => {
+        if (!c || typeof c.index !== 'number') return;
+        const cur = clipsData[c.index];
+        if (!cur) { clipsData[c.index] = c; changed = true; return; }
+        if (c.url && cur.url !== c.url) { cur.url = c.url; changed = true; }
+        if (c.duration && !cur.duration) { cur.duration = c.duration; changed = true; }
+        if (c.sizeBytes && !cur.sizeBytes) { cur.sizeBytes = c.sizeBytes; changed = true; }
+      });
+      if (changed) clipsData.forEach((c, i) => { if (c) updateSingleClip(i, c); });
+    } catch (e) { /* 地址拉不到不影响主流程 */ }
+  }, 400);
+}
+
+// ===== 成片：完成后直接在进度页播放 =====
+function outputVideoUrl(p) {
+  if (!p) return '';
+  const file = String(p).split(/[\\/]/).pop();
+  return file ? '/output/' + encodeURIComponent(file) : '';
+}
+
+function resetFinalVideo() {
+  const card = document.getElementById('finalVideoCard');
+  const video = document.getElementById('finalVideo');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (card) card.style.display = 'none';
+}
+
+function showFinalVideo(data) {
+  const card = document.getElementById('finalVideoCard');
+  const video = document.getElementById('finalVideo');
+  if (!card || !video) return;
+  const d = data || latestProgress || {};
+  const url = outputVideoUrl(d.outputPath) || d.s3Url || '';
+  if (!url) return;
+
+  if (video.getAttribute('src') !== url) video.src = url;
+  const meta = document.getElementById('finalVideoMeta');
+  if (meta) {
+    const parts = [];
+    if (d.success !== undefined && d.total) parts.push(`${d.success}/${d.total} 段`);
+    if (d.totalDurationSec) parts.push(Math.round(d.totalDurationSec) + ' 秒');
+    if (d.bgmResult && d.bgmResult.ok) parts.push('已配乐');
+    meta.textContent = parts.join(' · ');
+  }
+  const dl = document.getElementById('finalDownload');
+  if (dl) {
+    dl.href = url;
+    dl.download = url.split('/').pop() || 'final.mp4';
+  }
+  const firstShow = card.style.display === 'none' || !card.style.display;
+  card.style.display = 'block';
+  if (firstShow && typeof card.scrollIntoView === 'function') {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 // ===== 片段详情弹窗 =====
@@ -5898,7 +6529,8 @@ function closeClipDetail() {
 
 // 点击弹窗背景关闭
 document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('modal-overlay')) {
+  if (e.target.classList && e.target.classList.contains('modal-overlay')) {
+    if (e.target.id === 'clipPreviewModal') { closeClipPreview(); return; }
     e.target.classList.remove('show');
   }
 });
@@ -5907,17 +6539,18 @@ function setStep(step) {
   // 旧格式兼容 - 当没有新格式步骤数据时使用
   const stepMap = {
     'optimizing': 0,
-    'generating': 1,
-    'concatenating': 2,
-    'looping': 3,
-    'transcoding': 4,
-    'completed': 5
+    'generating': 2,
+    'concatenating': 3,
+    'looping': 4,
+    'mixing': 5,
+    'transcoding': 6,
+    'completed': 8
   };
-  const idx = stepMap[step] !== undefined ? stepMap[step] : 1;
+  const idx = stepMap[step] !== undefined ? stepMap[step] : 2;
   
   // 更新默认时间线的状态
   const stepEls = document.querySelectorAll('.pipeline-step');
-  if (stepEls.length === 7) {
+  if (stepEls.length >= 7) {
     stepEls.forEach((el, i) => {
       el.classList.remove('current', 'completed', 'failed', 'in_progress');
       if (i < idx) {
@@ -5933,12 +6566,30 @@ function setStep(step) {
 }
 
 function showResultPage(data) {
+  const d = data || latestProgress || {};
   switchPage('result');
-  const success = data.success || 0;
-  const total = data.total || 0;
+  const success = d.success || 0;
+  const total = d.total || 0;
   document.getElementById('resultClips').textContent = success + '/' + total;
-  document.getElementById('resultDuration').textContent = Math.round(success * 30 / 60) + ' 分钟';
-  document.getElementById('resultQC').textContent = total > 0 ? Math.round((success/total)*100) + '%' : '-';
+  const sec = d.totalDurationSec || success * 30;
+  document.getElementById('resultDuration').textContent = sec ? (Math.round(sec / 6) / 10) + ' 分钟' : '-';
+  document.getElementById('resultQC').textContent = total > 0 ? Math.round((success / total) * 100) + '%' : '-';
+
+  // 结果页也要能直接看片 + 下载（原来「下载视频」按钮根本没绑事件）
+  const url = outputVideoUrl(d.outputPath) || d.s3Url || '';
+  const wrap = document.getElementById('resultVideoWrap');
+  const video = document.getElementById('resultVideo');
+  const dl = document.getElementById('resultDownload');
+  if (url && wrap && video) {
+    if (video.getAttribute('src') !== url) video.src = url;
+    wrap.style.display = 'block';
+    if (dl) {
+      dl.href = url;
+      dl.download = url.split('/').pop() || 'final.mp4';
+    }
+  } else if (wrap) {
+    wrap.style.display = 'none';
+  }
 }
 
 // ==========================================
