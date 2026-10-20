@@ -3727,6 +3727,8 @@ async function testMultimodalConnection(key, baseUrl, model) {
       resultEl.style.color = '';
     } else {
       resultEl.textContent = '❌ ' + data.error;
+      // 服务端会把错误码翻成可执行的中文提示（如 Model.AccessDenied → 去控制台开通模型）
+      if (data.hint) resultEl.textContent += '\n👉 ' + data.hint;
       resultEl.className = 'test-result error';
       // 失败时把账号下的模型列出来，方便直接挑一个填进「模型名称」
       if (data.models && data.models.length) {

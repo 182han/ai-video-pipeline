@@ -587,12 +587,31 @@ app.post('/api/test-api-key', async (req, res) => {
         });
         if (!r2.ok) {
           const t = await r2.text().catch(() => '');
+          // 把常见错误码翻成可执行的中文，别把原始 JSON 直接甩给用户
+          let hint = '请在「多模态模型名称」里手动指定一个图像理解模型';
+          if (r2.status === 403 && /Model\.AccessDenied/i.test(t)) {
+            hint = `模型「${target}」未开通，或该账号/业务空间没有它的权限。`
+              + '去百炼控制台「模型广场」开通它；或改填 qwen-vl-plus / qwen-vl-max 再测；'
+              + '如果这把 Key 属于子业务空间，还需要在该空间里单独授权这个模型。';
+          } else if (r2.status === 401 || /InvalidApiKey|invalid_api_key/i.test(t)) {
+            hint = 'Key 无效或已过期，请到控制台重新创建。';
+          } else if (r2.status === 404 || /model[^a-z]*(not[^a-z]*found|does[^a-z]*not[^a-z]*exist)/i.test(t)) {
+            hint = `模型名「${target}」在这个账号下不存在，改填下面列表里的一个。`;
+          } else if (r2.status === 429 || /quota|rate[_\s-]?limit/i.test(t)) {
+            hint = '额度或限流问题：检查账户余额与并发限制。';
+          }
+
+          // 只把「能看图的」模型给用户参考，OCR / 语音 / 向量模型不适合做 NSFW 质检
+          const usable = models.filter((m) => /(-vl-|-vl$|vl-max|vl-plus|vision|4v)/i.test(m)
+            && !/ocr|realtime|audio|tts|asr|speech|embedding|rerank/i.test(m));
+
           return res.json({
             success: false,
             error: `模型 ${target} 图像调用失败 HTTP ${r2.status}：${t.slice(0, 120)}。`,
-            hint: '请在「多模态模型名称」里手动指定一个图像理解模型',
-            models: models,
-            triedModel: target
+            hint,
+            models: usable.length ? usable : models,
+            triedModel: target,
+            status: r2.status,
           });
         }
         const d2 = await r2.json().catch(() => ({}));
