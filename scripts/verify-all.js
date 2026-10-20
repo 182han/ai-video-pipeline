@@ -103,6 +103,12 @@ const SUITES = [
     script: 'verify-library.js',
     group: 'real',
     desc: '片段库：价目表/费用口径/分组/跨规格拼接归一化'
+  },
+  {
+    name: 'skill-prompt',
+    script: 'verify-skill-prompt.js',
+    group: 'fast',
+    desc: 'fengguang skill 规则层接入提示词优化（作用域/开关/systemPrompt 组成，不联网）'
   }
 ];
 

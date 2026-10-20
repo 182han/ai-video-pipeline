@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const promptSkill = require('./promptSkill');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
@@ -772,6 +773,48 @@ class PromptOptimizer {
     };
   }
 
+  // 组装 system prompt（拆出为独立方法，便于无网络单测）
+  // 2026-10-20 起：风光类主题在此叠加 fengguang skill 的摄影级规则层
+  buildSystemPrompt(theme = null) {
+    let systemPrompt;
+    let themeLabel = '无主题';
+    let negative = '';
+
+    if (!theme) {
+      // 无主题分支：仅通用规则打底，不拼任何模板词池
+      systemPrompt = `${this.rules}`;
+    } else {
+      const template = this.templates[theme] || this.templates.landscape;
+      const s = template.structure;
+      themeLabel = template.name;
+      negative = template.negative;
+
+      // 结构化参考（第三批 §4.4）：有 structure 时注入词池，要求 LLM 按公式输出
+      const structureRef = s ? `
+结构化参考（按需选用，可改写）：
+- 景观主体池：${(s.subjectPool || []).slice(0, 2).join(' | ')}
+- 运镜池：${(s.cameraPool || []).join(' | ')}
+- 光影池：${(s.lightingPool || []).join(' | ')}
+- 氛围池：${(s.atmospherePool || []).join(' | ')}
+- 质感：${(s.quality || []).join(', ')}
+要求：按「用户场景 + 运镜 + 光影 + 氛围 + 质感」公式组织，结尾用留白句收束（如 "No people — just the landscape holding still"），全英文输出。` : '';
+
+      systemPrompt = `
+${this.rules}
+${structureRef}
+当前主题：${template.name}
+参考关键词：${template.keywords.join(', ')}
+风格参考：${template.styleEnhancers.join(', ')}
+负面提示：${template.negative}
+`;
+    }
+
+    // 叠加 fengguang skill：仅风光类主题；SKILL_PROMPT_ENABLED=false 可整体关闭
+    systemPrompt = promptSkill.appendTo(systemPrompt, theme);
+
+    return { systemPrompt, themeLabel, negative };
+  }
+
   // AI 优化（需要 LLM API Key）；theme 为空 = 无主题：systemPrompt 只拼通用规则，不叠加模板词池
   async optimizeWithAI(userPrompt, theme = null, options = {}) {
     const apiKey = options.apiKey || config.OPENAI_API_KEY;
@@ -785,38 +828,8 @@ class PromptOptimizer {
     }
 
     try {
-      let systemPrompt;
-      let themeLabel = '无主题';
-      let negative = '';
-
-      if (!theme) {
-        // 无主题分支：仅通用规则打底，不拼任何模板词池
-        systemPrompt = `${this.rules}`;
-      } else {
-        const template = this.templates[theme] || this.templates.landscape;
-        const s = template.structure;
-        themeLabel = template.name;
-        negative = template.negative;
-
-        // 结构化参考（第三批 §4.4）：有 structure 时注入词池，要求 LLM 按公式输出
-        const structureRef = s ? `
-结构化参考（按需选用，可改写）：
-- 景观主体池：${(s.subjectPool || []).slice(0, 2).join(' | ')}
-- 运镜池：${(s.cameraPool || []).join(' | ')}
-- 光影池：${(s.lightingPool || []).join(' | ')}
-- 氛围池：${(s.atmospherePool || []).join(' | ')}
-- 质感：${(s.quality || []).join(', ')}
-要求：按「用户场景 + 运镜 + 光影 + 氛围 + 质感」公式组织，结尾用留白句收束（如 "No people — just the landscape holding still"），全英文输出。` : '';
-
-        systemPrompt = `
-${this.rules}
-${structureRef}
-当前主题：${template.name}
-参考关键词：${template.keywords.join(', ')}
-风格参考：${template.styleEnhancers.join(', ')}
-负面提示：${template.negative}
-`;
-      }
+      // system prompt 由 buildSystemPrompt 组装（含 fengguang skill 叠加层）
+      const { systemPrompt, themeLabel, negative } = this.buildSystemPrompt(theme);
 
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
