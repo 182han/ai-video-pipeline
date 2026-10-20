@@ -2561,7 +2561,7 @@ select {
             </div>
             <div class="optimize-text" id="optimizedText"></div>
             <div class="optimize-actions">
-              <button class="btn btn-secondary" onclick="useOptimizedPrompt()">使用此提示词</button>
+              <button class="btn btn-secondary" onclick="useOptimizedPrompt()">添加到提示词框</button>
             </div>
           </div>
         </div>
@@ -4418,15 +4418,29 @@ document.getElementById('optimizeBtn').addEventListener('click', async () => {
   btn.textContent = '优化中...';
 
   try {
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch (e) {}
+
     const res = await fetch('/api/optimize-prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, theme: null })
+      body: JSON.stringify({
+        prompt,
+        theme: null,
+        // 带上设置里的 LLM 配置：有 Key 才会走 AI 优化（即会叠加 fengguang skill 规则）
+        llmApiKey: cfg.llmKey || '',
+        llmBaseUrl: cfg.llmUrl || '',
+        llmModel: cfg.llmModel || ''
+      })
     });
     const data = await res.json();
+    if (data.error) throw new Error(data.error);
 
     document.getElementById('optimizedText').textContent = data.optimized;
-    document.getElementById('optimizeMethod').textContent = data.method === 'ai' ? 'AI 优化' : '模板优化';
+    document.getElementById('optimizeMethod').textContent =
+      (data.method === 'ai' ? 'AI 优化' : '模板优化')
+      + (data.themeResolved ? ' · ' + data.themeResolved : '')
+      + (data.hint ? ' · ' + data.hint : '');
     document.getElementById('optimizeResult').classList.add('show');
   } catch (e) {
     alert('优化失败: ' + e.message);
@@ -4436,9 +4450,24 @@ document.getElementById('optimizeBtn').addEventListener('click', async () => {
   btn.textContent = '✨ 重新优化';
 });
 
+// 追加到提示词框（不覆盖用户已写内容）
+// 2026-10-20：原先是直接赋值覆盖，用户自己写好的场景会被顶掉。
+// 多行模式下每行就是一个片段，所以用换行追加语义正好。
+function appendToPromptInput(text) {
+  const ta = document.getElementById('promptInput');
+  if (!ta || !text) return false;
+  const cur = ta.value.trim();
+  ta.value = cur ? cur + '\n' + text : text;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.scrollTop = ta.scrollHeight;
+  ta.focus();
+  try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+  return true;
+}
+
 function useOptimizedPrompt() {
   const text = document.getElementById('optimizedText').textContent;
-  document.getElementById('promptInput').value = text;
+  appendToPromptInput(text);
   document.getElementById('optimizeResult').classList.remove('show');
 }
 
@@ -6902,7 +6931,7 @@ async function checkRunningTask() {
     var btn = document.createElement('button');
     btn.className = 'assistant-use';
     btn.type = 'button';
-    btn.textContent = '使用这段提示词';
+    btn.textContent = '添加到提示词框';
     btn.addEventListener('click', function () { usePrompt(promptText); });
 
     box.appendChild(cap);
@@ -6913,10 +6942,12 @@ async function checkRunningTask() {
   }
 
   // 填入提示词框：必须派发 input 事件，否则批量提示与配乐分配不刷新
+  // 2026-10-20：改为「追加」，不覆盖用户已在框里写的内容（多行模式下每行 = 一个片段）
   function usePrompt(text) {
     var ta = document.getElementById('promptInput');
     if (!ta) return;
-    ta.value = text;
+    var cur = ta.value.trim();
+    ta.value = cur ? cur + '\n' + text : text;
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     closePanel();
     if (typeof switchPage === 'function') switchPage('create');

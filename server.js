@@ -37,6 +37,7 @@ const storage = require('./src/storage');
 const auth = require('./src/auth');
 const pipeline = require('./src/pipeline');
 const promptOptimizer = require('./src/promptOptimizer');
+const promptSkill = require('./src/promptSkill');
 const { resolveResume } = require('./src/pipelineStages');
 const { getAvailableModels } = require('./src/generators');
 const KlingGenerator = require('./src/generators/kling');
@@ -797,23 +798,48 @@ app.put('/api/rules', (req, res) => {
 });
 
 // 优化提示词
-app.post('/api/optimize-prompt', (req, res) => {
-  const { prompt, theme } = req.body;
+app.post('/api/optimize-prompt', async (req, res) => {
+  const { prompt, theme, llmApiKey, llmBaseUrl, llmModel } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: '请输入提示词' });
   }
 
-  // 先做质检
-  const validation = promptOptimizer.validatePrompt(prompt, theme);
+  try {
+    // 先做质检
+    const validation = promptOptimizer.validatePrompt(prompt, theme);
 
-  // 模板优化
-  const result = promptOptimizer.optimizeWithTemplate(prompt, theme);
+    // 主题解析：显式传入优先，其次读行尾【主题】标签
+    // （此前前端固定传 theme:null 且只走模板，模板在无主题时原样返回 → 按钮实际是空操作）
+    const parsed = promptOptimizer.parseThemeTag(prompt, theme ?? null);
+    const useTheme = theme || parsed.themeId;
 
-  res.json({
-    ...result,
-    validation
-  });
+    const apiKey = llmApiKey || config.OPENAI_API_KEY;
+    let result;
+    if (apiKey) {
+      // AI 优化路径：会叠加 fengguang skill 规则（仅风光类主题）
+      result = await promptOptimizer.optimizeWithAI(prompt, useTheme, {
+        apiKey,
+        baseUrl: llmBaseUrl,
+        model: llmModel,
+      });
+    } else {
+      result = promptOptimizer.optimizeWithTemplate(prompt, useTheme);
+    }
+
+    res.json({
+      ...result,
+      validation,
+      themeResolved: useTheme || null,
+      // 无主题又无 Key 时模板不改写任何内容，明确告知原因，避免误以为按钮坏了
+      hint: (!useTheme && !apiKey)
+        ? '未识别主题：请在行尾加【山】【沙漠】【星空】等标签，或在设置里配置 LLM Key 走 AI 优化'
+        : null,
+    });
+  } catch (e) {
+    console.error('[optimize-prompt] 失败:', e.message);
+    res.status(500).json({ error: '优化失败：' + e.message });
+  }
 });
 
 // ==========================================
@@ -852,8 +878,8 @@ const ASSISTANT_SYSTEM_PROMPT = `你是「视频提示词助手」，为用户�
 3. 需要收集：主体、时段/光线、运镜、情绪氛围。集齐就停止提问。
 4. 用户已经说清楚时，不要为了走流程继续问，直接给结果。
 5. 用户说"随便""不知道"时，给 2-3 个具体方向让他选。
-6. 产出时先用中文解释一句为什么这么写，再给英文提示词（视频模型通常吃英文）。
-7. 英文提示词包含：主体 + 环境 + 光线 + 运镜 + 氛围 + 质感。
+6. 产出时先用一句中文说明为什么这么写，再给中文提示词。
+7. 中文提示词按七段组织：主体（地貌专名）+ 运动 + 运镜 + 光线 + 氛围 + 质感 + 结尾留白。
 
 【写完自检】
 给出 prompt 之前检查一遍，里面有上面 9 条里的东西就重写，不要把违规内容交出去。
@@ -861,7 +887,7 @@ const ASSISTANT_SYSTEM_PROMPT = `你是「视频提示词助手」，为用户�
 【输出格式】必须只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释文字：
 {"ready": false, "message": "你这一轮要说的中文话", "prompt": null}
 - ready=false：还在提问阶段，prompt 必须为 null
-- ready=true：已经给出可用提示词，prompt 填英文提示词字符串
+- ready=true：已经给出可用提示词，prompt 填中文提示词字符串
 `;
 
 // 画面禁用项：与服务端 system prompt 对齐，作为 LLM 不听话时的硬兜底。
@@ -968,7 +994,13 @@ app.post('/api/assistant/chat', async (req, res) => {
   }
 
   // ---- 调用 LLM ----
-  const raw = await llmService.chatMulti(ASSISTANT_SYSTEM_PROMPT, history, llmCfg);
+  // 2026-10-20：叠加 fengguang skill 规则（摄影级风光）
+  // 助手的产出物全是自然风光（9 条禁用项里已排除城市/人物/动物），所以整段追加，不按主题过滤。
+  // SKILL_PROMPT_ENABLED=false 可整体关闭，回退到原助手行为。
+  const assistantSystem = promptSkill.isEnabled()
+    ? `${ASSISTANT_SYSTEM_PROMPT}\n\n${promptSkill.getSkillRules()}\n`
+    : ASSISTANT_SYSTEM_PROMPT;
+  const raw = await llmService.chatMulti(assistantSystem, history, llmCfg);
   if (!raw) {
     return res.status(200).json({
       ok: false,
