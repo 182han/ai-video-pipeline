@@ -108,7 +108,13 @@ const SUITES = [
     name: 'skill-prompt',
     script: 'verify-skill-prompt.js',
     group: 'fast',
-    desc: 'fengguang skill 规则层接入提示词优化（作用域/开关/systemPrompt 组成，不联网）'
+    desc: 'fengguang skill 规则层接入提示词优化（作用域/开关/systemPrompt 组成/全中文，不联网）'
+  },
+  {
+    name: 'skill-ai-path',
+    script: 'verify-skill-ai-path.js',
+    group: 'fast',
+    desc: 'skill 规则是否真的随请求发给 LLM（本地 mock 服务，端到端，不花钱）'
   }
 ];
 

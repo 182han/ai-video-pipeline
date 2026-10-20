@@ -154,6 +154,35 @@ function section(title) {
   ok('模板优化输出无英文残留', outAscii.length === 0, outAscii.join(','));
   ok('模板优化输出含中文', /[\u4e00-\u9fa5]/.test(zhOut.optimized));
 
+  // ---------- 8. 九个主题的模板输出结构 ----------
+  section('8. 9 个主题的模板输出（seed=0，逐段结构校验）');
+  const THEMES = ['landscape', 'space', 'aurora', 'ocean', 'mountain', 'desert', 'waterfall', 'lake', 'city'];
+  for (const th of THEMES) {
+    const tplTheme = optimizer.templates[th];
+    if (!tplTheme || !tplTheme.structure) {
+      ok(`${th}: 模板存在`, false, '缺少 structure');
+      continue;
+    }
+    const s = tplTheme.structure;
+    const out = optimizer.optimizeWithTemplate('测试场景：山与湖', th, { seed: 0 }).optimized;
+    // seed=0 时各池选中的下标：camera 0 / lighting 1 / atmosphere 2 / ending 3
+    const need = [
+      s.cameraPool[0],
+      s.lightingPool[1 % s.lightingPool.length],
+      s.atmospherePool[2 % s.atmospherePool.length],
+      s.endingPool[3 % s.endingPool.length],
+    ].filter(Boolean);
+    const missing = need.filter((x) => !out.includes(x));
+    ok(`${th}: 运镜/光影/氛围/结尾齐全且含中文`,
+      missing.length === 0 && /[\u4e00-\u9fa5]/.test(out),
+      missing.join(' | '));
+    ok(`${th}: 质感四项全量追加`,
+      s.quality.every((q) => out.includes(q)));
+    const ascii = [...new Set((out.match(/[A-Za-z]{2,}/g) || []))].filter((w) => !['mm', 'logo'].includes(w));
+    ok(`${th}: 输出无英文残留`, ascii.length === 0, ascii.join(','));
+    ok(`${th}: 长度未超 2400`, out.length <= 2400, `${out.length}`);
+  }
+
   // ---------- 汇总 ----------
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);
   if (fail) {
