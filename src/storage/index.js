@@ -138,6 +138,35 @@ function annotateTaskQC(task) {
   return qcVersionUtil.annotateTask(task);
 }
 
+// ===== 账号（登录墙）=====
+// 密码哈希只通过 getUserByUsername 返回（登录校验用）；
+// 其余接口返回的对象都不含 passwordHash。
+
+async function listUsers() {
+  return getDriver().listUsers();
+}
+async function countUsers() {
+  return getDriver().countUsers();
+}
+async function getUserByUsername(username) {
+  return getDriver().getUserByUsername(username);
+}
+async function getUser(id) {
+  return getDriver().getUser(id);
+}
+async function createUser(payload) {
+  return getDriver().createUser(payload);
+}
+async function deleteUser(id) {
+  return getDriver().deleteUser(id);
+}
+async function updateUserPassword(id, passwordHash) {
+  return getDriver().updateUserPassword(id, passwordHash);
+}
+async function touchUserLogin(id) {
+  return getDriver().touchUserLogin(id);
+}
+
 // ===== 迁移 =====
 
 /**
@@ -200,6 +229,15 @@ module.exports = {
   deleteTemplate,
   saveRules,
   getRules,
+  // 账号（登录墙）
+  listUsers,
+  countUsers,
+  getUserByUsername,
+  getUser,
+  createUser,
+  deleteUser,
+  updateUserPassword,
+  touchUserLogin,
   migrateFromJsonFiles,
   // 质检结论版本
   QC_VERSION: qcVersionUtil.QC_VERSION,

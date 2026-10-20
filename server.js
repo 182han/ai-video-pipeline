@@ -34,6 +34,7 @@ console.warn = (...a) => { _origWarn(...a); _logLine('WARN', a); };
 const config = require('./config');
 const taskManager = require('./src/taskManager');
 const storage = require('./src/storage');
+const auth = require('./src/auth');
 const pipeline = require('./src/pipeline');
 const promptOptimizer = require('./src/promptOptimizer');
 const { resolveResume } = require('./src/pipelineStages');
@@ -50,10 +51,171 @@ const server = http.createServer(app);
 const PORT = config.SERVER.port || 3000;
 
 // 初始化 WebSocket
-wsManager.init(server);
+// 第二个参数是「握手鉴权」：没有有效会话 cookie 就直接拒绝握手。
+// 不传（或 AUTH_ENABLED=false）时行为与改造前完全一致。
+wsManager.init(server, auth.isEnabled() ? { authorize: (req) => auth.authorizeRequest(req) } : null);
 
 // 中间件
 app.use(express.json());
+
+// ===== 登录墙 =====
+//
+// 拦截范围（有意为之，见 docs/spec/changelog.md「登录墙」一节）：
+//   页面（/ 与 *.html）  → 未登录 302 到 /login.html?next=原地址
+//   /api/*              → 未登录 401 JSON（code=AUTH_REQUIRED）
+//   媒体静态目录          → 不拦（/output、/clips、/bgm；本机演示够用，
+//                         公网部署时必须连同这三处一起拦，否则成片可被直接下载）
+//
+// 放行清单：登录页本身、登录/登出接口、/api/status（Docker HEALTHCHECK 用它）。
+const AUTH_PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/status']);
+
+app.use((req, res, next) => {
+  if (!auth.isEnabled()) return next();
+
+  const p = req.path || '/';
+
+  // 登录页必须始终可达，否则会 302 到自己形成死循环
+  if (p === '/login.html') return next();
+
+  if (p.startsWith('/api/')) {
+    if (AUTH_PUBLIC_API.has(p)) return next();
+    const session = auth.authorizeRequest(req);
+    if (!session) return res.status(401).json({ error: '未登录', code: 'AUTH_REQUIRED' });
+    req.auth = session;
+    return next();
+  }
+
+  // 只拦页面；图片/字体/视频等静态资源放行
+  const isPage = p === '/' || p.endsWith('.html');
+  if (!isPage) return next();
+
+  const session = auth.authorizeRequest(req);
+  if (!session) {
+    const target = encodeURIComponent(req.originalUrl || '/');
+    return res.redirect(302, `/login.html?next=${target}`);
+  }
+  req.auth = session;
+  next();
+});
+
+// ===== 认证接口 =====
+
+// 登录：失败 5 次锁 IP 5 分钟；错误提示不区分「账号不存在」与「密码错误」
+app.post('/api/auth/login', async (req, res) => {
+  const ip = auth.getClientIp(req);
+  const lock = auth.checkLock(ip);
+  if (lock.locked) {
+    return res.status(429).json({
+      error: `尝试次数过多，请 ${lock.retryAfter} 秒后再试`,
+      code: 'LOCKED',
+      retryAfter: lock.retryAfter
+    });
+  }
+
+  const username = String((req.body || {}).username || '').trim();
+  const password = String((req.body || {}).password || '');
+  if (!username || !password) return res.status(400).json({ error: '请输入账号和密码' });
+
+  let user = null;
+  try {
+    user = await auth.findUserByUsername(username);
+  } catch (e) {
+    // 关键：存储不可用时返回 503，绝不 fail-open
+    console.error('[auth] 认证存储不可用:', e.message);
+    return res.status(503).json({ error: '认证服务不可用：' + e.message, code: 'AUTH_STORAGE_DOWN' });
+  }
+
+  const ok = await auth.verifyPasswordConstant(password, user ? user.passwordHash : null);
+  if (!ok) {
+    const r = auth.recordFailure(ip);
+    if (r.locked) {
+      return res.status(401).json({ error: '尝试次数过多，已锁定', code: 'LOCKED' });
+    }
+    return res.status(401).json({ error: '账号或密码错误', code: 'BAD_CREDENTIALS' });
+  }
+
+  auth.resetFailures(ip);
+  auth.markLogin(user.id);
+  auth.setSessionCookie(res, auth.createSession(user));
+  console.log(`[auth] 登录成功: ${user.username} (${ip})`);
+  res.json({ ok: true, username: user.username });
+});
+
+// 登出：销毁会话 + 立即过期 cookie
+app.post('/api/auth/logout', (req, res) => {
+  const token = auth.tokenFromRequest(req);
+  if (token) auth.destroySession(token);
+  auth.clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// 当前登录者（中间件已保证有会话）
+app.get('/api/auth/me', (req, res) => {
+  res.json({ username: req.auth.username, userId: req.auth.userId, authEnabled: true });
+});
+
+// ===== 成员管理（所有账号平权，无管理员/普通角色之分）=====
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await storage.listUsers();
+    res.json({ users, authEnabled: auth.isEnabled(), selfId: req.auth.userId });
+  } catch (e) {
+    res.status(503).json({ error: e.message });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const username = String((req.body || {}).username || '').trim();
+    const password = String((req.body || {}).password || '');
+    const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
+    if (!/^[A-Za-z0-9_.@-]{2,32}$/.test(username)) {
+      return res.status(400).json({ error: '账号需 2–32 位，仅限字母、数字、下划线、点、@、横线' });
+    }
+    if (password.length < minLen) return res.status(400).json({ error: `密码至少 ${minLen} 位` });
+    const passwordHash = await auth.hashPassword(password);
+    const user = await storage.createUser({ username, passwordHash });
+    console.log(`[auth] 新建账号: ${user.username}`);
+    res.status(201).json({ user });
+  } catch (e) {
+    const msg = String(e.message || '新建失败');
+    res.status(/已存在/.test(msg) ? 409 : 400).json({ error: msg });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const users = await storage.listUsers();
+    if (users.length <= 1) return res.status(400).json({ error: '至少要保留一个账号' });
+    if (req.params.id === req.auth.userId) return res.status(400).json({ error: '不能删除当前登录的账号' });
+    const r = await storage.deleteUser(req.params.id);
+    if (!r.success) return res.status(404).json({ error: r.error || '账号不存在' });
+    auth.destroySessionsOfUser(req.params.id);
+    console.log(`[auth] 删除账号: ${req.params.id}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/users/:id/password', async (req, res) => {
+  try {
+    const password = String((req.body || {}).password || '');
+    const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
+    if (password.length < minLen) return res.status(400).json({ error: `密码至少 ${minLen} 位` });
+    const passwordHash = await auth.hashPassword(password);
+    const user = await storage.updateUserPassword(req.params.id, passwordHash);
+    if (!user) return res.status(404).json({ error: '账号不存在' });
+    auth.destroySessionsOfUser(req.params.id);
+    console.log(`[auth] 重置密码: ${user.username}`);
+    res.json({ ok: true, user });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// 静态资源（登录页在 public/login.html，由这里下发）
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 输出文件静态访问（用于视频播放和下载）
@@ -1054,7 +1216,7 @@ app.get('/api/tasks/:id/clips', (req, res) => {
       theme: c.theme || null,
       themeTag: c.themeTag || null,
       trackId: c.trackId || null,
-      duration: c.duration || 0,
+      duration: c.duration || (libEntry && libEntry.durationSec) || 0,
       qcPassed: c.qcResult ? !!c.qcResult.passed : null,
       qcUnverified: !!c.qcUnverified,
       // 单片段费用/耗时（任务详情卡片展示）
@@ -1442,7 +1604,19 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log(`  服务已启动: http://localhost:${PORT}`);
   console.log(`  WebSocket: ws://localhost:${PORT}/ws`);
+  console.log(`  登录墙:   ${config.AUTH.enabled ? '已启用（会话级 cookie，关浏览器需重登）' : '已关闭（AUTH_ENABLED=false）'}`);
   console.log('');
+
+  // ===== 登录墙：首次启动创建第一个账号 =====
+  // 有账号时什么都不做；没有账号时用 AUTH_USER / AUTH_PASSWORD 建，
+  // 缺密码则随机生成并打印一次（见 src/auth.js bootstrap）。
+  auth.bootstrap()
+    .then(r => {
+      if (r && r.created === false && r.count > 0) {
+        console.log(`  🔐 登录墙：${r.count} 个账号，未登录无法访问`);
+      }
+    })
+    .catch(e => console.error('  ⚠️  登录墙初始化失败（登录接口会返回 503）:', e.message));
 
   // ===== 启动自检：回收上次进程中断留下的僵尸任务 =====
   // 进程刚启动，不可能有任务在跑；凡处于「进行中」状态的都是僵尸。

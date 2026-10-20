@@ -18,6 +18,8 @@ data/trash/
 # 素材库元数据（每个片段一个 json）与波形缓存（音频峰值），均为运行时生成
 data/library/
 data/waveforms/
+# 登录墙账号（存 scrypt 哈希；每台机器各自独立，绝不进仓库）
+data/users.json
 *.mp4
 *.mp4.txt
 *.log

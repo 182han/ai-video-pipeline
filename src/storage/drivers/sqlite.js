@@ -117,12 +117,32 @@ const SQLITE_SCHEMA = [
     key text primary key,
     value text,
     updated_at text
+  )`,
+  `create table if not exists users (
+    id text primary key,
+    username text not null unique,
+    password_hash text not null,
+    created_at text,
+    updated_at text,
+    last_login_at text
   )`
 ];
 
 function nowIso() { return new Date().toISOString(); }
 function genId(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function j(v, fallback) { try { return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+
+/** 用户行 → 对外对象（不含 password_hash） */
+function rowToUser(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    username: r.username,
+    createdAt: r.created_at || null,
+    updatedAt: r.updated_at || null,
+    lastLoginAt: r.last_login_at || null
+  };
+}
 
 // 给已存在的老库补列。SQLite 没有 add column if not exists，
 // 只能先查 pragma table_info 再决定要不要 ALTER。
@@ -391,5 +411,61 @@ module.exports = {
     const r = db.prepare("select value from app_settings where key='optimization_rules'").get();
     if (!r) return '';
     return j(r.value, {}).rules || '';
+  },
+
+  // ===== 账号（登录墙）=====
+  async listUsers() {
+    return db.prepare('select id, username, created_at, updated_at, last_login_at from users order by created_at asc')
+      .all().map(rowToUser);
+  },
+
+  async countUsers() {
+    const r = db.prepare('select count(*) as n from users').get();
+    return r ? r.n : 0;
+  },
+
+  async getUserByUsername(username) {
+    const name = String(username || '').trim();
+    if (!name) return null;
+    const r = db.prepare('select * from users where username = ?').get(name);
+    if (!r) return null;
+    return { ...rowToUser(r), passwordHash: r.password_hash };
+  },
+
+  async getUser(id) {
+    const r = db.prepare('select id, username, created_at, updated_at, last_login_at from users where id = ?').get(id);
+    return r ? rowToUser(r) : null;
+  },
+
+  async createUser({ username, passwordHash }) {
+    const name = String(username || '').trim();
+    if (!name) throw new Error('账号不能为空');
+    if (db.prepare('select 1 from users where username = ?').get(name)) throw new Error('账号已存在');
+    const id = genId('usr');
+    const now = nowIso();
+    db.prepare('insert into users (id, username, password_hash, created_at, updated_at) values (?,?,?,?,?)')
+      .run(id, name, String(passwordHash), now, now);
+    return this.getUser(id);
+  },
+
+  async deleteUser(id) {
+    const before = db.prepare('select 1 from users where id = ?').get(id);
+    if (!before) return { success: false, error: '账号不存在' };
+    db.prepare('delete from users where id = ?').run(id);
+    return { success: true };
+  },
+
+  async updateUserPassword(id, passwordHash) {
+    const before = db.prepare('select 1 from users where id = ?').get(id);
+    if (!before) return null;
+    db.prepare('update users set password_hash = ?, updated_at = ? where id = ?').run(String(passwordHash), nowIso(), id);
+    return this.getUser(id);
+  },
+
+  async touchUserLogin(id) {
+    const before = db.prepare('select 1 from users where id = ?').get(id);
+    if (!before) return null;
+    db.prepare('update users set last_login_at = ? where id = ?').run(nowIso(), id);
+    return this.getUser(id);
   }
 };

@@ -186,6 +186,21 @@ create table if not exists app_settings (
 );
 
 -- ==========================================
+-- 6.5 登录墙账号
+-- ==========================================
+-- 密码只存 scrypt 哈希（scrypt$1$<salt>$<hash>，见 src/auth.js），绝不存明文；
+-- postgres 驱动会在第一次用到账号时 create table if not exists 兜底，
+-- 这里写一份是为了让手工建库的人一次执行完。
+create table if not exists users (
+  id             text primary key,
+  username       text not null unique,
+  password_hash  text not null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  last_login_at  timestamptz
+);
+
+-- ==========================================
 -- 7. 自动维护 updated_at
 -- ==========================================
 create or replace function touch_updated_at() returns trigger as $$

@@ -235,7 +235,8 @@ async function main() {
   }
   const srv = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: String(port) },
+    // 登录墙会把 /api/* 拦成 401；验收脚本走官方逃生开关（.env.example 的 AUTH_ENABLED）
+    env: { ...process.env, PORT: String(port), AUTH_ENABLED: 'false' },
     stdio: 'ignore'
   });
   try {

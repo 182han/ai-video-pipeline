@@ -253,5 +253,25 @@ module.exports = {
     websocket: env('WEBSOCKET', 'true') === 'true',
     // 访问口令（留空=不鉴权；公网部署强烈建议设置）
     accessToken: env('ACCESS_TOKEN')
+  },
+
+  // ===== 登录墙 =====
+  // 改动前请读 docs/spec/changelog.md 的「登录墙」一节：
+  //   - 会话是「内存 + 无 Max-Age 的 cookie」，关浏览器/重启服务即失效；
+  //   - AUTH_ENABLED=false 只应在跑验收脚本时临时使用，不要长期关闭。
+  AUTH: {
+    // 是否启用登录墙（默认开）。关掉时 /api/* 与页面全部放行。
+    enabled: env('AUTH_ENABLED', 'true') !== 'false',
+    // 会话绝对过期（小时）。cookie 本身是会话级、关浏览器即失效，这里是兜底上限。
+    sessionHours: parseInt(env('AUTH_SESSION_HOURS', '8'), 10),
+    // 连续失败多少次锁 IP
+    maxFails: parseInt(env('AUTH_MAX_FAILS', '5'), 10),
+    // 锁定分钟数
+    lockMinutes: parseInt(env('AUTH_LOCK_MINUTES', '5'), 10),
+    // 首次启动创建管理员用（之后以数据库/JSON 里的账号为准）
+    bootstrapUser: env('AUTH_USER', ''),
+    bootstrapPassword: env('AUTH_PASSWORD', ''),
+    // 新建账号的密码最短长度
+    minPasswordLength: parseInt(env('AUTH_MIN_PASSWORD_LENGTH', '8'), 10)
   }
 };

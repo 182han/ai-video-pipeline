@@ -21,6 +21,12 @@ const fs = require('fs');
 //   real   —— 需要起服务或跑 ffmpeg/mock 流水线，数十秒
 const SUITES = [
   {
+    name: 'auth',
+    script: 'verify-auth.js',
+    group: 'real',
+    desc: '登录墙（未登录 401/302、会话 cookie、成员管理、失败锁定、WS 握手，起两个临时服务）'
+  },
+  {
     name: 'stages',
     script: 'verify-stages.js',
     group: 'fast',
@@ -91,6 +97,12 @@ const SUITES = [
     script: 'verify-mock-vqc.js',
     group: 'fast',
     desc: 'Mock 模式视觉质检语义'
+  },
+  {
+    name: 'library',
+    script: 'verify-library.js',
+    group: 'real',
+    desc: '片段库：价目表/费用口径/分组/跨规格拼接归一化'
   }
 ];
 

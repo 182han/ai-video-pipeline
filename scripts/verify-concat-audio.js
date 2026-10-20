@@ -48,7 +48,20 @@ function assert(cond, name, detail) {
 
 function sh(cmd) {
   try { return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
-  catch (e) { return ''; }
+  catch (e) {
+    // 受限环境（本项目的 DSH 沙箱）禁止管道 stdio，捕获 stdout 会 EPERM。
+    // 降级为「重定向到临时文件再读」，与 videoProcessor._execText / verify-bgm-mix.js 同思路。
+    const tmp = path.join(TMP, `_sh_${process.pid}_${Date.now()}.txt`);
+    try {
+      try { fs.mkdirSync(TMP, { recursive: true }); } catch (e1) {}
+      try { execSync(`${cmd} > "${tmp}" 2>&1`, { stdio: 'ignore' }); } catch (e2) { /* 非 0 退出也要读输出 */ }
+      const out = fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : '';
+      try { fs.unlinkSync(tmp); } catch (e3) {}
+      return out;
+    } catch (e4) {
+      return '';
+    }
+  }
 }
 
 function probeDuration(f) {

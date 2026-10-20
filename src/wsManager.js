@@ -11,13 +11,37 @@ class WebSocketManager {
     this.taskSubscriptions = new Map(); // taskId -> Set of clientIds
   }
 
-  init(server) {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+  /**
+   * @param {import('http').Server} server
+   * @param {{authorize?: (req: any) => any}|null} [options]
+   *   options.authorize: 握手鉴权函数，返回假值则拒绝握手（HTTP 401）。
+   *   不传 = 与改造前行为一致（不鉴权），保持旧调用方式可用。
+   */
+  init(server, options) {
+    const authorize = options && typeof options.authorize === 'function' ? options.authorize : null;
+    const wsOptions = { server, path: '/ws' };
 
-    this.wss.on('connection', (ws) => {
+    if (authorize) {
+      // 握手阶段就校验会话 cookie：未登录的客户端连不上，也就订阅不到任务进度
+      wsOptions.verifyClient = (info, cb) => {
+        let session = null;
+        try { session = authorize(info.req); } catch (e) { session = null; }
+        if (session) {
+          info.req.auth = session;
+          return cb(true);
+        }
+        // 4001 让前端能区分「未登录」和「服务没起来」
+        return cb(false, 401, 'Unauthorized');
+      };
+    }
+
+    this.wss = new WebSocketServer(wsOptions);
+
+    this.wss.on('connection', (ws, req) => {
       const clientId = this._generateId();
+      const who = req && req.auth && req.auth.username ? req.auth.username : '匿名';
       this.clients.set(clientId, ws);
-      console.log(`[WS] 客户端连接: ${clientId}`);
+      console.log(`[WS] 客户端连接: ${clientId} (${who})`);
 
       ws.on('message', (data) => {
         try {

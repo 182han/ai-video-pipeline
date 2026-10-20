@@ -235,6 +235,40 @@ body {
 .status-dot.warning { background: var(--warning); }
 .status-dot.error { background: var(--danger); }
 
+/* 侧边栏底部的登录身份行（登录墙） */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 0;
+  font-size: 12px;
+}
+.sidebar-user-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.sidebar-user-action {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  transition: background .14s ease, color .14s ease;
+}
+.sidebar-user-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* ===== 主内容区 ===== */
 .main-content {
   flex: 1;
@@ -2457,6 +2491,11 @@ select {
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">系统就绪</span>
       </div>
+      <div class="sidebar-user">
+        <span class="sidebar-user-name" id="sidebarUserName">—</span>
+        <a class="sidebar-user-action" href="/members.html">成员</a>
+        <button class="sidebar-user-action" id="logoutBtn" type="button">退出</button>
+      </div>
     </div>
   </aside>
 
@@ -3348,6 +3387,45 @@ select {
 </div>
 
 <script>
+// ==========================================
+// 全局兜底：会话失效时回登录页
+// ==========================================
+// index.html 里有 38 处裸 fetch，逐个补凭据/错误处理不现实。
+// 这里统一包一层：任何请求返回 401 就跳登录页，其余行为完全不变。
+// （cookie 是 HttpOnly，前端本来就拿不到，也不需要拿。）
+(function () {
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    return nativeFetch(input, init).then(function (res) {
+      if (res && res.status === 401 && !/\/login\.html$/.test(location.pathname)) {
+        var next = encodeURIComponent(location.pathname + location.search);
+        location.replace('/login.html?next=' + next);
+      }
+      return res;
+    });
+  };
+
+  // 侧边栏显示当前登录账号 + 退出登录
+  document.addEventListener('DOMContentLoaded', function () {
+    nativeFetch('/api/auth/me', { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (me) {
+        var el = document.getElementById('sidebarUserName');
+        if (el && me && me.username) el.textContent = me.username;
+      })
+      .catch(function () {});
+
+    var btn = document.getElementById('logoutBtn');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        nativeFetch('/api/auth/logout', { method: 'POST' })
+          .catch(function () {})
+          .then(function () { location.replace('/login.html'); });
+      });
+    }
+  });
+})();
+
 // ==========================================
 // 全局状态
 // ==========================================

@@ -17,6 +17,7 @@ const PROMPTS_FILE = path.join(DATA_DIR, 'prompts.json');
 const ASSETS_FILE = path.join(DATA_DIR, 'video-assets.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
 const RULES_FILE = path.join(DATA_DIR, 'optimization_rules.txt');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -35,6 +36,25 @@ function readJson(file, fallback) {
 function writeJson(file, data) {
   ensureDir(path.dirname(file));
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// ===== 账号相关的小工具 =====
+
+/** 生成账号 id（与随机数无关的用途，AGENTS.md §4.2 允许） */
+function newUserId() {
+  return 'usr_' + Date.now().toString(36) + '_' + require('crypto').randomBytes(4).toString('hex');
+}
+
+/** 对外暴露的用户对象：绝不包含 passwordHash */
+function publicUser(u) {
+  if (!u) return null;
+  return {
+    id: u.id,
+    username: u.username,
+    createdAt: u.createdAt || null,
+    updatedAt: u.updatedAt || null,
+    lastLoginAt: u.lastLoginAt || null
+  };
 }
 
 module.exports = {
@@ -174,5 +194,69 @@ module.exports = {
   async getRules() {
     if (!fs.existsSync(RULES_FILE)) return '';
     return fs.readFileSync(RULES_FILE, 'utf8');
+  },
+
+  // ===== 账号（登录墙）=====
+  // 密码哈希只在 getUserByUsername 里返回（登录校验需要），
+  // 其余接口一律经过 publicUser() 过滤，绝不把 passwordHash 发给前端。
+  async listUsers() {
+    const all = readJson(USERS_FILE, []);
+    return all.map(publicUser).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  },
+
+  async countUsers() {
+    return readJson(USERS_FILE, []).length;
+  },
+
+  async getUserByUsername(username) {
+    const name = String(username || '').trim();
+    if (!name) return null;
+    const all = readJson(USERS_FILE, []);
+    return all.find(u => u.username === name) || null;
+  },
+
+  async getUser(id) {
+    const all = readJson(USERS_FILE, []);
+    const u = all.find(x => x.id === id);
+    return u ? publicUser(u) : null;
+  },
+
+  async createUser({ username, passwordHash }) {
+    const all = readJson(USERS_FILE, []);
+    const name = String(username || '').trim();
+    if (!name) throw new Error('账号不能为空');
+    if (all.some(u => u.username === name)) throw new Error('账号已存在');
+    const now = new Date().toISOString();
+    const user = { id: newUserId(), username: name, passwordHash: String(passwordHash), createdAt: now, updatedAt: now, lastLoginAt: null };
+    all.push(user);
+    writeJson(USERS_FILE, all);
+    return publicUser(user);
+  },
+
+  async deleteUser(id) {
+    const all = readJson(USERS_FILE, []);
+    const next = all.filter(u => u.id !== id);
+    if (next.length === all.length) return { success: false, error: '账号不存在' };
+    writeJson(USERS_FILE, next);
+    return { success: true };
+  },
+
+  async updateUserPassword(id, passwordHash) {
+    const all = readJson(USERS_FILE, []);
+    const u = all.find(x => x.id === id);
+    if (!u) return null;
+    u.passwordHash = String(passwordHash);
+    u.updatedAt = new Date().toISOString();
+    writeJson(USERS_FILE, all);
+    return publicUser(u);
+  },
+
+  async touchUserLogin(id) {
+    const all = readJson(USERS_FILE, []);
+    const u = all.find(x => x.id === id);
+    if (!u) return null;
+    u.lastLoginAt = new Date().toISOString();
+    writeJson(USERS_FILE, all);
+    return publicUser(u);
   }
 };

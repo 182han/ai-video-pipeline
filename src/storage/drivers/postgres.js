@@ -51,6 +51,38 @@ async function q(text, params) {
   return res;
 }
 
+// ===== 账号（登录墙）辅助 =====
+
+let usersTableReady = false;
+
+/** 懒建表：users 表由驱动自己 ensure，避免「没跑 schema.sql 就登不进去」 */
+async function ensureUsersTable() {
+  if (usersTableReady) return;
+  await q(`
+    create table if not exists users (
+      id text primary key,
+      username text not null unique,
+      password_hash text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      last_login_at timestamptz
+    )
+  `);
+  usersTableReady = true;
+}
+
+/** 用户行 → 业务对象（不含密码哈希；需要哈希时由调用方显式取） */
+function rowToUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    lastLoginAt: row.last_login_at ? new Date(row.last_login_at).toISOString() : null
+  };
+}
+
 // 任务行 → 业务对象（snake_case 转 camelCase）
 function rowToTask(row, clips) {
   if (!row) return null;
@@ -341,5 +373,76 @@ module.exports = {
     const res = await q("select value from app_settings where key = 'optimization_rules'");
     if (res.rows.length === 0) return '';
     return (res.rows[0].value && res.rows[0].value.rules) || '';
+  },
+
+  // ===== 账号（登录墙）=====
+  // 与其它表不同：users 表由驱动自己 ensure（create table if not exists），
+  // 因为登录是基础设施，不该要求用户先手动执行一遍 schema.sql 才能登进来。
+  // 幂等，且只在第一次用到账号时才执行。
+  async listUsers() {
+    await ensureUsersTable();
+    const res = await q('select id, username, created_at, updated_at, last_login_at from users order by created_at asc');
+    return res.rows.map(rowToUser);
+  },
+
+  async countUsers() {
+    await ensureUsersTable();
+    const res = await q('select count(*)::int as n from users');
+    return res.rows[0] ? res.rows[0].n : 0;
+  },
+
+  async getUserByUsername(username) {
+    await ensureUsersTable();
+    const name = String(username || '').trim();
+    if (!name) return null;
+    const res = await q('select * from users where username = $1', [name]);
+    const row = res.rows[0];
+    if (!row) return null;
+    return { ...rowToUser(row), passwordHash: row.password_hash };
+  },
+
+  async getUser(id) {
+    await ensureUsersTable();
+    const res = await q('select id, username, created_at, updated_at, last_login_at from users where id = $1', [id]);
+    return res.rows[0] ? rowToUser(res.rows[0]) : null;
+  },
+
+  async createUser({ username, passwordHash }) {
+    await ensureUsersTable();
+    const name = String(username || '').trim();
+    if (!name) throw new Error('账号不能为空');
+    const exists = await q('select 1 from users where username = $1', [name]);
+    if (exists.rows.length) throw new Error('账号已存在');
+    const id = 'usr_' + Date.now().toString(36) + '_' + require('crypto').randomBytes(4).toString('hex');
+    const res = await q(
+      'insert into users (id, username, password_hash, created_at, updated_at) values ($1,$2,$3, now(), now()) returning id, username, created_at, updated_at, last_login_at',
+      [id, name, String(passwordHash)]
+    );
+    return rowToUser(res.rows[0]);
+  },
+
+  async deleteUser(id) {
+    await ensureUsersTable();
+    const res = await q('delete from users where id = $1 returning id', [id]);
+    if (!res.rows.length) return { success: false, error: '账号不存在' };
+    return { success: true };
+  },
+
+  async updateUserPassword(id, passwordHash) {
+    await ensureUsersTable();
+    const res = await q(
+      'update users set password_hash = $2, updated_at = now() where id = $1 returning id, username, created_at, updated_at, last_login_at',
+      [id, String(passwordHash)]
+    );
+    return res.rows[0] ? rowToUser(res.rows[0]) : null;
+  },
+
+  async touchUserLogin(id) {
+    await ensureUsersTable();
+    const res = await q(
+      'update users set last_login_at = now() where id = $1 returning id, username, created_at, updated_at, last_login_at',
+      [id]
+    );
+    return res.rows[0] ? rowToUser(res.rows[0]) : null;
   }
 };

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成员管理 · Video Studio</title>
+<style>
+:root {
+  --bg-primary: #f7f6f3;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f7f7f5;
+  --bg-hover: #f1f1ef;
+  --text-primary: #37352f;
+  --text-secondary: #787774;
+  --text-tertiary: #9b9a97;
+  --text-placeholder: #c4c4c1;
+  --accent: #2383e2;
+  --accent-hover: #1a74d1;
+  --accent-bg: #eef6fb;
+  --accent-ring: rgba(35, 131, 226, 0.16);
+  --border: #d3d1cb;
+  --border-light: #e9e9e7;
+  --danger: #e03e3e;
+  --danger-bg: #fbecec;
+  --success: #0f7b0f;
+  --success-bg: #ecf7ec;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(15,15,15,0.08);
+  --shadow-lg: 0 12px 28px rgba(15,15,15,0.12);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  font-size: 14px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: 9px; }
+.brand-dot {
+  width: 20px; height: 20px; border-radius: 6px;
+  background: linear-gradient(135deg, #2383e2 0%, #6ba6e8 100%);
+  box-shadow: 0 1px 3px rgba(35, 131, 226, 0.35);
+}
+.brand-name { font-size: 13.5px; font-weight: 600; }
+.crumb { color: var(--text-tertiary); font-size: 13px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.who { font-size: 12.5px; color: var(--text-secondary); }
+
+.btn {
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease;
+  white-space: nowrap;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(35,131,226,.25); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger-text { color: var(--danger); border-color: transparent; background: transparent; }
+.btn-danger-text:hover { background: var(--danger-bg); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.wrap { max-width: 880px; margin: 0 auto; padding: 26px 24px 60px; }
+.page-title { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin-bottom: 4px; }
+.page-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.card-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.card-title { font-size: 13.5px; font-weight: 600; }
+.card-hint { font-size: 12px; color: var(--text-tertiary); }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+}
+.table td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.table tr:last-child td { border-bottom: none; }
+.table tr:hover td { background: #fcfcfb; }
+.uname { font-weight: 550; display: flex; align-items: center; gap: 7px; }
+.badge-self {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.muted { color: var(--text-tertiary); font-size: 12px; }
+.actions { display: flex; gap: 4px; justify-content: flex-end; }
+
+.form-row { display: flex; gap: 10px; padding: 16px 18px; flex-wrap: wrap; }
+.form-row input {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  outline: none;
+  transition: border-color .14s, box-shadow .14s;
+}
+.form-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.form-row input::placeholder { color: var(--text-placeholder); }
+.form-row input#newUsername { flex: 1 1 180px; }
+.form-row input#newPassword { flex: 1 1 160px; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translate(-50%, 12px);
+  background: #37352f;
+  color: #fff;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  z-index: 100;
+  max-width: 80vw;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.err { background: #b3342f; }
+
+.empty { padding: 26px 18px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
+/* 重置密码弹窗 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.32);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+.overlay.show { display: flex; }
+.modal {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+}
+.modal h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.modal p { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 16px; }
+.modal input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  margin-bottom: 6px;
+}
+.modal input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.modal-error { font-size: 12px; color: var(--danger); min-height: 16px; margin-bottom: 8px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot" aria-hidden="true"></span>
+    <span class="brand-name">Video Studio</span>
+    <span class="crumb">/ 成员管理</span>
+  </div>
+  <div class="topbar-right">
+    <span class="who" id="whoami"></span>
+    <a class="btn" href="/">返回工作台</a>
+    <button class="btn" id="logoutBtn" type="button">退出登录</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1 class="page-title">成员管理</h1>
+  <p class="page-desc">所有账号权限相同，任何持有账号密码的人都能登录并看到全部任务。</p>
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-title">账号列表</span>
+      <span class="card-hint" id="countHint"></span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:38%">账号</th>
+          <th style="width:22%">创建时间</th>
+          <th style="width:24%">最后登录</th>
+          <th style="width:16%; text-align:right">操作</th>
+        </tr>
+      </thead>
+      <tbody id="userRows">
+        <tr><td colspan="4" class="empty">加载中…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <span class="card-title">新增账号</span>
+      <span class="card-hint">密码至少 8 位</span>
+    </div>
+    <form class="form-row" id="createForm" autocomplete="off">
+      <input id="newUsername" type="text" placeholder="账号（字母/数字/下划线/点/@/横线）" spellcheck="false" autocomplete="off">
+      <input id="newPassword" type="password" placeholder="密码" autocomplete="new-password">
+      <button class="btn btn-primary" id="createBtn" type="submit">创建</button>
+    </form>
+  </section>
+</main>
+
+<div class="overlay" id="pwdOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pwdTitle">
+    <h2 id="pwdTitle">重置密码</h2>
+    <p id="pwdTarget"></p>
+    <input id="pwdInput" type="password" placeholder="新密码（至少 8 位）" autocomplete="new-password">
+    <div class="modal-error" id="pwdError"></div>
+    <div class="modal-foot">
+      <button class="btn" id="pwdCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="pwdConfirm" type="button">确认重置</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var selfId = null;
+  var pendingUser = null;
+
+  var rowsEl = document.getElementById('userRows');
+  var countHint = document.getElementById('countHint');
+  var whoami = document.getElementById('whoami');
+  var toastEl = document.getElementById('toast');
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmt(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    function p(n) { return n < 10 ? '0' + n : '' + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+           ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  var toastTimer = null;
+  function toast(msg, isErr) {
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show' + (isErr ? ' err' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.className = 'toast'; }, 2600);
+  }
+
+  function guard(res) {
+    if (res.status === 401) {
+      location.replace('/login.html?next=' + encodeURIComponent(location.pathname));
+      return false;
+    }
+    return true;
+  }
+
+  function loadUsers() {
+    return fetch('/api/users', { headers: { accept: 'application/json' } })
+      .then(function (r) {
+        if (!guard(r)) return null;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        selfId = data.selfId;
+        var users = data.users || [];
+        countHint.textContent = users.length + ' 个账号';
+        if (!users.length) {
+          rowsEl.innerHTML = '<tr><td colspan="4" class="empty">还没有账号</td></tr>';
+          return;
+        }
+        rowsEl.innerHTML = users.map(function (u) {
+          var isSelf = u.id === selfId;
+          return '<tr>' +
+            '<td><span class="uname">' + esc(u.username) +
+              (isSelf ? '<span class="badge-self">你</span>' : '') + '</span></td>' +
+            '<td class="muted">' + esc(fmt(u.createdAt)) + '</td>' +
+            '<td class="muted">' + esc(fmt(u.lastLoginAt)) + '</td>' +
+            '<td><div class="actions">' +
+              '<button class="btn" data-act="pwd" data-id="' + esc(u.id) + '" data-name="' + esc(u.username) + '">重置密码</button>' +
+              (isSelf ? '' : '<button class="btn btn-danger-text" data-act="del" data-id="' + esc(u.id) + '" data-name="' + esc(u.username) + '">删除</button>') +
+            '</div></td>' +
+          '</tr>';
+        }).join('');
+
+        // 记住自己的用户名，给顶栏用
+        var me = users.filter(function (u) { return u.id === selfId; })[0];
+        if (me) whoami.textContent = me.username;
+      })
+      .catch(function (e) {
+        rowsEl.innerHTML = '<tr><td colspan="4" class="empty">加载失败：' + esc(e.message) + '</td></tr>';
+      });
+  }
+
+  // 顶栏「我是谁」
+  fetch('/api/auth/me', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (me) { if (me && !whoami.textContent) whoami.textContent = me.username; })
+    .catch(function () {});
+
+  loadUsers();
+
+  // 行内按钮（事件委托）
+  rowsEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    var act = btn.getAttribute('data-act');
+    var id = btn.getAttribute('data-id');
+    var name = btn.getAttribute('data-name');
+
+    if (act === 'del') {
+      if (!confirm('确定删除账号「' + name + '」？该账号会立即被踢下线。')) return;
+      fetch('/api/users/' + encodeURIComponent(id), { method: 'DELETE' })
+        .then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (b) {
+            return { ok: r.ok, body: b };
+          });
+        })
+        .then(function (res) {
+          if (!res.ok) return toast(res.body.error || '删除失败', true);
+          toast('已删除 ' + name);
+          loadUsers();
+        })
+        .catch(function () { toast('网络错误', true); });
+      return;
+    }
+
+    if (act === 'pwd') {
+      pendingUser = { id: id, name: name };
+      document.getElementById('pwdTarget').textContent = '为「' + name + '」设置新密码，该账号现有会话会被踢下线。';
+      document.getElementById('pwdInput').value = '';
+      document.getElementById('pwdError').textContent = '';
+      document.getElementById('pwdOverlay').classList.add('show');
+      setTimeout(function () { document.getElementById('pwdInput').focus(); }, 30);
+    }
+  });
+
+  // 新增账号
+  document.getElementById('createForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var username = document.getElementById('newUsername').value.trim();
+    var password = document.getElementById('newPassword').value;
+    var btn = document.getElementById('createBtn');
+    if (!username || !password) return toast('请输入账号和密码', true);
+    btn.disabled = true;
+    fetch('/api/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ username: username, password: password })
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (b) { return { ok: r.ok, body: b }; });
+      })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) return toast(res.body.error || '创建失败', true);
+        document.getElementById('newUsername').value = '';
+        document.getElementById('newPassword').value = '';
+        toast('已创建账号 ' + username);
+        loadUsers();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        toast('网络错误', true);
+      });
+  });
+
+  // 重置密码弹窗
+  var overlay = document.getElementById('pwdOverlay');
+  function closePwd() { overlay.classList.remove('show'); pendingUser = null; }
+
+  document.getElementById('pwdCancel').addEventListener('click', closePwd);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) closePwd(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePwd(); });
+
+  document.getElementById('pwdConfirm').addEventListener('click', function () {
+    if (!pendingUser) return;
+    var pwd = document.getElementById('pwdInput').value;
+    var err = document.getElementById('pwdError');
+    if (pwd.length < 8) { err.textContent = '密码至少 8 位'; return; }
+    var btn = this;
+    btn.disabled = true;
+    fetch('/api/users/' + encodeURIComponent(pendingUser.id) + '/password', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ password: pwd })
+    })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (b) { return { ok: r.ok, body: b }; });
+      })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { err.textContent = res.body.error || '重置失败'; return; }
+        var name = pendingUser.name;
+        closePwd();
+        toast('已重置 ' + name + ' 的密码');
+        loadUsers();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        err.textContent = '网络错误';
+      });
+  });
+
+  document.getElementById('pwdInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('pwdConfirm').click();
+  });
+
+  // 退出登录
+  document.getElementById('logoutBtn').addEventListener('click', function () {
+    fetch('/api/auth/logout', { method: 'POST' })
+      .catch(function () {})
+      .then(function () { location.replace('/login.html'); });
+  });
+})();
+</script>
+</body>
+</html>

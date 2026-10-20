@@ -93,7 +93,8 @@ async function main() {
   const shimPath = path.join(__dirname, '_nsfw-pass-shim.js');
   const srv = spawn(process.execPath, ['--require', shimPath, 'server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: String(PORT) },
+    // 登录墙会把 /api/* 拦成 401；验收脚本走官方逃生开关
+    env: { ...process.env, PORT: String(PORT), AUTH_ENABLED: 'false' },
     stdio: 'ignore'
   });
 
