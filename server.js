@@ -220,7 +220,16 @@ app.put('/api/users/:id/password', async (req, res) => {
 });
 
 // 静态资源（登录页在 public/login.html，由这里下发）
-app.use(express.static(path.join(__dirname, 'public')));
+// 本项目没有构建步骤，改完 public/ 靠刷新生效。若浏览器缓存了旧 HTML/JS，
+// 会出现「服务端已是新代码、页面还是旧行为」的假象（实测踩过：按钮还是旧文案）。
+// 因此 HTML/JS/CSS 一律 no-cache，每次都回源校验。
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (/\.(html|js|css)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  },
+}));
 
 // 输出文件静态访问（用于视频播放和下载）
 app.use('/output', express.static(path.join(__dirname, 'output'), {
