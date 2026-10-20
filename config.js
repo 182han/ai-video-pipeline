@@ -173,8 +173,12 @@ module.exports = {
   //   OPENAI_MODEL=deepseek-chat
   // 再单独配视觉模型（NSFW 检测要用，DeepSeek 不支持图像输入）：
   //   MULTIMODAL_API_KEY=sk-阿里云百炼的key
-  //   MULTIMODAL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+  //   MULTIMODAL_BASE_URL=https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1
   //   OPENAI_MULTIMODAL_MODEL=qwen-vl-plus
+  // 注意（2026-10-20 查官方文档修正）：百炼视觉模型的 OpenAI 兼容地址是
+  // 「带 WorkspaceId 的专属接入点」，与视频生成同一个业务空间、只是路径换成 /compatible-mode/v1。
+  // 旧的通用入口 https://dashscope.aliyuncs.com/compatible-mode/v1 对业务空间 Key
+  // 会返回 403 Model.AccessDenied。
 
   // ===== 数据库 =====
   // 留空则继续使用本地 JSON 文件存储（向后兼容）

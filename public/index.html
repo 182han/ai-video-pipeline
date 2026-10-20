@@ -3283,7 +3283,8 @@ select {
           <button type="button" class="btn btn-secondary test-key-btn" id="testMultimodalBtn" style="padding:6px 14px;font-size:12px;">测试连接</button>
           <span class="test-result" id="multimodalTestResult"></span>
         </div>
-        <div class="form-hint">⚠️ 必须支持图像输入（如 qwen-vl-plus / glm-4v-flash）。DeepSeek 等纯文本模型不能用于此项。</div>
+        <div class="form-hint">⚠️ 必须支持图像输入（如 qwen-vl-plus / glm-4v-flash）。DeepSeek 等纯文本模型不能用于此项。<br>
+          百炼（阿里云）的地址要用<b>带 WorkspaceId 的专属接入点</b>：<code>https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1</code>（region 默认 cn-beijing）。留空会自动用上面视频那段的 WorkspaceId 拼。</div>
       </div>
       <div class="form-group">
         <label class="form-label">多模态 API 地址（可选）</label>
@@ -3680,12 +3681,25 @@ document.getElementById('testLLMBtn').addEventListener('click', () => {
   testApiKey('llm', 'keyLLM', 'llmTestResult', 'keyLLMUrl');
 });
 
+// 百炼视觉模型的 OpenAI 兼容地址是「带 WorkspaceId 的专属接入点」：
+//   https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1
+// 注意不是 https://dashscope.aliyuncs.com/compatible-mode/v1（那是旧的通用入口，
+// 业务空间 Key 走这里会 Model.AccessDenied）。留空时用视频那段的 WorkspaceId/Region 自动拼。
+function deriveMultimodalBase() {
+  const widEl = document.getElementById('dashScopeWorkspaceId');
+  const regionEl = document.getElementById('dashScopeRegion');
+  const wid = widEl ? widEl.value.trim() : '';
+  const region = regionEl ? regionEl.value : 'cn-beijing';
+  return wid ? `https://${wid}.${region}.maas.aliyuncs.com/compatible-mode/v1` : '';
+}
+
 // 多模态（NSFW 检测）测试：留空的多项分别回退到 LLM 的对应值
 document.getElementById('testMultimodalBtn').addEventListener('click', () => {
   const mmKey = document.getElementById('keyMultimodal').value.trim();
   const llmKey = document.getElementById('keyLLM').value.trim();
   const key = mmKey || llmKey;
   const baseUrl = document.getElementById('keyMultimodalUrl').value.trim()
+    || deriveMultimodalBase()
     || document.getElementById('keyLLMUrl').value.trim();
   const model = document.getElementById('keyMultimodalModel').value.trim()
     || '';
@@ -4649,7 +4663,8 @@ document.getElementById('startBtn').addEventListener('click', async () => {
         llmBaseUrl: settings.llmUrl || '',
         llmModel: settings.llmModel || '',
         multimodalApiKey: settings.multimodalKey || '',
-        multimodalBaseUrl: settings.multimodalUrl || '',
+        // 留空则用视频那段的 WorkspaceId 自动拼专属兼容地址（见 deriveMultimodalBase）
+        multimodalBaseUrl: settings.multimodalUrl || deriveMultimodalBase(),
         multimodalModel: settings.multimodalModel || '',
         // 用户勾选的「要紧质检项」；null=全部要紧
         strictQcItems: collectStrictQcItems()

@@ -591,8 +591,10 @@ app.post('/api/test-api-key', async (req, res) => {
           let hint = '请在「多模态模型名称」里手动指定一个图像理解模型';
           if (r2.status === 403 && /Model\.AccessDenied/i.test(t)) {
             hint = `模型「${target}」未开通，或该账号/业务空间没有它的权限。`
-              + '去百炼控制台「模型广场」开通它；或改填 qwen-vl-plus / qwen-vl-max 再测；'
-              + '如果这把 Key 属于子业务空间，还需要在该空间里单独授权这个模型。';
+              + '先确认地址是「带 WorkspaceId 的专属接入点」：'
+              + 'https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1'
+              + '（旧的通用入口 dashscope.aliyuncs.com/compatible-mode/v1 对业务空间 Key 会报这个错）；'
+              + '地址无误再去百炼控制台「模型广场」开通该模型，或改填 qwen-vl-plus / qwen-vl-max 再测。';
           } else if (r2.status === 401 || /InvalidApiKey|invalid_api_key/i.test(t)) {
             hint = 'Key 无效或已过期，请到控制台重新创建。';
           } else if (r2.status === 404 || /model[^a-z]*(not[^a-z]*found|does[^a-z]*not[^a-z]*exist)/i.test(t)) {
