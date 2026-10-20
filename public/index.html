@@ -22,6 +22,7 @@
   --accent-bg: #eef6fb;
   --border: #d3d1cb;         /* 强化边框 */
   --border-light: #e9e9e7;   /* 细分割线 */
+  --border-color: #d3d1cb;   /* 旧变量名：clip-count-input / chip 在用，缺它会退化成 currentColor 深色描边 */
   --success: #0f7b0f;        /* 低饱和成功绿 */
   --success-bg: #ecf7ec;
   --success-light: #dbeddb;
@@ -274,34 +275,139 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--bg-secondary);
+  /* 2026-10-21：原为 --bg-secondary（白），卡片也是白 → 白压白、只靠 1px 描边分层，观感很平 */
+  background: var(--bg-primary);
 }
 .page-container {
-  max-width: 780px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 48px 48px 80px;
+  padding: 36px 40px 48px;
 }
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 .page-title {
-  font-size: 40px;
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: -1px;
-  margin-bottom: 6px;
+  letter-spacing: -0.6px;
+  margin-bottom: 4px;
 }
 .page-desc {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: 1.55;
 }
+
+/* ===== 新建视频：三栏工作台（2026-10-21）=====
+   左=模型+生成参数 / 中=提示词 / 右=配乐+质检，底部动作条常驻。
+   目标：页面高度从约 4 屏压到 1 屏，「开始生成」不再掉到第 5 屏。 */
+.create-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+.create-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.create-grid .card { margin-bottom: 0; }
+.card-main {
+  padding: 26px 26px 22px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px rgba(15, 15, 15, .04), 0 10px 30px rgba(15, 15, 15, .05);
+}
+@media (min-width: 901px) {
+  .card-main #promptInput { min-height: 320px; }
+}
+/* 「继续历史任务」收成一条窄带，默认收起，不占首屏 */
+.strip-card {
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.strip-card .card-title { margin-bottom: 0; }
+
+/* 高级选项折叠：转场 / 自定义环节默认不展开 */
+.advanced-group {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-light);
+}
+.advanced-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.advanced-group > summary::-webkit-details-marker { display: none; }
+.advanced-group > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--text-tertiary);
+  transition: transform .15s ease;
+}
+.advanced-group[open] > summary::before { transform: rotate(90deg); }
+.advanced-group > summary span { font-size: 11.5px; color: var(--text-tertiary); }
+.advanced-body { padding-top: 14px; }
+
+/* 底部常驻动作条 */
+.create-actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 12px 2px 14px;
+  background: linear-gradient(to top, var(--bg-primary) 62%, rgba(247, 246, 243, 0));
+}
+.create-actionbar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 1px;
+  background: var(--border-light);
+}
+.create-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.create-summary b { color: var(--text-primary); font-weight: 600; }
+.create-actionbar #startBtn { min-width: 220px; }
+
+@media (max-width: 1360px) {
+  .create-grid { grid-template-columns: 280px minmax(0, 1fr); }
+  .create-col-right {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+}
+@media (max-width: 900px) {
+  .create-grid { grid-template-columns: 1fr; }
+  .create-col-right { display: flex; grid-column: auto; }
+  .create-actionbar { flex-wrap: wrap; }
+  .create-actionbar #startBtn { flex: 1 1 100%; }
+}
+
 
 /* ===== 卡片 ===== */
 .card {
   background: var(--bg-secondary);
-  border-radius: var(--radius-sm);
-  padding: 24px;
+  border-radius: var(--radius-md);
+  padding: 20px;
   border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 16px;
 }
 .card-title {
@@ -369,7 +475,7 @@ select, textarea {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -561,7 +667,7 @@ select {
 .btn {
   padding: 7px 16px;
   border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -2511,10 +2617,10 @@ select {
       <div id="page-create" class="page active">
         <div class="page-header">
           <h1 class="page-title">新建视频</h1>
-          <p class="page-desc">输入你的创意描述，AI 将自动生成高质量长视频</p>
+          <p class="page-desc">输入创意描述 → 自动分镜 → 批量生成 → 质检 → 拼接 → 配乐 → 导出成片</p>
         </div>
 
-        <div class="card" id="continueTaskCard" style="margin-bottom:16px;">
+        <div class="card strip-card" id="continueTaskCard">
           <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleContinueTaskList()">
             <span style="display:flex;align-items:center;gap:8px;">
               <span id="continueTaskArrow" style="display:inline-block;transition:transform 0.2s;font-size:12px;color:var(--text-tertiary);">▶</span>
@@ -2529,75 +2635,15 @@ select {
           </div>
         </div>
 
+        <div class="create-grid">
+          <!-- 左栏：模型 + 生成参数 -->
+          <div class="create-col">
         <div class="card">
           <div class="card-title">选择模型</div>
           <div class="form-group">
             <select id="modelSelect">
               <option value="mock">演示模式（无需 API Key）</option>
             </select>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">视频描述</div>
-          <div class="form-group theme-suggest-wrap">
-            <div class="label-row">
-              <label class="form-label">提示词</label>
-              <span class="prompt-draft-status" id="promptDraftStatus"></span>
-              <button type="button" class="expand-btn" id="expandPromptBtn" title="全屏编辑（Ctrl+Shift+E）">⤢ 放大编辑</button>
-            </div>
-            <textarea id="promptInput" rows="12" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
-            <div class="theme-suggest" id="themeSuggest" style="display:none;"></div>
-            <div id="multiPromptHint" style="display:none;margin-top:8px;padding:8px 12px;background:var(--primary-light, #eef4ff);border-radius:8px;font-size:12px;color:var(--text-secondary);"></div>
-            <div class="form-hint">💡 单行 = 单场景 × 段数；多行 = 每行一个场景（行数覆盖段数设置）。输入【 可联想选择主题模板；不写【 = 不套主题，只走通用优化规则。</div>
-          </div>
-
-          <button class="btn btn-ghost" id="optimizeBtn" style="padding-left:0;">✨ 智能优化提示词</button>
-
-          <div class="optimize-result" id="optimizeResult">
-            <div class="optimize-label">
-              <span>✨ 优化结果</span>
-              <span style="margin-left:auto;font-weight:400;color:var(--text-tertiary);" id="optimizeMethod">模板优化</span>
-            </div>
-            <div class="optimize-text" id="optimizedText"></div>
-            <div class="optimize-actions">
-              <button class="btn btn-secondary" onclick="useOptimizedPrompt()">添加到提示词框</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" id="bgmCard">
-          <div class="card-title">
-            配乐
-            <button class="btn-ghost" style="float:right;font-size:12px;padding:2px 8px;" onclick="window.location.href='/music-library.html'">管理库存 →</button>
-          </div>
-          <div class="form-group">
-            <label class="form-label">配乐模式</label>
-            <select id="bgmModeSelect" onchange="onBgmModeChange()">
-              <option value="off">不添加配乐</option>
-              <option value="auto">自动配乐（按成片时长铺满）</option>
-            </select>
-            <div class="form-hint" id="bgmModeHint">勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「剪辑」页面做精细调整（裁剪、变速、关键帧等）。</div>
-          </div>
-          <div id="bgmAssignSection" style="display:none;">
-            <div class="form-hint" style="margin:4px 0 6px;">
-              <span id="bgmTrackCountText">已加载 0 条音轨</span>
-            </div>
-            <div class="form-group">
-              <label class="form-label">配乐内容</label>
-              <label class="bgm-check"><input type="checkbox" id="bgmWantMusic" checked onchange="onBgmTracksChange()"> <span>轻音乐</span><span class="bgm-check-hint">按库存顺序一首接一首铺满全片</span></label>
-              <label class="bgm-check"><input type="checkbox" id="bgmWantAmbient" onchange="onBgmTracksChange()"> <span>环境音</span><span class="bgm-check-hint">选一首整片循环垫底；与轻音乐同时开启时自动压低到 -18dB</span></label>
-            </div>
-            <div class="form-group" id="bgmMusicGroup">
-              <label class="form-label">开场曲</label>
-              <select id="bgmStartTrack" class="form-input"></select>
-              <div class="form-hint">不选则随机开始。</div>
-            </div>
-            <div class="form-group" id="bgmAmbientGroup" style="display:none;">
-              <label class="form-label">环境音曲目</label>
-              <select id="bgmAmbientTrack" class="form-input"></select>
-              <div class="form-hint">不选则随机选一首，整片循环播放。</div>
-            </div>
           </div>
         </div>
 
@@ -2650,16 +2696,19 @@ select {
           <div class="form-group">
             <label class="form-label">执行档位</label>
             <select id="presetSelect">
-              <option value="quick">快速验证（核心链 + 拼接）—— 先看风格对不对，最省</option>
-              <option value="daily">日常交付（加循环 / 转码 / 配乐，不含终检）</option>
-              <option value="final" selected>最终成片（全部环节，含终检）</option>
-              <option value="clips_only">片段包（仅核心链，不产出成片，供人工精剪）</option>
-              <option value="custom">自定义（手动勾选环节）</option>
+              <option value="quick">快速验证（只到拼接）</option>
+              <option value="daily">日常交付（含配乐）</option>
+              <option value="final" selected>最终成片（全环节）</option>
+              <option value="clips_only">片段包（不出成片）</option>
+              <option value="custom">自定义环节</option>
             </select>
             <div class="form-hint" id="presetHint">快速验证档只跑到拼接；之后可在任务详情里「补成最终成片」，片段不会重新生成。</div>
           </div>
           <!-- 片段间转场（2026-10-20）：默认关闭，勾选后相邻片段之间做交叉淡化。
                成片时长 = 各段之和 −（段数−1）× 淡化时长；语义见 docs/spec/changelog.md -->
+          <details class="advanced-group" id="advancedParams">
+            <summary>高级选项 <span>片段间转场 · 自定义环节</span></summary>
+            <div class="advanced-body">
           <div class="form-group">
             <label class="form-label">片段间转场</label>
             <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
@@ -2698,9 +2747,85 @@ select {
               <label class="qc-strict-item"><input type="checkbox" data-stage="final_qc"><span>最终综合质检</span></label>
             </div>
           </div>
-          <div class="qc-strict-block">
-            <label class="form-label">质检严格度</label>
-            <div class="form-hint" style="margin-bottom:8px;">勾选的项没通过 = 该片段判失败并重试；不勾的项没通过 = 只记警告，片段仍算成功。</div>
+            </div>
+          </details>
+        </div>
+
+          </div>
+
+          <!-- 中栏：视频描述 -->
+          <div class="create-col create-col-main">
+        <div class="card card-main">
+          <div class="card-title">视频描述</div>
+          <div class="form-group theme-suggest-wrap">
+            <div class="label-row">
+              <label class="form-label">提示词</label>
+              <span class="prompt-draft-status" id="promptDraftStatus"></span>
+              <button type="button" class="expand-btn" id="expandPromptBtn" title="全屏编辑（Ctrl+Shift+E）">⤢ 放大编辑</button>
+            </div>
+            <textarea id="promptInput" rows="12" placeholder="单行：一个场景 + 段数生成（每段同场景）&#10;&#10;多行批量模式：每行一个场景提示词，行数即片段数，行尾可加【主题】标签按行优化&#10;例：&#10;冰岛黄金瀑布奔涌而下，彩虹横跨山谷，慢动作航拍【瀑布】&#10;极光在雪山上方舞动，星空延时摄影，湖面倒映绿光&#10;沙漠上航拍沙丘，沙纹绵延至地平线【沙漠】"></textarea>
+            <div class="theme-suggest" id="themeSuggest" style="display:none;"></div>
+            <div id="multiPromptHint" style="display:none;margin-top:8px;padding:8px 12px;background:var(--primary-light, #eef4ff);border-radius:8px;font-size:12px;color:var(--text-secondary);"></div>
+            <div class="form-hint">💡 单行 = 单场景 × 段数；多行 = 每行一个场景（行数覆盖段数设置）。输入【 可联想选择主题模板；不写【 = 不套主题，只走通用优化规则。</div>
+          </div>
+
+          <button class="btn btn-ghost" id="optimizeBtn" style="padding-left:0;">✨ 智能优化提示词</button>
+
+          <div class="optimize-result" id="optimizeResult">
+            <div class="optimize-label">
+              <span>✨ 优化结果</span>
+              <span style="margin-left:auto;font-weight:400;color:var(--text-tertiary);" id="optimizeMethod">模板优化</span>
+            </div>
+            <div class="optimize-text" id="optimizedText"></div>
+            <div class="optimize-actions">
+              <button class="btn btn-secondary" onclick="useOptimizedPrompt()">添加到提示词框</button>
+            </div>
+          </div>
+        </div>
+
+          </div>
+
+          <!-- 右栏：配乐 + 质检严格度 -->
+          <div class="create-col create-col-right">
+        <div class="card" id="bgmCard">
+          <div class="card-title">
+            配乐
+            <button class="btn-ghost" style="float:right;font-size:12px;padding:2px 8px;" onclick="window.location.href='/music-library.html'">管理库存 →</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">配乐模式</label>
+            <select id="bgmModeSelect" onchange="onBgmModeChange()">
+              <option value="off">不添加配乐</option>
+              <option value="auto">自动配乐（按成片时长铺满）</option>
+            </select>
+            <div class="form-hint" id="bgmModeHint">勾选要使用的音轨类型，可只选一项，也可两项都选。生成完成后可到「剪辑」页面做精细调整（裁剪、变速、关键帧等）。</div>
+          </div>
+          <div id="bgmAssignSection" style="display:none;">
+            <div class="form-hint" style="margin:4px 0 6px;">
+              <span id="bgmTrackCountText">已加载 0 条音轨</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">配乐内容</label>
+              <label class="bgm-check"><input type="checkbox" id="bgmWantMusic" checked onchange="onBgmTracksChange()"> <span>轻音乐</span><span class="bgm-check-hint">按库存顺序一首接一首铺满全片</span></label>
+              <label class="bgm-check"><input type="checkbox" id="bgmWantAmbient" onchange="onBgmTracksChange()"> <span>环境音</span><span class="bgm-check-hint">选一首整片循环垫底；与轻音乐同时开启时自动压低到 -18dB</span></label>
+            </div>
+            <div class="form-group" id="bgmMusicGroup">
+              <label class="form-label">开场曲</label>
+              <select id="bgmStartTrack" class="form-input"></select>
+              <div class="form-hint">不选则随机开始。</div>
+            </div>
+            <div class="form-group" id="bgmAmbientGroup" style="display:none;">
+              <label class="form-label">环境音曲目</label>
+              <select id="bgmAmbientTrack" class="form-input"></select>
+              <div class="form-hint">不选则随机选一首，整片循环播放。</div>
+            </div>
+          </div>
+        </div>
+
+          <!-- 质检严格度：从「生成参数」里抽出来，放右栏 -->
+          <div class="card">
+            <div class="card-title">质检严格度</div>
+            <div class="form-hint" style="margin:-6px 0 10px;">勾选的项没通过 = 该片段判失败并重试；不勾的项没通过 = 只记警告，片段仍算成功。</div>
             <div class="qc-strict-list" id="qcStrictList">
               <label class="qc-strict-item locked" title="合规红线，不可关闭">
                 <input type="checkbox" checked disabled data-qc-locked="nsfw">
@@ -2713,11 +2838,13 @@ select {
               <label class="qc-strict-item"><input type="checkbox" data-qc="contentMatch"><span>视觉内容匹配</span></label>
             </div>
           </div>
+          </div>
         </div>
 
-        <button class="btn btn-primary btn-block" id="startBtn" style="margin-top:8px;">
-          开始生成
-        </button>
+        <div class="create-actionbar">
+          <div class="create-summary" id="createSummary">10 段 × 15 秒 = 约 2.5 分钟 · 1080p · 最终成片</div>
+          <button class="btn btn-primary" id="startBtn">开始生成</button>
+        </div>
       </div>
 
       <!-- ===== 生成进度页 ===== -->
@@ -4054,10 +4181,67 @@ document.getElementById('modelSelect').addEventListener('change', () => {
   function sync() {
     const v = sel.value;
     wrap.style.display = v === 'custom' ? 'block' : 'none';
+    // 选「自定义」时自动展开高级选项，否则用户在折叠里找不到环节勾选
+    if (v === 'custom') {
+      const adv = document.getElementById('advancedParams');
+      if (adv) adv.open = true;
+    }
     if (hint) hint.textContent = HINTS[v] || '';
   }
   sel.addEventListener('change', sync);
   sync();
+})();
+
+// ==========================================
+// 底部动作条：段数 × 时长 = 预计片长
+// ==========================================
+// 2026-10-21：三栏布局后「开始生成」常驻底部，这里把关键参数汇总到同一行，
+// 让用户在按下去之前就能看到「这条要生成多长」。多行提示词时以行数为准（与提交逻辑一致）。
+(function initCreateSummary() {
+  const el = document.getElementById('createSummary');
+  if (!el) return;
+  const clipEl = document.getElementById('clipCountInput');
+  const durEl = document.getElementById('clipDurationInput');
+  const resEl = document.getElementById('resolutionSelect');
+  const preEl = document.getElementById('presetSelect');
+  const promptEl = document.getElementById('promptInput');
+  const PRESET_LABEL = {
+    quick: '快速验证', daily: '日常交付', final: '最终成片',
+    clips_only: '片段包', custom: '自定义'
+  };
+
+  function update() {
+    let count = parseInt(clipEl && clipEl.value, 10) || 0;
+    const dur = parseFloat(durEl && durEl.value) || 0;
+    if (promptEl) {
+      const lines = promptEl.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      if (lines.length > 1) count = lines.length;   // 多行批量模式：行数即片段数
+    }
+    const totalSec = count * dur;
+    const durText = totalSec >= 60
+      ? (totalSec / 60).toFixed(1) + ' 分钟'
+      : Math.round(totalSec) + ' 秒';
+    const resText = resEl && resEl.value ? resEl.value : '';
+    const preText = PRESET_LABEL[preEl && preEl.value] || '';
+    el.innerHTML = count + ' 段 × ' + dur + ' 秒 = <b>' + durText + '</b> · '
+      + [resText, preText].filter(Boolean).join(' · ');
+  }
+
+  let timer = null;
+  function updateSoon() {
+    clearTimeout(timer);
+    timer = setTimeout(update, 150);
+  }
+
+  [clipEl, durEl, promptEl].forEach(function (x) { if (x) x.addEventListener('input', updateSoon); });
+  [resEl, preEl].forEach(function (x) { if (x) x.addEventListener('change', update); });
+  // 「5段 / 15s」这类快捷 chip 是直接改 value、不派发 input 的，这里补一次
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.closest && e.target.closest('.chip[data-clips], .chip[data-duration]')) {
+      setTimeout(update, 0);
+    }
+  });
+  update();
 })();
 
 // ==========================================
