@@ -3298,6 +3298,9 @@ select {
     </div>
 
     <div class="modal-footer">
+      <button class="btn btn-ghost" id="backupSettings" title="把当前配置导出为 JSON 文件（含 Key，注意保管）">备份配置</button>
+      <button class="btn btn-ghost" id="restoreSettings" title="从备份 JSON 恢复配置">恢复配置</button>
+      <input type="file" id="restoreSettingsFile" accept="application/json,.json" style="display:none;">
       <button class="btn btn-secondary" id="cancelSettings">取消</button>
       <button class="btn btn-primary" id="saveSettings">保存</button>
     </div>
@@ -3530,6 +3533,50 @@ const historyDetailModal = document.getElementById('historyDetailModal');
 
 document.getElementById('cancelSettings').addEventListener('click', () => settingsModal.classList.remove('show'));
 document.getElementById('saveSettings').addEventListener('click', closeAndApplySettings);
+
+// ===== 配置备份 / 恢复 =====
+// 为什么需要：设置只存在浏览器 localStorage，换地址(localhost↔127.0.0.1)、换端口、
+// 换浏览器或无痕窗口、清站点数据，都会让「看起来不见了」。备份文件能一键搬过去。
+// ⚠️ 备份文件里含 API Key，自行保管，不要提交仓库或发给别人。
+document.getElementById('backupSettings').addEventListener('click', () => {
+  const cfg = JSON.parse(localStorage.getItem('vs_config') || '{}');
+  const payload = { _type: 'vs_config_backup', _savedAt: new Date().toISOString(), config: cfg };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'vs-config-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+    + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+});
+
+document.getElementById('restoreSettings').addEventListener('click', () => {
+  document.getElementById('restoreSettingsFile').click();
+});
+
+document.getElementById('restoreSettingsFile').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const raw = JSON.parse(String(reader.result));
+      const cfg = raw && raw.config && typeof raw.config === 'object' ? raw.config : raw;
+      if (!cfg || typeof cfg !== 'object') throw new Error('不是有效的配置备份');
+      localStorage.setItem('vs_config', JSON.stringify(cfg));
+      alert('已恢复配置，页面将刷新');
+      location.reload();
+    } catch (err) {
+      alert('恢复失败：' + err.message);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.readAsText(f);
+});
 
 // 测试 Agnes API Key
 // 通用测试函数
