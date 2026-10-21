@@ -1,0 +1,122 @@
+/* ============================================================
+   夜谷 · 白绿主题覆盖层（theme overlay）
+   ------------------------------------------------------------
+   用法：只在预览页 `preview-app.html` 里通过 <link> 引入，
+   排在 index.html 自带 <style> 之后，所以能覆盖它的 :root 令牌。
+
+   **不修改 public/index.html 一个字**。
+   实测覆盖率：index.html 里 `var(--text-primary)` 36 处、
+   `var(--accent)` 32 处、`var(--bg-primary)` 10 处，
+   硬编码色值只有 1 处 #f7f6f3 / 1 处 #2383e2，
+   其余 15 处 #ffffff 在新主题里仍是白色，不冲突。
+
+   对比度（WCAG，实算）：
+     正文 #0c1a14 / #eef4f1  ≈ 16 : 1
+     次级 #46594f / #ffffff  ≈ 7.5 : 1
+     辅助 #6b7d73 / #eef4f1  ≈ 4.6 : 1
+     主色 #0b6b45 / #ffffff  ≈ 5.8 : 1
+   ============================================================ */
+
+:root {
+  /* 画布：暖奶油 → 冷调白绿 */
+  --bg-primary: #eef4f1;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f2f7f4;
+  --bg-hover: #e8f1ed;
+  --bg-active: #dcebe4;
+
+  /* 文字：Notion 墨色 → 深墨绿 */
+  --text-primary: #0c1a14;
+  --text-secondary: #46594f;
+  --text-tertiary: #6b7d73;
+  --text-placeholder: #8ba096;
+
+  /* 主色：Apple 蓝 → 深林绿 */
+  --accent: #0b6b45;
+  --accent-hover: #085436;
+  --accent-bg: #e6f4ec;
+
+  /* 描边：暖灰 → 冷绿灰 */
+  --border: #cfdfd7;
+  --border-light: #e2ece7;
+  --border-color: #cfdfd7;
+
+  /* 语义色：保留可辨识度，只压掉饱和度以避免和主色抢 */
+  --success: #0f7a44;
+  --success-bg: #e8f6ee;
+  --success-light: #d5ecdf;
+  --danger: #b3352f;
+  --danger-bg: #fbeceb;
+  --danger-light: #f2d4d1;
+  --warning: #a9772a;
+  --warning-bg: #f8f1e2;
+
+  /* 阴影：压低对比、拉长扩散，贴近「柔和」而不是「贴纸」 */
+  --shadow-sm: 0 1px 2px rgba(12, 40, 30, .05);
+  --shadow-md: 0 6px 18px -8px rgba(12, 40, 30, .18);
+  --shadow-lg: 0 16px 40px -16px rgba(12, 40, 30, .24);
+
+  /* 圆角：整体上调一档，向「圆角卡片」靠 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* 图标底色：莫兰迪暖色 → 冷绿系，保留色相差异以便区分 */
+  --icon-create: #e0f0e7;
+  --icon-progress: #d9eae8;
+  --icon-template: #d9ecdf;
+  --icon-history: #e4eee4;
+  --icon-music: #d6ebe6;
+  --icon-settings: #e4ece8;
+  --icon-about: #e6efe9;
+  --icon-fg: #3d5147;
+}
+
+/* 画布加一层极淡的雾，避免纯色发闷。
+   注意：控制台**不用视频底片**——满屏小字号 + 视频会牺牲可读性，
+   视频只放在首屏展示页和登录页。 */
+body {
+  background:
+    radial-gradient(90% 65% at 16% -10%, rgba(255, 255, 255, .95) 0%, rgba(255, 255, 255, 0) 62%),
+    radial-gradient(75% 55% at 104% 106%, rgba(11, 107, 69, .075) 0%, rgba(11, 107, 69, 0) 60%),
+    var(--bg-primary);
+  background-attachment: fixed;
+}
+
+/* 选区与焦点环跟随主色，避免残留蓝色 */
+html { accent-color: var(--accent); }
+
+::selection {
+  background: rgba(11, 107, 69, .18);
+  color: #0c1a14;
+}
+
+/* 预览徽标：提醒这是预览，不是线上页面 */
+.theme-preview-badge {
+  position: fixed;
+  right: 14px;
+  top: 14px;
+  z-index: 2147483000;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(11, 107, 69, .94);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  box-shadow: 0 10px 26px -12px rgba(11, 107, 69, .7);
+  pointer-events: none;
+  user-select: none;
+}
+.theme-preview-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c6ff3d;
+}

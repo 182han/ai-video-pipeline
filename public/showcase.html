@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>夜谷 · 一句话长成一片风景</title>
+<!--
+  一屏展示 · 三层结构 · 双主题（白雾 / 夜谷）
+    ① 底层 <video>：项目已生成的片段 task_mvgw4hbo_ajuc_clip_2.mp4（喀斯特峰林 + 流动云雾），
+       放慢 2 倍 + xfade 0.3s 回绕成无缝循环；呼吸运镜由 CSS 缓速缩放承担
+    ② 中层：深色/白色半透明磨砂面板（backdrop-filter）
+    ③ 上层：强调色文字排版、圆角卡片、柔和阴影
+
+  底片复现命令（源文件只读，未改动）：
+    ffmpeg -y -i app/clips/task_mvgw4hbo_ajuc_clip_2.mp4 -filter_complex \
+      "[0:v]setpts=2.0*PTS,scale=1600:900:force_original_aspect_ratio=increase,crop=1600:900,fps=30,split[a][b];\
+       [a]trim=0:11.7,setpts=PTS-STARTPTS[main];[b]trim=0:0.3,setpts=PTS-STARTPTS[head];\
+       [main][head]xfade=transition=fade:duration=0.3:offset=11.4[v]" \
+      -map "[v]" -an -c:v libx264 -crf 25 -preset slow -pix_fmt yuv420p -movflags +faststart \
+      design/ui-ux/showcase/night-valley-loop.mp4
+
+  实测（2026-10-21）：
+    产物 11.700s / 1600×900 / 30fps / H.264 / 1.34 MB
+    循环接缝「末帧 vs 首帧」SSIM = 0.766
+    同素材 0.15s 自然帧差 SSIM = 0.750（即接缝位移不大于视频本身的相邻帧变化）
+
+  偏离 taste-skill house style 处（用户明确要求）：保留阴影 / 保留磨砂 / 保留视频底片。
+-->
+<style>
+  :root{
+    /* ── 白雾主题（默认） ── */
+    --bg:#eef4f1;
+    --panel:rgba(255,255,255,.62);
+    --panel-border:rgba(13,35,26,.09);
+    --card:rgba(255,255,255,.55);
+    --card-border:rgba(13,35,26,.08);
+    --text:#0c1a14;
+    --text-dim:#46594f;
+    --accent:#0b6b45;
+    --accent-soft:rgba(11,107,69,.09);
+    --accent-soft-border:rgba(11,107,69,.22);
+    --lime:#b7f24a;
+    --lime-ink:#0e2008;
+    --track:rgba(13,35,26,.14);
+    --bar-fill:#12a05e;
+    --bar-line:rgba(13,35,26,.12);
+    --top-hi:rgba(255,255,255,.85);
+    --shadow-panel:0 34px 76px -34px rgba(18,44,33,.42), 0 2px 8px -4px rgba(18,44,33,.16);
+    --shadow-card:0 16px 36px -26px rgba(18,44,33,.35);
+
+    /* 底片的调色与遮蔽：白雾版提亮、去饱和、压一层乳白 */
+    --video-filter:brightness(1.14) saturate(.60) contrast(.94) hue-rotate(-6deg);
+    --veil:
+      radial-gradient(120% 90% at 50% 42%, rgba(250,253,251,.40) 0%, rgba(246,251,248,.62) 45%, rgba(240,247,243,.78) 100%);
+    --vig:
+      radial-gradient(100% 100% at 50% 50%, rgba(0,0,0,0) 58%, rgba(30,52,42,.10) 100%);
+
+    --radius-panel:28px;
+    --radius-card:20px;
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI",
+           "PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  }
+
+  html[data-theme="night"]{
+    --bg:#050807;
+    --panel:rgba(8,14,12,.50);
+    --panel-border:rgba(255,255,255,.10);
+    --card:rgba(255,255,255,.04);
+    --card-border:rgba(255,255,255,.09);
+    --text:#f0f5f0;
+    --text-dim:#a6b7ac;
+    --accent:#c6ff3d;
+    --accent-soft:rgba(198,255,61,.10);
+    --accent-soft-border:rgba(198,255,61,.28);
+    --lime:#c6ff3d;
+    --lime-ink:#0a1206;
+    --track:rgba(255,255,255,.10);
+    --bar-fill:#c6ff3d;
+    --bar-line:rgba(255,255,255,.06);
+    --top-hi:rgba(255,255,255,.09);
+    --shadow-panel:0 40px 90px -32px rgba(0,0,0,.88), 0 2px 10px -4px rgba(0,0,0,.6);
+    --shadow-card:0 18px 44px -28px rgba(0,0,0,.9);
+
+    /* 夜间版压暗、偏青，再叠一层深青遮蔽 */
+    --video-filter:brightness(.46) saturate(.68) contrast(1.08) hue-rotate(-10deg);
+    --veil:
+      radial-gradient(120% 90% at 50% 45%, rgba(6,14,12,.46) 0%, rgba(5,11,10,.62) 50%, rgba(3,8,7,.82) 100%);
+    --vig:
+      radial-gradient(100% 100% at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%);
+  }
+
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font);
+    font-size:16px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow:hidden;
+    transition:background .4s ease,color .3s ease;
+  }
+  /* 视频不可用时的兜底 */
+  body::before{
+    content:"";
+    position:fixed;inset:0;z-index:0;
+    background:linear-gradient(180deg,#f7fbf9 0%,#e9f2ee 55%,#dfeae5 100%);
+  }
+  html[data-theme="night"] body::before{
+    background:linear-gradient(180deg,#04090a 0%,#0a1c18 55%,#061110 100%);
+  }
+
+  /* ① 底层：底片 */
+  .scene{
+    position:fixed;inset:0;z-index:0;
+    width:100%;height:100%;
+    object-fit:cover;
+    filter:var(--video-filter);
+    transform:scale(1.02);
+    transition:filter .5s ease;
+    will-change:transform;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .scene{animation:cam 26s ease-in-out infinite alternate}
+  }
+  @keyframes cam{
+    from{transform:scale(1.02) translate3d(0,-0.5%,0)}
+    to{transform:scale(1.055) translate3d(0,0.5%,0)}
+  }
+
+  /* 遮蔽层：保证文字与面板对比度 */
+  .veil{
+    position:fixed;inset:0;z-index:0;
+    background:var(--veil);
+    pointer-events:none;
+    transition:background .5s ease;
+  }
+  .vig{
+    position:fixed;inset:0;z-index:0;
+    background:var(--vig);
+    pointer-events:none;
+    transition:background .5s ease;
+  }
+
+  /* ── 中层：磨砂面板 ── */
+  .stage{
+    position:relative;z-index:1;
+    height:100dvh;
+    display:grid;place-items:center;
+    padding:clamp(14px,2.4vw,34px);
+  }
+  .panel{
+    width:min(1180px,100%);
+    max-height:100%;
+    padding:clamp(18px,2.2vw,30px);
+    display:flex;flex-direction:column;
+    gap:clamp(16px,2.2vw,28px);
+    border-radius:var(--radius-panel);
+    background:var(--panel);
+    border:1px solid var(--panel-border);
+    -webkit-backdrop-filter:blur(30px) saturate(150%);
+    backdrop-filter:blur(30px) saturate(150%);
+    box-shadow:var(--shadow-panel);
+    position:relative;
+    transition:background .4s ease,border-color .4s ease,box-shadow .4s ease;
+  }
+  .panel::before{
+    content:"";position:absolute;inset:0;
+    border-radius:inherit;pointer-events:none;
+    box-shadow:inset 0 1px 0 var(--top-hi);
+  }
+
+  /* ── 顶栏 ── */
+  .bar{
+    display:flex;align-items:center;gap:16px;
+    padding-bottom:clamp(12px,1.4vw,18px);
+    border-bottom:1px solid var(--bar-line); /* taste-skill-ignore 顶栏分组线，承载导航与内容的层级 */
+    transition:border-color .4s ease;
+  }
+  .brand{
+    display:inline-flex;align-items:center;gap:9px;
+    font-size:15px;font-weight:600;letter-spacing:.01em;
+    white-space:nowrap;
+  }
+  .brand i{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft);
+  }
+  .nav{display:flex;gap:4px;margin-left:auto}
+  .nav a{
+    display:inline-flex;align-items:center;
+    min-height:40px;padding:0 12px;
+    border-radius:10px;
+    color:var(--text-dim);
+    font-size:14.5px;text-decoration:none;
+    transition:background .18s ease,color .18s ease;
+  }
+  .nav a:hover{background:var(--accent-soft);color:var(--text)}
+  .nav a[aria-current="page"]{color:var(--text);font-weight:500}
+
+  .mode{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-height:40px;padding:0 14px;
+    margin-left:6px;
+    border-radius:999px;
+    border:1px solid var(--card-border);
+    background:var(--card);
+    color:var(--text-dim);
+    font:inherit;font-size:14px;font-weight:500;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:background .18s ease,color .18s ease,border-color .18s ease;
+  }
+  .mode:hover{color:var(--text);border-color:var(--accent-soft-border)}
+  .bar-meta{font-size:14px;color:var(--text-dim);white-space:nowrap}
+
+  /* ── 主体 ── */
+  .body{
+    display:grid;
+    grid-template-columns:minmax(0,1.12fr) minmax(0,.88fr);
+    gap:clamp(20px,3vw,46px);
+    align-items:start;
+  }
+  .lead h1{
+    margin:0;
+    font-size:clamp(34px,3.8vw,58px);
+    line-height:1.06;
+    letter-spacing:-.022em;
+    font-weight:600;
+    text-wrap:balance;
+  }
+  .lead h1 em{font-style:normal;color:var(--accent);transition:color .3s ease}
+  .sub{
+    margin:14px 0 0;
+    max-width:32em;
+    font-size:clamp(16.5px,1.18vw,18px);
+    color:var(--text-dim);
+  }
+  .cta{display:flex;flex-wrap:wrap;gap:10px;margin-top:clamp(18px,2.2vw,26px)}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    min-height:48px;padding:0 22px;
+    border-radius:12px;
+    border:1px solid transparent;
+    font:inherit;font-size:15.5px;font-weight:600;
+    letter-spacing:.01em;
+    cursor:pointer;
+    transition:transform .18s ease,background .18s ease,border-color .18s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--lime);color:var(--lime-ink)}
+  .btn-primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  .btn-ghost{
+    background:var(--card);
+    border-color:var(--panel-border);
+    color:var(--text);
+  }
+  .btn-ghost:hover{background:var(--accent-soft)}
+  .btn:focus-visible,
+  .nav a:focus-visible,
+  .mode:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:3px;
+  }
+
+  .facts{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;
+    margin:clamp(16px,2vw,22px) 0 0;padding:0;
+    list-style:none;
+    font-size:14.5px;color:var(--text-dim);
+  }
+  .facts li{display:inline-flex;align-items:center;gap:8px}
+  .facts li+li::before{
+    content:"";width:3px;height:3px;border-radius:50%;
+    background:var(--panel-border);
+  }
+  .facts b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+
+  /* ── 上层：状态卡 ── */
+  .live{
+    border-radius:var(--radius-card);
+    background:var(--card);
+    border:1px solid var(--card-border);
+    padding:clamp(16px,1.7vw,22px);
+    box-shadow:var(--shadow-card);
+    transition:background .4s ease,border-color .4s ease,box-shadow .4s ease;
+  }
+  .live-head{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    font-size:14px;color:var(--text-dim);
+    font-variant-numeric:tabular-nums;
+  }
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;
+    padding:5px 10px 5px 9px;
+    border-radius:999px;
+    background:var(--accent-soft);
+    border:1px solid var(--accent-soft-border);
+    color:var(--accent);
+    font-size:14px;font-weight:600;
+    white-space:nowrap;
+  }
+  .pill i{
+    width:6px;height:6px;border-radius:50%;background:var(--accent);
+    animation:breath 2.6s ease-in-out infinite;
+  }
+  .pct{
+    display:flex;align-items:baseline;gap:2px;
+    margin:10px 0 8px;
+    font-variant-numeric:tabular-nums;
+  }
+  .pct .num{
+    font-size:clamp(34px,3.1vw,44px);
+    line-height:1;font-weight:600;letter-spacing:-.03em;
+  }
+  .pct .unit{font-size:18px;color:var(--text-dim);font-weight:500}
+  .pct .of{margin-left:auto;font-size:14px;color:var(--text-dim)}
+
+  .track{height:6px;border-radius:999px;background:var(--track);overflow:hidden}
+  .track i{
+    display:block;height:100%;width:68%;
+    border-radius:inherit;
+    background:var(--bar-fill);
+    transform-origin:left center;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .track i{animation:fill 1s cubic-bezier(.2,.7,.2,1) .55s both}
+  }
+  @keyframes fill{ from{transform:scaleX(0)} to{transform:scaleX(1)} }
+
+  .steps{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:2px}
+  .steps li{
+    display:flex;align-items:center;gap:10px;
+    min-height:34px;font-size:14.5px;color:var(--text-dim);
+  }
+  .steps li .dot{
+    width:8px;height:8px;border-radius:50%;
+    border:1.5px solid var(--panel-border);
+    flex:0 0 auto;
+  }
+  .steps .state{
+    margin-left:auto;font-size:14px;
+    font-variant-numeric:tabular-nums;color:var(--text-dim);
+  }
+  .steps li[data-s="done"]{color:var(--text)}
+  .steps li[data-s="done"] .dot{background:var(--accent);border-color:var(--accent)}
+  .steps li[data-s="active"]{color:var(--text)}
+  .steps li[data-s="active"] .dot{
+    border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft);
+  }
+  .steps li[data-s="active"] .state{color:var(--accent)}
+
+  .live-foot{
+    margin:16px 0 0;
+    font-size:14px;color:var(--text-dim);
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* 失败态（只有接真实数据后才可能出现） */
+  .pill[data-s="failed"]{color:#b4451a;background:rgba(180,69,26,.10);border-color:rgba(180,69,26,.30)}
+  .steps li[data-s="failed"]{color:#b91c1c}
+  .steps li[data-s="failed"] .dot{background:#dc2626;border-color:#dc2626}
+  html[data-theme="night"] .pill[data-s="failed"]{color:#fca5a5;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.32)}
+  html[data-theme="night"] .steps li[data-s="failed"]{color:#fca5a5}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ── 动效 ── */
+  @keyframes breath{
+    0%,100%{opacity:1;transform:scale(1)}
+    50%{opacity:.45;transform:scale(.86)}
+  }
+  @keyframes rise{
+    from{opacity:0;transform:translateY(16px)}
+    to{opacity:1;transform:none}
+  }
+  @keyframes fade{
+    from{opacity:0;transform:translateY(8px)}
+    to{opacity:1;transform:none}
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .panel{animation:rise .9s cubic-bezier(.2,.7,.2,1) both}
+    .lead h1{animation:fade .7s cubic-bezier(.2,.7,.2,1) .10s both}
+    .sub{animation:fade .7s cubic-bezier(.2,.7,.2,1) .18s both}
+    .cta{animation:fade .7s cubic-bezier(.2,.7,.2,1) .26s both}
+    .facts{animation:fade .7s cubic-bezier(.2,.7,.2,1) .34s both}
+    .live{animation:fade .8s cubic-bezier(.2,.7,.2,1) .22s both}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .pill i{animation:none}
+    .scene{animation:none}
+    body,.panel,.live,.scene,.veil,.vig{transition:none}
+  }
+
+  /* 触摸设备把点击目标放到 44px 以上 */
+  @media (pointer: coarse){
+    .btn{min-height:52px}
+    .mode,.nav a{min-height:44px}
+  }
+
+  /* ── 响应式 ── */
+  @media (max-width: 900px){
+    .body{grid-template-columns:1fr;gap:clamp(16px,3vw,22px)}
+    .facts{display:none}
+    .steps li{min-height:30px}
+  }
+  @media (max-width: 620px){
+    .stage{padding:10px}
+    .panel{padding:16px;border-radius:22px;gap:14px}
+    .nav{display:none}
+    .bar-meta{display:none}
+    .mode{margin-left:auto}
+    .lead h1{font-size:clamp(30px,8.6vw,38px)}
+    .sub{font-size:15.5px;margin-top:10px}
+    .cta{margin-top:14px;gap:8px}
+    .btn{flex:1 1 auto;padding:0 16px}
+    .pct{margin:6px 0}
+    .pct .num{font-size:30px}
+    .steps{display:none}
+    .live-foot{margin-top:10px}
+  }
+  @media (max-height: 640px){
+    .facts{display:none}
+    .steps li:nth-child(n+4){display:none}
+    .sub{display:none}
+  }
+</style>
+</head>
+<body>
+
+<video id="scene" class="scene" autoplay muted loop playsinline preload="auto"
+       poster="showcase/night-valley-poster.jpg" aria-hidden="true" tabindex="-1">
+  <source src="showcase/night-valley-loop.mp4" type="video/mp4">
+</video>
+<div class="veil" aria-hidden="true"></div>
+<div class="vig" aria-hidden="true"></div>
+
+<div class="stage">
+  <div class="panel">
+
+    <div class="bar">
+      <div class="brand"><i></i>夜谷 Studio</div>
+      <nav class="nav" aria-label="主导航">
+        <a href="#" aria-current="page">工作台</a>
+        <a href="#">片段库</a>
+        <a href="#">配乐</a>
+        <a href="#">设置</a>
+      </nav>
+      <button class="mode" id="mode" type="button" aria-pressed="false">夜间</button>
+      <div class="bar-meta" id="barMeta">演示数据</div>
+    </div>
+
+    <div class="body">
+      <section class="lead">
+        <h1>一句话，长成<br><em>一整条</em>风景长片</h1>
+        <p class="sub">
+          分镜、生成、质检、拼接、配乐、转码，六步跑完。产出 30 分钟以上、头尾能衔接的屏保级成片。
+        </p>
+        <div class="cta">
+          <button class="btn btn-primary" type="button" id="btnCreate">开始生成</button>
+          <button class="btn btn-ghost" type="button" id="btnSample">看一条样片</button>
+        </div>
+        <ul class="facts">
+          <li><b>4K</b> / 30fps</li>
+          <li><b>32:10</b> 成片时长</li>
+          <li><b>11</b> 项质检</li>
+          <li><b>0.9495</b> 循环 SSIM</li>
+        </ul>
+      </section>
+
+      <aside class="live" aria-label="生成状态">
+        <div class="live-head">
+          <span class="pill" id="statusPill"><i></i><span id="statusText">正在生成</span></span>
+          <span id="taskTime">已用 02:41</span>
+        </div>
+
+        <div class="pct">
+          <span class="num" id="pctNum">68</span><span class="unit">%</span>
+          <span class="of" id="stepOf">第 3 幕 / 共 8 幕</span>
+        </div>
+
+        <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="68" aria-label="生成进度"><i id="trackFill"></i></div>
+
+        <ol class="steps" id="stepsList">
+          <li data-s="done"><span class="dot"></span>分镜脚本<span class="state">已完成</span></li>
+          <li data-s="active"><span class="dot"></span>片段生成<span class="state">3 / 6</span></li>
+          <li data-s="queued"><span class="dot"></span>画质质检<span class="state">待执行</span></li>
+          <li data-s="queued"><span class="dot"></span>拼接 · 配乐<span class="state">待执行</span></li>
+        </ol>
+
+        <p class="live-foot" id="liveFoot">质检 11/11 全过 · 预计成片 32:10</p>
+      </aside>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var video = document.getElementById("scene");
+  var modeBtn = document.getElementById("mode");
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  /* ── 主题切换（只改根节点属性，CSS 变量与底片调色一起跟着变） ── */
+  var theme = "light";
+
+  function setTheme(next){
+    theme = next === "night" ? "night" : "light";
+    document.documentElement.dataset.theme = theme;
+    if (modeBtn){
+      var nightOn = theme === "night";
+      modeBtn.textContent = nightOn ? "日间" : "夜间";
+      modeBtn.setAttribute("aria-pressed", nightOn ? "true" : "false");
+      modeBtn.setAttribute("aria-label", nightOn ? "切换到日间（白雾）" : "切换到夜间（夜谷）");
+    }
+    try { localStorage.setItem("nv-theme", theme); } catch (e) {}
+  }
+
+  if (modeBtn){
+    modeBtn.addEventListener("click", function(){
+      setTheme(theme === "night" ? "light" : "night");
+    });
+  }
+
+  var saved = null;
+  try { saved = localStorage.getItem("nv-theme"); } catch (e) {}
+  setTheme(saved === "night" ? "night" : "light");
+
+  /* ── 底片播放控制 ── */
+  function play(){
+    if (!video) return;
+    var p = video.play();
+    if (p && typeof p.catch === "function") p.catch(function(){ /* 自动播放被拦时保留海报帧 */ });
+  }
+
+  function syncMotion(){
+    if (!video) return;
+    if (reduceMotion.matches) video.pause();
+    else if (!document.hidden) play();
+  }
+
+  video.addEventListener("error", function(){
+    video.style.display = "none";     // 退回 body::before 的静态渐变
+  }, true);
+
+  if (reduceMotion.addEventListener) reduceMotion.addEventListener("change", syncMotion);
+  else if (reduceMotion.addListener) reduceMotion.addListener(syncMotion);
+
+  document.addEventListener("visibilitychange", function(){
+    if (!video) return;
+    if (document.hidden) video.pause();
+    else if (!reduceMotion.matches) play();
+  });
+
+  // iOS 低电量等场景下自动播放可能被拒：首次交互时补一次
+  document.addEventListener("pointerdown", function once(){
+    if (!video || reduceMotion.matches) return;
+    if (video.paused) play();
+  }, { once: true });
+
+  syncMotion();
+  /* ── 真实数据（只读接入）────────────────────────────
+     GET /api/tasks → GET /api/tasks/:id。
+     拿不到数据（file:// 打开 / 未登录 / 后端未起）时保留静态演示值，
+     顶部标记会显示「演示数据」，不把假数字说成真数据。 */
+
+  var STAGE_ORDER = ['prompt_optimize','storyboard','clip_generation','concatenation',
+                     'loop_processing','audio_mix','transcoding','final_qc'];
+  var STAGE_LABEL = {
+    prompt_optimize:'提示词优化', storyboard:'分镜头生成', clip_generation:'片段生成',
+    concatenation:'视频拼接', loop_processing:'无缝循环', audio_mix:'配乐混音',
+    transcoding:'转码导出', final_qc:'最终质检'
+  };
+  var RUNNING_STATUS = ['pending','generating','concatenating','looping','transcoding','mixing'];
+  var DONE_STATUS = { completed:1, reused:1, skipped:1 };
+
+  function byId(id){ return document.getElementById(id); }
+  function putText(id, s){ var n = byId(id); if (n) n.textContent = s; }
+
+  function computeProgress(detail){
+    var set = detail.stageSet || {};
+    var stages = STAGE_ORDER.filter(function(k){ return set[k] === true; });
+    if (!stages.length) stages = STAGE_ORDER.slice(0, 3);
+    var steps = detail.steps || {};
+    var done = 0, current = -1;
+    for (var i = 0; i < stages.length; i++){
+      var st = (steps[stages[i]] && steps[stages[i]].status) || 'pending';
+      if (DONE_STATUS[st]) done++;
+      else if (current < 0) current = i;
+    }
+    var finished = detail.status === 'completed';
+    return {
+      stages: stages,
+      steps: steps,
+      current: finished ? stages.length - 1 : (current < 0 ? stages.length - 1 : current),
+      pct: Math.round((finished ? stages.length : done) / stages.length * 100),
+      finished: finished
+    };
+  }
+
+  function renderTask(detail){
+    var p = computeProgress(detail);
+
+    var pill = byId('statusPill');
+    if (pill){
+      pill.dataset.s = detail.status === 'failed' ? 'failed'
+                    : detail.status === 'completed' ? 'done' : 'run';
+      var label = detail.status === 'failed' ? '生成失败'
+                : detail.status === 'completed' ? '已完成'
+                : RUNNING_STATUS.indexOf(detail.status) >= 0 ? '正在生成' : '排队中';
+      putText('statusText', label);
+    }
+
+    putText('pctNum', String(p.pct));
+    var fill = byId('trackFill');
+    if (fill) fill.style.width = p.pct + '%';
+
+    var from = Math.max(0, Math.min(p.current - 1, p.stages.length - 4));
+    var rows = p.stages.slice(from, from + 4);
+    var range = (from + 1) + (rows.length > 1 ? '–' + (from + rows.length) : '');
+    putText('stepOf', '第 ' + range + ' 步 / 共 ' + p.stages.length + ' 步');
+
+    // 真实耗时：开始→结束；未结束就按当前时间算
+    var timeEl = byId('taskTime');
+    if (timeEl){
+      var t0 = detail.startedAt || detail.createdAt;
+      var t1 = detail.completedAt || (detail.status === 'completed' ? null : Date.now());
+      if (t0 && t1){
+        var sec = Math.max(0, Math.round((new Date(t1) - new Date(t0)) / 1000));
+        var mm = Math.floor(sec / 60), ss = sec % 60;
+        timeEl.textContent = (detail.status === 'completed' ? '用时 ' : '已用 ')
+                           + mm + ':' + (ss < 10 ? '0' + ss : ss);
+      }
+    }
+
+    var list = byId('stepsList');
+    if (list){
+      var html = '';
+      for (var i = 0; i < rows.length; i++){
+        var key = rows[i];
+        var s = (p.steps[key] && p.steps[key].status) || 'pending';
+        var cls = (s === 'completed' || s === 'reused') ? 'done'
+                : s === 'failed' ? 'failed'
+                : s === 'in_progress' ? 'active' : 'queued';
+        var right = s === 'completed' ? '已完成'
+                  : s === 'reused' ? '已复用'
+                  : s === 'skipped' ? '按档位跳过'
+                  : s === 'in_progress' ? '进行中'
+                  : s === 'failed' ? '失败' : '待执行';
+        html += '<li data-s="' + cls + '"><span class="dot"></span>' + STAGE_LABEL[key]
+              + '<span class="state">' + right + '</span></li>';
+      }
+      list.innerHTML = html;
+    }
+
+    var bits = ['档位 ' + (detail.preset || 'final')];
+    bits.push(detail.qcTrusted ? '质检可信' : '质检未验证');
+    var clips = detail.clips || [];
+    var ok = 0;
+    for (var c = 0; c < clips.length; c++) if (clips[c].status === 'success') ok++;
+    if (clips.length) bits.push('片段 ' + ok + '/' + clips.length);
+    putText('liveFoot', bits.join(' · '));
+
+    var sample = byId('btnSample');
+    if (sample){
+      var out = detail.outputPath || '';
+      if (out){
+        sample.disabled = false;
+        sample.title = '打开成片';
+        var name = out.split(/[\\/]/).pop();
+        sample.onclick = function(){ window.open('/output/' + encodeURIComponent(name), '_blank'); };
+      } else {
+        sample.disabled = true;
+        sample.title = '该任务没有成片（片段包档位不产成片）';
+        sample.onclick = null;
+      }
+    }
+  }
+
+  var createBtn = byId('btnCreate');
+  if (createBtn) createBtn.onclick = function(){ location.href = '/'; };
+
+  function loadLive(){
+    if (!window.fetch || location.protocol === 'file:'){ putText('barMeta', '演示数据'); return; }
+    fetch('/api/tasks', { credentials:'same-origin', headers:{ Accept:'application/json' } })
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(list){
+        if (!Array.isArray(list) || !list.length) throw new Error('empty');
+        var pick = null;
+        for (var i = 0; i < list.length; i++){
+          if (RUNNING_STATUS.indexOf(list[i].status) >= 0){ pick = list[i]; break; }
+        }
+        if (!pick) pick = list[0];
+        return fetch('/api/tasks/' + encodeURIComponent(pick.taskId), { credentials:'same-origin' })
+          .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function(d){ renderTask(d); putText('barMeta', '实时数据'); });
+      })
+      .catch(function(){ putText('barMeta', '演示数据'); });
+  }
+
+  loadLive();
+  setInterval(function(){ if (!document.hidden) loadLive(); }, 5000);
+  window.__sceneReady = true;
+})();
+</script>
+</body>
+</html>
