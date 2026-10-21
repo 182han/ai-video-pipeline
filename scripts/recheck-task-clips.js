@@ -15,6 +15,7 @@
 // 说明：
 //   - Key 只用于本次进程内调用；落盘前一律走 redact.redactTask() 脱敏，不会写进任务。
 //   - 不重新生成、不覆盖任何视频文件。
+//   - 已成功但片段库缺档案的片段会顺手补库（不需要 Key，见 library.ingestMissing）。
 //   - 改完后需重启服务（或等它重载）再点「补跑」，才能用上新的片段状态。
 // ==========================================
 
@@ -67,8 +68,14 @@ if (!taskId) {
 
   const clips = Array.isArray(task.clips) ? task.clips : [];
   const todo = [];
+  // 已成功但片段库里没有档案的片段：可顺手补库（不需要 Key，也不重新质检）。
+  // 典型来源：手工恢复的付费片段、补跑复用的老片段 —— 它们不经过生成/重检入库。
+  const libTodo = [];
   clips.forEach((c, i) => {
-    if (c.status === 'success') return;
+    if (c.status === 'success') {
+      if (!library.get(`${task.taskId}_c${c.index + 1}`)) libTodo.push({ clip: c, index: i });
+      return;
+    }
     if (!c.videoPath || !fs.existsSync(c.videoPath)) {
       console.log(`  跳过 clip#${i}：文件不存在`);
       return;
@@ -76,7 +83,17 @@ if (!taskId) {
     todo.push({ clip: c, index: i });
   });
 
-  console.log(`任务 ${taskId}：共 ${clips.length} 段，待重检 ${todo.length} 段`);
+  console.log(`任务 ${taskId}：共 ${clips.length} 段，待重检 ${todo.length} 段，待补库 ${libTodo.length} 段`);
+
+  if (libTodo.length) {
+    libTodo.forEach(({ clip, index }) => console.log(`  + clip#${index} 已成功但未入库（${path.basename(clip.videoPath || '')}）`));
+    if (args['dry-run']) {
+      console.log('  [dry-run] 会补入片段库，未写盘。');
+    } else {
+      const added = library.ingestMissing(task);
+      console.log(`  已补入片段库 ${added.length} 条: ${added.join(', ') || '（无）'}`);
+    }
+  }
   console.log(`  地址: ${baseUrl || '<空>'}`);
   console.log(`  模型: ${model || '<回退默认>'}`);
 

@@ -23,6 +23,27 @@ const LIB_DIR = path.join(APP_DIR, 'data', 'library');
 const CLIPS_DIR = path.join(APP_DIR, 'clips');
 
 let cache = null;
+let cacheSignature = '';
+
+// 目录签名：文件名 + 大小 + mtime。
+// 用途：片段库是文件存储，补库脚本 / 人工修复 / 另一个服务实例都可能在本进程之外改库。
+// 只靠 saveEntry() 刷新缓存的话，运行中的服务会一直读旧列表，刷新页面也看不到
+// （事故：task_mvgw4hbo_ajuc 补库后页面仍然空白，最后靠一次收藏开关触发重读）。
+function dirSignature() {
+  try {
+    const names = fs.readdirSync(LIB_DIR).filter(n => n.endsWith('.json')).sort();
+    return names.map(n => {
+      try {
+        const st = fs.statSync(path.join(LIB_DIR, n));
+        return `${n}:${st.size}:${st.mtimeMs}`;
+      } catch (e) {
+        return n + ':missing';
+      }
+    }).join('|');
+  } catch (e) {
+    return '';
+  }
+}
 
 function ensureDir() {
   if (!fs.existsSync(LIB_DIR)) fs.mkdirSync(LIB_DIR, { recursive: true });
@@ -37,7 +58,8 @@ function entryPath(id) {
 }
 
 function loadAll(force = false) {
-  if (cache && !force) return cache;
+  const sig = dirSignature();
+  if (cache && !force && sig === cacheSignature) return cache;
   ensureDir();
   const map = new Map();
   let names = [];
@@ -56,6 +78,7 @@ function loadAll(force = false) {
     }
   }
   cache = map;
+  cacheSignature = sig;
   return cache;
 }
 
@@ -225,10 +248,12 @@ function buildEntry(task, clip, filePath, probe) {
       reason: qc.reason || '',
       qcVersion: qc.qcVersion || null
     } : {
+      // 没有片段级质检记录（手工恢复 / 补跑复用的片段）如实标「未验证」。
+      // 旧逻辑落到前端「质检记录异常」（红色），既吓人也不准确：没记录 ≠ 记录异常。
       passed: false,
-      unverified: !!clip.qcUnverified,
+      unverified: true,
       level: 'unknown',
-      reason: '无质检记录',
+      reason: clip.qcUnverified ? '片段级质检未执行（以终检为准）' : '无片段级质检记录（未重新质检）',
       qcVersion: null
     },
     theme: clip.theme || task.theme || null,
@@ -298,6 +323,29 @@ function ingestClip(task, clip, probeOverride) {
     console.warn(`[library] 入库失败 ${task && task.taskId}: ${e.message}`);
     return null;
   }
+}
+
+/**
+ * 把任务里「已成功、但片段库没有档案」的片段补进库（幂等）。
+ *
+ * 为什么需要：入库只挂在「生成成功」和「重检转成功」两条路径上。
+ * 手工恢复的付费片段、补跑复用的老片段都不经过这两条路径，
+ * 结果是片段文件在、成片也拼出来了，片段库却一条都没有
+ * （事故：task_mvgw4hbo_ajuc 两个已付费片段）。
+ *
+ * 只处理 status==='success'；已有档案的跳过，不覆盖用户的收藏/替代关系。
+ */
+function ingestMissing(task) {
+  const added = [];
+  if (!task || !Array.isArray(task.clips)) return added;
+  for (const clip of task.clips) {
+    if (!clip || clip.status !== 'success') continue;
+    const id = `${task.taskId}_c${clip.index + 1}`;
+    if (get(id)) continue;
+    const entry = ingestClip(task, clip);
+    if (entry) added.push(entry.id);
+  }
+  return added;
 }
 
 function markRegenerateStarted(oldId, taskId) {
@@ -376,6 +424,7 @@ module.exports = {
   update,
   remove,
   ingestClip,
+  ingestMissing,
   markRegenerateStarted,
   markRegenerateFailed,
   setFavorite,

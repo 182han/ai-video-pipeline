@@ -114,7 +114,31 @@ if (all.length) {
   ok('库内条目都不是 mock', all.every(it => it.model !== 'mock'));
 }
 
-console.log('\n[5] 跨分辨率/帧率拼接');
+console.log('\n[5] 外部补库热加载（不需要重启服务）');
+const hotId = 'verify_hot_reload_c1';
+const hotFile = path.join(library.LIB_DIR, hotId + '.json');
+try { if (fs.existsSync(hotFile)) fs.unlinkSync(hotFile); } catch (e) {}
+library.loadAll(true);
+ok('预热：外部文件不存在时查不到', library.get(hotId) === null);
+try {
+  fs.writeFileSync(hotFile, JSON.stringify({
+    id: hotId,
+    fileName: 'verify_hot_reload.mp4',
+    filePath: path.join(CLIPS_DIR, 'verify_hot_reload.mp4'),
+    url: '/clips/verify_hot_reload.mp4',
+    width: 1280, height: 720, durationSec: 6,
+    tags: { resolution: '720p' },
+    cost: { amount: 0 },
+    favorite: false,
+    addedAt: new Date().toISOString()
+  }), 'utf8');
+  ok('外部写入后不 force 也能读到（目录签名失效）', !!library.get(hotId));
+} finally {
+  try { fs.unlinkSync(hotFile); } catch (e) {}
+}
+ok('外部删除后缓存同步失效', library.get(hotId) === null);
+
+console.log('\n[6] 跨分辨率/帧率拼接');
 function pickClip(name) {
   const p = path.join(CLIPS_DIR, name);
   return fs.existsSync(p) ? p : null;

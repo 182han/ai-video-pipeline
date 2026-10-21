@@ -781,6 +781,15 @@ class Pipeline {
     if (!task) return { success: false, error: '任务不存在' };
 
     const rc = task.runtimeConfig || {};
+    // 已成功但库里缺档案的片段先补齐：手工恢复 / 补跑复用的片段都不经过生成入库，
+    // 不补的话会出现「片段文件在、成片也有、片段库却没有」。
+    try {
+      const added = library.ingestMissing(task);
+      if (added.length) console.log(`[${taskId}] 补入片段库 ${added.length} 条: ${added.join(', ')}`);
+    } catch (e) {
+      console.warn(`[${taskId}] 补入库失败: ${e.message}`);
+    }
+
     const nsfw = {
       apiKey: options.multimodalApiKey || rc.multimodalApiKey || '',
       baseUrl: options.multimodalBaseUrl || rc.multimodalBaseUrl || '',
@@ -1186,6 +1195,15 @@ class Pipeline {
     this._markMockFallback(taskId, task, generator);
 
     const batchInfo = await this._batchGenerate(taskId, generator);
+
+    // 补跑复用的片段（以及任何已成功但库里没档案的片段）补入库。
+    // 入库原先只挂在「生成成功」和「重检转成功」两条路径上，复用路径从不入库。
+    try {
+      const added = library.ingestMissing(taskManager.getTask(taskId) || task);
+      if (added.length) console.log(`[${taskId}] 补入片段库 ${added.length} 条: ${added.join(', ')}`);
+    } catch (e) {
+      console.warn(`[${taskId}] 补入库失败: ${e.message}`);
+    }
 
     // 检查片段生成结果
     const progress = taskManager.getProgress(taskId);

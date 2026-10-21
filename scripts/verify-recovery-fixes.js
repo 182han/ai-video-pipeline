@@ -178,12 +178,64 @@ const config = require('../config');
     assert.strictEqual(fast403.value.status, 403);
   });
 
-  // ---------- 5. 接线静态断言 ----------
+  // ---------- 5. 已成功片段补入库（片段库缺档案） ----------
+  // 事故：task_mvgw4hbo_ajuc 两个已付费片段被手工恢复成 success，
+  // 但入库只挂在「生成成功 / 重检转成功」两条路径上，片段库一条都没有。
+  check('ingestMissing 补齐缺失条目、跳过非 success、可重复执行', () => {
+    const library = require('../src/library');
+    const sample = path.join(APP, 'clips', 'mock_mvgy1dd6_4tbe09.mp4');
+    assert.ok(fs.existsSync(sample), '样例片段不存在: ' + sample);
+
+    const taskId = 'verify_lib_ingest';
+    const entryFiles = ['c1', 'c2'].map(n => path.join(library.LIB_DIR, `${taskId}_${n}.json`));
+    entryFiles.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    library.loadAll(true);
+
+    try {
+      const task = {
+        taskId, model: 'dashscope', resolution: '720p', clipDuration: 6, prompt: 'p', source: 'generation',
+        clips: [
+          { index: 0, status: 'success', prompt: 'p0', videoPath: sample, attempts: 1, qcResult: null },
+          { index: 1, status: 'failed', prompt: 'p1', videoPath: sample, attempts: 1 }
+        ]
+      };
+      const added = library.ingestMissing(task);
+      assert.deepStrictEqual(added, [`${taskId}_c1`]);
+      assert.ok(fs.existsSync(entryFiles[0]), '库条目文件未生成');
+
+      const entry = library.get(`${taskId}_c1`);
+      assert.ok(entry, '读不到库条目');
+      assert.strictEqual(entry.width, 1280);
+      assert.strictEqual(entry.height, 720);
+      // 没有片段级质检记录 → 标「未验证」，不冒充通过、也不标成「记录异常」
+      assert.strictEqual(entry.qc.passed, false);
+      assert.strictEqual(entry.qc.unverified, true);
+
+      // 幂等：第二次执行不应重复添加
+      assert.strictEqual(library.ingestMissing(task).length, 0);
+    } finally {
+      entryFiles.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+      library.loadAll(true);
+    }
+  });
+
+  // ---------- 6. 接线静态断言 ----------
   const read = p => fs.readFileSync(path.join(APP, p), 'utf8');
   const pipelineSrc = read('src/pipeline.js');
   const serverSrc = read('server.js');
   const htmlSrc = read('public/index.html');
   const genSrc = read('src/generators/index.js');
+
+  check('pipeline 在补跑/重检两处都会补入库', () => {
+    const hits = (pipelineSrc.match(/library\.ingestMissing\(/g) || []).length;
+    assert.ok(hits >= 2, 'ingestMissing 调用次数=' + hits);
+  });
+  check('重检脚本会对已成功片段补库', () =>
+    assert.ok(/library\.ingestMissing\(task\)/.test(read('scripts/recheck-task-clips.js'))));
+  check('补库脚本存在且走 storage', () => {
+    const src = read('scripts/ingest-task-clips.js');
+    assert.ok(/storage\.getTask\(taskId\)/.test(src) && /library\.ingestMissing\(task\)/.test(src));
+  });
 
   check('pipeline 使用 _nextClipPath 下载片段', () =>
     assert.ok(/const localPath = this\._nextClipPath\(taskId, index\)/.test(pipelineSrc)));
