@@ -3,215 +3,185 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>登录 · Video Studio</title>
+<!--
+  登录页（夜谷 · 白绿主题）
+  与改造前相比：只换视觉，认证逻辑逐行一致（同 /api/auth/login、
+  next 参数沿用站内相对路径校验、401/429/503 文案照搬）。
+  回退：git -C app checkout -- public/login.html
+-->
 <style>
-/* 设计令牌与 public/index.html 保持一致（Notion × Apple 混合风） */
-:root {
-  --bg-primary: #f7f6f3;
-  --bg-secondary: #ffffff;
-  --text-primary: #37352f;
-  --text-secondary: #787774;
-  --text-tertiary: #9b9a97;
-  --text-placeholder: #c4c4c1;
-  --accent: #2383e2;
-  --accent-hover: #1a74d1;
-  --accent-ring: rgba(35, 131, 226, 0.16);
-  --border: #d3d1cb;
-  --border-light: #e9e9e7;
-  --danger: #e03e3e;
-  --danger-bg: #fbecec;
-  --shadow-md: 0 4px 12px rgba(15, 15, 15, 0.08);
-  --shadow-lg: 0 12px 28px rgba(15, 15, 15, 0.12);
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  position: relative;
-  overflow: hidden;
-}
-/* 背景：两团极淡的暖色光斑，避免纯色显得死板 */
-body::before,
-body::after {
-  content: "";
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(60px);
-  pointer-events: none;
-  z-index: 0;
-}
-body::before {
-  width: 520px; height: 520px;
-  background: rgba(35, 131, 226, 0.07);
-  top: -180px; left: -140px;
-}
-body::after {
-  width: 460px; height: 460px;
-  background: rgba(203, 145, 47, 0.06);
-  bottom: -200px; right: -120px;
-}
+  :root {
+    --text: #0c1a14;
+    --text-dim: #46594f;
+    --text-tertiary: #6b7d73;
+    --placeholder: #8ba096;
+    --accent: #0b6b45;
+    --accent-hover: #085436;
+    --accent-ring: rgba(18, 148, 92, .18);
+    --danger: #b3261e;
+    --card: rgba(255, 255, 255, .66);
+    --card-border: rgba(13, 35, 26, .10);
+    --field: rgba(255, 255, 255, .82);
+    --field-border: rgba(13, 35, 26, .14);
+    --line: rgba(13, 35, 26, .10);
+    --radius: 22px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
+            "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font);
+    color: var(--text);
+    background: #eef4f1;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -.01em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
 
-.auth-wrap {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: 392px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-}
+  /* 底片：与展示页同一段循环素材 */
+  .bg {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: brightness(1.12) saturate(.60) contrast(.95) hue-rotate(-6deg);
+    z-index: 0;
+  }
+  .veil {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: radial-gradient(120% 90% at 50% 42%,
+      rgba(250, 253, 251, .42) 0%, rgba(246, 251, 248, .64) 45%, rgba(240, 247, 243, .80) 100%);
+    pointer-events: none;
+  }
 
-.auth-card {
-  width: 100%;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-  padding: 32px 30px 26px;
-}
+  .auth-wrap {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 404px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 26px;
-}
-.brand-dot {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #2383e2 0%, #6ba6e8 100%);
-  box-shadow: 0 1px 3px rgba(35, 131, 226, 0.35);
-  flex-shrink: 0;
-}
-.brand-name {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+  .auth-card {
+    width: 100%;
+    background: var(--card);
+    -webkit-backdrop-filter: blur(26px) saturate(150%);
+    backdrop-filter: blur(26px) saturate(150%);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    box-shadow:
+      0 30px 70px -30px rgba(18, 44, 33, .40),
+      0 2px 8px -4px rgba(18, 44, 33, .14);
+    padding: 30px 28px 24px;
+    animation: rise .7s cubic-bezier(.2, .7, .2, 1) both;
+  }
 
-.auth-title {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  margin-bottom: 6px;
-}
-.auth-sub {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 24px;
-}
+  .brand { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; }
+  .brand-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #c6ff3d;
+    box-shadow: 0 0 0 4px rgba(198, 255, 61, .22);
+    flex-shrink: 0;
+  }
+  .brand-name { font-size: 14px; font-weight: 600; }
 
-.field { display: block; margin-bottom: 15px; }
-.field-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 550;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-.field input {
-  width: 100%;
-  height: 38px;
-  padding: 0 11px;
-  font-size: 14px;
-  font-family: inherit;
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  outline: none;
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-  letter-spacing: 0;
-}
-.field input::placeholder { color: var(--text-placeholder); }
-.field input:hover { background: #fcfcfb; }
-.field input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-  background: var(--bg-secondary);
-}
+  .auth-title { font-size: 23px; font-weight: 600; letter-spacing: -.022em; margin-bottom: 6px; }
+  .auth-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 22px; }
 
-.auth-error {
-  min-height: 18px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--danger);
-  margin: 2px 0 12px;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity .16s ease, transform .16s ease;
-}
-.auth-error.show { opacity: 1; transform: translateY(0); }
+  .field { display: block; margin-bottom: 14px; }
+  .field-label {
+    display: block; font-size: 13.5px; font-weight: 550;
+    color: var(--text-dim); margin-bottom: 7px;
+  }
+  .field input {
+    width: 100%; height: 44px; padding: 0 13px;
+    font-size: 15px; font-family: inherit; color: var(--text);
+    background: var(--field);
+    border: 1px solid var(--field-border);
+    border-radius: 12px;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    letter-spacing: 0;
+  }
+  .field input::placeholder { color: var(--placeholder); }
+  .field input:hover { background: rgba(255, 255, 255, .92); }
+  .field input:focus {
+    border-color: #12945c;
+    box-shadow: 0 0 0 4px var(--accent-ring);
+    background: #fff;
+  }
 
-.btn {
-  width: 100%;
-  height: 38px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 13.5px;
-  font-weight: 550;
-  font-family: inherit;
-  letter-spacing: -0.005em;
-  cursor: pointer;
-  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
-  box-shadow: 0 1px 2px rgba(35, 131, 226, 0.28);
-}
-.btn:hover:not(:disabled) { background: var(--accent-hover); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: .65; cursor: default; box-shadow: none; }
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .auth-error {
+    min-height: 19px; font-size: 13px; line-height: 19px;
+    color: var(--danger); margin: 4px 0 12px;
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity .16s ease, transform .16s ease;
+  }
+  .auth-error.show { opacity: 1; transform: translateY(0); }
 
-.auth-foot {
-  margin-top: 20px;
-  padding-top: 15px;
-  border-top: 1px solid var(--border-light);
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-}
+  .btn {
+    width: 100%; height: 48px;
+    border: none; border-radius: 12px;
+    background: var(--accent); color: #fff;
+    font-size: 15px; font-weight: 600; font-family: inherit;
+    letter-spacing: .01em; cursor: pointer;
+    transition: background .16s ease, transform .06s ease;
+  }
+  .btn:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-.auth-copy {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  letter-spacing: 0.01em;
-}
+  .auth-foot {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 13px; line-height: 1.6; color: var(--text-tertiary);
+  }
+  .auth-copy { font-size: 12.5px; color: var(--text-dim); letter-spacing: .01em; }
 
-/* 错误时的横向抖动，给「密码错了」一个物理反馈 */
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-5px); }
-  40% { transform: translateX(4px); }
-  60% { transform: translateX(-3px); }
-  80% { transform: translateX(2px); }
-}
-.shake { animation: shake .32s ease; }
 
-@media (max-width: 420px) {
-  .auth-card { padding: 26px 22px 22px; }
-  .auth-title { font-size: 20px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px); }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(2px); }
+  }
+  .shake { animation: shake .32s ease; }
+
+  @media (max-width: 420px) {
+    .auth-card { padding: 24px 20px 20px; border-radius: 18px; }
+    .auth-title { font-size: 21px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .auth-card { animation: none; }
+    * { transition: none !important; }
+    .shake { animation: none; }
+  }
 </style>
 </head>
 <body>
+
+<video class="bg" id="bgVideo" autoplay muted loop playsinline preload="auto"
+       poster="showcase/night-valley-poster.jpg" aria-hidden="true" tabindex="-1">
+  <source src="showcase/night-valley-loop.mp4" type="video/mp4">
+</video>
+<div class="veil" aria-hidden="true"></div>
 <main class="auth-wrap">
   <div class="auth-card" id="card">
     <div class="brand">
@@ -257,7 +227,7 @@ body::after {
   var card = document.getElementById('card');
   var submitBtn = document.getElementById('submitBtn');
 
-  // 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向
+  // 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向（与 login.html 同一规则）
   var nextRaw = new URLSearchParams(location.search).get('next') || '/';
   var target = /^\/(?!\/)/.test(nextRaw) ? nextRaw : '/';
 
@@ -265,7 +235,6 @@ body::after {
     errorEl.textContent = msg;
     errorEl.classList.add('show');
     card.classList.remove('shake');
-    // 强制回流，保证连续两次错误都能重放动画
     void card.offsetWidth;
     card.classList.add('shake');
     setTimeout(function () { card.classList.remove('shake'); }, 400);
@@ -332,6 +301,17 @@ body::after {
         showError('无法连接到服务器，请确认服务是否已启动');
       });
   });
+
+  // 尊重「减少动态效果」：暂停底片
+  var video = document.getElementById('bgVideo');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function syncMotion() {
+    if (!video) return;
+    if (reduce.matches) video.pause();
+    else { var p = video.play(); if (p && p.catch) p.catch(function () {}); }
+  }
+  if (reduce.addEventListener) reduce.addEventListener('change', syncMotion);
+  syncMotion();
 })();
 </script>
 </body>
