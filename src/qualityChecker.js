@@ -22,6 +22,9 @@ const QC_ITEMS = [
   // 合规红线：需求申报表承诺「NSFW 置信度阈值 0.8」。此项未执行即整体不通过。
   { key: 'nsfw', name: 'NSFW合规检测', category: 'clip', desc: '多模态模型按每分钟 1 帧抽检，置信度达阈值即判不合规' },
   { key: 'concat', name: '拼接质检', category: 'post', desc: '检查片段拼接是否流畅无跳帧' },
+  // 接缝质量：只校验时长抓不到「拼接是否自然」（AGENTS.md §6 的接缝 SSIM 0.238 就是这么漏掉的）。
+  // 该项未执行即整体不通过；唯一合法跳过是「只有 1 个片段」。
+  { key: 'seam', name: '接缝质量检测', category: 'post', desc: '逐缝测结构相似度/色差/亮度差/像素级变化，判硬切或淡化是否自然' },
   { key: 'loop', name: '循环质检', category: 'post', desc: '检查首尾循环过渡是否自然' },
   { key: 'transcode', name: '转码质检', category: 'post', desc: '校验转码后分辨率、帧率、码率' },
   { key: 'final', name: '最终综合质检', category: 'final', desc: '文件完整性 + 整体质量综合评估' }
@@ -61,6 +64,13 @@ class QualityChecker {
       nsfwThreshold: config.QC && Number.isFinite(config.QC.nsfwThreshold)
         ? config.QC.nsfwThreshold
         : 0.8,
+      // ===== 接缝质检阈值（详见 docs/spec/seam-quality-spec.md §6）=====
+      // 硬切接缝 minSSIM 0.42~0.54 / 开淡化后 0.83~0.95，两群无重叠，0.75 落在空档
+      seamSsimMin: config.QC && Number.isFinite(config.QC.seamSsimMin) ? config.QC.seamSsimMin : 0.75,
+      seamDe76Max: config.QC && Number.isFinite(config.QC.seamDe76Max) ? config.QC.seamDe76Max : 25,
+      seamDyMax: config.QC && Number.isFinite(config.QC.seamDyMax) ? config.QC.seamDyMax : 30,
+      seamMadRatioMax: config.QC && Number.isFinite(config.QC.seamMadRatioMax) ? config.QC.seamMadRatioMax : 8,
+      seamMaxSeams: config.QC && Number.isFinite(config.QC.seamMaxSeams) ? config.QC.seamMaxSeams : 8,
       ...options
     };
     this.qcItems = QC_ITEMS;
@@ -395,6 +405,325 @@ class QualityChecker {
         detectorError: true
       };
     }
+  }
+
+  // ========== 片段接缝质检（2026-10-27 新增）==========
+  //
+  // 为什么必须有这一项：
+  //   checkConcat 只校验「产物时长 ≈ 各片段时长之和」（防 -c copy 静默截断），**不读画面**；
+  //   checkLoop 只测成片【首尾】的 SSIM。于是「片段之间那道缝自然不自然」此前完全没被测量。
+  //   实测（docs/spec/seam-quality-spec.md）：硬切成片接缝相邻帧 SSIM 仅 0.42~0.54、
+  //   像素级变化是自然运动的 10~51 倍，而全部质检项照样「通过」。
+  //
+  // 三态语义（AGENTS.md §4.1）：
+  //   - 测不到 / 抽帧不全 / 算不出数值 → passed:false（并标 undetermined，**绝不当通过**）
+  //   - 唯一合法跳过：只有 1 个片段（业务上不存在接缝）→ skipped + legitimateSkip + 理由
+  //   - 不用 Math.random 参与任何判定（§4.2）；每个数值都来自 ffmpeg 实测
+  //
+  // 度量（全部由 ffmpeg 现算，不引入新依赖）：
+  //   SSIM     结构相似度（复用 _ssimFromBase64）
+  //   ΔE76     两帧平均色差（signalstats 的 YUV 均值 → Lab，见 _deltaE76FromYuv）
+  //   ΔY       两帧平均亮度差
+  //   MAD 倍数 像素级平均绝对差 ÷ 同段基线（把「画面自己在动」与「接缝在跳」分开）
+  //
+  // @param {string} videoPath      拼接产物（_concat.mp4 或成片）
+  // @param {number[]} clipDurations 各片段时长（秒），用于定位每道缝
+  // @param {object} options        { fadeDuration, ssimMin, de76Max, dyMax, madRatioMax, maxSeams }
+  async checkSeam(videoPath, clipDurations, options = {}) {
+    const fail = (reason, extra = {}) => ({
+      passed: false,
+      qcVersion: QC_VERSION,
+      reason,
+      level: 'fail',
+      ...extra
+    });
+    const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    const th = {
+      ssimMin: numOr(options.ssimMin, this.options.seamSsimMin),
+      de76Max: numOr(options.de76Max, this.options.seamDe76Max),
+      dyMax: numOr(options.dyMax, this.options.seamDyMax),
+      madRatioMax: numOr(options.madRatioMax, this.options.seamMadRatioMax)
+    };
+
+    if (!this._hasFFmpeg()) {
+      return fail('接缝质量未执行：FFmpeg 不可用，无法抽帧计算相似度与色差', { detectorUnavailable: true });
+    }
+
+    const durs = Array.isArray(clipDurations) ? clipDurations.map(Number) : [];
+    const usable = durs.filter(n => Number.isFinite(n) && n > 0);
+
+    // 唯一合法的跳过：只有 1 个片段 → 不存在「片段之间」的接缝
+    if (Array.isArray(clipDurations) && clipDurations.length === 1) {
+      return {
+        passed: true,
+        qcVersion: QC_VERSION,
+        skipped: true,
+        legitimateSkip: true,
+        level: 'skip',
+        reason: '接缝质量按设计跳过：仅 1 个片段，不存在片段间接缝'
+      };
+    }
+    if (usable.length < 2 || usable.length !== durs.length) {
+      return fail(
+        `接缝质量未执行：片段时长不可用（收到 ${durs.length} 个，有效 ${usable.length} 个），无法定位接缝`,
+        { undetermined: true }
+      );
+    }
+
+    let info;
+    try {
+      info = await this._getVideoInfoFFmpeg(videoPath);
+    } catch (e) {
+      return fail('接缝质量未执行：无法读取产物信息' + (e.message ? `（${e.message}）` : ''), { detectorError: true });
+    }
+    const dur = info && info.duration;
+    if (!(dur > 0)) {
+      return fail('接缝质量未执行：产物时长无法探测（不可判定）', { undetermined: true });
+    }
+
+    // 缝位置：硬切时第 k 道缝 = Σ前 k 段；做过转场则整体前移 (k+1)×fade
+    // （与 src/processors/transitionMixer.js 的「成片时长 = Σd − (N−1)·F」同口径）
+    const fadeRaw = Number(options.fadeDuration);
+    const fade = Number.isFinite(fadeRaw) && fadeRaw > 0 ? fadeRaw : 0;
+    const seamTimes = [];
+    let acc = 0;
+    for (let i = 0; i < usable.length - 1; i++) {
+      acc += usable[i];
+      seamTimes.push(acc - (i + 1) * fade);
+    }
+    const EPS = 0.15;
+    const inRange = seamTimes
+      .map((t, k) => ({ t, k }))
+      .filter(o => o.t > EPS && o.t < dur - EPS);
+    if (!inRange.length) {
+      return fail(
+        `接缝质量未执行：按片段时长算出的 ${seamTimes.length} 道缝全部落在产物范围外（不可判定）`,
+        { undetermined: true, seamTimes }
+      );
+    }
+
+    // 抽样上限：每条缝约 1~1.5s，长片缝多时避免质检本身拖垮流水线。
+    // 抽样只决定「测哪些位置」，每个位置的结论都是实测（§4.2 禁止的是随机数冒充结论）。
+    const maxSeams = Math.max(1, parseInt(options.maxSeams, 10) || this.options.seamMaxSeams || 8);
+    let picked = inRange;
+    let sampled = false;
+    if (inRange.length > maxSeams) {
+      const chosen = new Map();
+      for (let k = 0; k < maxSeams; k++) {
+        const idx = Math.round(k * (inRange.length - 1) / Math.max(1, maxSeams - 1));
+        chosen.set(inRange[idx].k, inRange[idx]);
+      }
+      picked = [...chosen.values()].sort((a, b) => a.k - b.k);
+      sampled = true;
+    }
+
+    const seams = [];
+    for (const s of picked) {
+      const t = s.t;
+      // 采样点：[-0.60,-0.50] = 同段基线（画面自己在动的水平）；[-0.10..+0.10] = 接缝区
+      const offsets = [-0.60, -0.50, -0.10, -0.03, 0.03, 0.10];
+      const times = offsets.map(o => Math.max(0.01, Math.min(dur - 0.01, t + o)));
+      const frames = this._extractFramesAtTimes(videoPath, times);
+      if (frames.length < times.length) {
+        seams.push({
+          index: s.k,
+          t: Number(t.toFixed(3)),
+          undetermined: true,
+          reason: `抽帧不完整（计划 ${times.length} 帧，实际 ${frames.length} 帧）`
+        });
+        continue;
+      }
+
+      const baseSsim = this._ssimFromBase64(frames[1], frames[0]);
+      const baseMad = this._madFromBase64(frames[1], frames[0]);
+
+      // 接缝区 4 帧 → 3 对，取 SSIM 最低的一对作为「最不相似帧对」（硬切时正好跨缝）
+      let worst = null;
+      for (const [a, b] of [[2, 3], [3, 4], [4, 5]]) {
+        const v = this._ssimFromBase64(frames[b], frames[a]);
+        if (v === null) continue;
+        if (!worst || v < worst.ssim) worst = { ssim: v, a, b };
+      }
+      if (!worst) {
+        seams.push({
+          index: s.k,
+          t: Number(t.toFixed(3)),
+          undetermined: true,
+          reason: '接缝区 SSIM 计算失败（无法解析 ffmpeg 输出）'
+        });
+        continue;
+      }
+
+      const mad = this._madFromBase64(frames[worst.b], frames[worst.a]);
+      const yuvA = this._yuvAvgFromBase64(frames[worst.a]);
+      const yuvB = this._yuvAvgFromBase64(frames[worst.b]);
+
+      let dy = null, dU = null, dV = null, de76 = null;
+      if (yuvA && yuvB) {
+        dy = Number((yuvB.Y - yuvA.Y).toFixed(2));
+        dU = Number((yuvB.U - yuvA.U).toFixed(2));
+        dV = Number((yuvB.V - yuvA.V).toFixed(2));
+        de76 = this._deltaE76FromYuv(yuvA, yuvB);
+      }
+      // 基线过小（画面几乎静止）时比值会爆炸，此时不参与判定，只记录原始值
+      const madRatio = (mad !== null && baseMad !== null && baseMad > 0.01)
+        ? Number((mad / baseMad).toFixed(2))
+        : null;
+
+      const reasons = [];
+      if (worst.ssim < th.ssimMin) reasons.push(`结构相似度 ${worst.ssim.toFixed(3)} < ${th.ssimMin}`);
+      if (de76 !== null && de76 > th.de76Max) reasons.push(`色差 ΔE76 ${de76} > ${th.de76Max}`);
+      if (dy !== null && Math.abs(dy) > th.dyMax) reasons.push(`亮度差 ΔY ${dy} 超出 ±${th.dyMax}`);
+      if (madRatio !== null && madRatio > th.madRatioMax) {
+        reasons.push(`像素级变化为同段自然运动的 ${madRatio}× > ${th.madRatioMax}×`);
+      }
+      // 数值缺失也算没测到 —— 不能因为「算不出来」就放行
+      if (de76 === null) reasons.push('色差计算失败（数值缺失）');
+
+      const passed = reasons.length === 0;
+      seams.push({
+        index: s.k,
+        t: Number(t.toFixed(3)),
+        ssim: worst.ssim,
+        baseSsim,
+        de76,
+        dy,
+        dU,
+        dV,
+        mad,
+        baseMad,
+        madRatio,
+        passed,
+        level: passed ? 'pass' : 'fail',
+        reasons
+      });
+    }
+
+    const measured = seams.filter(x => !x.undetermined);
+    const failedSeams = seams.filter(x => x.undetermined || x.passed === false);
+    const undeterminedCount = seams.filter(x => x.undetermined).length;
+    const passed = failedSeams.length === 0;
+
+    const worstSsim = measured.length ? Math.min(...measured.map(s => s.ssim)) : null;
+    const worstDe = measured.filter(s => Number.isFinite(s.de76)).map(s => s.de76);
+    const summary = {
+      totalSeamsInVideo: inRange.length,
+      scanned: picked.length,
+      sampled,
+      passedSeams: measured.filter(s => s.passed).length,
+      failedSeams: measured.filter(s => s.passed === false).length,
+      undeterminedSeams: undeterminedCount,
+      worstSsim: worstSsim === null ? null : Number(worstSsim.toFixed(4)),
+      worstDe76: worstDe.length ? Number(Math.max(...worstDe).toFixed(2)) : null,
+      fadeDuration: fade
+    };
+
+    let reason;
+    if (passed) {
+      reason = `接缝质量通过：${measured.length} 道缝全部达标`
+        + `（最差 SSIM ${summary.worstSsim}，最大 ΔE76 ${summary.worstDe76 ?? '—'}`
+        + `${sampled ? `，共 ${inRange.length} 道缝已抽样 ${picked.length} 道` : ''}）`;
+    } else {
+      const detail = failedSeams.slice(0, 3).map(s =>
+        s.undetermined
+          ? `缝#${s.index + 1}@${s.t}s 未测到（${s.reason}）`
+          : `缝#${s.index + 1}@${s.t}s 不通过（${s.reasons.join('、')}）`
+      );
+      const more = failedSeams.length > 3 ? ` 等 ${failedSeams.length} 道` : '';
+      reason = `接缝质量不通过：${detail.join('；')}${more}`;
+    }
+
+    return {
+      passed,
+      qcVersion: QC_VERSION,
+      reason,
+      level: passed ? 'pass' : 'fail',
+      // 有缝没测到 → 整体标 undetermined（不可判定 ≠ 通过，§4.3 同理）
+      undetermined: undeterminedCount > 0 || undefined,
+      details: { seams, summary, thresholds: th }
+    };
+  }
+
+  // 单帧的平均 Y/U/V（signalstats 的 YAVG/UAVG/VAVG）。失败返回 null。
+  // 走 _exec（内含 EPERM → 临时文件降级），命令自带 2>&1 把日志收进来。
+  _yuvAvgFromBase64(b64) {
+    const os = require('os');
+    const stamp = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const f = path.join(os.tmpdir(), `qc_yuv_${stamp}.jpg`);
+    try {
+      fs.writeFileSync(f, Buffer.from(b64, 'base64'));
+      const out = this._exec(
+        `"${FFMPEG_PATH}" -hide_banner -i "${f}" -vf "signalstats,metadata=mode=print" -f null - 2>&1`
+      );
+      return this._parseSignalStats(String(out));
+    } catch (e) {
+      const out = String((e && (e.stdout || e.stderr)) || '');
+      return this._parseSignalStats(out);
+    } finally {
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
+    }
+  }
+
+  _parseSignalStats(text) {
+    const y = String(text).match(/lavfi\.signalstats\.YAVG=([\d.]+)/);
+    const u = String(text).match(/lavfi\.signalstats\.UAVG=([\d.]+)/);
+    const v = String(text).match(/lavfi\.signalstats\.VAVG=([\d.]+)/);
+    if (!y || !u || !v) return null;
+    const Y = parseFloat(y[1]), U = parseFloat(u[1]), V = parseFloat(v[1]);
+    if (!Number.isFinite(Y) || !Number.isFinite(U) || !Number.isFinite(V)) return null;
+    return { Y, U, V };
+  }
+
+  // 两帧的像素级平均绝对差（Y 平面），即 MAD。失败返回 null。
+  // 做法：blend=all_mode=difference 得到差图，再用 signalstats 求其 YAVG。
+  _madFromBase64(b64a, b64b) {
+    const os = require('os');
+    const stamp = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const fa = path.join(os.tmpdir(), `qc_mad_a_${stamp}.jpg`);
+    const fb = path.join(os.tmpdir(), `qc_mad_b_${stamp}.jpg`);
+    try {
+      fs.writeFileSync(fa, Buffer.from(b64a, 'base64'));
+      fs.writeFileSync(fb, Buffer.from(b64b, 'base64'));
+      const out = this._exec(
+        `"${FFMPEG_PATH}" -hide_banner -i "${fa}" -i "${fb}" `
+        + `-filter_complex "[0:v][1:v]blend=all_mode=difference,signalstats,metadata=mode=print" -f null - 2>&1`
+      );
+      const st = this._parseSignalStats(String(out));
+      return st ? Number(st.Y.toFixed(2)) : null;
+    } catch (e) {
+      const out = String((e && (e.stdout || e.stderr)) || '');
+      const st = this._parseSignalStats(out);
+      return st ? Number(st.Y.toFixed(2)) : null;
+    } finally {
+      try { if (fs.existsSync(fa)) fs.unlinkSync(fa); } catch (e) {}
+      try { if (fs.existsSync(fb)) fs.unlinkSync(fb); } catch (e) {}
+    }
+  }
+
+  // 两帧「平均色的色差」ΔE76（CIE1976 Lab 欧氏距离）。
+  // 口径与 docs/spec/seam-quality-spec.md §2.1 一致：BT.709 + TV range → sRGB → XYZ(D65) → Lab。
+  // 注意这是「两帧平均色之差」，不是逐像素色差；逐像素差异由 MAD 承担。
+  _deltaE76FromYuv(a, b) {
+    const toLab = ({ Y, U, V }) => {
+      const y = (Y - 16) / 219;
+      const u = (U - 128) / 224;
+      const v = (V - 128) / 224;
+      const clamp = (x) => Math.max(0, Math.min(1, x));
+      const r = clamp(y + 1.5748 * v);
+      const g = clamp(y - 0.1873 * u - 0.4681 * v);
+      const bl = clamp(y + 1.8556 * u);
+      const lin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+      const R = lin(r), G = lin(g), B = lin(bl);
+      const X = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
+      const Yl = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
+      const Z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
+      const f = (t) => (t > 0.008856 ? Math.cbrt(t) : (7.787 * t) + 16 / 116);
+      const fx = f(X / 0.95047), fy = f(Yl / 1.0), fz = f(Z / 1.08883);
+      return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
+    };
+    const la = toLab(a), lb = toLab(b);
+    const d = Math.sqrt(Math.pow(la.L - lb.L, 2) + Math.pow(la.a - lb.a, 2) + Math.pow(la.b - lb.b, 2));
+    return Number.isFinite(d) ? Number(d.toFixed(2)) : null;
   }
 
   // 探测媒体时长（秒）；失败返回 0
@@ -777,6 +1106,38 @@ class QualityChecker {
     } catch (e) {
       totalPassed = false;
       results.nsfw = { passed: false, reason: 'NSFW 检测出错: ' + e.message, level: 'fail', detectorError: true };
+    }
+
+    // 片段接缝质量（2026-10-27 新增）：硬切还是淡化、接缝自不自然，此前完全没被测量。
+    // 三态口径（§4.1）：
+    //   能测 → 实测（逐缝数值）；调用方声明「业务上不适用」（Mock 素材 / 无任务上下文）→ 合法跳过；
+    //   其余（缺片段时长、抽帧失败…）→ 一律判 fail，绝不静默放行。
+    try {
+      const seamOpt = options.seam || null;
+      if (seamOpt && seamOpt.legitimateSkip === true) {
+        results.seam = {
+          passed: true,
+          skipped: true,
+          legitimateSkip: true,
+          level: 'skip',
+          reason: seamOpt.skipReason || '接缝质量按设计跳过'
+        };
+      } else if (seamOpt && Array.isArray(seamOpt.clipDurations)) {
+        const seamResult = await this.checkSeam(videoPath, seamOpt.clipDurations, seamOpt);
+        results.seam = seamResult;
+        if (!seamResult.passed) totalPassed = false;
+      } else {
+        totalPassed = false;
+        results.seam = {
+          passed: false,
+          reason: '接缝质量未执行：调用方未提供片段时长，无法定位接缝',
+          level: 'fail',
+          detectorUnavailable: true
+        };
+      }
+    } catch (e) {
+      totalPassed = false;
+      results.seam = { passed: false, reason: '接缝质量检测出错: ' + e.message, level: 'fail', detectorError: true };
     }
 
     // 汇总「为什么没过」，避免只回一个笼统的「存在问题」
