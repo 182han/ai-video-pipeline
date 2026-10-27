@@ -86,22 +86,81 @@ const IMAGE_INPUT_CAPABILITY = Object.freeze({
   dashscope: null
 });
 
+// ===== 出图厂商适配器注册表（2026-10-27）=====
+//
+// 目的：把「用哪家出图」这个决定推迟到配置层，代码里不锁死厂商。
+// 加一家的工作量 = 新增一个适配器函数 + 在启动时 registerImageProvider() 一次；
+// 流水线与前端都不需要改。
+//
+// 适配器契约（必须遵守，否则视为未接入）：
+//   async ({ prompt, options, config }) => ({
+//     imagePath,   // string，本地文件绝对路径，必须真实存在
+//     width,       // number
+//     height,      // number
+//     provider,    // string，厂商标识
+//     model        // string，实际使用的模型 id
+//   })
+// 硬性要求：
+//   - 不许返回占位图 / 假图 / 纯色图冒充结果（AGENTS §4.8）
+//   - 失败必须 throw，不要返回 { ok:false } 这种会被上游误判的形态
+//   - 不要把 base64 塞进 imagePath；先落盘再返回路径
+//
+// 示例（写到 src/generators/providers/<vendor>.js，然后在启动时注册）：
+//   registerImageProvider('somevendor', async ({ prompt, options, config }) => {
+//     const buf = await callVendor(prompt, options, config);   // 自己实现
+//     const imagePath = path.join(config.outputDir || 'output', `img_${Date.now()}.png`);
+//     fs.writeFileSync(imagePath, buf);
+//     return { imagePath, width, height, provider: 'somevendor', model: config.model };
+//   });
+const PROVIDERS = new Map();
+
+function registerImageProvider(name, adapter) {
+  if (!name || typeof name !== 'string') throw new Error('registerImageProvider: name 必须是非空字符串');
+  if (typeof adapter !== 'function') throw new Error('registerImageProvider: adapter 必须是函数');
+  PROVIDERS.set(name, adapter);
+  return adapter;
+}
+
+function listImageProviders() {
+  return Array.from(PROVIDERS.keys());
+}
+
 class ImageGenerator {
   constructor(cfg = {}) {
     this.name = 'imageGen';
     this.config = cfg;
     this.capabilities = {
       supportsImageOutput: true,
-      // 还没接任何厂商，能力必须声明为 false
-      implemented: false
+      // 只有「配置齐 + 选定的厂商有适配器」才算已实现
+      implemented: Boolean(cfg.provider) && PROVIDERS.has(String(cfg.provider))
     };
   }
 
   /**
    * 生成一张静帧（分镜图）。
-   * 当前**未实现**，调用即抛错。接入后返回 { imagePath, width, height, provider, model }。
+   * 未选厂商 / 厂商未接入 / 配置不全 → 显式抛错，绝不返回占位图。
+   * 成功时返回 { imagePath, width, height, provider, model }。
    */
   async generateImage(prompt, options = {}) {
+    const provider = String(this.config.provider || '').trim();
+
+    if (!provider) {
+      throw new Error(
+        '未选择出图厂商：IMAGE_GEN_PROVIDER 为空。'
+        + `当前已注册适配器：${listImageProviders().join(', ') || '（无）'}。`
+        + '选定厂商后，实现对应适配器并 registerImageProvider() 即可，无需改流水线。'
+      );
+    }
+
+    const adapter = PROVIDERS.get(provider);
+    if (!adapter) {
+      throw new Error(
+        `出图厂商「${provider}」尚未接入适配器。`
+        + `当前已注册：${listImageProviders().join(', ') || '（无）'}。`
+        + '接入方式见 src/generators/imageGen.js 顶部「适配器契约」。这是预期的「未实现」错误，不会产出任何假图。'
+      );
+    }
+
     const status = getImageGenStatus();
     if (!status.ready) {
       throw new Error(
@@ -109,11 +168,23 @@ class ImageGenerator {
         + '请在 .env 中补齐 IMAGE_GEN_API_KEY / IMAGE_GEN_BASE_URL / IMAGE_GEN_MODEL。'
       );
     }
-    // 配置齐了也还没写调用逻辑 —— 显式失败，绝不返回占位图冒充结果
-    throw new Error(
-      '图片生成尚未接入厂商（src/generators/imageGen.js 目前只是配置预留层）。'
-      + '这是预期的「未实现」错误，不是配置问题，也不会产出任何假图。'
-    );
+
+    const out = await adapter({ prompt, options, config: this.config });
+
+    // 校验契约，防止适配器把半成品当结果返回
+    if (!out || typeof out.imagePath !== 'string' || !out.imagePath) {
+      throw new Error(`出图适配器「${provider}」没有返回合法的 imagePath（返回类型: ${typeof out}）`);
+    }
+    if (typeof out.width !== 'number' || typeof out.height !== 'number') {
+      throw new Error(`出图适配器「${provider}」没有返回合法的 width/height`);
+    }
+    return {
+      imagePath: out.imagePath,
+      width: out.width,
+      height: out.height,
+      provider: out.provider || provider,
+      model: out.model || this.config.model || ''
+    };
   }
 }
 
@@ -121,5 +192,7 @@ module.exports = {
   ImageGenerator,
   getImageGenStatus,
   resolveI2VConfig,
-  IMAGE_INPUT_CAPABILITY
+  IMAGE_INPUT_CAPABILITY,
+  registerImageProvider,
+  listImageProviders
 };
