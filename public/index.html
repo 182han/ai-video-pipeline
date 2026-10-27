@@ -1417,6 +1417,26 @@ select {
   border-color: #ff6b6b;
   color: #c73030;
 }
+/* 历史记录里的「剪辑」入口：跳到编辑器并直接打开该成片（?task=<id>） */
+.history-clip-btn {
+  background: none;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.4;
+}
+.history-clip-btn:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .trash-item {
   padding: 14px 0;
   border-bottom: 1px solid var(--border-light);
@@ -6806,6 +6826,9 @@ async function loadHistory() {
             <span class="history-status status-${t.status}">${statusText(t.status)}</span>
           </span>
           <span class="history-actions">
+            ${(t.status === 'completed' || t.status === 'partial')
+              ? `<a class="history-clip-btn" href="/bgm-editor.html?task=${encodeURIComponent(t.taskId)}" onclick="event.stopPropagation()">剪辑</a>`
+              : ''}
             <button class="history-delete-btn" onclick="event.stopPropagation(); moveToTrash('${t.taskId}', '${(t.prompt || '').substring(0, 20).replace(/'/g, '')}')">删除</button>
           </span>
         </div>
