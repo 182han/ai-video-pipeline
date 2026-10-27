@@ -45,14 +45,18 @@ const generators = {
 };
 
 // 获取可用的模型列表
+// supportsImageInput 三态（对应「先图后视频」工作流，见 src/generators/imageGen.js）：
+//   true  = 已核实支持图生视频（首帧图作为输入）
+//   false = 已核实不支持
+//   null  = **尚未核实**，不得当成支持
 function getAvailableModels() {
   return [
-    { id: 'mock', name: '模拟生成器（测试用）', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: true },
-    { id: 'siliconflow', name: 'Wan 2.2 (硅基流动)', maxDuration: 5, resolutions: ['720p'], available: !!config.SILICONFLOW_API_KEY },
-    { id: 'agnes', name: 'Agnes (Pavo) 2.5', maxDuration: 12, resolutions: ['720P', '1080P', '2K'], available: !!config.AGNES_API_KEY },
-    { id: 'seedance', name: 'Seedance 2.5 (字节跳动)', maxDuration: 30, resolutions: ['480p', '720p'], available: !!config.SEEDANCE_API_KEY },
-    { id: 'kling', name: '可灵 Kling 3.0 (快手)', maxDuration: 15, resolutions: ['720p', '1080p', '4K'], available: !!(config.KLING_ACCESS_KEY && config.KLING_SECRET_KEY) },
-    { id: 'dashscope', name: 'Wan 3.0 (阿里 DashScope)', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: !!config.DASHSCOPE_API_KEY }
+    { id: 'mock', name: '模拟生成器（测试用）', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: true, supportsImageInput: false },
+    { id: 'siliconflow', name: 'Wan 2.2 (硅基流动)', maxDuration: 5, resolutions: ['720p'], available: !!config.SILICONFLOW_API_KEY, supportsImageInput: null },
+    { id: 'agnes', name: 'Agnes (Pavo) 2.5', maxDuration: 12, resolutions: ['720P', '1080P', '2K'], available: !!config.AGNES_API_KEY, supportsImageInput: null },
+    { id: 'seedance', name: 'Seedance 2.5 (字节跳动)', maxDuration: 30, resolutions: ['480p', '720p'], available: !!config.SEEDANCE_API_KEY, supportsImageInput: null },
+    { id: 'kling', name: '可灵 Kling 3.0 (快手)', maxDuration: 15, resolutions: ['720p', '1080p', '4K'], available: !!(config.KLING_ACCESS_KEY && config.KLING_SECRET_KEY), supportsImageInput: null },
+    { id: 'dashscope', name: 'Wan 3.0 (阿里 DashScope)', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: !!config.DASHSCOPE_API_KEY, supportsImageInput: null }
   ];
 }
 

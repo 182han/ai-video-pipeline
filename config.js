@@ -110,6 +110,20 @@ function transitionDuration(fallback = 0.5) {
   return n;
 }
 
+// 片段接缝质检的数值阈值：必须在 [min,max] 内的有限数，否则回退默认。
+// 为什么不用 parseInt：SSIM/ΔE 是小数，且 NaN 会让比较恒为 false（= 检测永远宽松，
+// 等于把「测不到」偷偷变成「不报错」——违反 §4.1 的语义精神）。
+function seamNum(key, fallback, min, max) {
+  const raw = env(key);
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) {
+    console.warn(`[config] ${key}="${raw}" 非法（需 ${min}~${max} 之间的数字），已回退默认 ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 module.exports = {
   // ===== 视频生成模型 API Key =====
   // 留空的模型在页面上还是可以选，但会用 Mock 模式模拟
@@ -151,6 +165,29 @@ module.exports = {
   DASHSCOPE_API_KEY: env('DASHSCOPE_API_KEY'),
   DASHSCOPE_BASE_URL: env('DASHSCOPE_BASE_URL'),
   DASHSCOPE_MODEL_ID: env('DASHSCOPE_MODEL_ID', 'wan3.0-video'),
+
+  // ===== 图片生成 / 图生视频（「先图后视频」工作流）=====
+  // 状态：**仅预留配置位，尚未接入任何厂商**。真正的调用实现见
+  //   src/generators/imageGen.js（当前被调用会抛明确错误，不会伪造成功，
+  //   遵守 AGENTS.md §4.2「禁止用随机数冒充检测结论」/ §4.8「不许谎报状态」）。
+  //
+  // 需要填两组（可用的组合方式见下）：
+  //   ① 文生图：IMAGE_GEN_*  —— 产出分镜静帧，供人工确认
+  //   ② 图生视频：I2V_*      —— 拿确认过的静帧做首帧生成视频
+  //
+  // 若同一家厂商一个 Key 同时提供文生图与图生视频（如阿里百炼），
+  // I2V_* 留空即可自动回退到 IMAGE_GEN_* 的 key/baseUrl，只填两个模型名。
+  IMAGE_GEN_PROVIDER: env('IMAGE_GEN_PROVIDER', 'openai'),
+  IMAGE_GEN_API_KEY: env('IMAGE_GEN_API_KEY'),
+  IMAGE_GEN_BASE_URL: env('IMAGE_GEN_BASE_URL'),
+  IMAGE_GEN_MODEL: env('IMAGE_GEN_MODEL'),
+  IMAGE_GEN_SIZE: env('IMAGE_GEN_SIZE', '1024x1024'),
+  IMAGE_GEN_TIMEOUT_MS: parseInt(env('IMAGE_GEN_TIMEOUT_MS', '180000'), 10),
+
+  I2V_PROVIDER: env('I2V_PROVIDER'),
+  I2V_API_KEY: env('I2V_API_KEY'),
+  I2V_BASE_URL: env('I2V_BASE_URL'),
+  I2V_MODEL: env('I2V_MODEL'),
 
   // ===== 大语言模型（提示词优化用）=====
 
@@ -241,20 +278,43 @@ module.exports = {
     // 循环质检：产物末尾 vs 开头的 SSIM 阈值，.env 用 QC_LOOP_SSIM_THRESHOLD 覆盖
     loopSsimThreshold: loopSsimThreshold(0.9),
     // 无缝循环交叉淡化时长（秒），.env 用 LOOP_FADE_DURATION 覆盖
-    loopFadeDuration: loopFadeDuration(0.5)
+    loopFadeDuration: loopFadeDuration(0.5),
+
+    // ===== 片段接缝质检（checkSeam）=====
+    // 阈值来自 docs/spec/seam-quality-spec.md §6 的实测校准：
+    //   硬切成片接缝 minSSIM 0.42~0.54；开 0.4s 淡化后 0.83~0.95（两群无重叠，0.75 落在空档）。
+    // 全部可被 .env 覆盖；非法值回退默认（与 loopSsimThreshold 同做法，避免 NaN 让检测永远宽松）。
+    seamSsimMin: seamNum('QC_SEAM_SSIM_MIN', 0.75, 0, 1),
+    seamDe76Max: seamNum('QC_SEAM_DE76_MAX', 25, 0, 200),
+    seamDyMax: seamNum('QC_SEAM_DY_MAX', 30, 0, 219),
+    seamMadRatioMax: seamNum('QC_SEAM_MAD_RATIO_MAX', 8, 1, 1000),
+    // 单次检测最多测多少道缝（超出则均匀抽样，并在结果里标注 sampled=true）。
+    // 每道缝约 1~1.5s，8 道 ≈ 10s；长片缝多时避免质检本身拖垮流水线。
+    seamMaxSeams: Math.max(1, parseInt(env('QC_SEAM_MAX_SEAMS', '8'), 10) || 8)
   },
 
   // ===== 片段间转场（交叉淡化）=====
   // 与「首尾循环」是两件事：循环处理的是成片尾部回绕到开头，
   // 这里处理的是每两个相邻片段之间的接缝。
   //
-  // 默认关闭（零回归）：开启后成片时长 = Σ片段 − (N−1)×duration，
-  // 与既有「Σ片段」口径不同，所有验收/展示都要按实际返回值走。
-  // 需要时在 .env 里设 TRANSITION_ENABLED=true，或按任务传 transition 配置。
+  // **默认开启（2026-10-27 用户拍板）**：实测依据见 docs/spec/seam-quality-spec.md §9
+  //   —— 硬切成片的接缝相邻帧 SSIM 仅 0.42~0.54，开启 0.4s 淡化后升到 0.83~0.95；
+  //   代价实测：47s/7 段样本 copy 0.46s → 重编码 8.13s → 转场 11.36s，
+  //   30 分钟成片推算 5.2 → 7.3 分钟。成本跃升主要来自「放弃 -c copy」（17.6×），
+  //   转场本身只多 1.40×，所以没有理由默认关闭。
+  //
+  // 仍可关闭：.env 设 TRANSITION_ENABLED=false，或按任务传 transition 配置覆盖。
+  // 例外：`quick` 档由 pipeline._transitionOptions() 强制关（求快，走 -c copy）。
+  //
+  // 注意（改这里必须同步）：开启后成片时长 = Σ片段 − (N−1)×duration，
+  // 与既有「Σ片段」口径不同 —— 调用 checkConcat 时**必须**传 expectedDuration，
+  // 否则会把正确的转场产物误判成「拼接被截断」。
   TRANSITIONS: {
-    enabled: /^(1|true|yes)$/i.test(String(env('TRANSITION_ENABLED', 'false')).trim()),
-    // 淡化时长（秒），.env 用 TRANSITION_DURATION 覆盖
-    duration: transitionDuration(0.5),
+    enabled: /^(1|true|yes)$/i.test(String(env('TRANSITION_ENABLED', 'true')).trim()),
+    // 淡化时长（秒），.env 用 TRANSITION_DURATION 覆盖。
+    // 默认 0.4：实测 0.5 与 0.4 在接缝 SSIM 上无差别，但短一点更不容易在
+    // 快速运动的镜头上留下双重曝光鬼影（见规格文档 §4.4 的影片条证据）。
+    duration: transitionDuration(0.4),
     // xfade 转场类型，.env 用 TRANSITION_TYPE 覆盖（默认 fade = 交叉淡化）
     type: env('TRANSITION_TYPE', 'fade')
   },
