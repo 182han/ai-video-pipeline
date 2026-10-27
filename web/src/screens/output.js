@@ -28,6 +28,17 @@ function qcState(r) {
   return { key: 'fail', text: '不通过', cls: 'text-danger', dot: 'bg-danger' };
 }
 
+// 校色状态（与「镜头色彩连续性」是两件事：这说「有没有做」，那说「做没做好」）
+function colorMatchTag(state, reason) {
+  switch (state) {
+    case 'applied': return { text: '已校色', cls: 'text-accent', title: reason || '已对相邻镜头做过校色对齐' };
+    case 'disabled': return { text: '未校色', cls: 'text-ink3', title: reason || '默认关闭，本次未开启' };
+    case 'skipped': return { text: '校色未执行', cls: 'text-warn', title: reason || '按设计跳过（典型原因：转场关闭）' };
+    case 'failed': return { text: '校色失败', cls: 'text-danger', title: (reason || '') + '（成片仍按原片产出，不是出片失败）' };
+    default: return null;
+  }
+}
+
 function useJson(url) {
   const [s, setS] = useState({ loading: true, data: null, error: null });
   useEffect(() => {
@@ -161,6 +172,12 @@ export function OutputScreen() {
                         <span className=${'w-[6px] h-[6px] rounded-full shrink-0 ' + st.dot}></span>
                         <span className="text-[12px] text-ink">${it.name}</span>
                         <span className="flex-1"></span>
+                        ${it.key === 'colorContinuity' && r && (() => {
+                          const tag = colorMatchTag(r.colorMatchState, r.colorMatchReason);
+                          return tag
+                            ? html`<span className=${'text-[10px] shrink-0 ' + tag.cls} title=${tag.title}>${tag.text}</span>`
+                            : null;
+                        })()}
                         <span className=${'text-[11px] shrink-0 ' + st.cls}>${st.text}</span>
                       </div>
                       ${r && r.reason && html`

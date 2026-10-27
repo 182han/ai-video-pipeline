@@ -31,6 +31,66 @@ function qcBadge(qc) {
   return { text: '不通过', cls: 'text-danger' };
 }
 
+// 校色四态（2026-10-27 契约，字段直接读，不从 reason 猜）
+//   任务级意图：task.colorMatch { enabled, maxGain } / null = 没要求
+//   拼接结果：  task.steps.concatenation.qcDetails.colorMatch { state, reason, applied, total, luts }
+//   终检汇总：  task.finalQC.details.colorContinuity.colorMatchState / colorMatchReason
+function colorMatchBadge(cm) {
+  if (!cm || !cm.state) return { text: '未执行', cls: 'text-warn', title: '没有拿到校色结果字段' };
+  switch (cm.state) {
+    case 'applied':
+      return {
+        text: '已校色',
+        cls: 'text-accent',
+        title: [
+          cm.reason || '',
+          cm.applied != null && cm.total != null ? `已校色 ${cm.applied}/${cm.total} 段` : '',
+          Array.isArray(cm.luts) ? `${cm.luts.length} 组 LUT` : ''
+        ].filter(Boolean).join(' · ')
+      };
+    case 'disabled':
+      return { text: '未校色', cls: 'text-ink3', title: cm.reason || '默认关闭，本次未开启' };
+    case 'skipped':
+      return { text: '校色未执行', cls: 'text-warn', title: cm.reason || cm.colorMatchReason || '按设计跳过' };
+    case 'failed':
+      return {
+        text: '校色失败',
+        cls: 'text-danger',
+        title: (cm.reason || '') + '（成片仍按原片产出，不是出片失败）'
+      };
+    default:
+      return { text: cm.state, cls: 'text-ink3', title: cm.reason || '' };
+  }
+}
+
+// 从任务对象取校色信息：意图 + 实际结果（优先拼接步骤，回退终检汇总）
+function pickColorMatch(task) {
+  if (!task) return null;
+  const intent = task.colorMatch && task.colorMatch.enabled === true;
+  const maxGain = (task.colorMatch && task.colorMatch.maxGain) ?? null;
+
+  const concatCm = task.steps && task.steps.concatenation
+    && task.steps.concatenation.qcDetails
+    && task.steps.concatenation.qcDetails.colorMatch;
+
+  const finalCc = task.finalQC && task.finalQC.details && task.finalQC.details.colorContinuity;
+
+  if (concatCm && concatCm.state) return { intent, maxGain, result: concatCm, source: 'concatenation' };
+  if (finalCc && finalCc.colorMatchState) {
+    return {
+      intent,
+      maxGain,
+      result: {
+        state: finalCc.colorMatchState,
+        reason: finalCc.colorMatchReason || '',
+        colorMatchReason: finalCc.colorMatchReason || ''
+      },
+      source: 'finalQC'
+    };
+  }
+  return { intent, maxGain, result: null, source: null };
+}
+
 function statusStyle(status) {
   switch (status) {
     case 'completed': return { text: '已完成', dot: 'bg-accent', cls: 'text-accent' };
@@ -155,6 +215,29 @@ export function TaskDrawer({ taskId, onClose }) {
               </${Row}>
               ${t.error && html`<${Row} label="错误"><span className="text-danger">${t.error}</span></${Row}>`}
             </div>
+
+            ${(() => {
+              const cm = pickColorMatch(t);
+              const b = colorMatchBadge(cm.result);
+              return html`
+                <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">校色</h4>
+                <div className="flex items-center gap-2 py-[5px] border-b border-black/[.04]">
+                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">用户要求</span>
+                  <span className=${'text-[12px] ' + (cm.intent ? 'text-ink' : 'text-ink3')}>
+                    ${cm.intent ? '开启' : '未要求（默认关）'}${cm.maxGain != null ? ' · 增益上限 ' + cm.maxGain : ''}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2 py-[5px]">
+                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">实际结果</span>
+                  <span className="flex-1 min-w-0">
+                    <span className=${'text-[12px] ' + b.cls} title=${b.title}>${b.text}</span>
+                    ${b.title && html`
+                      <span className="block mt-[2px] text-[10px] leading-[1.6] text-ink3 break-words">${b.title}</span>
+                    `}
+                  </span>
+                </div>
+              `;
+            })()}
 
             <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">流水线</h4>
             <ul className="divide-y divide-black/[.04]">
