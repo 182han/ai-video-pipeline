@@ -19,6 +19,9 @@ const { useEffect, useState, useRef } = React;
 const KEY_STORE = 'vs_config';
 const WEB_STORE = 'vs_web_config';
 
+// 用户已明确不会使用的模型，设置里不露出（后端仍保留）
+const HIDDEN_MODELS = new Set(['siliconflow', 'agnes']);
+
 function readJson(k) {
   try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : {}; } catch { return {}; }
 }
@@ -79,27 +82,16 @@ function Toggle(props) {
 }
 
 // ===== Key 分组定义（字段名严格沿用旧版 vs_config）=====
+// 2026-10-27：用户确认不再使用 硅基流动 Wan 2.2 与 Agnes(Pavo)，入口已移除。
+// 后端 generator 仍然保留（旧版页面还在用），只是设置里不再露出，
+// 避免「永远配不出 Key 的模型」占位。
 const KEY_GROUPS = [
-  {
-    id: 'siliconflow', title: '硅基流动 Wan 2.2', testType: 'siliconflow',
-    fields: [
-      { key: 'siliconflowKey', label: 'API Key', secret: true },
-      { key: 'siliconflowModel', label: '模型', placeholder: 'Wan-AI/Wan2.2-T2V-A14B' }
-    ]
-  },
   {
     id: 'seedance', title: 'Seedance 2.5（字节）', testType: 'seedance',
     fields: [
       { key: 'seedanceKey', label: 'API Key', secret: true },
       { key: 'seedanceBaseUrl', label: 'Base URL', placeholder: '留空用默认' },
       { key: 'seedanceModel', label: '模型', placeholder: '留空用默认' }
-    ]
-  },
-  {
-    id: 'agnes', title: 'Agnes (Pavo) 2.5', testType: 'agnes',
-    fields: [
-      { key: 'agnesKey', label: 'API Key', secret: true },
-      { key: 'agnesBaseUrl', label: 'Base URL', placeholder: '留空用默认' }
     ]
   },
   {
@@ -147,14 +139,12 @@ function KeyGroup(props) {
       const body = {
         type: group.testType,
         apiKey: cfg[group.fields[0].key] || '',
-        baseUrl: cfg.seedanceBaseUrl || cfg.agnesBaseUrl || cfg.llmUrl || cfg.multimodalUrl || ''
+        baseUrl: cfg.seedanceBaseUrl || cfg.llmUrl || cfg.multimodalUrl || ''
       };
       if (group.id === 'kling') { body.accessKey = cfg.klingAk || ''; body.secretKey = cfg.klingSk || ''; }
       if (group.id === 'llm') { body.baseUrl = cfg.llmUrl || ''; body.model = cfg.llmModel || ''; }
       if (group.id === 'multimodal') { body.baseUrl = cfg.multimodalUrl || ''; body.model = cfg.multimodalModel || ''; }
-      if (group.id === 'siliconflow') { body.model = cfg.siliconflowModel || ''; }
       if (group.id === 'seedance') { body.baseUrl = cfg.seedanceBaseUrl || ''; body.model = cfg.seedanceModel || ''; }
-      if (group.id === 'agnes') { body.baseUrl = cfg.agnesBaseUrl || ''; }
 
       const r = await fetch('/api/test-api-key', {
         method: 'POST',
@@ -218,7 +208,8 @@ function SettingsTab() {
   const saveKey = (patch) => setKeys(writeJson(KEY_STORE, patch));
   const saveWeb = (patch) => setWeb(writeJson(WEB_STORE, patch));
 
-  const modelList = Array.isArray(models.data) ? models.data : [];
+  const modelList = (Array.isArray(models.data) ? models.data : [])
+    .filter((m) => !HIDDEN_MODELS.has(m.id));
   const curModel = modelList.find((m) => m.id === web.videoModel) || modelList[0];
   const resolutions = (curModel && curModel.resolutions) || ['1080p'];
   const transitionOn = web.transition !== false;
