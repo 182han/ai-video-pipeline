@@ -84,6 +84,38 @@ function probeStreams(file) {
   });
 }
 
+// 判断某个 output 产物是否来自 Mock 任务（合成素材）。
+// 为什么要排除：Mock 生成的是 ffmpeg 纯色测试图案，整段画面**帧帧相同**，
+// 于是循环质检的「源素材首尾基线 SSIM」恒为 1.0。
+// 本脚本旧版按「时长最长」挑素材，恰好挑到 Mock 的 145s 静态样片 →
+// 断言 `wrap > base + 0.15`（base=1）在数学上永远不成立，
+// 这条断言 25 项里**从来没真正验证过「循环是否自然」**（假绿）。
+// 见 task-8 / AGENTS.md §4.1 同构问题：测不了的测试比没有测试更危险。
+function isMockOutput(file) {
+  const base = path.basename(file);
+  let ids = [];
+  try {
+    ids = fs.readdirSync(path.join(__dirname, '..', 'data', 'tasks'))
+      .filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''));
+  } catch (e) { return false; }
+  const id = ids.filter(x => base.startsWith(x + '_')).sort((a, b) => b.length - a.length)[0];
+  if (!id) return false;
+  try {
+    const t = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'tasks', `${id}.json`), 'utf8'));
+    return String(t.model) === 'mock';
+  } catch (e) { return false; }
+}
+
+// 兜底：造一段「首尾帧确实不同」的合成素材（testsrc 有运动与纹理）。
+// 只有在 output/ 里没有任何可用真实成片时才用，保证断言仍然可判。
+function buildSyntheticSource(dur = 20) {
+  const p = path.join(TMP, 'synthetic_source.mp4');
+  sh(`"${FFMPEG}" -y -v error -f lavfi -i "testsrc=size=1280x720:rate=30:duration=${dur}" `
+    + `-f lavfi -i "sine=frequency=440:duration=${dur}" `
+    + `-c:v libx264 -pix_fmt yuv420p -preset ultrafast -c:a aac -shortest "${p}"`);
+  return fs.existsSync(p) ? p : null;
+}
+
 function pickSource() {
   const idx = process.argv.indexOf('--source');
   if (idx > -1 && process.argv[idx + 1]) {
@@ -91,7 +123,8 @@ function pickSource() {
     if (!fs.existsSync(p)) throw new Error(`指定的素材不存在: ${p}`);
     return p;
   }
-  // 默认挑 output 里时长最长的成片（更能体现循环价值，也更容易看出接缝）
+  // 默认挑 output 里时长最长的**真实**（非 Mock）成片：
+  // 更能体现循环价值，也更容易看出接缝；且保证首尾帧不同（断言才有意义）。
   if (!fs.existsSync(OUTPUT_DIR)) throw new Error(`找不到 output 目录: ${OUTPUT_DIR}`);
   const files = fs.readdirSync(OUTPUT_DIR)
     .filter(f => /\.mp4$/i.test(f) && !/_loop\.mp4$/i.test(f))
@@ -100,9 +133,14 @@ function pickSource() {
       return { full, duration: probeDuration(full) || 0 };
     })
     .filter(f => f.duration > 3)
+    .filter(f => !isMockOutput(f.full))          // ← 排除合成静态样片（假绿根源）
     .sort((a, b) => b.duration - a.duration);
-  if (files.length === 0) throw new Error('output 目录里没有可用于测试的成片');
-  return files[0].full;
+  if (files.length > 0) return files[0].full;
+
+  console.warn('  ⚠ output/ 里没有可用的真实成片（只剩 Mock 合成样片），改用合成运动素材');
+  const syn = buildSyntheticSource();
+  if (!syn) throw new Error('output 目录里没有可用成片，且构造合成素材失败');
+  return syn;
 }
 
 async function main() {
@@ -174,6 +212,12 @@ async function main() {
     assert(!('mock' in qc) && !qc.mock, '结论不再是 mock/写死通过', `mock 字段: ${JSON.stringify(qc.mock)}`);
     assert(qc.durationCheck === 'ok', '时长核验通过', `duration=${qc.duration}s, expected=${qc.expectedDuration}s`);
     if (Number.isFinite(qc.wrapSsim) && Number.isFinite(qc.baseSsim)) {
+      // 防假绿护栏（task-8）：若素材首尾基线 SSIM 接近 1（静态/纯色画面），
+      // 下面这条相对断言在数学上不可能成立（要求 wrap ≥ base+0.15 > 1）。
+      // 必须先确认「基线有区分度」，否则整条用例退回成"永不可能通过的断言"。
+      assert(qc.baseSsim < 0.999,
+        '素材首尾基线 SSIM 有区分度（基线≈1 时该断言不可判，等于假覆盖）',
+        `baseSsim=${qc.baseSsim}，素材 ${path.basename(source)}`);
       assert(qc.wrapSsim > qc.baseSsim + 0.15,
         '回绕相似度显著高于素材基线（证明淡化真的起作用）',
         `wrap=${qc.wrapSsim} vs base=${qc.baseSsim}`);
@@ -233,6 +277,38 @@ async function main() {
   assert(qcWrongFade.passed === false && qcWrongFade.durationCheck === 'mismatch',
     '错误淡化时长被判 fail',
     `duration=${qcWrongFade.duration}s, expected=${qcWrongFade.expectedDuration}s`);
+
+  // ---------- 5b. 负向：时长正确但回绕不自然（隔离 SSIM 判定） ----------
+  //
+  // 为什么单独造这个用例（task-8）：上面的 [1] 证明了「好产物能通过」，
+  // [2] 的直通产物是**时长**不符被抓，并没有证明 wrap SSIM 这一路判定真的有效。
+  // 本用例构造一个「时长完全正确、但尾巴没有渐变回开头」的产物：
+  //   = 把源素材裁到 (源时长 − 淡化时长)，不做任何淡化。
+  // 它必须只因**回绕相似度**被判 fail —— 这样才证明「循环自然与否」真的被测量。
+  console.log('\n[5b] 负向：时长正确但回绕不自然（隔离 wrap SSIM 判定）');
+  const fakeLoop = path.join(TMP, 'fake_loop_no_fade.mp4');
+  const trimTo = Math.max(0.5, sourceDuration - fade);
+  sh(`"${FFMPEG}" -y -v error -i "${source}" -t ${trimTo.toFixed(3)} `
+    + `-c:v libx264 -pix_fmt yuv420p -preset ultrafast -c:a aac "${fakeLoop}"`);
+  if (fs.existsSync(fakeLoop)) {
+    const qcFake = await qualityChecker.checkLoop(fakeLoop, {
+      sourcePath: source,
+      sourceDuration,
+      fadeDuration: fade,
+      threshold
+    });
+    assert(qcFake.durationCheck === 'ok',
+      '该产物的时长核验是「通过」的（隔离变量：不是靠时长被抓）',
+      `duration=${qcFake.duration}s, expected=${qcFake.expectedDuration}s`);
+    assert(qcFake.passed === false,
+      '回绕不自然的产物被判 **fail**（证明 wrap SSIM 判定真的生效）',
+      `wrap=${qcFake.wrapSsim}, base=${qcFake.baseSsim}, threshold=${threshold}`);
+    assert(!Number.isFinite(qcFake.wrapSsim) || qcFake.wrapSsim <= qcFake.baseSsim + 0.15,
+      '失败原因确实是「回绕相似度不够高」而不是别的',
+      `wrap=${qcFake.wrapSsim} vs base=${qcFake.baseSsim}`);
+  } else {
+    bad('构造「时长正确但未淡化」的产物失败', '无法验证 wrap SSIM 判定');
+  }
 
   // ---------- 6. 双路径一致性：新建流程 vs 重建母版 ----------
   //
