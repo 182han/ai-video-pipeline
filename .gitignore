@@ -20,6 +20,8 @@ data/library/
 data/waveforms/
 # 登录墙账号（存 scrypt 哈希；每台机器各自独立，绝不进仓库）
 data/users.json
+# 诊断报告（接缝分析等，含抽帧 PNG，体积大且属运行时产物）
+data/reports/
 *.mp4
 *.mp4.txt
 *.log
