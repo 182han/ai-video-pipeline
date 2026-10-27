@@ -10,6 +10,7 @@ import { promptBus } from '../store.js';
 import { TaskDrawer } from '../components/taskDrawer.js';
 import { Assistant } from '../components/assistant.js';
 import { Boundary } from '../components/boundary.js';
+import { OutputScreen } from './output.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -185,7 +186,7 @@ export function Workbench({ route }) {
       <${TopBar} stage=${stage} />
       ${stage === 'create' && html`<${CreateScreen} />`}
       ${stage === 'review' && html`<${Placeholder} title="审核" note="静帧接缝审核 · 下一步实现" />`}
-      ${stage === 'output' && html`<${Placeholder} title="产出" note="成片 / 质检 / 导出 · 下一步实现" />`}
+      ${stage === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
       <${Assistant} />
     </div>
   `;
