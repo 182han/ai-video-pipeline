@@ -49,6 +49,15 @@ tools/ffmpeg/bin/*.dll
 tools/ffmpeg/bin/
 tools/ffmpeg/*.exe
 
+# ===== Tailwind 独立 CLI（约 40MB，不进仓库）=====
+# 本机没有 npm，样式改用 Tailwind 官方单文件程序生成。
+# 新机器恢复方式（PowerShell）：
+#   node -e "fetch('https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-windows-x64.exe').then(r=>r.arrayBuffer()).then(b=>require('fs').writeFileSync('tools/tailwind/tailwindcss.exe',Buffer.from(b)))"
+# 生成样式：
+#   tools/tailwind/tailwindcss.exe -c web/tailwind.config.js -i web/styles/src.css -o web/styles/app.css --minify
+# 注意：web/vendor/（React UMD + htm，约 150KB）刻意入库，新机器 clone 后直接可跑。
+tools/tailwind/*.exe
+
 # ===== 本地临时文件 =====
 _e2e_*.js
 .DS_Store
