@@ -77,10 +77,17 @@ check(calls >= 4, '四条拼接路径都接入了转场（实测调用点）', `
 console.log('\n[5] config.js / .env.example');
 const cfg = read('config.js');
 check(/TRANSITIONS:\s*\{/.test(cfg), 'config 有 TRANSITIONS 配置块');
-check(/TRANSITION_ENABLED',\s*'false'/.test(cfg), '默认关闭（TRANSITION_ENABLED 回退 false）');
+// 默认值（2026-10-27 起）：默认**开启**（用户拍板，依据 docs/spec/seam-quality-spec.md §9）
+// 同时保留「能关掉」的回归断言 —— 关掉要回到 -c copy 直拼，这是快速验证档依赖的路径。
+check(/TRANSITION_ENABLED',\s*'true'/.test(cfg), '默认开启（TRANSITION_ENABLED 回退 true）');
 check(/TRANSITION_DURATION/.test(cfg) && /TRANSITION_TYPE/.test(cfg), 'duration / type 可配置');
+// quick 档必须强制关闭转场（否则快速验证档也会被 17.6× 的重编码拖慢）
+check(/disabledByPreset/.test(pl), 'pipeline 按档位关闭转场（quick → disabledByPreset）');
 const env = read('.env.example');
 check(/TRANSITION_ENABLED=/.test(env) && /TRANSITION_DURATION=/.test(env) && /TRANSITION_TYPE=/.test(env), '.env.example 已列出三个变量');
+// .env.example 的示例值必须与代码默认一致，否则用户照抄会得到不同行为
+check(/^TRANSITION_ENABLED=true/m.test(env), '.env.example 的 TRANSITION_ENABLED 与代码默认一致（true）');
+check(/^TRANSITION_DURATION=0\.4/m.test(env), '.env.example 的 TRANSITION_DURATION 与代码默认一致（0.4）');
 
 console.log('\n' + '='.repeat(60));
 console.log(`结果: ${pass} 通过 / ${fail} 失败`);
