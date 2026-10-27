@@ -209,6 +209,17 @@ function concatCopy(files, outName) {
     '3 段视频算出 2 道缝', JSON.stringify(rSampled.details.summary));
   ok(rSampled.details.summary.sampled === true && rSampled.details.seams.length === 1,
     'maxSeams=1 时触发抽样，且只测 1 道（抽样状态如实标注）');
+  // 覆盖面必须写进**结论字符串**，不能只藏在 details 里 ——
+  // 否则用户会以为"8 段以上成片也全测了"（task-7 反馈第 3 点）。
+  ok(/仅检测 1\/2 道缝/.test(String(rSampled.reason)),
+    '抽样时结论里显式写明「仅检测 1/2 道缝」', String(rSampled.reason).slice(0, 100));
+  ok(rSampled.details.summary.unscanned === 1 && rSampled.details.summary.partialCoverage === true,
+    '抽样时暴露 unscanned / partialCoverage 字段',
+    `unscanned=${rSampled.details.summary.unscanned}, partialCoverage=${rSampled.details.summary.partialCoverage}`);
+  // 反向：未抽样时不得出现「仅检测」字样（避免误报覆盖面）
+  const rFull = await qualityChecker.checkSeam(hardcut, [3, 3], {});
+  ok(!/仅检测/.test(String(rFull.reason)),
+    '未抽样时结论里不出现「仅检测」字样（不误报覆盖面）', String(rFull.reason).slice(0, 80));
 
   // ---------------------------------------------------------
   section('[7] 真实成片（只读 output/；--fast 跳过）');

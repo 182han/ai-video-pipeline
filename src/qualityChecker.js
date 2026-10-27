@@ -606,10 +606,16 @@ class QualityChecker {
 
     const worstSsim = measured.length ? Math.min(...measured.map(s => s.ssim)) : null;
     const worstDe = measured.filter(s => Number.isFinite(s.de76)).map(s => s.de76);
+    const unscanned = Math.max(0, inRange.length - picked.length);
     const summary = {
       totalSeamsInVideo: inRange.length,
       scanned: picked.length,
       sampled,
+      // 覆盖面必须显式暴露：抽样时结论只覆盖被检测的那些缝。
+      // 不能让用户/下游以为「全片都测过了」（AGENTS.md §4.1 的同构要求：
+      // 没测的部分不能靠沉默变成"通过"）。
+      unscanned,
+      partialCoverage: sampled,
       passedSeams: measured.filter(s => s.passed).length,
       failedSeams: measured.filter(s => s.passed === false).length,
       undeterminedSeams: undeterminedCount,
@@ -618,11 +624,17 @@ class QualityChecker {
       fadeDuration: fade
     };
 
+    // 覆盖面说明：抽样时必须写进结论（不能只留在 details 里）
+    const coverageNote = sampled
+      ? `；本次仅检测 ${picked.length}/${inRange.length} 道缝（均匀抽样），`
+        + `未检测的 ${unscanned} 道不计入结论`
+      : '';
+
     let reason;
     if (passed) {
       reason = `接缝质量通过：${measured.length} 道缝全部达标`
         + `（最差 SSIM ${summary.worstSsim}，最大 ΔE76 ${summary.worstDe76 ?? '—'}`
-        + `${sampled ? `，共 ${inRange.length} 道缝已抽样 ${picked.length} 道` : ''}）`;
+        + `${coverageNote}）`;
     } else {
       const detail = failedSeams.slice(0, 3).map(s =>
         s.undetermined
@@ -630,7 +642,7 @@ class QualityChecker {
           : `缝#${s.index + 1}@${s.t}s 不通过（${s.reasons.join('、')}）`
       );
       const more = failedSeams.length > 3 ? ` 等 ${failedSeams.length} 道` : '';
-      reason = `接缝质量不通过：${detail.join('；')}${more}`;
+      reason = `接缝质量不通过：${detail.join('；')}${more}${coverageNote}`;
     }
 
     return {
