@@ -131,6 +131,7 @@ function KeyGroup(props) {
   const { group, cfg, onSave } = props;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [shown, setShown] = useState({});   // 每个密钥框独立的「显示明文」开关
 
   async function test() {
     setBusy(true);
@@ -177,12 +178,22 @@ function KeyGroup(props) {
       </div>
 
       ${group.fields.map((f) => html`
-        <${Row} key=${f.key} label=${f.label}>
+        <${Row} key=${f.key} label=${f.label}
+          tail=${f.secret ? html`
+            <button
+              type="button"
+              onClick=${() => setShown((s) => ({ ...s, [f.key]: !s[f.key] }))}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-ink hover:bg-black/[.04] shrink-0"
+              title=${shown[f.key] ? '隐藏' : '显示明文'}
+            >${shown[f.key] ? '隐藏' : '显示'}</button>
+          ` : null}>
           <input
-            type=${f.secret ? 'password' : 'text'}
+            type=${f.secret && !shown[f.key] ? 'password' : 'text'}
             className=${inputCls}
             value=${cfg[f.key] || ''}
             placeholder=${f.placeholder || ''}
+            autoComplete="off"
+            spellCheck="false"
             onChange=${(e) => onSave({ [f.key]: e.target.value.trim() })}
           />
         </${Row}>
@@ -389,37 +400,173 @@ function TasksTab() {
 }
 
 function AssetsTab() {
-  const lib = useJson('/api/library');
+  const [q, setQ] = useState('');
+  const [favOnly, setFavOnly] = useState(false);
+  const [res, setRes] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState('');
+  const [tick, setTick] = useState(0);   // 变更后靠它触发重取
+
+  const qs = new URLSearchParams();
+  if (q.trim()) qs.set('q', q.trim());
+  if (favOnly) qs.set('favorite', '1');
+  if (res) qs.set('resolution', res);
+  const url = '/api/library' + (qs.toString() ? '?' + qs.toString() : '');
+
+  const { data, loading, error } = useJson(url + (url.includes('?') ? '&' : '?') + '_=' + tick);
   const bgm = useJson('/api/bgm');
-  const totals = (lib.data && lib.data.totals) || {};
+
+  const groups = (data && data.groups) || [];
+  const facets = (data && data.facets) || {};
+  const totals = (data && data.totals) || {};
   const tracks = (bgm.data && bgm.data.tracks) || [];
 
-  return html`
-    <${Section} title="片段库" hint=${lib.loading ? '加载中…' : (lib.error ? '读取失败' : 'GET /api/library')}>
-      ${lib.error
-        ? html`<p className="text-[12px] text-danger">${lib.error}</p>`
-        : (Object.keys(totals).length === 0
-          ? html`<span className="text-[12px] text-ink3">库里还没有片段</span>`
-          : html`<div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-ink2 font-num">
-              ${Object.entries(totals).map(([k, v]) => html`<span key=${k}>${k} ${v}</span>`)}
-            </div>`)}
-    </${Section}>
+  async function toggleFav(it) {
+    setBusyId(it.id);
+    setErr('');
+    try {
+      const r = await fetch('/api/library/' + encodeURIComponent(it.id), {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favorite: !it.favorite })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setTick((t) => t + 1);
+    } catch (e) {
+      setErr('收藏失败：' + e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
-    <${Section} title="配乐库" hint=${bgm.loading ? '加载中…' : (bgm.error ? '读取失败' : 'GET /api/bgm')}>
-      ${bgm.error
-        ? html`<p className="text-[12px] text-danger">${bgm.error}</p>`
-        : html`
-          <p className="text-[12px] text-ink2 font-num">共 ${(bgm.data && bgm.data.total) || 0} 首</p>
-          <ul className="mt-1 divide-y divide-black/[.04]">
-            ${tracks.slice(0, 12).map((t) => html`
-              <li key=${t.id} className="py-[5px] flex items-center gap-2">
-                <span className="text-[12px] text-ink truncate flex-1">${t.title || t.id}</span>
-                <span className="text-[10px] text-ink3">${(t.mood || []).join('/')}</span>
-              </li>
+  async function remove(it) {
+    // 删除会同时删掉 clips/ 下的源文件，必须二次确认并写明后果
+    const ok = window.confirm(
+      '确定删除这条片段吗？\n\n提示词：' + (it.prompt || '').slice(0, 60) + '\n\n'
+      + '会同时删除磁盘上的片段文件（' + (it.fileName || it.id) + '），不可恢复。'
+    );
+    if (!ok) return;
+    setBusyId(it.id);
+    setErr('');
+    try {
+      const r = await fetch('/api/library/' + encodeURIComponent(it.id), {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.success) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      setTick((t) => t + 1);
+    } catch (e) {
+      setErr('删除失败：' + e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return html`
+    <div className="py-2">
+      <div className="flex items-center gap-2">
+        <input
+          className="h-8 flex-1 max-w-[260px] rounded-[5px] border border-black/[.09] bg-s3 px-2 text-[12px] text-ink"
+          placeholder="搜索提示词…"
+          value=${q}
+          onChange=${(e) => setQ(e.target.value)}
+        />
+        <select
+          className="h-8 rounded-[5px] border border-black/[.09] bg-s3 px-2 text-[12px] text-ink"
+          value=${res}
+          onChange=${(e) => setRes(e.target.value)}
+        >
+          <option value="">全部分辨率</option>
+          ${(facets.resolutions || []).map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
+        </select>
+        <button
+          onClick=${() => setFavOnly((v) => !v)}
+          className=${'h-8 px-2.5 rounded-[5px] border text-[12px] ' +
+            (favOnly ? 'border-accent/40 bg-accent/[.08] text-accent' : 'border-black/[.09] text-ink2')}
+        >只看收藏</button>
+        <span className="flex-1"></span>
+        <span className="text-[11px] text-ink3 font-num">
+          ${loading ? '加载中…' : (error ? '读取失败'
+            : (totals.count || 0) + ' 条' + (totals.favorites ? ' · 收藏 ' + totals.favorites : ''))}
+        </span>
+      </div>
+
+      ${err && html`<p className="mt-1 text-[11px] text-danger">${err}</p>`}
+      ${error && html`<p className="mt-1 text-[11px] text-danger">${error}</p>`}
+
+      ${groups.length === 0 && !loading && html`
+        <p className="mt-4 text-[12px] text-ink3">没有匹配的片段。</p>
+      `}
+
+      ${groups.map((g) => html`
+        <div key=${g.label} className="mt-3">
+          <div className="flex items-baseline gap-2 border-b border-black/[.07] pb-1">
+            <span className="text-[12px] font-medium text-ink">${g.label}</span>
+            <span className="text-[10px] text-ink3 font-num">${g.count} 条</span>
+            ${g.totalCost > 0 && html`<span className="text-[10px] text-ink3 font-num">¥${g.totalCost}</span>`}
+          </div>
+
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-3">
+            ${(g.items || []).map((it) => html`
+              <div key=${it.id} className="rounded-[6px] border border-black/[.07] overflow-hidden bg-s2">
+                <video
+                  src=${it.url}
+                  className="w-full aspect-video bg-black object-cover"
+                  preload="metadata"
+                  muted
+                  playsInline
+                  controls
+                ></video>
+                <div className="px-2 py-1.5">
+                  <p className="text-[11px] leading-[1.5] text-ink line-clamp-2 min-h-[32px]">
+                    ${(it.prompt || '').slice(0, 80)}
+                  </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-[10px] text-ink3">${it.model || '-'}</span>
+                    <span className="text-[10px] text-ink3 font-num">${(() => {
+                      const d = it.duration || it.durationSec || it.durationSeconds;
+                      return d ? Math.round(d) + 's' : '';
+                    })()}</span>
+                    <span className="flex-1"></span>
+                    <button
+                      onClick=${() => toggleFav(it)}
+                      disabled=${busyId === it.id}
+                      title=${it.favorite ? '取消收藏' : '收藏'}
+                      className=${'h-6 px-1.5 rounded-[4px] text-[12px] hover:bg-black/[.05] ' +
+                        (it.favorite ? 'text-warn' : 'text-ink3')}
+                    >${it.favorite ? '★' : '☆'}</button>
+                    <button
+                      onClick=${() => remove(it)}
+                      disabled=${busyId === it.id}
+                      title="删除（含文件）"
+                      className="h-6 px-1.5 rounded-[4px] text-[11px] text-ink3 hover:text-danger hover:bg-black/[.05]"
+                    >删除</button>
+                  </div>
+                </div>
+              </div>
             `)}
-          </ul>
-        `}
-    </${Section}>
+          </div>
+        </div>
+      `)}
+
+      <${Section} title="配乐库" hint=${bgm.loading ? '加载中…' : (bgm.error ? '读取失败' : 'GET /api/bgm')}>
+        ${bgm.error
+          ? html`<p className="text-[12px] text-danger">${bgm.error}</p>`
+          : html`
+            <p className="text-[12px] text-ink2 font-num">共 ${(bgm.data && bgm.data.total) || 0} 首</p>
+            <ul className="mt-1 divide-y divide-black/[.04]">
+              ${tracks.slice(0, 12).map((t) => html`
+                <li key=${t.id} className="py-[5px] flex items-center gap-2">
+                  <span className="text-[12px] text-ink truncate flex-1">${t.title || t.id}</span>
+                  <span className="text-[10px] text-ink3">${(t.mood || []).join('/')}</span>
+                </li>
+              `)}
+            </ul>
+          `}
+      </${Section}>
+    </div>
   `;
 }
 
