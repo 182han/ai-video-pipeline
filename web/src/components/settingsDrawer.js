@@ -399,7 +399,7 @@ function TasksTab() {
   `;
 }
 
-function AssetsTab() {
+function ClipsTab() {
   const [q, setQ] = useState('');
   const [favOnly, setFavOnly] = useState(false);
   const [res, setRes] = useState('');
@@ -414,7 +414,6 @@ function AssetsTab() {
   const url = '/api/library' + (qs.toString() ? '?' + qs.toString() : '');
 
   const { data, loading, error } = useJson(url + (url.includes('?') ? '&' : '?') + '_=' + tick);
-  const bgm = useJson('/api/bgm');
 
   const groups = (data && data.groups) || [];
   const facets = (data && data.facets) || {};
@@ -550,29 +549,119 @@ function AssetsTab() {
           </div>
         </div>
       `)}
+    </div>
+  `;
+}
 
-      <${Section} title="配乐库" hint=${bgm.loading ? '加载中…' : (bgm.error ? '读取失败' : 'GET /api/bgm')}>
-        ${bgm.error
-          ? html`<p className="text-[12px] text-danger">${bgm.error}</p>`
-          : html`
-            <p className="text-[12px] text-ink2 font-num">共 ${(bgm.data && bgm.data.total) || 0} 首</p>
-            <ul className="mt-1 divide-y divide-black/[.04]">
-              ${tracks.slice(0, 12).map((t) => html`
-                <li key=${t.id} className="py-[5px] flex items-center gap-2">
-                  <span className="text-[12px] text-ink truncate flex-1">${t.title || t.id}</span>
-                  <span className="text-[10px] text-ink3">${(t.mood || []).join('/')}</span>
-                </li>
-              `)}
-            </ul>
-          `}
-      </${Section}>
+// ===== 音乐库（独立页签，不与视频库混在一起）=====
+function MusicTab() {
+  const [tick, setTick] = useState(0);
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState('');
+  const bgm = useJson('/api/bgm?_=' + tick);
+
+  const tracks = (bgm.data && bgm.data.tracks) || [];
+  const prefs = bgm.data || {};
+  const defaultId = prefs.defaultTrackId || '';
+  const moodNames = prefs.moodNames || {};
+  const catNames = prefs.categoryNames || {};
+
+  async function setDefault(t) {
+    setBusyId(t.id);
+    setErr('');
+    try {
+      const r = await fetch('/api/bgm/prefs', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultTrackId: t.id })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setTick((v) => v + 1);
+    } catch (e) {
+      setErr('设为默认失败：' + e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function removeTrack(t) {
+    const ok = window.confirm('确定删除配乐「' + (t.title || t.id) + '」吗？\n删除后不可恢复。');
+    if (!ok) return;
+    setBusyId(t.id);
+    setErr('');
+    try {
+      const r = await fetch('/api/bgm/' + encodeURIComponent(t.id), {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.success) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      setTick((v) => v + 1);
+    } catch (e) {
+      setErr('删除失败：' + e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return html`
+    <div className="py-2">
+      <div className="flex items-baseline gap-2 border-b border-black/[.07] pb-1">
+        <span className="text-[12.5px] font-medium text-ink">配乐库</span>
+        <span className="text-[10px] text-ink3 font-num">
+          ${bgm.loading ? '加载中…' : (bgm.error ? '读取失败' : '共 ' + ((bgm.data && bgm.data.total) || 0) + ' 首')}
+        </span>
+      </div>
+
+      ${err && html`<p className="mt-1 text-[11px] text-danger">${err}</p>`}
+      ${bgm.error && html`<p className="mt-1 text-[11px] text-danger">${bgm.error}</p>`}
+
+      ${tracks.length === 0 && !bgm.loading && html`
+        <p className="mt-3 text-[12px] text-ink3">还没有配乐。</p>
+      `}
+
+      <ul className="mt-1 divide-y divide-black/[.05]">
+        ${tracks.map((t) => html`
+          <li key=${t.id} className="py-2 flex items-center gap-2">
+            <span className="text-[12px] text-ink truncate flex-1" title=${t.id}>
+              ${t.title || t.id}
+            </span>
+            <span className="text-[10px] text-ink3 shrink-0">
+              ${(t.mood || []).map((m) => moodNames[m] || m).join(' / ')}
+            </span>
+            <span className="text-[10px] text-ink3 shrink-0">
+              ${catNames[t.category] || t.category || ''}
+            </span>
+            ${defaultId === t.id
+              ? html`<span className="text-[10px] text-accent shrink-0">默认</span>`
+              : html`
+                <button
+                  onClick=${() => setDefault(t)}
+                  disabled=${busyId === t.id}
+                  className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-black/[.05] shrink-0"
+                >设为默认</button>
+              `}
+            <button
+              onClick=${() => removeTrack(t)}
+              disabled=${busyId === t.id}
+              className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-black/[.05] shrink-0"
+            >删除</button>
+          </li>
+        `)}
+      </ul>
+
+      <p className="mt-3 text-[10px] leading-[1.7] text-ink3">
+        自动配乐会从「默认」曲目开始按顺序接续。曲目文件放在 app/assets/bgm/，新增走旧版配乐管理页。
+      </p>
     </div>
   `;
 }
 
 const TABS = [
   { key: 'tasks', label: '任务' },
-  { key: 'assets', label: '资产' },
+  { key: 'clips', label: '视频库' },
+  { key: 'music', label: '音乐库' },
   { key: 'settings', label: '设置' }
 ];
 
@@ -617,7 +706,8 @@ export function SettingsDrawer({ onClose }) {
 
         <div className="flex-1 min-h-0 overflow-auto px-4 py-2">
           ${tab === 'tasks' && html`<${TasksTab} />`}
-          ${tab === 'assets' && html`<${AssetsTab} />`}
+          ${tab === 'clips' && html`<${ClipsTab} />`}
+          ${tab === 'music' && html`<${MusicTab} />`}
           ${tab === 'settings' && html`<${SettingsTab} />`}
         </div>
       </aside>
