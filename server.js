@@ -87,7 +87,14 @@ app.use((req, res, next) => {
   }
 
   // 只拦页面；图片/字体/视频等静态资源放行
-  const isPage = p === '/' || p.endsWith('.html');
+  //
+  // 2026-10-27 修正：React 版挂在 /app 下，SPA 路由（/app/create 之类）不带 .html 后缀。
+  // 按旧判据会被当成「静态资源」直接放行 —— 等于绕过登录墙（既有安全缺陷）。
+  // 这里把 SPA 路由显式算作页面；但 /app 下的静态资源前缀不算，否则 JS/CSS 也要登录才能取。
+  const SPA_ASSET = /^\/app\/(vendor|src|styles|assets)\//;
+  const isSpaRoute = (p === '/app' || p === '/app/') ||
+    (p.startsWith('/app/') && !SPA_ASSET.test(p));
+  const isPage = p === '/' || p.endsWith('.html') || isSpaRoute;
   if (!isPage) return next();
 
   const session = auth.authorizeRequest(req);
@@ -230,6 +237,29 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   },
 }));
+
+// ===== React 版（app/web），挂在 /app 下 =====
+// 迁移期两套并存：旧版仍在 /（public/index.html），新版在 /app，互不影响。
+// 没有构建步骤：vendor/ 是预先下载好的 React UMD 与 htm；样式由 tools/tailwind 的独立 CLI 生成。
+// 注意：/app 的 SPA 路由已在登录墙里按「页面」处理（不靠 .html 后缀判断）。
+app.use('/app', express.static(path.join(__dirname, 'web'), {
+  // 关掉目录索引重定向：/app 直接由下面的 SPA 兜底返回 index.html，
+  // 否则 /app 会先 301 到 /app/，多一跳且在重定向下容易暴露路径细节。
+  index: false,
+  redirect: false,
+  setHeaders: (res, filePath) => {
+    if (/\.(html|js|css|mp4|jpg|png)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  },
+}));
+
+// SPA 兜底：/app 下任何非静态资源路径都回 index.html（刷新不 404）
+app.get(/^\/app(\/.*)?$/, (req, res, next) => {
+  if (/^\/app\/(vendor|src|styles|assets)\//.test(req.path)) return next();
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.sendFile(path.join(__dirname, 'web', 'index.html'));
+});
 
 // 输出文件静态访问（用于视频播放和下载）
 app.use('/output', express.static(path.join(__dirname, 'output'), {
