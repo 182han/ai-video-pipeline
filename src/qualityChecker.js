@@ -25,6 +25,9 @@ const QC_ITEMS = [
   // 接缝质量：只校验时长抓不到「拼接是否自然」（AGENTS.md §6 的接缝 SSIM 0.238 就是这么漏掉的）。
   // 该项未执行即整体不通过；唯一合法跳过是「只有 1 个片段」。
   { key: 'seam', name: '接缝质量检测', category: 'post', desc: '逐缝测结构相似度/色差/亮度差/像素级变化，判硬切或淡化是否自然' },
+  // 镜头级色彩连续性：补 seam 的盲区——转场开启时接缝中心是混合帧，
+  // 「两个镜头本身色调差很多」测不出来（实测 pair3：接缝 ΔE76 0.29 通过，镜头级 25.49）。
+  { key: 'colorContinuity', name: '镜头色彩连续性', category: 'post', desc: '测相邻镜头整体色调差（缝前/缝后各抽一帧算 ΔE76），三档：通过/提示/失败' },
   { key: 'loop', name: '循环质检', category: 'post', desc: '检查首尾循环过渡是否自然' },
   { key: 'transcode', name: '转码质检', category: 'post', desc: '校验转码后分辨率、帧率、码率' },
   { key: 'final', name: '最终综合质检', category: 'final', desc: '文件完整性 + 整体质量综合评估' }
@@ -36,7 +39,7 @@ const QC_ITEMS = [
 //   1 = 修复前产生的结论 —— 视为「历史未验证」，绝不能当作真实通过
 //   2 = 修复后产生的结论 —— 可信
 // 判定逻辑统一放在 src/storage/qcVersion.js，本文件只负责「打标」。
-const QC_VERSION = 2;
+const QC_VERSION = 3;
 // 历史分界：任何 >= 该值的版本都按可信处理（将来升到 3 时，2 依然可信）
 const QC_VERSION_LEGACY = 1;
 
@@ -71,6 +74,11 @@ class QualityChecker {
       seamDyMax: config.QC && Number.isFinite(config.QC.seamDyMax) ? config.QC.seamDyMax : 30,
       seamMadRatioMax: config.QC && Number.isFinite(config.QC.seamMadRatioMax) ? config.QC.seamMadRatioMax : 8,
       seamMaxSeams: config.QC && Number.isFinite(config.QC.seamMaxSeams) ? config.QC.seamMaxSeams : 8,
+      // ===== 镜头级色彩连续性阈值（详见 docs/spec/re-jianying/seam-experiment.md）=====
+      // 实验：合格组镜头级 ΔE76 1.4~3.6，明显不连贯组 25~48。
+      // 三档：≤warn 通过 / warn~max 记 warn（不判失败）/ >max 判失败。
+      colorDe76Warn: config.QC && Number.isFinite(config.QC.colorDe76Warn) ? config.QC.colorDe76Warn : 15,
+      colorDe76Max: config.QC && Number.isFinite(config.QC.colorDe76Max) ? config.QC.colorDe76Max : 40,
       ...options
     };
     this.qcItems = QC_ITEMS;
@@ -656,6 +664,229 @@ class QualityChecker {
     };
   }
 
+  // ============================================================
+  // 镜头级色彩连续性（colorContinuity，2026-10-27 新增）
+  // ------------------------------------------------------------
+  // 为什么需要它：checkSeam 只在「接缝中心帧」测相似度；转场开启时那里是混合帧，
+  // 于是「两个镜头本身色调差很多」测不出来。实测（docs/spec/re-jianying/seam-experiment.md）：
+  // pair3 接缝 ΔE76 仅 0.29（按阈值通过），但相邻镜头均值 ΔE76 高达 25.49 ——
+  // 转场瞬间顺、前后镜头色调却不连贯。
+  //
+  // 做法：每道缝取「缝前 0.6s」与「缝后 0.6s」两帧（刻意避开转场混合区），
+  //      算两帧 Y/U/V 均值的 ΔE76，判「镜头整体色调是否跳变」。
+  //
+  // 三档（用户 2026-10-27 拍板）：≤warn 通过；warn~max 记 warn（不拉低通过率）；>max 失败。
+  // 冷暖对比（日落→蓝调）可能是刻意创作，不能一刀切。
+  //
+  // 校色状态（colorMatchState）：
+  //   applied  → 正常判定；
+  //   disabled → 校色没开（默认），照常测色差，只在结论里注明「本次未校色」；
+  //   skipped / failed → 校色「要了没做成」→ 本项 skipped 且 legitimateSkip=false
+  //                      → 进 notRunItems → 整体不通过（§4.1：未执行 ≠ 通过）。
+  async checkColorContinuity(videoPath, clipDurations, options = {}) {
+    const cmState = options.colorMatchState || 'disabled';
+    const cmReason = options.colorMatchReason || '';
+    const cmMeta = { colorMatchState: cmState, colorMatchReason: cmReason };
+    const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    const fail = (reason, extra = {}) => ({
+      passed: false,
+      qcVersion: QC_VERSION,
+      reason,
+      level: 'fail',
+      ...cmMeta,
+      ...extra
+    });
+
+    // 校色被要求但没做成：这属于「流程未执行」，不能当通过
+    if (cmState === 'skipped' || cmState === 'failed') {
+      return {
+        passed: false,
+        skipped: true,
+        legitimateSkip: false,
+        level: 'fail',
+        qcVersion: QC_VERSION,
+        reason: '校色未执行：' + (cmReason || '未提供原因') + '（§4.1：未执行不计为通过）',
+        ...cmMeta
+      };
+    }
+
+    if (!this._hasFFmpeg()) {
+      return fail('镜头色彩连续性未执行：FFmpeg 不可用，无法抽帧算色差', { detectorUnavailable: true });
+    }
+
+    const durs = Array.isArray(clipDurations) ? clipDurations.map(Number) : [];
+    const usable = durs.filter(n => Number.isFinite(n) && n > 0);
+
+    // 唯一合法的跳过：只有 1 个片段（与 checkSeam 口径一致）
+    if (Array.isArray(clipDurations) && clipDurations.length === 1) {
+      return {
+        passed: true,
+        qcVersion: QC_VERSION,
+        skipped: true,
+        legitimateSkip: true,
+        level: 'skip',
+        reason: '镜头色彩连续性按设计跳过：仅 1 个片段，不存在镜头间断点',
+        ...cmMeta
+      };
+    }
+    if (usable.length < 2 || usable.length !== durs.length) {
+      return fail(
+        `镜头色彩连续性未执行：片段时长不可用（收到 ${durs.length} 个，有效 ${usable.length} 个），无法定位镜头间断点`,
+        { undetermined: true }
+      );
+    }
+
+    let info;
+    try {
+      info = await this._getVideoInfoFFmpeg(videoPath);
+    } catch (e) {
+      return fail('镜头色彩连续性未执行：无法读取产物信息' + (e.message ? `（${e.message}）` : ''), { detectorError: true });
+    }
+    const dur = info && info.duration;
+    if (!(dur > 0)) {
+      return fail('镜头色彩连续性未执行：产物时长无法探测（不可判定）', { undetermined: true });
+    }
+
+    // 与 checkSeam 同款公式：做过转场则缝位置整体前移 (k+1)×fade
+    const fadeRaw = Number(options.fadeDuration);
+    const fade = Number.isFinite(fadeRaw) && fadeRaw > 0 ? fadeRaw : 0;
+    const seamTimes = [];
+    let acc = 0;
+    for (let i = 0; i < usable.length - 1; i++) {
+      acc += usable[i];
+      seamTimes.push(acc - (i + 1) * fade);
+    }
+
+    const EPS = 0.15;
+    const OFFSET = 0.6;   // 避开转场混合区的采样偏移（秒）
+    const inRange = seamTimes
+      .map((t, k) => ({ t, k }))
+      .filter(o => o.t > EPS && o.t < dur - EPS);
+    if (!inRange.length) {
+      return fail(
+        `镜头色彩连续性未执行：按片段时长算出的 ${seamTimes.length} 道缝全部落在产物范围外（不可判定）`,
+        { undetermined: true, seamTimes }
+      );
+    }
+
+    const th = {
+      warn: numOr(options.warn, this.options.colorDe76Warn),
+      max: numOr(options.max, this.options.colorDe76Max)
+    };
+
+    const maxSeams = Math.max(1, parseInt(options.maxSeams, 10) || this.options.seamMaxSeams || 8);
+    let picked = inRange;
+    let sampled = false;
+    if (inRange.length > maxSeams) {
+      const chosen = new Map();
+      for (let k = 0; k < maxSeams; k++) {
+        const idx = Math.round(k * (inRange.length - 1) / Math.max(1, maxSeams - 1));
+        chosen.set(inRange[idx].k, inRange[idx]);
+      }
+      picked = [...chosen.values()].sort((a, b) => a.k - b.k);
+      sampled = true;
+    }
+
+    const seams = [];
+    for (const s of picked) {
+      const t = s.t;
+      const times = [
+        Math.max(0.01, Math.min(dur - 0.01, t - OFFSET)),
+        Math.max(0.01, Math.min(dur - 0.01, t + OFFSET))
+      ];
+      const frames = this._extractFramesAtTimes(videoPath, times);
+      if (!frames || frames.length < 2) {
+        seams.push({
+          index: s.k,
+          t: Number(t.toFixed(3)),
+          undetermined: true,
+          reason: `抽帧不完整（计划 2 帧，实际 ${frames ? frames.length : 0} 帧）`
+        });
+        continue;
+      }
+      const yuvA = this._yuvAvgFromBase64(frames[0]);
+      const yuvB = this._yuvAvgFromBase64(frames[1]);
+      let de76 = null, dy = null, dU = null, dV = null;
+      if (yuvA && yuvB) {
+        dy = Number((yuvB.Y - yuvA.Y).toFixed(2));
+        dU = Number((yuvB.U - yuvA.U).toFixed(2));
+        dV = Number((yuvB.V - yuvA.V).toFixed(2));
+        de76 = this._deltaE76FromYuv(yuvA, yuvB);
+      }
+
+      const reasons = [];
+      let level = 'pass';
+      if (de76 === null) {
+        level = 'fail';
+        reasons.push('色差计算失败（数值缺失）');
+      } else if (de76 > th.max) {
+        level = 'fail';
+        reasons.push(`镜头色差 ΔE76 ${de76} > ${th.max}`);
+      } else if (de76 > th.warn) {
+        level = 'warn';
+        reasons.push(`镜头色差 ΔE76 ${de76} 超过提示阈值 ${th.warn}（色调跳变，但可能是刻意对比）`);
+      }
+
+      seams.push({
+        index: s.k,
+        t: Number(t.toFixed(3)),
+        de76,
+        dy,
+        dU,
+        dV,
+        level,
+        passed: level !== 'fail',
+        reasons,
+        sampleTimes: times.map(x => Number(x.toFixed(2)))
+      });
+    }
+
+    const measured = seams.filter(x => !x.undetermined);
+    const failedSeams = seams.filter(x => x.undetermined || x.level === 'fail');
+    const warnSeams = measured.filter(x => x.level === 'warn');
+    const passed = failedSeams.length === 0;
+    const worst = measured.length
+      ? measured.reduce((a, b) => ((a.de76 === null ? -1 : a.de76) >= (b.de76 === null ? -1 : b.de76) ? a : b))
+      : null;
+    const unscanned = Math.max(0, inRange.length - picked.length);
+    const summary = {
+      totalSeamsInVideo: inRange.length,
+      scanned: picked.length,
+      sampled,
+      unscanned,
+      warnSeams: warnSeams.length
+    };
+
+    const cmNote = cmState === 'disabled'
+      ? `（本次未校色：${cmReason || '默认关闭'}）`
+      : '';
+    const coverageNote = sampled
+      ? `（本次仅检测 ${picked.length}/${inRange.length} 道缝（均匀抽样），未检测的 ${unscanned} 道不计入结论）`
+      : '';
+
+    let reason;
+    if (passed) {
+      reason = warnSeams.length
+        ? `镜头色彩连续性：${warnSeams.length} 道缝色调跳变超过提示阈值（最差 ΔE76 ${worst && worst.de76}，warn ${th.warn} / fail ${th.max}），不判失败${coverageNote}${cmNote}`
+        : `镜头色彩连续性通过（最差 ΔE76 ${worst && worst.de76} ≤ ${th.warn}）${coverageNote}${cmNote}`;
+    } else {
+      const detail = failedSeams.slice(0, 3).map(x => (x.undetermined
+        ? `缝#${x.index + 1}@${x.t}s 未测到（${x.reason}）`
+        : `缝#${x.index + 1}@${x.t}s 色差 ΔE76 ${x.de76} > ${th.max}`));
+      const more = failedSeams.length > 3 ? ` 等 ${failedSeams.length} 道` : '';
+      reason = `镜头色彩连续性不通过：${detail.join('；')}${more}${coverageNote}${cmNote}`;
+    }
+
+    return {
+      passed,
+      qcVersion: QC_VERSION,
+      reason,
+      level: passed ? (warnSeams.length ? 'warn' : 'pass') : 'fail',
+      undetermined: seams.some(x => x.undetermined) || undefined,
+      details: { seams, summary, thresholds: th, ...cmMeta }
+    };
+  }
+
   // 单帧的平均 Y/U/V（signalstats 的 YAVG/UAVG/VAVG）。失败返回 null。
   // 走 _exec（内含 EPERM → 临时文件降级），命令自带 2>&1 把日志收进来。
   _yuvAvgFromBase64(b64) {
@@ -1150,6 +1381,47 @@ class QualityChecker {
     } catch (e) {
       totalPassed = false;
       results.seam = { passed: false, reason: '接缝质量检测出错: ' + e.message, level: 'fail', detectorError: true };
+    }
+
+    // 镜头级色彩连续性（2026-10-27 新增）：补 seam 的盲区 —— 转场开启时接缝中心是混合帧，
+    // 「两个镜头本身色调差很多」测不出来。三档：≤warn 通过 / warn~max 记 warn / >max 失败。
+    // 校色状态（colorMatchState）会一并记录：disabled 属合法跳过；
+    // skipped（要了没做成）/ failed 会被 checkColorContinuity 标成 notRun → 整体不通过。
+    try {
+      const ccOpt = options.colorContinuity || null;
+      if (ccOpt && ccOpt.legitimateSkip === true) {
+        results.colorContinuity = {
+          passed: true,
+          skipped: true,
+          legitimateSkip: true,
+          level: 'skip',
+          reason: ccOpt.skipReason || '镜头色彩连续性按设计跳过',
+          colorMatchState: ccOpt.colorMatchState || 'disabled',
+          colorMatchReason: ccOpt.colorMatchReason || ''
+        };
+      } else if (ccOpt && Array.isArray(ccOpt.clipDurations)) {
+        const cc = await this.checkColorContinuity(videoPath, ccOpt.clipDurations, ccOpt);
+        results.colorContinuity = cc;
+        if (!cc.passed) totalPassed = false;
+      } else {
+        totalPassed = false;
+        results.colorContinuity = {
+          passed: false,
+          reason: '镜头色彩连续性未执行：调用方未提供片段时长，无法定位镜头间断点',
+          level: 'fail',
+          detectorUnavailable: true,
+          colorMatchState: 'disabled',
+          colorMatchReason: ''
+        };
+      }
+    } catch (e) {
+      totalPassed = false;
+      results.colorContinuity = {
+        passed: false,
+        reason: '镜头色彩连续性检测出错: ' + e.message,
+        level: 'fail',
+        detectorError: true
+      };
     }
 
     // 汇总「为什么没过」，避免只回一个笼统的「存在问题」

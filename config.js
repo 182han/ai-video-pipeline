@@ -290,7 +290,23 @@ module.exports = {
     seamMadRatioMax: seamNum('QC_SEAM_MAD_RATIO_MAX', 8, 1, 1000),
     // 单次检测最多测多少道缝（超出则均匀抽样，并在结果里标注 sampled=true）。
     // 每道缝约 1~1.5s，8 道 ≈ 10s；长片缝多时避免质检本身拖垮流水线。
-    seamMaxSeams: Math.max(1, parseInt(env('QC_SEAM_MAX_SEAMS', '8'), 10) || 8)
+    seamMaxSeams: Math.max(1, parseInt(env('QC_SEAM_MAX_SEAMS', '8'), 10) || 8),
+
+    // ===== 镜头级色彩连续性（checkColorContinuity）=====
+    // 与 checkSeam 的区别：seam 测「接缝中心帧」（转场开启时那是混合帧），
+    // 这里测「缝前 0.6s vs 缝后 0.6s」的两个镜头本身色调差 → 补上 seam 的盲区。
+    // 阈值来自 2026-10-27 实验（docs/spec/re-jianying/seam-experiment.md）：
+    //   合格组镜头级 ΔE76 1.4~3.6；明显不连贯组 25~48。
+    // 三档（用户拍板）：≤warn 通过 / warn~max 记 warn 不判失败 / >max 判失败。
+    // 中间留 warn 档是因为「日落→蓝调」这类冷暖对比可能是刻意创作，不能一刀切。
+    colorDe76Warn: seamNum('QC_COLOR_DE76_WARN', 15, 0, 200),
+    colorDe76Max: seamNum('QC_COLOR_DE76_MAX', 40, 0, 200),
+
+    // ===== 拼接时自动校色（默认关，批次 2 接入）=====
+    // 只在「转场开启」的重编码路径生效，避免为校色多编码一次；
+    // 默认关是因为它会改变画面观感，必须用户知情后显式开启。
+    colorMatchEnabled: /^(1|true|yes)$/i.test(String(env('COLOR_MATCH_ENABLED', 'false')).trim()),
+    colorMatchMaxGain: seamNum('COLOR_MATCH_MAX_GAIN', 0.15, 0, 1)
   },
 
   // ===== 片段间转场（交叉淡化）=====

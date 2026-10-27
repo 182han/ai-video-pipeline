@@ -981,7 +981,9 @@ class Pipeline {
       },
       // 片段接缝质检（2026-10-27 新增）：终检要知道「缝在哪」。
       // 三处 checkFinal 都走本方法，所以只改这一处即可全覆盖。
-      seam: this._seamQcOptions(task)
+      seam: this._seamQcOptions(task),
+      // 镜头级色彩连续性（2026-10-27 新增）：与 seam 共用缝位置，额外带「校色到底执行没有」
+      colorContinuity: this._colorContinuityQcOptions(task)
     };
   }
 
@@ -1020,6 +1022,54 @@ class Pipeline {
       fadeDuration = t.enabled ? t.duration : 0;
     }
     return { clipDurations, fadeDuration };
+  }
+
+  // 镜头级色彩连续性（checkColorContinuity）的输入：与接缝共用「缝在哪」，
+  // 额外带上「校色是否真的执行了」——这条是本项的关键可观测字段（§4.1）：
+  //   disabled：校色默认关，没要求 → 合法跳过「校色」这件事，但仍照常测色差，不判失败；
+  //   skipped ：任务要了 colorMatch 但没做成（转场关闭 / 版本未接入）→ QC 必须看到「未执行」；
+  //   failed  ：执行报错（批次 2 接入后由 transitionMixer 回传）。
+  // 只有 applied 才代表真的校过色。
+  _colorContinuityQcOptions(task) {
+    if (!task) {
+      return {
+        legitimateSkip: true,
+        skipReason: '镜头色彩连续性按设计跳过：无任务上下文，无法定义镜头间断点',
+        colorMatchState: 'disabled',
+        colorMatchReason: ''
+      };
+    }
+    if (this._isSynthetic(task)) {
+      return {
+        legitimateSkip: true,
+        skipReason: '镜头色彩连续性按设计跳过：Mock 合成素材，色调连续性无业务意义',
+        colorMatchState: 'disabled',
+        colorMatchReason: ''
+      };
+    }
+
+    const seamOpt = this._seamQcOptions(task);
+    const clipDurations = Array.isArray(seamOpt.clipDurations) ? seamOpt.clipDurations : [];
+    const fadeDuration = Number(seamOpt.fadeDuration) || 0;
+
+    const requested = !!(task.colorMatch && task.colorMatch.enabled === true);
+    let colorMatchState = 'disabled';
+    let colorMatchReason = '校色未开启（默认关，需任务显式开启 colorMatch）';
+
+    if (requested) {
+      const trans = this._transitionOptions(task);
+      if (!trans.enabled) {
+        colorMatchState = 'skipped';
+        colorMatchReason = '校色已请求但未执行：转场关闭（-c copy 直拼路径不校色）';
+      } else {
+        // 批次 1（本次）只做质检；自动校色在批次 2 接入。
+        // 这里如实报「未执行」，绝不能让任务看起来"校过色了"。
+        colorMatchState = 'skipped';
+        colorMatchReason = '校色已请求但未执行：当前版本尚未接入自动校色（批次 2）';
+      }
+    }
+
+    return { clipDurations, fadeDuration, colorMatchState, colorMatchReason };
   }
 
   // ===== 启动自检：回收「僵尸任务」 =====
