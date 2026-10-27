@@ -3,10 +3,20 @@ const html = fs.readFileSync('public/bgm-editor.html', 'utf8');
 const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
 const script = /<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/.exec(html)[1];
 
-const refs = [...script.matchAll(/\$\('([^']+)'\)/g)].map(m => m[1]);
+// 2026-10-27 修正：原正则只认 $('x')，而页面实际主要用 byId('x')，
+// 导致「引用 id 数量: 0」→ missing 恒为空 → 断言空转（假绿）。
+// 现在三种写法都提取；且提取不到任何引用时直接判失败，避免再次空转。
+const refs = [
+  ...script.matchAll(/\bbyId\('([^']+)'\)/g),
+  ...script.matchAll(/getElementById\('([^']+)'\)/g),
+  ...script.matchAll(/\$\('([^']+)'\)/g),
+].map(m => m[1]);
+const refsCount = new Set(refs).size;
 const missing = [...new Set(refs)].filter(r => !ids.has(r));
-console.log('页内 id 数量:', ids.size, '| 脚本引用 id 数量:', new Set(refs).size);
-console.log(missing.length ? 'FAIL 缺少 id: ' + missing.join(', ') : 'PASS 所有 $() 引用的元素都存在');
+console.log('页内 id 数量:', ids.size, '| 脚本引用 id 数量:', refsCount);
+const vacuous = refsCount === 0;
+if (vacuous) console.log('FAIL 未提取到任何元素引用，该断言会空转，按失败处理');
+console.log(missing.length ? 'FAIL 缺少 id: ' + missing.join(', ') : 'PASS 所有元素引用都能在页内找到');
 
 const fns = new Set([...script.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)].map(m => m[1]));
 const evtRe = /on(?:click|input|change)="([A-Za-z_$][\w$]*)\(/g;
@@ -17,4 +27,4 @@ console.log(undef.length ? 'FAIL 未定义的处理函数: ' + undef.join(', ') 
 
 const localLet = new Set([...script.matchAll(/^(?:let|const)\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]));
 console.log('顶层 let/const:', [...localLet].join(', '));
-process.exit(missing.length || undef.length ? 1 : 0);
+process.exit(missing.length || undef.length || vacuous ? 1 : 0);
