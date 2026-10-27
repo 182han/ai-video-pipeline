@@ -37,6 +37,7 @@ const srv = app.listen(3102, '127.0.0.1', async () => {
     '/app/src/router.js',
     '/app/src/screens/workbench.js',
     '/app/src/screens/output.js',
+    '/app/src/components/settingsDrawer.js',
     '/app/src/components/taskDrawer.js',
     '/app/src/components/assistant.js',
     '/app/src/components/boundary.js',

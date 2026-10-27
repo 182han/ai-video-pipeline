@@ -11,6 +11,7 @@ import { TaskDrawer } from '../components/taskDrawer.js';
 import { Assistant } from '../components/assistant.js';
 import { Boundary } from '../components/boundary.js';
 import { OutputScreen } from './output.js';
+import { SettingsDrawer } from '../components/settingsDrawer.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -28,7 +29,7 @@ function stageOf(route) {
   return 'create';
 }
 
-function TopBar({ stage }) {
+function TopBar({ stage, onOpenSettings }) {
   return html`
     <header className="h-16 shrink-0 flex items-center gap-7 px-6 border-b border-black/[.06] bg-s3">
       <span className="font-display text-[22px] uppercase tracking-[.06em] text-accent select-none">
@@ -50,6 +51,10 @@ function TopBar({ stage }) {
       </nav>
       <span className="flex-1" />
       <span className="text-[12px] text-ink3 font-num">React ${React.version}</span>
+      <button
+        onClick=${onOpenSettings}
+        className="h-9 px-3.5 rounded-[6px] text-[14px] text-ink2 hover:bg-black/[.04] transition-colors"
+      >设置</button>
     </header>
   `;
 }
@@ -181,13 +186,25 @@ function Placeholder({ title, note }) {
 
 export function Workbench({ route }) {
   const stage = stageOf(route);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return html`
     <div className="h-full flex flex-col bg-s0 text-ink">
-      <${TopBar} stage=${stage} />
+      <${TopBar} stage=${stage} onOpenSettings=${() => setSettingsOpen(true)} />
       ${stage === 'create' && html`<${CreateScreen} />`}
       ${stage === 'review' && html`<${Placeholder} title="审核" note="静帧接缝审核 · 下一步实现" />`}
       ${stage === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
       <${Assistant} />
+      ${settingsOpen && html`
+        <${Boundary} fallback=${(e) => html`
+          <div className="fixed inset-x-0 bottom-4 mx-auto w-[min(520px,92vw)] rounded-[8px] z-50
+                          border border-danger/30 bg-s3 px-3 py-2 text-[12px] text-danger shadow-lg">
+            设置抽屉渲染失败：${String(e && e.message)}
+            <button className="ml-2 underline" onClick=${() => setSettingsOpen(false)}>关闭</button>
+          </div>
+        `}>
+          <${SettingsDrawer} onClose=${() => setSettingsOpen(false)} />
+        </${Boundary}>
+      `}
     </div>
   `;
 }
