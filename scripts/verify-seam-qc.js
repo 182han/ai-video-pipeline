@@ -93,7 +93,14 @@ function concatCopy(files, outName) {
   const seamBlock = (() => {
     const i = qcSrc.indexOf('async checkSeam(');
     if (i < 0) return '';
-    const j = qcSrc.indexOf('// 单帧的平均 Y/U/V', i);
+    // 边界要取「下一个方法/分隔注释」里最近的那个：2026-10-27 新增的
+    // checkColorContinuity 就插在 seam 与 `// 单帧的平均 Y/U/V` 之间，
+    // 只用后者当边界会把它算进 seam 的片段，导致 skipped 计数虚高。
+    const stops = [
+      qcSrc.indexOf('// 镜头级色彩连续性', i),
+      qcSrc.indexOf('// 单帧的平均 Y/U/V', i)
+    ].filter(x => x > i);
+    const j = stops.length ? Math.min(...stops) : -1;
     return qcSrc.slice(i, j > i ? j : i + 12000);
   })();
   ok(seamBlock.length > 500, '取到 checkSeam 实现片段用于静态检查', `${seamBlock.length} 字符`);
@@ -107,6 +114,23 @@ function concatCopy(files, outName) {
   ok(skipIdx >= 0 && /legitimateSkip:\s*true/.test(skipWindow),
     '该 skipped 与 legitimateSkip:true 同时返回（§4.1 唯一合法跳过）');
   ok(/legitimateSkip/.test(seamBlock), '唯一的跳过路径带 legitimateSkip 标记');
+
+  // checkColorContinuity（2026-10-27 新增）按同一口径检查：
+  // 它有两条 skipped 路径 —— 单片段（legitimateSkip:true）与「校色要了没做成」（legitimateSkip:false），
+  // 后者是 §4.1 要求的「未执行 ≠ 通过」，所以不能简单要求只出现一次。
+  const ccBlock = (() => {
+    const i = qcSrc.indexOf('async checkColorContinuity(');
+    if (i < 0) return '';
+    const j = qcSrc.indexOf('// 单帧的平均 Y/U/V', i);
+    return qcSrc.slice(i, j > i ? j : i + 12000);
+  })();
+  ok(ccBlock.length > 500, '取到 checkColorContinuity 实现片段', `${ccBlock.length} 字符`);
+  const ccSkips = [...ccBlock.matchAll(/skipped:\s*true/g)];
+  ok(ccSkips.length >= 2, 'checkColorContinuity 有两条跳过/未执行路径', `${ccSkips.length} 处`);
+  ok(ccSkips.every(m => /legitimateSkip:\s*(true|false)/.test(ccBlock.slice(m.index, m.index + 500))),
+    '每一处 skipped 都显式标注了 legitimateSkip（不许裸 skipped）');
+  ok(/legitimateSkip:\s*true/.test(ccBlock) && /legitimateSkip:\s*false/.test(ccBlock),
+    '「合法跳过（单片段）」与「未执行（校色）」分别标注，语义不混用');
   ok(!/OUTPUT_DIR|output\//.test(seamBlock), 'checkSeam 不写 output/（§4.7）');
 
   // ---------------------------------------------------------
