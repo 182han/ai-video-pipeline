@@ -1131,7 +1131,7 @@ app.post('/api/assistant/chat', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1212,6 +1212,9 @@ app.post('/api/tasks', (req, res) => {
     // 片段间转场：{ enabled, duration, type }。不传/传 null → 用 config.TRANSITIONS 全局默认。
     // 注意：漏掉这一行会让前端勾选被静默忽略（与早前 preset 字段同样的坑）。
     transition: (transition && typeof transition === 'object') ? transition : null,
+    // 拼接时自动校色：{ enabled }。不传 = 关闭（默认关，会改变画面观感，必须用户知情）。
+    // 与 transition 互斥：enabled 时必须开启转场，校验在 taskManager.createTask（2026-10-27）。
+    colorMatch: (colorMatch && typeof colorMatch === 'object') ? colorMatch : null,
     // 兼容：老前端仍传 clipTracks 时保留透传，由 createTask 收敛为整片主曲
     clipTracks: Array.isArray(clipTracks) ? clipTracks.slice(0, count) : undefined,
     // 保存前端传入的 API 配置（运行时使用）
