@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== 设计 token（与 design/ui-ux/v5 对齐）===== */
+:root {
+  --s0: #EEF4F1;
+  --s1: #F3F7F5;
+  --s2: #F8FAF9;
+  --s3: #FCFDFC;
+  --ink: #0C1A14;
+  --ink2: #46594F;
+  --ink3: #5E7066;
+  --accent: #0B6B45;
+  --danger: #B3261E;
+  --warn: #8F5E10;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* 右侧抽屉滑入 */
+@keyframes drawerIn {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.drawer-in { animation: drawerIn .2s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-in { animation: none; }
+}
