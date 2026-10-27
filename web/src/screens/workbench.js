@@ -30,17 +30,17 @@ function stageOf(route) {
 
 function TopBar({ stage }) {
   return html`
-    <header className="h-14 shrink-0 flex items-center gap-6 px-5 border-b border-black/[.06] bg-s3">
-      <span className="font-display text-[17px] uppercase tracking-[.06em] text-accent select-none">
+    <header className="h-16 shrink-0 flex items-center gap-7 px-6 border-b border-black/[.06] bg-s3">
+      <span className="font-display text-[22px] uppercase tracking-[.06em] text-accent select-none">
         Video Studio
       </span>
-      <nav className="flex items-center gap-1">
+      <nav className="flex items-center gap-1.5">
         ${STAGES.map((s) =>
           html`<button
             key=${s.key}
             onClick=${() => navigate(s.route)}
             className=${[
-              'h-8 px-3 rounded-[5px] text-[13px] transition-colors',
+              'h-9 px-4 rounded-[6px] text-[14px] transition-colors',
               s.key === stage
                 ? 'bg-accent text-white'
                 : 'text-ink2 hover:bg-black/[.04]'
@@ -49,7 +49,7 @@ function TopBar({ stage }) {
         )}
       </nav>
       <span className="flex-1" />
-      <span className="text-[11px] text-ink3 font-num">React ${React.version}</span>
+      <span className="text-[12px] text-ink3 font-num">React ${React.version}</span>
     </header>
   `;
 }

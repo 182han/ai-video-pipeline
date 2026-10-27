@@ -97,7 +97,7 @@ export function TaskDrawer({ taskId, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label="任务详情"
-        className="absolute right-0 top-0 bottom-0 w-[min(520px,92vw)] bg-s3 border-l border-black/[.08]
+        className="absolute right-0 top-0 bottom-0 w-[min(760px,94vw)] bg-s3 border-l border-black/[.08]
                    shadow-[-16px_0_48px_rgba(0,0,0,.12)] flex flex-col drawer-in"
         onClick=${(e) => e.stopPropagation()}
       >
