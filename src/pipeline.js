@@ -610,6 +610,15 @@ class Pipeline {
       ? Number(t.duration)
       : (Number.isFinite(Number(global.duration)) && Number(global.duration) > 0 ? Number(global.duration) : 0.5);
     const type = (typeof t.type === 'string' && t.type) || global.type || 'fade';
+
+    // 档位策略（2026-10-27）：`quick` 档求快，**强制** -c copy 直拼，不做转场。
+    // 依据 docs/spec/seam-quality-spec.md §9 实测：copy 0.46s / 重编码 8.13s / 转场 11.36s，
+    // 放弃 -c copy 会慢 17.6×。快速验证档的产物本来就不用于交付，没必要付出这个代价。
+    // 这里是**唯一**的转场判定入口（4 处拼接路径都走它），所以只需改这一处。
+    if (task && String(task.preset) === 'quick') {
+      return { enabled: false, duration, type, disabledByPreset: 'quick' };
+    }
+
     return { enabled, duration, type };
   }
 
@@ -969,8 +978,48 @@ class Pipeline {
         model: rc.multimodalModel,
         // Mock 片段是合成图案，NSFW 对它不适用（与片段级判定一致）
         syntheticSource: this._isSynthetic(task)
-      }
+      },
+      // 片段接缝质检（2026-10-27 新增）：终检要知道「缝在哪」。
+      // 三处 checkFinal 都走本方法，所以只改这一处即可全覆盖。
+      seam: this._seamQcOptions(task)
     };
+  }
+
+  // 组装接缝质检所需输入：各成功片段的时长（缝位置）+ 实际使用的淡化时长。
+  //
+  // 两个容易搞错的地方：
+  //  1) 只有 success 的片段会参与拼接，失败片段不能算进缝位置；
+  //  2) 淡化时长以「拼接步骤的实际留痕」为准 —— 补跑/复用历史产物时，
+  //     当前配置（TRANSITION_ENABLED 默认已改为 true）可能与当初实际执行的不一致，
+  //     用当前配置算缝位置会整体偏移，把好片判成坏片。
+  _seamQcOptions(task) {
+    if (!task) {
+      return { legitimateSkip: true, skipReason: '接缝质量按设计跳过：无任务上下文，无法定义接缝' };
+    }
+    // 合成素材（Mock）画面是 ffmpeg 测试图案，「接缝是否自然」对它没有业务意义，
+    // 与 NSFW/内容匹配对 Mock 的既有口径一致（见 _isSynthetic 的用法）。
+    if (this._isSynthetic(task)) {
+      return { legitimateSkip: true, skipReason: '接缝质量按设计跳过：Mock 合成素材，接缝无业务意义' };
+    }
+    const clips = (Array.isArray(task.clips) ? task.clips : [])
+      .filter(c => c && c.status === 'success')
+      .sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0));
+    const clipDurations = clips
+      .map(c => Number(c.duration))
+      .filter(n => Number.isFinite(n) && n > 0);
+
+    let fadeDuration = 0;
+    const applied = task.steps
+      && task.steps.concatenation
+      && task.steps.concatenation.qcDetails
+      && task.steps.concatenation.qcDetails.transition;
+    if (applied && Number(applied.transitions) > 0 && Number.isFinite(Number(applied.fadeDuration))) {
+      fadeDuration = Number(applied.fadeDuration);   // 以实际留痕为准
+    } else {
+      const t = this._transitionOptions(task);
+      fadeDuration = t.enabled ? t.duration : 0;
+    }
+    return { clipDurations, fadeDuration };
   }
 
   // ===== 启动自检：回收「僵尸任务」 =====
