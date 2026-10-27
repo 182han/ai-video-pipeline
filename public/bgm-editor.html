@@ -129,6 +129,109 @@
   .modal { background: #fff; border-radius: 14px; padding: 20px; width: 420px; max-width: 92vw; }
   .modal h3 { margin: 0 0 12px; font-size: 16px; }
   .modal video { width: 100%; border-radius: 8px; background: #000; margin-bottom: 12px; }
+
+  /* ============================================================
+     剪映画风覆盖层（2026-10-27）
+     ------------------------------------------------------------
+     设计 token 取自剪映 11.6.0.14552 内置 Web 的 video-edit 主题对象
+     （Resources/canvas_agent/app/static/js/ai-creation~24.d127b52d.js）：
+       片段通用 #303030 / 视频片段 #243743 / 圆角 8
+       标尺底 rgba(38,38,38,.96)、刻度 rgba(255,255,255,.15)、标签 rgba(255,255,255,.2)
+       播放头与吸附线 #00cae0、占位 rgba(0,193,205,.2)
+       正文 #e0e0e0、次级 #949494、三级 #7a7a7a
+     本层只改视觉，不改任何选择器语义，也不动 JS 逻辑。
+     ============================================================ */
+  :root {
+    color-scheme: dark;                       /* 原生 select / 滚动条跟随深色 */
+    --bg: #141414; --card: #1c1c1c; --panel: #1c1c1c; --panel-2: #262626;
+    --border: rgba(255, 255, 255, .08); --border-2: rgba(255, 255, 255, .16);
+    --text: #e0e0e0; --text-2: #949494; --text-3: #7a7a7a;
+    --primary: #00c1cd; --primary-light: rgba(0, 193, 205, .1);
+    --cta: #3370ff;                           /* 主操作按钮沿用系统蓝，与青色选区区分 */
+    --music: #00c1cd; --ambient: #2ea86a;
+    --snap: #00cae0;
+    --clip-video: #243743; --clip-radius: 8px;
+  }
+
+  body { background: var(--bg); color: var(--text); }
+
+  /* ---- 顶栏 / 按钮 ---- */
+  .topbar { background: var(--panel); border-bottom: 1px solid var(--border); }
+  .btn { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+  .btn:hover { border-color: var(--border-2); background: #2e2e2e; }
+  .btn-primary { background: var(--cta); border-color: transparent; color: #fff; }
+  .btn-primary:hover { background: #4a83ff; }
+  .btn-danger { color: #ff7b72; border-color: rgba(255, 123, 114, .35); }
+  .btn-danger:hover { background: rgba(255, 123, 114, .12); }
+
+  /* ---- 成片卡片 ---- */
+  .task-card { background: var(--panel); border-color: var(--border); border-radius: 8px; }
+  .task-card:hover { border-color: var(--border-2); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+  .task-title { color: var(--text); }
+  .task-meta { color: var(--text-2); }
+  .badge-ok { background: rgba(0, 193, 205, .14); color: var(--snap); }
+  .badge-none { background: rgba(255, 255, 255, .06); color: var(--text-2); }
+
+  /* ---- 预览区 / 侧栏 ---- */
+  .stage { background: #0d0d0d; }
+  .side { background: var(--panel); border-left: 1px solid var(--border); }
+  .side-tabs { border-bottom: 1px solid var(--border); }
+  .side-tab { color: var(--text-2); }
+  .side-tab.active { color: var(--snap); border-bottom-color: var(--snap); }
+  .lib-item { border-color: var(--border); border-radius: 8px; background: var(--panel-2); }
+  .lib-item:hover { border-color: rgba(0, 193, 205, .5); background: rgba(0, 193, 205, .08); }
+  .lib-title { color: var(--text); }
+  .lib-meta { color: var(--text-2); }
+
+  /* ---- 时间轴 ---- */
+  .timeline { background: var(--panel); border-top: 1px solid var(--border); }
+  .tl-toolbar { border-bottom: 1px solid var(--border); }
+  .ruler { background: rgba(38, 38, 38, .96); border-bottom: 1px solid var(--border); }
+  .track-row { border-bottom: 1px solid rgba(255, 255, 255, .06); }
+  .track-label { background: var(--panel); border-right: 1px solid var(--border); color: var(--text-2); }
+  .track-label .tl-name { color: var(--text); }
+  .track-lane { background: rgba(255, 255, 255, .012); }
+
+  .clip { border-radius: var(--clip-radius); border-color: rgba(255, 255, 255, .06); }
+  .clip.music { background: rgba(0, 193, 205, .16); border-color: rgba(0, 193, 205, .42); }
+  .clip.ambient { background: rgba(46, 168, 106, .16); border-color: rgba(46, 168, 106, .42); }
+  .clip.selected { box-shadow: 0 0 0 2px #fff; }
+  .clip .clip-name { color: rgba(255, 255, 255, .78); font-weight: 500; }
+  .clip .handle { background: rgba(255, 255, 255, .1); }
+  .clip .handle:hover { background: var(--snap); }
+
+  .playhead { width: 1px; background: var(--snap); }
+  .playhead::before {
+    content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 8px solid var(--snap);
+  }
+
+  .clip.video { background: var(--clip-video); border-color: rgba(255, 255, 255, .06); }
+  .clip.video .clip-name { color: #fff; background: rgba(0, 0, 0, .45); }
+  .clip.video .vmeta { background: rgba(0, 0, 0, .45); }
+  .mode-hint { background: var(--clip-video); color: var(--text-3); }
+
+  /* ---- 属性面板 / 表单 ---- */
+  .props { background: var(--panel); border: 1px solid var(--border) !important;
+           border-radius: 8px !important; box-shadow: 0 12px 32px rgba(0, 0, 0, .55) !important; }
+  .field label { color: var(--text-2); }
+  .field input[type=number], .field input[type=text], .field select,
+  .props input[type=number], .props input[type=text], .props select {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px;
+  }
+  .field input:focus, .field select:focus, .props input:focus {
+    outline: none; border-color: rgba(0, 193, 205, .6);
+  }
+  .hint, .empty-hint { color: var(--text-3); }
+
+  /* ---- 状态条 / 弹窗 ---- */
+  .status-bar { background: var(--panel); border-top: 1px solid var(--border); color: var(--text-2); }
+  .status-bar.busy .dot { background: #ff9f0a; }
+  .status-bar.ok .dot { background: #3ddc84; }
+  .status-bar.err .dot { background: #ff453a; }
+  .modal-overlay { background: rgba(0, 0, 0, .6); }
+  .modal { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -152,7 +255,7 @@
 <!-- 编辑器 -->
 <div id="editorView" class="editor">
   <div class="topbar">
-    <button class="btn" onclick="backToList()">← 返回列表</button>
+    <a class="btn" href="/">← 返回工作台</a>
     <h1 id="editTitle">剪辑</h1>
     <div class="spacer"></div>
     <div class="master-bar" id="masterBar" style="display:none;">
@@ -225,7 +328,7 @@
 
   <!-- 属性面板（选中片段时浮在右侧上方） -->
   <div class="props" id="propsPanel" style="display:none; position:fixed; right:14px; bottom:310px; width:300px;
-       background:#fff; border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 28px rgba(0,0,0,.12);
+       background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 32px rgba(0,0,0,.55);
        max-height:calc(100vh - 420px);"></div>
 </div>
 
@@ -314,10 +417,25 @@ async function openEditor(taskId) {
   byId('editorView').classList.add('active');
   setStatus('加载中…', 'busy');
 
-  const [planRes, libRes] = await Promise.all([
-    fetch('/api/tasks/' + encodeURIComponent(taskId) + '/bgm-plan').then(r => r.json()),
-    fetch('/api/bgm').then(r => r.json())
+  const [planR, libR] = await Promise.all([
+    fetch('/api/tasks/' + encodeURIComponent(taskId) + '/bgm-plan'),
+    fetch('/api/bgm')
   ]);
+  // 注意：旧写法 `fetch(...).then(r => r.json())` 会把 404 的 {error} 当成正常数据，
+  // 于是任务不存在时也不抛错，直接进入一个 DURATION=0、videoUrl=undefined 的空编辑器。
+  if (!planR.ok) {
+    let msg = '任务不存在或已被删除（HTTP ' + planR.status + '）';
+    try {
+      const j = await planR.json();
+      if (j && j.error) msg = j.error + '（HTTP ' + planR.status + '）';
+    } catch (e) { /* 响应不是 JSON，保留默认文案 */ }
+    throw new Error(msg);
+  }
+  const planRes = await planR.json();
+  const libRes = libR.ok ? await libR.json() : { tracks: [] };
+  if (!planRes || !planRes.videoUrl) {
+    throw new Error('该任务没有成片文件，无法进入配乐编辑');
+  }
   TASK = planRes;
   INVENTORY = libRes.tracks || [];
   DURATION = Number(planRes.totalDuration) || 0;
@@ -436,12 +554,17 @@ async function openLibraryEditor(clearSelection) {
   setStatus('加载片段库…', 'busy');
   LIB_CAT = 'library';
   document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === 'library'));
+  // 片段库加载失败不能静默降级成「空库」——那样用户会停在一个挑不到素材的编辑器里。
+  // 抛出去由 init 的 fallback 接住，退回成片列表并提示原因；「库为空」本身仍是合法状态。
   try {
-    const data = await (await fetch('/api/library')).json();
+    const r = await fetch('/api/library');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
     LIB_ITEMS_CACHE = [];
     for (const g of (data.groups || [])) for (const it of (g.items || [])) LIB_ITEMS_CACHE.push(it);
   } catch (e) {
     LIB_ITEMS_CACHE = [];
+    throw new Error('片段库加载失败：' + (e && e.message ? e.message : e));
   }
   const map = new Map((LIB_ITEMS_CACHE || []).map(i => [i.id, i]));
   let seq = 0;
@@ -892,8 +1015,8 @@ function drawRuler(total, width) {
   const ctx = c.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, 24);
-  ctx.fillStyle = '#f7f7f9'; ctx.fillRect(0, 0, width, 24);
-  ctx.fillStyle = '#86868b'; ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#262626'; ctx.fillRect(0, 0, width, 24);
+  ctx.fillStyle = 'rgba(255,255,255,.30)'; ctx.font = '10px sans-serif'; ctx.textBaseline = 'middle';
   // 刻度间隔随缩放自适应
   let step = 1;
   if (PX_PER_SEC < 20) step = 5;
@@ -901,14 +1024,14 @@ function drawRuler(total, width) {
   else if (PX_PER_SEC >= 120) step = 0.5;
   for (let t = 0; t <= total + 1; t += step) {
     const x = t * PX_PER_SEC;
-    ctx.strokeStyle = '#dcdce0';
+    ctx.strokeStyle = 'rgba(255,255,255,.15)';
     ctx.beginPath(); ctx.moveTo(x, 14); ctx.lineTo(x, 24); ctx.stroke();
     if (t % (step * 2) === 0 || step >= 1) ctx.fillText(fmt(t), x + 3, 8);
   }
   // 片尾标记：左移 1px 让 2px 宽的线整体落在可见区域内，避免被裁掉只露半条
   if (DURATION) {
     const xe = Math.max(1, DURATION * PX_PER_SEC - 1);
-    ctx.strokeStyle = '#ff9f0a'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#00cae0'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(xe, 0); ctx.lineTo(xe, 24); ctx.stroke();
     ctx.lineWidth = 1;
   }
@@ -1008,7 +1131,7 @@ async function drawWave(canvas, clip, kind) {
     // 退化为「等宽能量条」示意：仍能看出片段范围、能正常拖拽裁剪，
     // 并在 title 里说明原因。音频本身不受影响——混音完全在服务端完成。
     const cached = WAVE_CACHE.get(clip.trackId);
-    const barColor = kind === 'ambient' ? 'rgba(29,122,53,.35)' : 'rgba(26,115,232,.35)';
+    const barColor = kind === 'ambient' ? 'rgba(46,168,106,.35)' : 'rgba(0,193,205,.35)';
     ctx.strokeStyle = barColor; ctx.fillStyle = barColor;
     // 画一条中轴线
     ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
@@ -1033,7 +1156,7 @@ async function drawWave(canvas, clip, kind) {
   const endIdx = Math.ceil(to * peaks.length);
   const span = Math.max(1, endIdx - startIdx);
   const mid = h / 2;
-  const color = kind === 'ambient' ? 'rgba(29,122,53,.75)' : 'rgba(26,115,232,.75)';
+  const color = kind === 'ambient' ? 'rgba(46,168,106,.75)' : 'rgba(0,193,205,.75)';
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   // 注意：peaks 是「振幅大小」（0..1），不是带符号的样本值。
@@ -1234,9 +1357,9 @@ function renderKeyframes(c) {
   if (!kfs.length) { box.innerHTML = '<div class="hint">暂无关键帧</div>'; return; }
   box.innerHTML = kfs.map((k, i) =>
     `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
-       <span style="font-size:11px;color:#6e6e73;width:52px;">${k.t.toFixed(2)}s</span>
+       <span style="font-size:11px;color:var(--text-2);width:52px;">${k.t.toFixed(2)}s</span>
        <input type="number" step="0.05" min="0" max="4" value="${k.v}"
-              style="flex:1;padding:3px 6px;border:1px solid #e5e5ea;border-radius:6px;font-size:12px;"
+              style="flex:1;padding:3px 6px;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;"
               oninput="updateKeyframe(${i}, this.value)">
        <button class="btn btn-sm btn-danger" onclick="removeKeyframe(${i})">删</button>
      </div>`).join('');
@@ -1460,13 +1583,46 @@ function zoomBy(dir) {
 // ============================================================
 // 启动
 // ============================================================
+// 进入失败时的退路：回到成片列表并说明原因。
+// 背景：默认入口已改成「直接进编辑器」，此时 #listView 是隐藏的；
+// 若 openEditor / openLibraryEditor 抛错而没人兜底，用户会卡在半初始化的
+// 空编辑器里，且没有任何返回入口（真实风险，2026-10-27 复核时提出）。
+function fallbackToList(reason) {
+  const msg = (reason && reason.message) ? reason.message : String(reason || '未知错误');
+  try {
+    const ed = byId('editorView');
+    if (ed) ed.classList.remove('active');
+    const lv = byId('listView');
+    if (lv) lv.style.display = '';
+    const v = byId('video');
+    if (v) { try { v.pause(); } catch (e) { /* ignore */ } }
+    if (typeof MASTER_POLL !== 'undefined' && MASTER_POLL) { clearInterval(MASTER_POLL); MASTER_POLL = null; }
+    // 复用 listEmpty 当作错误提示条（列表页没有独立的状态栏）
+    const le = byId('listEmpty');
+    if (le) {
+      le.style.display = 'block';
+      le.textContent = '打开编辑器失败：' + msg + ' —— 已返回成片列表，可重试或换一条。';
+    }
+    loadTasks();
+  } catch (e2) {
+    console.error('[editor] fallback 也失败了:', e2);
+  }
+  console.error('[editor] 进入编辑器失败:', reason);
+}
+
 (async function init() {
   const q = new URLSearchParams(location.search);
+  // 1) 带 ?task=<id>：直接打开该成片的编辑态（供历史记录跳转）
   const taskId = q.get('task');
-  if (taskId) { await openEditor(taskId); return; }
+  // 2) 其余一律直接进编辑器：默认就是「从片段库拼一条新成片」的空时间线。
+  //    原「先看成片列表再选一条」的中间页已下线——成片历史属于「历史记录」页。
   const fromLib = q.get('from') === 'library' || !!sessionStorage.getItem('vs_clip_selection');
-  if (fromLib) { await openLibraryEditor(false); return; }
-  await loadTasks();
+  try {
+    if (taskId) { await openEditor(taskId); return; }
+    await openLibraryEditor(!fromLib);
+  } catch (e) {
+    fallbackToList(e);
+  }
 })();
 </script>
 </body>
