@@ -203,6 +203,89 @@ function makeTempPath(outputPath, i) {
   return path.join(path.dirname(outputPath), `.tr_${process.pid}_${Date.now()}_${i}.mp4`);
 }
 
+// ============================================================
+// 校色（colorMatch，2026-10-27 批次 2）
+// ------------------------------------------------------------
+// 为什么放在这里：转场拼接本来就要整段重编码，把 lutrgb 塞进同一条滤镜链
+// 是**零额外编码成本**的；而 -c copy 直拼路径要校色就得多编一遍，不值。
+//
+// 算法：抽若干帧 → 逐通道均值/方差 → 与「首段」对齐（Reinhard 式线性变换）
+//      → 生成 lutrgb 表达式。参考段固定首段（链式会随段数累积偏色）。
+// 限幅：单通道增益限制在 [1-maxGain, 1+maxGain]，防止把画面拉坏。
+// ============================================================
+const CM_SAMPLE_FRAMES = 5;
+const CM_SAMPLE_W = 64;
+const CM_SAMPLE_H = 36;
+
+// 采样一个片段的 RGB 均值/标准差（3 个通道）。
+// 一次 ffmpeg 调用取 N 帧（fps 滤镜重采样到 N/dur），落文件再读——
+// 逐帧起进程在短片段上开销会超过编码本身（实测 5 次/段 ≈ 2.4s）。
+// 捕获 stdout 会踩 EPERM（AGENTS.md §2.3），所以走文件。
+function sampleRgbStats(file, duration) {
+  const dur = Number(duration);
+  if (!(dur > 0.05)) throw new Error('采样失败：片段时长不可用');
+  const target = Math.max(1, Math.min(CM_SAMPLE_FRAMES, Math.max(1, Math.floor(dur * 2))));
+  const rate = target / dur;
+  const frameBytes = CM_SAMPLE_W * CM_SAMPLE_H * 3;
+  const tmp = path.join(os.tmpdir(), `tr_rgb_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.raw`);
+
+  try {
+    const cmd = `"${FFMPEG_PATH}" -y -hide_banner -loglevel error -i "${file}" `
+      + `-vf "fps=${rate.toFixed(6)},scale=${CM_SAMPLE_W}:${CM_SAMPLE_H}" `
+      + `-frames:v ${target} -pix_fmt rgb24 -f rawvideo "${tmp}"`;
+    const r = runFFmpeg(cmd);
+    if (!r.ok) throw new Error('抽帧失败: ' + r.error);
+    const buf = fs.readFileSync(tmp);
+    const frames = Math.floor(buf.length / frameBytes);
+    if (!frames) throw new Error('抽帧不完整（0 帧）');
+
+    const sum = [0, 0, 0];
+    const sumSq = [0, 0, 0];
+    for (let f = 0; f < frames; f++) {
+      const base = f * frameBytes;
+      for (let p = 0; p < CM_SAMPLE_W * CM_SAMPLE_H; p++) {
+        for (let c = 0; c < 3; c++) {
+          const v = buf[base + p * 3 + c];
+          sum[c] += v;
+          sumSq[c] += v * v;
+        }
+      }
+    }
+    const count = CM_SAMPLE_W * CM_SAMPLE_H * frames;
+    const mean = [0, 0, 0];
+    const sd = [0, 0, 0];
+    for (let c = 0; c < 3; c++) {
+      mean[c] = sum[c] / count;
+      const variance = Math.max(0, sumSq[c] / count - mean[c] * mean[c]);
+      sd[c] = Math.sqrt(variance) || 1;
+    }
+    return { mean, sd, frames };
+  } finally {
+    cleanupTmp(tmp);
+  }
+}
+
+// 生成把 cur 拉到 ref 的 lutrgb 表达式；返回 { expr, gain, offset, clamped }
+function buildColorLut(ref, cur, maxGain) {
+  const lo = 1 - maxGain;
+  const hi = 1 + maxGain;
+  const gain = [];
+  const offset = [];
+  const clamped = [];
+  for (let c = 0; c < 3; c++) {
+    const rawGain = cur.sd[c] > 1 ? ref.sd[c] / cur.sd[c] : 1;
+    const g = Math.max(lo, Math.min(hi, rawGain));
+    gain.push(Number(g.toFixed(4)));
+    offset.push(Number((ref.mean[c] - g * cur.mean[c]).toFixed(2)));
+    clamped.push(Math.abs(rawGain - g) > 1e-6);
+  }
+  const expr = `lutrgb=r='val*${gain[0]}+${offset[0]}':`
+    + `g='val*${gain[1]}+${offset[1]}':`
+    + `b='val*${gain[2]}+${offset[2]}'`;
+  return { expr, gain, offset, clamped };
+}
+
+
 // 主入口：把 clips 用交叉淡化拼成 outputPath
 // clips: ['a.mp4', 'b.mp4'] 或 [{ path, inSec, outSec }]
 // options: { duration=0.5, type='fade', resolution|width/height, fps }
@@ -342,10 +425,65 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       return { success: false, error: '片段总时长不足以覆盖转场重叠时长' };
     }
 
+    // 6.6) 校色（默认关）：只在本次重编码里顺带做，不额外多编一次。
+    // 失败绝不阻断拼接，但状态必须如实回传（pipeline 会写进 qcDetails，
+    // 终检据此判「校色未执行」，见 AGENTS §4.1）。
+    const cmOpt = (options.colorMatch && typeof options.colorMatch === 'object') ? options.colorMatch : null;
+    const cmEnabled = !!(cmOpt && cmOpt.enabled === true);
+    const cmMaxGain = Number(cmOpt && cmOpt.maxGain) > 0 ? Number(cmOpt.maxGain) : 0.15;
+    let colorMatch = {
+      state: 'disabled',
+      reason: '校色未开启（默认关，需任务显式开启 colorMatch）',
+      reference: 'first',
+      maxGain: cmMaxGain,
+      applied: 0,
+      total: Math.max(0, list.length - 1),
+      luts: []
+    };
+    const luts = new Array(prepared.length).fill(null);
+    if (cmEnabled) {
+      try {
+        const stats = prepared.map((p, i) => sampleRgbStats(p, actualDurs[i]));
+        const detailsLuts = [];
+        for (let i = 1; i < prepared.length; i++) {
+          const lut = buildColorLut(stats[0], stats[i], cmMaxGain);
+          luts[i] = lut;
+          detailsLuts.push({
+            index: i,
+            gain: lut.gain,
+            offset: lut.offset,
+            clamped: lut.clamped
+          });
+        }
+        colorMatch = {
+          state: 'applied',
+          reason: `已按首段校色：${prepared.length - 1} 段，单通道增益限幅 ±${(cmMaxGain * 100).toFixed(0)}%`,
+          reference: 'first',
+          maxGain: cmMaxGain,
+          applied: prepared.length - 1,
+          total: prepared.length - 1,
+          luts: detailsLuts
+        };
+      } catch (e) {
+        colorMatch = {
+          state: 'failed',
+          reason: '校色执行失败：' + (e && e.message ? e.message : String(e)) + '（已按原片拼接，不阻断出片）',
+          reference: 'first',
+          maxGain: cmMaxGain,
+          applied: 0,
+          total: Math.max(0, list.length - 1),
+          luts: []
+        };
+      }
+    }
+
     // 7) 滤镜链
     const parts = [];
     for (let i = 0; i < prepared.length; i++) {
-      parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p[v${i}]`);
+      // 校色放在 trim/setpts 之后：只对有效区间取帧，避免把裁剪掉的部分统计进来。
+      // 显式走 rgb24 → lutrgb → yuv420p，不依赖滤镜自动协商，路径可预测。
+      const lutPart = luts[i] ? `,format=rgb24,${luts[i].expr},format=yuv420p` : '';
+      parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p${lutPart}[v${i}]`);
     }
     let vPrev = 'v0';
     let acc = actualDurs[0];
@@ -441,7 +579,9 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       target,
       fps,
       audioMode: allAudio ? 'all' : (noneAudio ? 'none' : 'mixed-padded'),
-      hasAudio: wantAudio
+      hasAudio: wantAudio,
+      // 校色实际状态：disabled / applied / failed（skipped 由上层在「转场关闭」时给出）
+      colorMatch
     };
   } catch (e) {
     cleanupTemps();

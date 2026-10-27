@@ -223,7 +223,9 @@ class Pipeline {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
-          fps: 30
+          fps: 30,
+          // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
+          colorMatch: this._colorMatchOptions(task)
         })
         : await videoProcessor.concatenate(successClips, concatPath);
 
@@ -243,7 +245,10 @@ class Pipeline {
 
       taskManager.recordStepComplete(taskId, 'concatenation', {
         qcResult: concatQC.passed ? 'pass' : concatQC.level,
-        qcDetails: concatQC
+        // 补跑路径同样要留痕，否则终检拿不到「转场/校色实际执行了什么」
+        qcDetails: concatResult.colorMatch
+          ? { ...concatQC, colorMatch: concatResult.colorMatch }
+          : concatQC
       });
     }
 
@@ -622,6 +627,23 @@ class Pipeline {
     return { enabled, duration, type };
   }
 
+  // 校色（colorMatch）开关：默认关，必须由任务显式开启（或 .env 的 COLOR_MATCH_ENABLED）。
+  // 与转场互斥：转场关闭时走 -c copy，不重编码也就无从校色 —— 那种情况由
+  // _colorContinuityQcOptions 报 skipped，绝不当作「校过色」。
+  _colorMatchOptions(task) {
+    const qc = (config.QC && typeof config.QC === 'object') ? config.QC : {};
+    const t = (task && task.colorMatch && typeof task.colorMatch === 'object') ? task.colorMatch : {};
+    const enabled = typeof t.enabled === 'boolean'
+      ? t.enabled
+      : qc.colorMatchEnabled === true;
+    const maxGain = Number.isFinite(Number(t.maxGain)) && Number(t.maxGain) > 0
+      ? Number(t.maxGain)
+      : (Number.isFinite(Number(qc.colorMatchMaxGain)) && Number(qc.colorMatchMaxGain) > 0
+        ? Number(qc.colorMatchMaxGain)
+        : 0.15);
+    return { enabled, maxGain };
+  }
+
   // ===== 流水线档位：某一步是否应当执行 =====
   //
   // stageSet 的形状是「只列出要执行的步骤」（{loop_processing:true, ...}），
@@ -738,7 +760,9 @@ class Pipeline {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
-          fps: 30
+          fps: 30,
+          // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
+          colorMatch: this._colorMatchOptions(task)
         })
         : await videoProcessor.concatenate(paths, tmp);
       if (!r.success) { cleanup(); return { success: false, error: '拼接母版失败: ' + r.error }; }
@@ -1052,21 +1076,33 @@ class Pipeline {
     const clipDurations = Array.isArray(seamOpt.clipDurations) ? seamOpt.clipDurations : [];
     const fadeDuration = Number(seamOpt.fadeDuration) || 0;
 
-    const requested = !!(task.colorMatch && task.colorMatch.enabled === true);
+    // 是否要求校色：与 _colorMatchOptions 同一判定（任务级优先，其次 .env 全局）
+    const cmOpt = this._colorMatchOptions(task);
+    const requested = cmOpt.enabled === true;
+
+    // 优先看「拼接步骤的实际留痕」：这才是真的发生了什么。
+    const recorded = task.steps
+      && task.steps.concatenation
+      && task.steps.concatenation.qcDetails
+      && task.steps.concatenation.qcDetails.colorMatch;
+
     let colorMatchState = 'disabled';
     let colorMatchReason = '校色未开启（默认关，需任务显式开启 colorMatch）';
 
-    if (requested) {
-      const trans = this._transitionOptions(task);
-      if (!trans.enabled) {
-        colorMatchState = 'skipped';
-        colorMatchReason = '校色已请求但未执行：转场关闭（-c copy 直拼路径不校色）';
-      } else {
-        // 批次 1（本次）只做质检；自动校色在批次 2 接入。
-        // 这里如实报「未执行」，绝不能让任务看起来"校过色了"。
-        colorMatchState = 'skipped';
-        colorMatchReason = '校色已请求但未执行：当前版本尚未接入自动校色（批次 2）';
+    if (recorded && typeof recorded.state === 'string') {
+      // 有留痕就以留痕为准（applied / disabled / failed 由 transitionMixer 回传）
+      colorMatchState = recorded.state;
+      colorMatchReason = recorded.reason || ('校色状态：' + recorded.state);
+      // 留痕说 applied 但当时转场其实没开？不可能，但保持一致性检查：
+      if (colorMatchState === 'applied' && !requested) {
+        colorMatchReason = '校色已执行（本次任务按 .env 全局开关开启）';
       }
+    } else if (requested) {
+      const trans = this._transitionOptions(task);
+      colorMatchState = 'skipped';
+      colorMatchReason = !trans.enabled
+        ? '校色已请求但未执行：转场关闭（-c copy 直拼路径不校色）'
+        : '校色已请求但未执行：拼接步骤没有留下校色记录（可能复用了旧产物）';
     }
 
     return { clipDurations, fadeDuration, colorMatchState, colorMatchReason };
@@ -1433,7 +1469,9 @@ class Pipeline {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
-          fps: 30
+          fps: 30,
+          // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
+          colorMatch: this._colorMatchOptions(task)
         });
         if (concatResult.success) concatResult.reencoded = true;
       } else {
@@ -1463,6 +1501,8 @@ class Pipeline {
           durationCheck: concatResult.durationCheck,
           decodeCheck: concatResult.decodeCheck,
           reencoded: !!concatResult.reencoded,
+          // 校色实际状态（disabled/applied/failed）：终检据此判「校色未执行」
+          colorMatch: concatResult.colorMatch,
           transition: concatResult.transitionType
             ? {
               type: concatResult.transitionType,
@@ -1504,7 +1544,9 @@ class Pipeline {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
-          fps: 30
+          fps: 30,
+          // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
+          colorMatch: this._colorMatchOptions(task)
         })
         : await videoProcessor.concatenate(successClips, concatPath);
 
@@ -1534,7 +1576,9 @@ class Pipeline {
               transitions: concatResult.transitions,
               durationCheck: concatResult.durationCheck,
               decodeCheck: concatResult.decodeCheck
-            }
+            },
+            // 校色实际状态（disabled/applied/failed）：终检据此判「校色未执行」
+            colorMatch: concatResult.colorMatch
           }
           : concatQC
       });

@@ -223,6 +223,29 @@ class TaskManager {
       }
       : null;
 
+    // 拼接校色（2026-10-27 批次 2）：默认关，任务级 { enabled, maxGain } 覆盖 .env 全局。
+    const colorMatchOption = (options.colorMatch && typeof options.colorMatch === 'object')
+      ? {
+        enabled: options.colorMatch.enabled !== undefined ? !!options.colorMatch.enabled : undefined,
+        maxGain: Number.isFinite(Number(options.colorMatch.maxGain)) ? Number(options.colorMatch.maxGain) : undefined
+      }
+      : null;
+
+    // 互斥组合：校色只在「转场开启」的重编码路径里做。
+    // 要了校色却把转场关掉 → 不静默改成"没要求"，而是记一条 note 让原因可见；
+    // 终检会据实际留痕报「校色未执行」并判不通过（AGENTS §4.1）。
+    // 注：这里不抛错 —— createTask 外层没有 try/catch（server.js 亦无），
+    // 抛出会变成未处理的 Promise 拒绝，接口直接挂住。
+    const cmWanted = !!(colorMatchOption && colorMatchOption.enabled === true);
+    const transWanted = transitionOption && transitionOption.enabled !== undefined
+      ? transitionOption.enabled
+      : !!(config.TRANSITIONS && config.TRANSITIONS.enabled);
+    if (cmWanted && !transWanted) {
+      presetResolution.notes = (presetResolution.notes || []).concat([
+        '校色已请求，但转场被关闭：串接走 -c copy 直拼，无法校色 → 终检会报「校色未执行」并判不通过。'
+      ]);
+    }
+
     const task = {
       taskId,
       status: 'pending',
@@ -247,6 +270,8 @@ class TaskManager {
       masterPath: null,
       // 片段间转场配置：{ enabled, duration, type } 或 null（null = 用全局配置）
       transition: transitionOption,
+      // 拼接校色：{ enabled, maxGain } 或 null（null = 用 .env 全局，默认关）
+      colorMatch: colorMatchOption,
       currentStep: 'created',
       currentStepKey: null,
       outputPath: null,
