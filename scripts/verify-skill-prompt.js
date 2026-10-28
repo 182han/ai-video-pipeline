@@ -29,6 +29,15 @@ function section(title) {
   console.log(`\n--- ${title} ---`);
 }
 
+function compareVer(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
 (async () => {
   console.log('=== verify-skill-prompt ===\n');
 
@@ -49,6 +58,17 @@ function section(title) {
   ok('规则含高光控制', rules.includes('高光') || rules.includes('controlled highlights'));
   ok('规则含地貌专名表', rules.includes('沙丘脊线') && rules.includes('丹霞'));
   ok('规则含天文分支', rules.includes('天文'));
+
+  // 规则版本必须跟上 skill 迭代：低于 0.2.6 视为软件端落后
+  const ver = rules.match(/fengguang v(\d+\.\d+\.\d+)/);
+  ok('规则含版本号（fengguang vX.Y.Z）', !!ver, ver ? ver[1] : '未匹配');
+  ok('规则版本 ≥ v0.2.6', !!ver && compareVer(ver[1], '0.2.6') >= 0, ver ? ver[1] : '未匹配');
+  ok('规则含极光四型 + 氧原子绿', rules.includes('极光四型') && rules.includes('氧原子绿'));
+  ok('规则含机位族→焦段池', rules.includes('机位族') && rules.includes('长焦'));
+  ok('规则含纹理特写', rules.includes('纹理特写'));
+  ok('规则含多段连续性', rules.includes('多段连续性'));
+  ok('规则含阴天补光向', rules.includes('阴天散射') && rules.includes('光从哪来'));
+  ok('规则含静机位禁配摇臂/升降', rules.includes('静机位') && rules.includes('摇臂'));
 
   // ---------- 2. 作用域 ----------
   section('2. 作用域：只叠加风光类主题');
