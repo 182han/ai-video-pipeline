@@ -418,7 +418,7 @@ function ClipsTab() {
   const groups = (data && data.groups) || [];
   const facets = (data && data.facets) || {};
   const totals = (data && data.totals) || {};
-  const tracks = (bgm.data && bgm.data.tracks) || [];
+
 
   async function toggleFav(it) {
     setBusyId(it.id);
