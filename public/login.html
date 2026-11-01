@@ -228,8 +228,9 @@
   var submitBtn = document.getElementById('submitBtn');
 
   // 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向（与 login.html 同一规则）
-  var nextRaw = new URLSearchParams(location.search).get('next') || '/';
-  var target = /^\/(?!\/)/.test(nextRaw) ? nextRaw : '/';
+  // 2026-10-31：默认落地页改为新版前端 /app（旧版 / 冻结；带 ?next= 时仍按 next 走）
+  var nextRaw = new URLSearchParams(location.search).get('next') || '/app';
+  var target = /^\/(?!\/)/.test(nextRaw) ? nextRaw : '/app';
 
   function showError(msg) {
     errorEl.textContent = msg;
