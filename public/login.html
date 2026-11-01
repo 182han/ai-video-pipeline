@@ -1,318 +1,569 @@
-<!DOCTYPE html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>登录 · Video Studio</title>
 <!--
-  登录页（夜谷 · 白绿主题）
-  与改造前相比：只换视觉，认证逻辑逐行一致（同 /api/auth/login、
-  next 参数沿用站内相对路径校验、401/429/503 文案照搬）。
-  回退：git -C app checkout -- public/login.html
+  login-intro.html — 浏览器直接打开版（视频 + 海报外链，观感最好）
+  自包含/预览容器：用同目录 login-intro-standalone.html（海报内联 base64；视频仍外链）
+  素材：/assets/night-valley-loop.mp4（与 app/public/showcase/night-valley-loop.mp4 同一文件）
+        /assets/hq/poster-2k.jpg（2560×1440，去噪+锐化+重采样；源视频 1600×900 是硬上限）
+  行为（2026-10-27 定稿）：
+    t=0   低饱和夜谷视频循环 + 白色雾叠层 + 底部「Click to enter」；全屏任意位置可点
+    第 1 次点击（全屏） 1200ms：场景 scale 1.0→1.18；雾叠层 opacity 1→0；
+                       最后 300ms 视频 saturate .82→1.08 / brightness 1.02→1.18 的短过渡
+                       80~400ms：「Are you signing in?」+「Enter」淡入；登录表单不出现
+    第 2 次点击（Enter 或整块区域） 英文行淡出，登录表单在同一位置淡入
+    提交（Sign in） 雾过渡：白雾渐起 760ms 盖住画面 → 切工作台 → 雾渐渐淡去 760ms
+                      （不是硬切；prefers-reduced-motion 时直接切）
+  每次打开都播；无跳过、无 localStorage 记忆
+  不对 video filter 做关键帧；主过渡是白色雾叠层 opacity（GPU）
+  版式：标题块水平居中、垂直顶格；英文部分（主名/副题/四项英文小标）保持不动
 -->
 <style>
-  :root {
-    --text: #0c1a14;
-    --text-dim: #46594f;
-    --text-tertiary: #6b7d73;
-    --placeholder: #8ba096;
-    --accent: #0b6b45;
-    --accent-hover: #085436;
-    --accent-ring: rgba(18, 148, 92, .18);
-    --danger: #b3261e;
-    --card: rgba(255, 255, 255, .66);
-    --card-border: rgba(13, 35, 26, .10);
-    --field: rgba(255, 255, 255, .82);
-    --field-border: rgba(13, 35, 26, .14);
-    --line: rgba(13, 35, 26, .10);
-    --radius: 22px;
-    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
-            "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  :root{
+    --ink:#FFFFFF;
+    --dim:rgba(255,255,255,.68);
+    --faint:rgba(255,255,255,.44);
+    --hair:rgba(255,255,255,.30);
+    --hair-strong:rgba(255,255,255,.72);
+    --danger:#F0C9A8;
+    --sans:"Inter","SF Pro Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+    --num:"SF Mono","Cascadia Mono",Consolas,ui-monospace,monospace;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    font-family: var(--font);
-    color: var(--text);
-    background: #eef4f1;
-    -webkit-font-smoothing: antialiased;
-    letter-spacing: -.01em;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    position: relative;
-    overflow: hidden;
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:radial-gradient(80% 70% at 50% 42%, #12362a 0%, #0a241b 42%, #06130e 100%)}
+  body{
+    color:var(--ink);font:14px/1.55 var(--sans);overflow:hidden;
+    -webkit-font-smoothing:antialiased;letter-spacing:.01em;
+  }
+  button,input{font-family:inherit}
+
+  /* 场景：视频 + 两层雾，整体做 scale；UI 不跟着缩 */
+  .scene{
+    position:fixed;inset:0;z-index:0;overflow:hidden;
+    transform:scale(1);transform-origin:50% 50%;
+    transition:transform 1200ms cubic-bezier(.2,.7,.2,1);
+    will-change:transform;
+  }
+  .bg{
+    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+    filter:saturate(.82) brightness(1.02);
+    transform:translateZ(0);
+  }
+  .fog{
+    position:absolute;inset:-12%;z-index:1;pointer-events:none;
+    opacity:1;will-change:opacity;
+    transition:opacity 1200ms cubic-bezier(.2,.7,.2,1);
+    background:
+      radial-gradient(42% 38% at 22% 42%, rgba(255,255,255,.78) 0%, rgba(255,255,255,.26) 46%, rgba(255,255,255,0) 72%),
+      radial-gradient(36% 32% at 68% 30%, rgba(255,255,255,.66) 0%, rgba(255,255,255,.18) 52%, rgba(255,255,255,0) 76%),
+      radial-gradient(52% 40% at 52% 82%, rgba(255,255,255,.84) 0%, rgba(255,255,255,.24) 48%, rgba(255,255,255,0) 76%),
+      radial-gradient(30% 26% at 86% 70%, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 72%);
+    filter:blur(2px);
+  }
+  .fog-b{
+    inset:-18%;z-index:2;opacity:.7;
+    background:
+      radial-gradient(38% 30% at 34% 68%, rgba(255,255,255,.7) 0%, rgba(255,255,255,.16) 50%, rgba(255,255,255,0) 74%),
+      radial-gradient(44% 30% at 74% 54%, rgba(255,255,255,.62) 0%, rgba(255,255,255,0) 70%);
+    animation:drift 19s ease-in-out infinite alternate;
+  }
+  .fog-a{animation:drift 15s ease-in-out infinite alternate-reverse}
+  @keyframes drift{
+    from{transform:translate3d(-2.2%,0,0) scale(1.02)}
+    to{transform:translate3d(2.4%,-1.2%,0) scale(1.04)}
   }
 
-  /* 底片：与展示页同一段循环素材 */
-  .bg {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: brightness(1.12) saturate(.60) contrast(.95) hue-rotate(-6deg);
-    z-index: 0;
+  /* 视频/海报都加载不出来时的山形 + 雾兜底；任何情况下不出现纯黑 */
+  .fallback-scene{position:absolute;inset:0;z-index:0;overflow:hidden;
+    background:linear-gradient(180deg,#12362a 0%,#0a241b 48%,#06130e 100%)}
+  .fs-sky{position:absolute;inset:0;background:
+    radial-gradient(46% 38% at 32% 34%, rgba(120,210,180,.10) 0%, rgba(120,210,180,0) 70%),
+    radial-gradient(36% 30% at 76% 28%, rgba(120,210,180,.10) 0%, rgba(120,210,180,0) 72%)}
+  .fs-ridge{position:absolute;left:-8%;right:-8%;bottom:0;background:#07150f;clip-path:polygon(0 62%, 12% 40%, 24% 58%, 38% 30%, 52% 55%, 66% 34%, 80% 56%, 92% 38%, 100% 52%, 100% 100%, 0 100%)}
+  .fs-ridge.far{height:58%;opacity:.62;background:#123a2b;clip-path:polygon(0 56%, 14% 30%, 28% 52%, 42% 22%, 58% 48%, 72% 26%, 86% 50%, 100% 34%, 100% 100%, 0 100%)}
+  .fs-ridge.near{height:42%;opacity:.96;background:#06130e;clip-path:polygon(0 66%, 16% 44%, 32% 62%, 48% 34%, 64% 60%, 80% 40%, 100% 58%, 100% 100%, 0 100%)}
+  .bg-fallback .fallback-scene{background-image:
+    linear-gradient(180deg, rgba(4,16,11,.12) 0%, rgba(4,16,11,.22) 100%),
+    url("/assets/hq/poster-2k.jpg");
+    background-size:cover;background-position:center}
+  .bg-fallback .bg{display:none}
+
+  /* 暗角：只在中心压暗，保证文字可读；边界看不出 */
+  /* 全局色调层：沿用左侧面板那套深墨绿，铺满整屏；中心亮、四边与上下压暗 */
+  .vignette{
+    position:fixed;inset:0;z-index:2;pointer-events:none;
+    background:
+      radial-gradient(88% 72% at 50% 38%, rgba(4,16,11,.48) 0%, rgba(4,16,11,.14) 56%, rgba(4,16,11,0) 84%),
+      linear-gradient(180deg,
+        rgba(4,16,11,.44) 0%,
+        rgba(4,16,11,.08) 30%,
+        rgba(4,16,11,.10) 64%,
+        rgba(4,16,11,.54) 100%);
   }
-  .veil {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    background: radial-gradient(120% 90% at 50% 42%,
-      rgba(250, 253, 251, .42) 0%, rgba(246, 251, 248, .64) 45%, rgba(240, 247, 243, .80) 100%);
-    pointer-events: none;
+  /* 封面标题块：水平居中、垂直顶格贴住画面顶边（2026-10-27 六次调整） */
+  .brand{
+    position:fixed;left:50%;top:0;transform:translateX(-50%);
+    z-index:4;pointer-events:none;text-align:center;
+    width:min(940px,80vw);
+    padding-top:clamp(20px,3.2vh,44px);
+    display:flex;flex-direction:column;align-items:center;
+    text-shadow:0 2px 30px rgba(0,0,0,.55);
+  }
+  /* 全局色调层已提供对比，不再需要局部暗角 */
+  .brand::before{display:none;content:none}
+  /* 主名：Bodoni 高对比衬线，全大写，杂志封面感 */
+  .brand-name{
+    display:block;
+    font-family:"Bodoni MT","Perpetua Titling MT","Baskerville Old Face",Garamond,Georgia,serif;
+    font-size:clamp(42px,5vw,118px);
+    font-weight:500;text-transform:uppercase;
+    letter-spacing:.05em;line-height:1.02;color:#fff;
+  }
+  /* 英文副题：斜体衬线 */
+  .brand-en{
+    display:block;margin-top:clamp(18px,2.6vh,32px);
+    font-family:"Bodoni MT","Perpetua Titling MT",Garamond,Georgia,serif;
+    font-style:italic;
+    font-size:clamp(15px,1.5vw,27px);
+    letter-spacing:.015em;line-height:1.35;
+    color:rgba(255,255,255,.9);
+  }
+  /* 中文主诉 */
+  .brand-cn{
+    display:block;margin-top:clamp(24px,3.4vh,44px);
+    font-size:clamp(15px,1.25vw,22px);
+    letter-spacing:.16em;line-height:1.6;
+    color:rgba(255,255,255,.95);
+  }
+  /* 分隔线 */
+  .brand-rule{
+    display:block;margin:clamp(28px,4vh,56px) auto;
+    width:clamp(56px,4.6vw,84px);height:1px;
+    background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
+  }
+  /* 四项能力：整行四列，居中对齐 */
+  .brand-feats{
+    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:clamp(14px,2vh,26px) clamp(16px,2.6vw,52px);
+    width:100%;
+  }
+  .brand-feat{display:block}
+  .brand-feat b{
+    display:block;font-weight:400;
+    font-size:clamp(12px,1.02vw,17px);
+    letter-spacing:.12em;line-height:1.4;color:rgba(255,255,255,.94);
+  }
+  .brand-feat i{
+    display:block;margin-top:4px;font-style:normal;
+    font-family:var(--num);font-size:clamp(11px,.66vw,12px);
+    letter-spacing:.18em;text-transform:uppercase;
+    color:rgba(255,255,255,.48);
+  }
+  /* 底部说明 */
+  .brand-foot{
+    display:block;margin-top:clamp(44px,6.2vh,92px);
+    font-size:clamp(11px,.86vw,14px);
+    letter-spacing:.07em;line-height:1.9;
+    color:rgba(255,255,255,.6);
   }
 
-  .auth-wrap {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 404px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
+  /* 散落提示；点击层是全屏的，提示只是视觉 */
+  .hints{position:fixed;left:0;right:0;top:0;bottom:0;z-index:3;pointer-events:none;display:grid;align-items:center;justify-items:center;padding:24px;transition:opacity .45s ease}
+  .hint{
+    text-shadow:0 2px 18px rgba(0,0,0,.7);
+    position:static;display:flex;align-items:center;gap:8px;
+    font-size:14px;letter-spacing:.12em;color:rgba(255,255,255,.86);
+    text-transform:uppercase;white-space:nowrap;
+  }
+  .hint::before{content:"";width:5px;height:5px;border:1px solid rgba(255,255,255,.6);border-radius:50%}
+  .hint.h1{left:auto;top:auto;right:auto;bottom:auto}
+  .is-asked .hints{opacity:0}
+
+  /* 全屏点击层：初始盖住一切 */
+  .hit{
+    position:fixed;inset:0;z-index:20;width:100%;height:100%;
+    border:0;background:transparent;cursor:pointer;
+  }
+  .hit:focus-visible{outline:2px solid rgba(255,255,255,.7);outline-offset:-4px}
+
+  /* 两段 UI：同一中心位置 */
+  .gate{
+    position:fixed;inset:0;z-index:5;
+    display:grid;align-items:center;justify-items:center;
+    padding:24px;
+    pointer-events:none;
+  }
+  .ask{
+    grid-area:1/1;width:min(560px,88vw);padding:18px;text-align:center;
+    opacity:0;visibility:hidden;transform:translateY(12px);
+    transition:opacity .35s ease .08s, transform .35s ease .08s, visibility 0s .08s;
+    pointer-events:none;cursor:pointer;border-radius:0;outline:none;
+  }
+  .is-asked .ask{
+    opacity:1;visibility:visible;transform:none;pointer-events:auto;
+  }
+  .ask:focus-visible{outline:2px solid rgba(255,255,255,.6);outline-offset:10px}
+  .en-title{
+    text-shadow:0 2px 22px rgba(0,0,0,.55);
+    margin:0 0 20px;
+    font-size:clamp(26px,3.2vw,42px);line-height:1.2;font-weight:300;
+    letter-spacing:.06em;color:#fff;
+  }
+  .ask .enter{display:inline-block;margin-top:2px}
+  .enter{
+    padding:0 0 4px;border:0;border-bottom:1px solid rgba(255,255,255,.78);border-radius:0;
+    background:transparent;color:#fff;font-size:14px;letter-spacing:.16em;
+    cursor:pointer;transition:opacity .18s ease,border-color .18s ease;
+  }
+  .enter:hover{border-bottom-color:#fff;opacity:.92}
+
+  /* 表单：第二段；透明、下划线、无卡片 */
+  .form{
+    grid-area:1/1;width:min(360px,86vw);
+    margin-top:clamp(40px,11vh,150px);
+    opacity:0;visibility:hidden;transform:translateY(10px);
+    transition:opacity .55s ease .2s, transform .55s ease .2s, visibility 0s .2s;
+    pointer-events:none;
+  }
+  .is-form .ask{
+    opacity:0;visibility:hidden;transform:translateY(-8px);pointer-events:none;
+    transition:opacity .3s ease, transform .3s ease, visibility 0s .3s;
+  }
+  .is-form .form{
+    opacity:1;visibility:visible;transform:none;pointer-events:auto;
+  }
+  .field{display:block;margin-bottom:18px}
+  .field span{
+    display:block;margin-bottom:7px;
+    font-family:var(--num);font-size:9px;letter-spacing:.2em;color:var(--faint);
+    text-transform:uppercase;
+  }
+  .field input{
+    width:100%;height:34px;padding:0 0 6px;
+    border:0;border-bottom:1px solid var(--hair);border-radius:0;
+    background:transparent;color:#fff;font-size:14px;letter-spacing:.02em;
+    outline:none;transition:border-color .2s ease;
+  }
+  .field input::placeholder{color:rgba(255,255,255,.34)}
+  .field input:focus{border-bottom-color:var(--hair-strong)}
+  .err{min-height:18px;margin:2px 0 6px;font-size:11px;line-height:18px;color:var(--danger)}
+  .form .enter{display:inline-block;margin:12px 0 0}
+  .form .enter:disabled{opacity:.45;cursor:default}
+  .fine{
+    margin:18px 0 0;font-size:10px;line-height:1.6;color:rgba(255,255,255,.42);
+    letter-spacing:.02em;
   }
 
-  .auth-card {
-    width: 100%;
-    background: var(--card);
-    -webkit-backdrop-filter: blur(26px) saturate(150%);
-    backdrop-filter: blur(26px) saturate(150%);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius);
-    box-shadow:
-      0 30px 70px -30px rgba(18, 44, 33, .40),
-      0 2px 8px -4px rgba(18, 44, 33, .14);
-    padding: 30px 28px 24px;
-    animation: rise .7s cubic-bezier(.2, .7, .2, 1) both;
+  /* ===== 登录成功过渡（2026-10-27）：白雾渐起 → 工作台 → 雾渐渐淡去 ===== */
+  .fog-out{
+    position:fixed;inset:-10%;z-index:60;pointer-events:none;
+    opacity:0;
+    transition:opacity 760ms cubic-bezier(.4,.55,.3,1);
+    background:
+      radial-gradient(120% 96% at 50% 58%, rgba(255,255,255,.97) 0%, rgba(252,253,252,.94) 52%, rgba(238,244,241,.92) 100%);
+    filter:blur(2px);
+  }
+  body.is-leaving .fog-out{opacity:1}
+
+  .workbench{
+    position:fixed;inset:0;z-index:50;
+    display:grid;place-items:center;text-align:center;
+    background:
+      radial-gradient(88% 70% at 50% 30%, #FCFDFC 0%, #F3F7F5 58%, #EEF4F1 100%);
+    color:#0C1A14;
+    opacity:0;visibility:hidden;
+    transition:opacity 420ms ease;
+  }
+  body.is-workbench .workbench{opacity:1;visibility:visible}
+  .wb-name{
+    display:block;
+    font-family:"Bodoni MT","Perpetua Titling MT",Garamond,Georgia,serif;
+    font-size:clamp(26px,2.6vw,44px);text-transform:uppercase;
+    letter-spacing:.06em;color:#0B6B45;
+  }
+  .wb-note{
+    display:block;margin-top:14px;
+    font-size:13px;letter-spacing:.06em;color:#5E7066;
   }
 
-  .brand { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; }
-  .brand-dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: #c6ff3d;
-    box-shadow: 0 0 0 4px rgba(198, 255, 61, .22);
-    flex-shrink: 0;
-  }
-  .brand-name { font-size: 14px; font-weight: 600; }
-
-  .auth-title { font-size: 23px; font-weight: 600; letter-spacing: -.022em; margin-bottom: 6px; }
-  .auth-sub { font-size: 14px; color: var(--text-dim); margin-bottom: 22px; }
-
-  .field { display: block; margin-bottom: 14px; }
-  .field-label {
-    display: block; font-size: 13.5px; font-weight: 550;
-    color: var(--text-dim); margin-bottom: 7px;
-  }
-  .field input {
-    width: 100%; height: 44px; padding: 0 13px;
-    font-size: 15px; font-family: inherit; color: var(--text);
-    background: var(--field);
-    border: 1px solid var(--field-border);
-    border-radius: 12px;
-    outline: none;
-    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-    letter-spacing: 0;
-  }
-  .field input::placeholder { color: var(--placeholder); }
-  .field input:hover { background: rgba(255, 255, 255, .92); }
-  .field input:focus {
-    border-color: #12945c;
-    box-shadow: 0 0 0 4px var(--accent-ring);
-    background: #fff;
+  /* 尊重减弱动效：不做雾过渡，直接切到工作台 */
+  @media (prefers-reduced-motion: reduce){
+    .fog-out{transition:none !important}
+    body.is-leaving .fog-out{opacity:0}
+    .workbench{transition:none !important}
   }
 
-  .auth-error {
-    min-height: 19px; font-size: 13px; line-height: 19px;
-    color: var(--danger); margin: 4px 0 12px;
-    opacity: 0; transform: translateY(-2px);
-    transition: opacity .16s ease, transform .16s ease;
-  }
-  .auth-error.show { opacity: 1; transform: translateY(0); }
+  .is-asked .scene{transform:scale(1.18)}
+  .is-asked .fog{opacity:0}
+  .is-asked .fog-b{opacity:0}
 
-  .btn {
-    width: 100%; height: 48px;
-    border: none; border-radius: 12px;
-    background: var(--accent); color: #fff;
-    font-size: 15px; font-weight: 600; font-family: inherit;
-    letter-spacing: .01em; cursor: pointer;
-    transition: background .16s ease, transform .06s ease;
+  /* 视频 filter 只做一次 300ms 短过渡（延迟到雾散后段），不做关键帧 */
+  .is-asked .bg{
+    filter:saturate(1.08) brightness(1.18);
+    transition:filter .3s ease .9s;
   }
-  .btn:hover:not(:disabled) { background: var(--accent-hover); }
-  .btn:active:not(:disabled) { transform: translateY(1px); }
-  .btn:disabled { opacity: .6; cursor: default; }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-  .auth-foot {
-    margin-top: 18px; padding-top: 14px;
-    border-top: 1px solid var(--line);
-    font-size: 13px; line-height: 1.6; color: var(--text-tertiary);
+  /* 窄屏：能力项回到两列 */
+  @media (max-width:900px){
+    .brand{width:88vw}
+    .brand-feats{grid-template-columns:repeat(2,minmax(0,1fr));width:min(420px,86vw)}
   }
-  .auth-copy { font-size: 12.5px; color: var(--text-dim); letter-spacing: .01em; }
 
-
-  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    20% { transform: translateX(-5px); }
-    40% { transform: translateX(4px); }
-    60% { transform: translateX(-3px); }
-    80% { transform: translateX(2px); }
+  /* 矮屏（笔记本 768~820 高）：标题块收紧，避免和中央内容相撞 */
+  @media (max-height:820px){
+    .brand{padding-top:clamp(14px,2.2vh,28px)}
+    .brand-name{font-size:clamp(34px,4vw,84px)}
+    .brand-en{margin-top:clamp(12px,1.8vh,22px)}
+    .brand-cn{margin-top:clamp(16px,2.4vh,30px)}
+    .brand-rule{margin:clamp(18px,2.8vh,36px) auto}
+    .brand-feats{gap:clamp(10px,1.6vh,20px) clamp(12px,2.2vw,40px)}
+    .brand-foot{margin-top:clamp(28px,4.4vh,56px);line-height:1.7}
   }
-  .shake { animation: shake .32s ease; }
-
-  @media (max-width: 420px) {
-    .auth-card { padding: 24px 20px 20px; border-radius: 18px; }
-    .auth-title { font-size: 21px; }
+  @media (max-height:660px){
+    .brand-foot{display:none}
   }
-  @media (prefers-reduced-motion: reduce) {
-    .auth-card { animation: none; }
-    * { transition: none !important; }
-    .shake { animation: none; }
+  @media (max-width:520px){
+    .brand{left:50%;width:90vw;padding-top:16px}
+    .brand-name{font-size:clamp(28px,8.4vw,46px)}
+    .brand-en{font-size:clamp(12px,3.2vw,16px);margin-top:7px}
+    .brand-cn{font-size:clamp(12px,3.2vw,15px);margin-top:10px;letter-spacing:.1em}
+    .brand-rule{margin:12px auto;width:40px}
+    .brand-feats{gap:9px 14px;width:100%}
+    .brand-feat b{font-size:clamp(11px,2.8vw,13px)}
+    .brand-feat i{font-size:11px;margin-top:2px;letter-spacing:.12em}
+    .brand-foot{font-size:11px;margin-top:12px;line-height:1.7}
+    .hint.h1{left:auto;top:auto;right:auto;bottom:auto}
+    .en-title{margin-bottom:18px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .scene,.fog,.bg,.ask,.form,.hints{transition:none !important;animation:none !important}
+    .scene{transform:scale(1.18)}
+    .fog{opacity:0}
+    .bg{filter:saturate(1.08) brightness(1.18)}
+    .ask,.hints,.hit{display:none}
+    .form{opacity:1;visibility:visible;transform:none;pointer-events:auto}
   }
 </style>
+<noscript>
+<style>
+  .hit,.hints,.ask{display:none}
+  .scene{transform:scale(1.18)}
+  .fog{opacity:0}
+  .bg{filter:saturate(1.08) brightness(1.18)}
+  .form{opacity:1;visibility:visible;transform:none;pointer-events:auto}
+</style>
+</noscript>
 </head>
 <body>
 
-<video class="bg" id="bgVideo" autoplay muted loop playsinline preload="auto"
-       poster="showcase/night-valley-poster.jpg" aria-hidden="true" tabindex="-1">
-  <source src="showcase/night-valley-loop.mp4" type="video/mp4">
-</video>
-<div class="veil" aria-hidden="true"></div>
-<main class="auth-wrap">
-  <div class="auth-card" id="card">
-    <div class="brand">
-      <span class="brand-dot" aria-hidden="true"></span>
-      <span class="brand-name">Video Studio</span>
-    </div>
-
-    <h1 class="auth-title">登录</h1>
-    <p class="auth-sub">输入账号与密码以继续</p>
-
-    <form id="loginForm" novalidate>
-      <label class="field">
-        <span class="field-label">账号</span>
-        <input id="username" name="username" type="text" autocomplete="username"
-               spellcheck="false" autocapitalize="off" placeholder="请输入账号" required>
-      </label>
-      <label class="field">
-        <span class="field-label">密码</span>
-        <input id="password" name="password" type="password" autocomplete="current-password"
-               placeholder="请输入密码" required>
-      </label>
-
-      <div class="auth-error" id="error" role="alert" aria-live="polite"></div>
-
-      <button class="btn" id="submitBtn" type="submit">登录</button>
-    </form>
-
-    <div class="auth-foot">
-      会话只保存在本次浏览器会话中：关闭浏览器、或服务重启后需要重新登录。
-    </div>
+<div class="scene" aria-hidden="true">
+  <div class="fallback-scene" aria-hidden="true">
+    <div class="fs-sky"></div>
+    <div class="fs-ridge far"></div>
+    <div class="fs-ridge near"></div>
   </div>
-  <div class="auth-copy">本地部署 · 未登录访问会被拒绝</div>
+  <video class="bg" id="bg" autoplay muted loop playsinline preload="auto"
+         poster="/assets/hq/poster-2k.jpg" tabindex="-1">
+    <source src="/assets/night-valley-loop.mp4" type="video/mp4">
+  </video>
+  <div class="fog fog-a"></div>
+  <div class="fog fog-b"></div>
+</div>
+
+<div class="vignette" aria-hidden="true"></div>
+<div class="brand">
+  <span class="brand-name">Video Studio</span>
+  <span class="brand-en">One sentence, an entire landscape film</span>
+  <span class="brand-cn">一句话，生成整条风景长片</span>
+  <span class="brand-rule"></span>
+  <span class="brand-feats">
+    <span class="brand-feat"><b>自动分镜</b><i>Storyboard</i></span>
+    <span class="brand-feat"><b>无缝拼接</b><i>Seamless cut</i></span>
+    <span class="brand-feat"><b>自动配乐</b><i>Soundtrack</i></span>
+    <span class="brand-feat"><b>循环播放</b><i>Loop ready</i></span>
+  </span>
+  <span class="brand-foot">为 Android TV 屏保设计 · 单条 30 分钟以上 · 头尾无缝衔接</span>
+</div>
+
+<div class="hints" aria-hidden="true">
+  <span class="hint h1">Click to enter</span>
+</div>
+
+<button class="hit" id="hit" aria-label="点击任意位置进入登录"></button>
+
+<main class="gate" id="gate">
+  <div class="ask" id="ask" role="button" tabindex="0" aria-label="确认进入登录">
+    <h1 class="en-title">Are you signing in?</h1>
+    <span class="enter">Enter</span>
+  </div>
+
+  <form class="form" id="loginForm" novalidate aria-hidden="true">
+    <label class="field">
+      <span>账号</span>
+      <input id="username" name="username" type="text" autocomplete="username"
+             spellcheck="false" autocapitalize="off" placeholder="请输入账号" required>
+    </label>
+    <label class="field">
+      <span>密码</span>
+      <input id="password" name="password" type="password" autocomplete="current-password"
+             placeholder="请输入密码" required>
+    </label>
+    <p class="err" id="err" role="alert" aria-live="polite"></p>
+    <button class="enter" id="submitBtn" type="submit">Sign in</button>
+    <p class="fine">会话只保留在本次浏览器会话中；关闭浏览器后需要重新登录。</p>
+  </form>
 </main>
 
+<!-- 登录成功过渡：白雾渐起 → 切到工作台 → 雾渐渐淡去（2026-10-27） -->
+<div class="fog-out" id="fogOut" aria-hidden="true"></div>
+
+
+
 <script>
-(function () {
-  'use strict';
+(function(){
+  "use strict";
+  var body = document.body;
+  var hit = document.getElementById("hit");
+  var ask = document.getElementById("ask");
+  var form = document.getElementById("loginForm");
+  var user = document.getElementById("username");
+  var pass = document.getElementById("password");
+  var err = document.getElementById("err");
+  var submit = document.getElementById("submitBtn");
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var asked = false, formed = false;
 
-  var form = document.getElementById('loginForm');
-  var usernameEl = document.getElementById('username');
-  var passwordEl = document.getElementById('password');
-  var errorEl = document.getElementById('error');
-  var card = document.getElementById('card');
-  var submitBtn = document.getElementById('submitBtn');
-
-  // 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向（与 login.html 同一规则）
-  // 2026-10-31：默认落地页改为新版前端 /app（旧版 / 冻结；带 ?next= 时仍按 next 走）
-  var nextRaw = new URLSearchParams(location.search).get('next') || '/app';
-  var target = /^\/(?!\/)/.test(nextRaw) ? nextRaw : '/app';
-
-  function showError(msg) {
-    errorEl.textContent = msg;
-    errorEl.classList.add('show');
-    card.classList.remove('shake');
-    void card.offsetWidth;
-    card.classList.add('shake');
-    setTimeout(function () { card.classList.remove('shake'); }, 400);
+  var v = document.getElementById("bg");
+  var fallbackDone = false;
+  function fallbackScene(){
+    if(fallbackDone) return;
+    fallbackDone = true;
+    body.classList.add("bg-fallback");
+    try{
+      document.body.style.backgroundImage = 'linear-gradient(180deg, rgba(4,16,11,.12), rgba(4,16,11,.22)), url("/assets/hq/poster-2k.jpg")';
+      document.body.style.backgroundSize = "cover";
+      document.body.style.backgroundPosition = "center";
+    }catch(e){}
+    if(v){ try{ v.pause(); }catch(e){} v.style.display = "none"; }
+  }
+  if(v){
+    v.addEventListener("error", fallbackScene);
+    v.addEventListener("stalled", function(){ if(v.readyState === 0) fallbackScene(); });
+    setTimeout(function(){
+      if(!fallbackDone && (v.readyState === 0 || v.networkState === 3)) fallbackScene();
+    }, 1500);
+    try{ if(v.play) v.play().catch(function(){}); }catch(e){}
+  } else {
+    fallbackScene();
   }
 
-  function clearError() {
-    errorEl.classList.remove('show');
-    errorEl.textContent = '';
+  function enterScene(){
+    if(asked) return;
+    asked = true;
+    body.classList.add("is-asked");
+    hit.hidden = true;
+    hit.style.display = "none";
+    if(reduced){
+      ask.setAttribute("aria-hidden","true");
+    } else {
+      setTimeout(function(){ ask.focus({preventScroll:true}); }, 400);
+    }
   }
 
-  function setBusy(busy) {
-    submitBtn.disabled = busy;
-    submitBtn.textContent = busy ? '登录中…' : '登录';
+  function enterForm(){
+    if(!asked || formed) return;
+    formed = true;
+    body.classList.add("is-form");
+    ask.setAttribute("aria-hidden","true");
+    form.setAttribute("aria-hidden","false");
+    if(reduced){
+      user.focus({preventScroll:true});
+    } else {
+      setTimeout(function(){ user.focus({preventScroll:true}); }, 300);
+    }
   }
 
-  // 已经登录过了就直接进去（例如浏览器后退回到登录页）
-  fetch('/api/auth/me', { headers: { 'accept': 'application/json' } })
-    .then(function (r) { if (r.ok) location.replace(target); })
-    .catch(function () {});
+  hit.addEventListener("click", enterScene);
+  hit.addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); enterScene(); }
+  });
 
-  usernameEl.focus();
+  ask.addEventListener("click", enterForm);
+  ask.addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); enterForm(); }
+  });
 
-  form.addEventListener('submit', function (e) {
+  if(reduced){
+    enterScene();
+    enterForm();
+  }
+
+  // ---------- 真实登录（2026-11-01）----------
+  // next 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向
+  var target = (function(){
+    var raw = new URLSearchParams(location.search).get("next") || "/app";
+    return /^\/(?!\/)/.test(raw) ? raw : "/app";
+  })();
+
+  function setBusy(busy){
+    submit.disabled = busy;
+    submit.textContent = busy ? "Signing in…" : "Sign in";
+  }
+
+  // 已登录过就直接进去（浏览器后退回登录页时）
+  fetch("/api/auth/me", { headers: { accept: "application/json" } })
+    .then(function(r){ if (r.ok) location.replace(target); })
+    .catch(function(){});
+
+  // 雾起 → 换场 → 跳转；尊重「减少动态效果」时直接跳
+  function goThrough(){
+    if (reduced) { location.replace(target); return; }
+    body.classList.add("is-leaving");
+    setTimeout(function(){
+      body.classList.add("is-workbench");
+      setTimeout(function(){ location.replace(target); }, 420);
+    }, 780);
+  }
+
+  form.addEventListener("submit", function(e){
     e.preventDefault();
-    clearError();
-
-    var username = usernameEl.value.trim();
-    var password = passwordEl.value;
-
-    if (!username) { showError('请输入账号'); usernameEl.focus(); return; }
-    if (!password) { showError('请输入密码'); passwordEl.focus(); return; }
-
+    var u = user.value.trim(), p = pass.value;
+    if(!u){ err.textContent = "请输入账号"; user.focus(); return; }
+    if(!p){ err.textContent = "请输入密码"; pass.focus(); return; }
+    err.textContent = "";
     setBusy(true);
 
-    fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-      body: JSON.stringify({ username: username, password: password })
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept": "application/json" },
+      body: JSON.stringify({ username: u, password: p })
     })
-      .then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (body) {
-          return { status: r.status, body: body };
+      .then(function(r){
+        return r.json().catch(function(){ return {}; }).then(function(b){
+          return { status: r.status, body: b };
         });
       })
-      .then(function (res) {
-        if (res.status === 200) {
-          location.replace(target);
-          return;
-        }
+      .then(function(res){
+        if (res.status === 200) { goThrough(); return; }
         setBusy(false);
-        passwordEl.select();
-        if (res.status === 429) {
-          showError(res.body.error || '尝试次数过多，请稍后再试');
-        } else if (res.status === 503) {
-          showError('认证服务不可用，请联系部署者检查数据库连接');
-        } else if (res.status === 401) {
-          showError(res.body.error || '账号或密码错误');
-        } else {
-          showError(res.body.error || '登录失败（HTTP ' + res.status + '）');
-        }
+        try { pass.select(); } catch(e){}
+        if (res.status === 429) err.textContent = res.body.error || "尝试次数过多，请稍后再试";
+        else if (res.status === 503) err.textContent = "认证服务不可用，请联系部署者检查数据库连接";
+        else if (res.status === 401) err.textContent = res.body.error || "账号或密码错误";
+        else err.textContent = res.body.error || ("登录失败（HTTP " + res.status + "）");
       })
-      .catch(function () {
+      .catch(function(){
         setBusy(false);
-        showError('无法连接到服务器，请确认服务是否已启动');
+        err.textContent = "无法连接到服务器，请确认服务是否已启动";
       });
   });
 
-  // 尊重「减少动态效果」：暂停底片
-  var video = document.getElementById('bgVideo');
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-  function syncMotion() {
-    if (!video) return;
-    if (reduce.matches) video.pause();
-    else { var p = video.play(); if (p && p.catch) p.catch(function () {}); }
-  }
-  if (reduce.addEventListener) reduce.addEventListener('change', syncMotion);
-  syncMotion();
+  user.addEventListener("input", function(){ if(err.textContent) err.textContent=""; });
+  pass.addEventListener("input", function(){ if(err.textContent) err.textContent=""; });
 })();
 </script>
 </body>
