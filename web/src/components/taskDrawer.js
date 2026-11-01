@@ -8,6 +8,8 @@
 //   skipped 但不是合法跳过      → 不通过（绝不显示成通过）
 //   测不到 / 无结果             → 未执行
 // ============================================================
+import { statusMeta, PauseButton } from './pauseControl.js';
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
@@ -91,15 +93,10 @@ function pickColorMatch(task) {
   return { intent, maxGain, result: null, source: null };
 }
 
-function statusStyle(status) {
-  switch (status) {
-    case 'completed': return { text: '已完成', dot: 'bg-accent', cls: 'text-accent' };
-    case 'failed': return { text: '失败', dot: 'bg-danger', cls: 'text-danger' };
-    case 'generating': return { text: '生成中', dot: 'bg-warn', cls: 'text-warn' };
-    case 'partial': return { text: '部分完成', dot: 'bg-warn', cls: 'text-warn' };
-    case 'pending': return { text: '等待中', dot: 'bg-ink3', cls: 'text-ink3' };
-    default: return { text: status || '-', dot: 'bg-ink3', cls: 'text-ink3' };
-  }
+// 状态展示统一走 pauseControl.statusMeta：paused 单独一态，
+// failed 若带 failureCode=pause_* 则显示「已中止 · 可补跑」而不是普通失败。
+function statusStyle(status, task) {
+  return statusMeta(status, task);
 }
 
 // outputPath 是绝对路径，转成 /output/<文件名> 才能被静态目录下发
@@ -111,7 +108,7 @@ function toOutputUrl(p) {
 
 function Row({ label, children }) {
   return html`
-    <div className="flex gap-3 py-[7px] border-b border-black/[.04] last:border-0">
+    <div className="flex gap-3 py-[7px] border-b border-white/[.04] last:border-0">
       <span className="w-[68px] shrink-0 text-[12px] text-ink3">${label}</span>
       <span className="flex-1 min-w-0 text-[12px] text-ink break-words">${children}</span>
     </div>
@@ -120,6 +117,29 @@ function Row({ label, children }) {
 
 export function TaskDrawer({ taskId, onClose }) {
   const [state, setState] = useState({ loading: true, task: null, error: null });
+  const [tick, setTick] = useState(0);
+  const [actErr, setActErr] = useState('');
+  const [busyAct, setBusyAct] = useState('');
+
+  // 失败任务的补救动作（接口已核实：retry / resume / continue / recheck-clips）
+  async function postAction(path) {
+    setActErr('');
+    setBusyAct(path);
+    try {
+      const r = await fetch('/api/tasks/' + encodeURIComponent(taskId) + '/' + path, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.success === false) throw new Error(j.error || ('HTTP ' + r.status));
+      setTick((v) => v + 1);
+    } catch (e) {
+      setActErr(e.message || '操作失败');
+    } finally {
+      setBusyAct('');
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -132,7 +152,7 @@ export function TaskDrawer({ taskId, onClose }) {
       .then((t) => { if (alive) setState({ loading: false, task: t, error: null }); })
       .catch((e) => { if (alive) setState({ loading: false, task: null, error: e.message }); });
     return () => { alive = false; };
-  }, [taskId]);
+  }, [taskId, tick]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -141,14 +161,14 @@ export function TaskDrawer({ taskId, onClose }) {
   }, [onClose]);
 
   const t = state.task;
-  const st = statusStyle(t && t.status);
+  const st = statusStyle(t && t.status, t);
   const videoUrl = t ? toOutputUrl(t.outputPath) : null;
   const steps = t && t.steps ? STEP_ORDER.filter((k) => t.steps[k]) : [];
 
   return html`
     <div className="fixed inset-0 z-40">
       <div
-        className="absolute inset-0 bg-black/25"
+        className="absolute inset-0 bg-black/60"
         onClick=${onClose}
         aria-hidden="true"
       ></div>
@@ -157,18 +177,26 @@ export function TaskDrawer({ taskId, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label="任务详情"
-        className="absolute right-0 top-0 bottom-0 w-[min(760px,94vw)] bg-s3 border-l border-black/[.08]
+        className="absolute right-0 top-0 bottom-0 w-[min(760px,94vw)] bg-s3 border-l border-white/[.08]
                    shadow-[-16px_0_48px_rgba(0,0,0,.12)] flex flex-col drawer-in"
         onClick=${(e) => e.stopPropagation()}
       >
-        <header className="shrink-0 h-12 flex items-center gap-2 px-4 border-b border-black/[.06]">
+        <header className="shrink-0 h-12 flex items-center gap-2 px-4 border-b border-white/[.06]">
           <span className=${'w-[7px] h-[7px] rounded-full ' + st.dot}></span>
           <span className=${'text-[12px] ' + st.cls}>${st.text}</span>
           <span className="text-[11px] text-ink3 font-num truncate">${taskId}</span>
           <span className="flex-1"></span>
+          ${t && html`
+            <${PauseButton}
+              taskId=${taskId}
+              status=${t.status}
+              compact=${false}
+              onChanged=${() => setTick((v) => v + 1)}
+            />
+          `}
           <button
             onClick=${onClose}
-            className="h-7 w-7 grid place-items-center rounded-[5px] text-ink2 hover:bg-black/[.05]"
+            className="h-7 w-7 grid place-items-center rounded-[5px] text-ink2 hover:bg-white/[.05]"
             aria-label="关闭"
           >✕</button>
         </header>
@@ -214,6 +242,38 @@ export function TaskDrawer({ taskId, onClose }) {
                 ${t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-'}
               </${Row}>
               ${t.error && html`<${Row} label="错误"><span className="text-danger">${t.error}</span></${Row}>`}
+              ${t.failureCode && html`<${Row} label="中止">
+                <span className="text-warn">${st.note || t.failureCode}</span>
+                ${t.recoverable ? html`<span className="text-[11px] text-ink3"> · 可补跑</span>` : null}
+                ${t.pauseTimedOutAt && html`
+                  <span className="text-[10px] text-ink3">
+                    （${new Date(t.pauseTimedOutAt).toLocaleString('zh-CN')}）
+                  </span>
+                `}
+              </${Row}>`}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              ${(t.status === 'failed' || t.status === 'partial') && html`
+                <button onClick=${() => postAction('retry')} disabled=${!!busyAct}
+                  className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
+                             hover:bg-white/[.06] disabled:opacity-40">重试</button>
+                <button onClick=${() => postAction('resume')} disabled=${!!busyAct}
+                  className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
+                             hover:bg-white/[.06] disabled:opacity-40">用已成功片段继续</button>
+                <button onClick=${() => postAction('continue')} disabled=${!!busyAct}
+                  className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
+                             hover:bg-white/[.06] disabled:opacity-40">补跑</button>
+              `}
+              ${videoUrl && html`
+                <a href=${videoUrl} download
+                  className="h-7 px-2.5 inline-flex items-center rounded-[5px] border border-white/[.10]
+                             text-[11px] text-ink2 hover:bg-white/[.06]">下载成片</a>
+              `}
+              <a href="/bgm-editor.html" target="_blank" rel="noreferrer"
+                className="h-7 px-2.5 inline-flex items-center rounded-[5px] border border-white/[.10]
+                           text-[11px] text-ink2 hover:bg-white/[.06]">去剪辑</a>
+              ${actErr && html`<span className="text-[11px] text-danger">${actErr}</span>`}
             </div>
 
             ${(() => {
@@ -221,7 +281,7 @@ export function TaskDrawer({ taskId, onClose }) {
               const b = colorMatchBadge(cm.result);
               return html`
                 <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">校色</h4>
-                <div className="flex items-center gap-2 py-[5px] border-b border-black/[.04]">
+                <div className="flex items-center gap-2 py-[5px] border-b border-white/[.04]">
                   <span className="w-[68px] shrink-0 text-[12px] text-ink3">用户要求</span>
                   <span className=${'text-[12px] ' + (cm.intent ? 'text-ink' : 'text-ink3')}>
                     ${cm.intent ? '开启' : '未要求（默认关）'}${cm.maxGain != null ? ' · 增益上限 ' + cm.maxGain : ''}
@@ -240,7 +300,7 @@ export function TaskDrawer({ taskId, onClose }) {
             })()}
 
             <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">流水线</h4>
-            <ul className="divide-y divide-black/[.04]">
+            <ul className="divide-y divide-white/[.04]">
               ${steps.map((k) => {
                 const s = t.steps[k];
                 const b = qcBadge(s.qcDetails);
