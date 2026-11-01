@@ -6,7 +6,7 @@
 // 路由：以 /app 为前缀，pathname 直接映射，不用 hash（见 ./router.js）。
 // ============================================================
 import { currentRoute } from './router.js';
-import { Workbench } from './screens/workbench.js';
+import { AppShell } from './screens/shell.js';
 import { Boundary } from './components/boundary.js';
 
 const { React, ReactDOM } = window;
@@ -22,8 +22,8 @@ function Router() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // 登录页暂仍由 public/login.html 承担（效果已确认）；工作台从 React 起步。
-  return html`<${Boundary}><${Workbench} route=${route} /></${Boundary}>`;
+  // 登录页仍由 public/login.html 承担（效果已确认）；工作台整体挂在 /app。
+  return html`<${Boundary}><${AppShell} route=${route} /></${Boundary}>`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${Router} />`);

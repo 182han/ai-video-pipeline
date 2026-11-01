@@ -74,7 +74,7 @@ function Msg({ role, text }) {
       <div
         className=${[
           'max-w-[86%] rounded-[10px] px-2.5 py-1.5 text-[12px] leading-[1.65] whitespace-pre-wrap break-words',
-          mine ? 'bg-accent text-white' : 'bg-black/[.05] text-ink'
+          mine ? 'bg-accent text-onaccent' : 'bg-white/[.05] text-ink'
         ].join(' ')}
       >${text}</div>
     </div>
@@ -226,21 +226,21 @@ export function Assistant() {
             ? { left: Math.min(pos.left, Math.max(8, window.innerWidth - 344)) + 'px', top: Math.max(8, pos.top - 476) + 'px' }
             : { right: '24px', bottom: '132px' })
         }}
-        className="flex flex-col rounded-[10px] border border-black/[.08] bg-s3 shadow-[0_18px_48px_rgba(0,0,0,.16)] overflow-hidden"
+        className="flex flex-col rounded-[10px] border border-white/[.08] bg-s3 shadow-[0_18px_48px_rgba(0,0,0,.16)] overflow-hidden"
       >
-        <div className="shrink-0 flex items-center gap-2 px-3 h-10 border-b border-black/[.06]">
+        <div className="shrink-0 flex items-center gap-2 px-3 h-10 border-b border-white/[.06]">
           <span className="text-[12px] font-medium text-ink">提示词助手</span>
           <span className="text-[10px] text-ink3">不知道写什么？问我</span>
           <span className="flex-1"></span>
           <button
-            className="h-6 px-1.5 rounded-[4px] text-[11px] text-ink2 hover:bg-black/[.05]"
+            className="h-6 px-1.5 rounded-[4px] text-[11px] text-ink2 hover:bg-white/[.05]"
             onClick=${() => setOpen(false)}
           >收起</button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 flex flex-col gap-2">
           ${!hasKey && html`
-            <div className="rounded-[8px] border border-black/[.08] bg-s2 p-2.5">
+            <div className="rounded-[8px] border border-white/[.08] bg-s2 p-2.5">
               <p className="text-[12px] text-ink">还没配置 LLM Key</p>
               <p className="mt-1 text-[11px] leading-[1.6] text-ink3">
                 先去旧版设置页填好 Key，再回来这里就能对话了。
@@ -259,14 +259,14 @@ export function Assistant() {
               <p className="text-[11px] text-ink3">建议提示词</p>
               <p className="mt-1 text-[12px] leading-[1.7] text-ink whitespace-pre-wrap break-words">${suggested}</p>
               <button
-                className="mt-2 h-7 px-2.5 rounded-[5px] bg-accent text-white text-[11px]"
+                className="mt-2 h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px]"
                 onClick=${usePrompt}
               >使用这段提示词</button>
             </div>
           `}
         </div>
 
-        <div className="shrink-0 flex items-end gap-2 border-t border-black/[.06] p-2">
+        <div className="shrink-0 flex items-end gap-2 border-t border-white/[.06] p-2">
           <textarea
             ref=${inputRef}
             rows="1"
@@ -280,7 +280,7 @@ export function Assistant() {
           <button
             onClick=${send}
             disabled=${!hasKey || thinking || !draft.trim()}
-            className="h-7 px-2.5 rounded-[5px] bg-accent text-white text-[11px] disabled:opacity-40"
+            className="h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px] disabled:opacity-40"
           >发送</button>
         </div>
       </div>

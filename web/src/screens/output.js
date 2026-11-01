@@ -94,7 +94,7 @@ export function OutputScreen() {
             <select
               value=${taskId || ''}
               onChange=${(e) => setTaskId(e.target.value)}
-              className="h-8 max-w-[420px] rounded-[5px] border border-black/[.08] bg-s3 px-2 text-[12px] text-ink"
+              className="h-8 max-w-[420px] rounded-[5px] border border-white/[.08] bg-s3 px-2 text-[12px] text-ink"
             >
               ${candidates.map((t) => html`
                 <option key=${t.taskId} value=${t.taskId}>
@@ -134,13 +134,13 @@ export function OutputScreen() {
                   <a
                     href=${videoUrl}
                     download
-                    className="h-9 px-4 rounded-[6px] bg-accent text-white text-[13px] inline-flex items-center hover:bg-[#095737] transition-colors"
+                    className="h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px] inline-flex items-center hover:bg-[#095737] transition-colors"
                   >导出</a>
                 `}
                 <button
                   disabled
                   title="重新生成会再次产生付费调用，接入前需要你确认"
-                  className="h-9 px-3 rounded-[6px] border border-black/[.10] text-[13px] text-ink2 opacity-40 cursor-not-allowed"
+                  className="h-9 px-3 rounded-[6px] border border-white/[.10] text-[13px] text-ink2 opacity-40 cursor-not-allowed"
                 >重新生成</button>
               </div>
 
@@ -162,7 +162,7 @@ export function OutputScreen() {
                 </span>
               </div>
 
-              <ul className="mt-2 divide-y divide-black/[.05] rounded-[8px] border border-black/[.07] bg-s3 px-3">
+              <ul className="mt-2 divide-y divide-white/[.05] rounded-[8px] border border-white/[.07] bg-s3 px-3">
                 ${qcItems.map((it) => {
                   const r = finalResults[it.key];
                   const st = qcState(r);

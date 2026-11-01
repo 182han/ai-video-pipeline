@@ -4,16 +4,33 @@
 
 /* ===== 设计 token（与 design/ui-ux/v5 对齐）===== */
 :root {
-  --s0: #EEF4F1;
-  --s1: #F3F7F5;
-  --s2: #F8FAF9;
-  --s3: #FCFDFC;
-  --ink: #0C1A14;
-  --ink2: #46594F;
-  --ink3: #5E7066;
-  --accent: #0B6B45;
-  --danger: #B3261E;
-  --warn: #8F5E10;
+  /* 深绿黑 + 香槟金（与首屏登录页同一族；2026-10-31 换肤） */
+  --s0: #0A0E0C;
+  --s1: #0E1411;
+  --s2: #121815;
+  --s3: #121815;
+  --s4: #171E1A;
+  --s5: #202823;
+  --ink: #F4F7F5;
+  --ink2: #A7B3AD;
+  --ink3: #7B8781;
+  --accent: #D6B36A;
+  --onaccent: #11170F;
+  --danger: #F08A84;
+  --warn: #E0B34F;
+  /* 通道值：Tailwind 的 /透明度 修饰符需要 rgb(var(--x) / <alpha>) 形式 */
+  --accent-rgb: 214 179 106;
+  --danger-rgb: 240 138 132;
+  --warn-rgb: 224 179 79;
+  color-scheme: dark;
+}
+
+/* 深色滚动条：不设会是一条白 */
+* { scrollbar-width: thin; scrollbar-color: rgba(244,247,245,.18) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(244,247,245,.18); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box;
 }
 
 @layer base {
