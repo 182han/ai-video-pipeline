@@ -814,6 +814,18 @@ app.get('/api/themes', (req, res) => {
   res.json(promptOptimizer.getThemes());
 });
 
+// 模板列表（2026-10-31 补：此前只有 GET /api/templates/:id，
+// 旧版 loadTemplates() 一直在打 /api/templates 却永远 404 —— 只读接口，无副作用）
+app.get('/api/templates', (req, res) => {
+  try {
+    const file = path.join(__dirname, 'data', 'templates.json');
+    const data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+    res.json({ templates: data });
+  } catch (e) {
+    res.status(500).json({ error: '读取模板失败: ' + e.message });
+  }
+});
+
 // 获取模板详情
 app.get('/api/templates/:id', (req, res) => {
   const template = promptOptimizer.getTemplate(req.params.id);
