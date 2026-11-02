@@ -8,6 +8,8 @@
 //           POST /api/bgm · DELETE /api/bgm/:id
 // 照片：    依赖出图厂商（未接入）→ 只给说明，不装样子
 // ============================================================
+import { navigate } from '../router.js';
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
@@ -243,6 +245,10 @@ export function MusicView() {
   return html`
     <div className="px-6 py-5">
       <${Head} title="配乐" sub=${tracks.length + ' 首'}>
+        <button onClick=${() => navigate('/bgm')}
+          className="h-8 px-3 rounded-[6px] border border-accent/40 text-accent text-[12px] hover:bg-accent/[.08]"
+          title="打开配乐编辑器：给已完成成片排时间轴"
+        >配乐编辑器 →</button>
         <button onClick=${() => setAdding((v) => !v)}
           className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
         >${adding ? '收起' : '＋ 新增配乐'}</button>
