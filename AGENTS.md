@@ -31,6 +31,12 @@
 
 **因此本仓库的「构建命令」= 没有；「启动命令」= `node server.js`。**
 
+### 1.1 产品口径（2026-11-02 用户确认）
+
+- **成片目标：30 分钟**（Android TV 屏保循环长片）。这是 `docs/requirements/项目需求申报表.md` 的口径，优先于 `PROJECT_STATE.md` 里"10 秒成片"的旧写法。
+- **单片段：5–10 秒**。做法是"小视频逐个生成 → 拼接"。
+- ⚠️ **代码默认值与之不符**：`.env` `GEN_CLIP_DURATION=15`、`config.js:252` 默认 `15` 秒。是否改成 8/10 秒，待用户定；改之前不要假设默认值等于产品口径。
+
 ---
 
 ## 2. 测试
@@ -80,7 +86,7 @@ Error: spawn EPERM
 
 | 红灯 | 数量 | 根因（已定位） |
 |---|---|---|
-| `verify-auth.js` | 11 通过 / **15 失败** | `data/users.json` 残留账号 `tmp_negative_probe`；`auth.js:265` `if (count > 0) return` 导致跳过创建测试账号 → 登录全 401。**是测试数据污染，不是登录功能失效。** |
+| `verify-auth.js` | 11 通过 / **15 失败** | `data/users.json` 残留账号 `tmp_negative_probe`；`auth.js:265` `if (count > 0) return` 导致跳过创建测试账号 → 登录全 401。**是测试数据污染，不是登录功能失效。** 该脚本**故意**用 `DATABASE_TYPE=json` 起临时服务（`verify-auth.js:57`）；线上走 postgres，账号是 `admin`，两者互不影响。 |
 | `verify-loop.js` | 28 通过 / **1 失败** | 断言过期：`verify-loop.js:211` 要求 `qcVersion === 2`，代码已是 `qualityChecker.js:42` `QC_VERSION = 3`。 |
 
 > 另一会话 13:45 记录的「11 个套件全绿」也成立——但它没跑 auth 与 loop。
@@ -116,7 +122,7 @@ Error: spawn EPERM
 | 2 | 包管理器坏了 | `npm` 不存在；`pnpm --version` exit 1 | 不要写依赖 npm 的流程；已有 `node_modules` 就够用 |
 | 3 | `verify-loop` 必红 | `qcVersion=3` 但断言 `===2` | 这是既有过期断言，**不要为了让测试变绿去改代码语义**；要么修断言（需按「测试也不许为了让代码通过而改」的规矩先确认），要么先记录 |
 | 4 | `verify-auth` 必红 | `data/users.json` 里 `tmp_negative_probe` 让 bootstrap 跳过建号 | 修测试隔离（改用独立 DATA_DIR / 临时账号），**不要删用户数据凑绿** |
-| 5 | 数据库不可达 | `.env` `DATABASE_TYPE=postgres`，但测试大量打印 `timeout exceeded when trying to connect` | 涉及持久化的断言当前不可信；只覆盖内存/JSON 侧 |
+| 5 | 数据库**可达，但会间歇超时** | 2026-11-02 15:06 实测：`users` 表 1 行（`admin`）、`tasks` 表 **201** 行 → 库是通的；但批量跑测试时大量打印 `timeout exceeded when trying to connect` | **不要把测试里的超时噪声当成"库坏了"**；持久化断言仍只覆盖内存/JSON 侧 |
 | 6 | sqlite 驱动不可用 | `better-sqlite3` 不在 `package.json` 也不在 `node_modules` | 不要用 `DATABASE_TYPE=sqlite` |
 | 7 | `.err` 漏出 gitignore | `.gitignore:27` 只有 `*.log`；`data/logs/console-3001.log.err` 已被提交（0 字节） | 新增日志后缀时要同步规则 |
 | 8 | 双锁文件 | `package-lock.json` 与 `pnpm-lock.yaml` 都在库 | 改依赖前先确认用哪个，别两个都改 |
@@ -174,7 +180,7 @@ Error: spawn EPERM
 ## 8. 未验证清单（不要假设）
 
 - 真实厂商生成（无 Key，全部 Mock / 注入 fetch）。
-- 持久化（Postgres 不可达）。
+- 持久化：库连得上（`users` 1 行、`tasks` 201 行），但**没有测试断言验证「任务真的写进 Postgres」**，现有断言只覆盖内存/JSON 侧。
 - 30 分钟级长片、真实接缝、长时转码。
 - 视觉与交互（无人工浏览器验收记录）。
 - 10 个未注册套件的当前状态。

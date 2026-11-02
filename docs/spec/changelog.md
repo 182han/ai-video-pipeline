@@ -1,0 +1,2924 @@
+# 变更记录
+
+> 用途：记录跨多条线的改动归属与来龙去脉。
+> 起因：2026-10-18 有若干次提交把不同来源的改动合并进了同一条 commit，
+> 提交信息与实际内容不符，仅凭 `git log` 无法追溯某项功能是何时、因何改的。
+> 本文件按「事实」记录，不替代 commit，但比 commit message 更可靠。
+
+---
+
+---
+
+## 2026-10-18 · qcVersion：区分历史伪造结论与修复后的真实结论
+
+**状态**：代码完成，待独立验收。
+
+### 背景
+
+上文提到的两处缺陷（`skipped` 当 `passed`、`Math.random` 假质检）修好之前，
+所有落库的质检结论都是**没真正执行过检测的伪造 pass**。它们已经写进了
+数据库的 `tasks.final_qc` / `clips.qc_result`，以及本地 `data/tasks/*.json`。
+
+用户决定**不重跑历史任务**（成本高），改用版本号区分新旧结论。
+
+### 版本语义
+
+| `qc_version` | 含义 | 可信？ |
+|---|---|---|
+| `>= 2` | 修复后产生的结论，真实执行过检测 | 可信 |
+| `1` | 修复前产生的结论，**历史未验证** | 不可当作真实通过 |
+| `NULL` / 缺字段 / 非法值 | 同上，未知来源 | 不可当作真实通过 |
+
+判定逻辑**只有一份**，在 `src/storage/qcVersion.js`。之所以单独抽一个文件：
+判定若散落在 postgres / sqlite / jsonfile / API 四处，迟早漏改一处，
+造成「某条路径把历史结论当成通过」——那正是本任务要防的失败模式。
+
+### 实现
+
+| 文件 | 改动 |
+|---|---|
+| `src/qualityChecker.js` | 新增 `QC_VERSION = 2` 常量；`checkClip` / `checkFinal` / `checkConcat` / `checkPrompt` / `checkStoryboard` / `checkLoop` / `checkTranscode` / `checkNSFW` / `_mockCheck` 的**所有**返回对象均带 `qcVersion`。`module.exports.QC_VERSION` 一并导出，供存储层引用 |
+| `src/storage/qcVersion.js` | **新增**。`normalize()` / `qcVersionOf()` / `isTrustedQC()` / `annotateQC()` / `annotateTask()` |
+| `src/storage/schema.sql` | `tasks.qc_version`、`clips.qc_version` 两列；新增「2.5 增量补列」段（幂等 ALTER + 索引 + 历史行标记为 1） |
+| `src/storage/drivers/postgres.js` | 建表式读写映射；`rowToTask` / `rowToClip` 输出 `qcVersion`，`finalQC` / `qcResult` 走 `annotateQC`；insert 加 `qc_version`（占位符重编号 `$1..$25` / `$1..$14`）；upsert 同步更新 |
+| `src/storage/drivers/sqlite.js` | 同上；另加 `ensureColumn()` 给老库补列（SQLite 无 `add column if exists`），补列后把历史结论标记为 1 |
+| `src/storage/drivers/jsonfile.js` | **未改**。JSON 天然透传，无需 schema |
+| `src/storage/index.js` | `getTask` / `getAllTasks` **读取即标注**；导出 `isTrustedQC` / `annotateQC` / `annotateTaskQC` / `QC_VERSION` / `QC_TRUSTED_FROM` |
+| `scripts/backfill-qc-version.js` | **新增**。回填脚本，支持 `--dry-run` / `--json-only` / `--db-only` |
+
+### API 返回的字段
+
+`getTask` / `getAllTasks` 返回的任务对象现在带：
+
+```json
+{
+  "qcVersion": 1,
+  "qcTrusted": false,
+  "finalQC": { "passed": true, "qcVersion": 1, "qcTrusted": false, "qcLabel": "legacy_unverified" },
+  "clips": [{ "qcResult": { "passed": true, "qcVersion": 1, "qcLabel": "legacy_unverified" } }]
+}
+```
+
+- `qcLabel` 取值：`verified`（可信） / `legacy_unverified`（历史未验证）
+- **`passed` 字段保持原值不改**——不篡改历史数据，只新增标注字段
+- UI 若要把历史结论显示为「历史未验证」，读 `qcLabel` / `qcTrusted` 即可，**不需要改判定逻辑**
+
+### 回填脚本的用法
+
+```powershell
+cd app
+node scripts/backfill-qc-version.js --dry-run   # 先看会改什么
+node scripts/backfill-qc-version.js             # 实际执行
+```
+
+安全性：
+
+- **只补 1，绝不补 2**（补 2 = 把伪造结论洗成可信，是本任务最大的失败模式）
+- 幂等：已是 1 或 >=2 的记录不会被改写
+- 不删除数据、不改 `final_qc` / `qc_result` 内容
+- 改 JSON 前先备份到 `data/backup-qcversion-<时间戳>/`
+
+### 已验证 / 未验证
+
+**已验证（实测数据见任务 t3 提交记录）**
+
+- `checkClip` / `checkFinal` 返回 `qcVersion = 2`
+- 本地 JSON 副本回填：23 个文件、13 处任务级、71 处片段级，**全部标 1，无一标 2**
+- 回填后：文件数不变、文件名集合不变、除 `qcVersion` 外**所有字段（含嵌套）逐字节一致**、所有 `passed` 值不变
+- 幂等：二次运行标记 0 条、改写 0 个文件
+- SQLite 驱动：建表含两列；老库补列逻辑正确；新库不触发 ALTER
+- Postgres 驱动：占位符编号与参数数量对齐（25/25、14/14）
+- 负向 24 项：`passed:true` 无版本 / 版本 1 / 0 / null / "abc" / 负数 → 全部判不可信
+
+**未验证**
+
+- 真实 Postgres 库上的 `schema.sql` 增量段与回填脚本（本次未连接生产库，按用户要求不动现有数据）
+- SQLite 真实库（环境未安装 `better-sqlite3`，按零新增依赖原则未安装，改用字符串级 + 桩验证）
+
+### 留给后续
+
+- **前端展示**：`public/index.html` 未改（不在本任务范围）。UI 需要在任务详情里
+  根据 `qcLabel === 'legacy_unverified'` 显示「历史未验证」角标，否则用户看不出区别
+- `src/taskManager.js` / `server.js` 未改（同样不在范围）。`storage.getTask` / `getAllTasks`
+  已自动带标注；但 `taskManager.getAllTasks()` 直接读内存对象，**不会**自动带标注。
+  API 若要暴露，需在 `server.js` 的 `/api/tasks/:id` 等处调用 `storage.annotateTaskQC(task)`
+
+---
+
+## 2026-10-18 · NSFW 合规检测落地
+
+**状态**：代码完成，待独立验收。
+
+### 背景
+
+`docs/requirements/项目需求申报表.md` 对外承诺「NSFW 置信度阈值 0.8」作为合规红线，
+但 `src/qualityChecker.js` 原有的 10 个质检项里完全没有 NSFW。属「文档承诺 vs 代码缺失」。
+
+### 实现
+
+| 文件 | 改动 |
+|---|---|
+| `src/qualityChecker.js` | +378/−9，16 个 hunk，**增量 edit**。新增 `checkNSFW()`、`_buildNSFWFramePlan()`、`_extractFramesAtTimes()`、`_execRawBuffer()`、`_callNsfwMultimodal()`（NSFW 专用 prompt）、`_parseNsfwVerdict()`。`QC_ITEMS` 由 10 项增至 11 项，新增 `nsfw` |
+| `config.js` | 新增 `QC.nsfwThreshold`（读 `QC_NSFW_THRESHOLD`，默认 0.8，非法值警告回退）；`QUALITY_CHECK.nsfwThreshold` 同源保留兼容 |
+| `.env.example` | 补 `QC_NSFW_THRESHOLD=0.8` 说明 |
+| `scripts/verify-nsfw.js` | 42 项自测（注入 fetch，不联网），覆盖调用失败/超时/解析失败等无法真实构造的路径 |
+| `scripts/check-encoding.js` | 源文件编码检查（GBK 环境下防污染） |
+
+`checkContentMatch`、`_callMultimodal`、`_parseVerdict`、`_extractFramesBase64` **一行未改**。
+
+### 关键设计
+
+1. **`checkNSFW` 的返回体刻意不设 `skipped` 字段**——不是「记得别用 skipped」，而是让
+   `passed || skipped` 这条历史缺陷在结构上写不出来。
+2. **所有失败路径一律 `passed: false`**：无 Key、FFmpeg 不可用、调用失败、超时、非 2xx、
+   无法解析、抽帧不完整。
+3. **抽帧采样点向内收**：`-ss` 落在首关键帧之前会 seek 到上一个关键帧。实测样片
+   `task_mv4v7qp2_m8r0_final.mp4` 首关键帧在 35.04s（即片尾），导致 `-ss 0.5` 抽帧
+   **空输出且退出码为 0**——正是 §4.3 描述的假成功。采样点已收至 `[min(0.5, d×5%), d-edge]`，
+   且「抽帧不完整」判 fail。
+4. **抽帧密度**：每分钟 1 帧，上限 30 帧（1800s 及以上封顶 30）。
+
+### 实测数值
+
+| 场景 | 结果 |
+|---|---|
+| 无 Key | `passed:false` · `detectorUnavailable:true` · `skipped:false` |
+| `checkClip` | `passed=false`，`totalChecks=5`，reason 指名 `NSFW合规检测` |
+| `checkFinal` | `passed=false`，details 含 `nsfw` |
+| 阈值 | 未设 → 0.8；`=0.65` → 0.65；`=abc` → 警告回退 0.8 |
+| 自测 | 42 项全绿（HTTP500 / ECONNREFUSED / 超时 / 非 JSON / 空 content / score=3.7 越界 → 全 fail；0.12、0.79 pass；**0.80、0.95 fail**；`nsfw:true` 但 score 0.1 → 从严 fail） |
+| 抽帧 | 59s→2 / 600s→10 / 1800s→30 封顶 / 5400s→30；真实样片 35.04s→2 帧 |
+
+### 注意事项
+
+- `.env` 的 `OPENAI_API_KEY` **当前为空**，因此运行时实际走「未执行 → 判 fail」路径。
+  这是预期行为，不是缺陷。填入 Key 后即可真实检测。
+- `QC_ITEMS` 由 10 项增至 11 项，**任何断言「共 10 项质检」的旧代码/文档需同步更新**。
+
+### 遗留
+
+`src/pipeline.js` 的 Mock 模式会整体跳过视觉质检。NSFW 属合规项，Mock 模式下也应执行
+（合成画面天然安全，真实调用不会误杀）。本次范围不含 `pipeline.js`，未改动，留待后续。
+
+---
+
+## 2026-10-18 · 9af1fb4 内容归属说明
+
+**提交信息**：`fix: soft-delete flag lost when persisting tasks`
+**实际内容**：8 个文件，混合了两条互不相关的线。
+
+| 文件 | 实际改动 | 属于哪条线 | 与提交信息相符 |
+|---|---|---|---|
+| `src/storage/drivers/postgres.js` | 软删除标志持久化修复 | 存储线 | ✅ |
+| `src/storage/drivers/sqlite.js` | 软删除标志持久化修复 | 存储线 | ✅ |
+| `src/storage/index.js` | 软删除标志传递 | 存储线 | ✅ |
+| **`src/qualityChecker.js`** | **质检语义重构（+297 行）** | **质检线** | ❌ 无关 |
+| **`config.js`** | **ffmpeg/ffprobe 自包含解析** | **质检线** | ❌ 无关 |
+| **`src/videoProcessor.js`** | **拼接时长校验不再放行** | **质检线** | ❌ 无关 |
+| **`.gitignore`** | **排除项目内 ffmpeg 二进制** | **质检线** | ❌ 无关 |
+| **`tools/ffmpeg/README.md`** | **ffmpeg 恢复说明** | **质检线** | ❌ 无关 |
+
+**结论**：`git log` 中看到 `9af1fb4` 时，不要以为它只动了存储层。
+**质检语义重构实际发生在这个提交里。**
+
+---
+
+## 质检语义重构 —— 改了什么、为什么
+
+### 背景故障
+
+`qualityChecker` 存在两处会伪造「通过」的缺陷：
+
+1. **`skipped` 被当作 `passed`**
+   ```js
+   const allPassed = Object.values(results).every(r => r.passed || r.skipped);
+   ```
+   FFmpeg 不在 PATH 时，黑帧/模糊/重复帧/时长四项全部落入 `catch` 并返回
+   `{ passed: true, skipped: true }`，汇总时因 `skipped` 被视作通过，最终结论仍是「片段质检通过」。
+   **实测：4 项检测执行了 0 项，结论为通过。**
+
+2. **`Math.random() > 0.1` 冒充检测结论**
+   随机 90% 判通过、10% 判失败，表现为「偶发失败」，极难排查。
+
+### 修复内容
+
+| 位置 | 修改前 | 修改后 |
+|---|---|---|
+| `checkClip` 汇总 | `passed \|\| skipped` 即通过 | 区分 `failedItems` / `notRunItems` / `legitSkipItems`，**未执行即不通过** |
+| `checkClip` 前置 | 无 | FFmpeg 不可用时直接判 fail 并说明「四项均未实际检测」 |
+| 4 处检测 `catch` | `{passed:true, skipped:true}` | `{passed:false, detectorError:true}` |
+| `checkConcat` | `catch(e){}` 后无条件 `passed:true` | 前置闸门 + catch 判 fail |
+| `_mockCheck` | `Math.random() > 0.1` | 明确返回「未执行」 |
+| `checkFinal` 视频信息 | 无 FFmpeg 时谎称「视频信息正常」 | 判 fail |
+| `checkFinal` 音频 | 无 FFmpeg 时**不产生记录**（静默缺失） | 显式记录为未检测 |
+| `_validateConcatDuration` | 探测失败返回 `{ok:true}` | 返回 `{ok:false, undetermined:true}`，调用方保留产物但标记 `unverified` |
+
+### 新增能力
+
+- **`_exec()`**：统一子进程入口。运行环境禁止捕获 stdio（`spawn EPERM`，
+  如沙箱/CI）时自动降级为「重定向到临时文件再读取」，保证质检在受限环境同样真实执行。
+
+### 保留的合法跳过
+
+「未配乐任务的成片没有音频流」属于业务上本就不适用，标记 `legitimateSkip: true`，
+不计入失败。这是唯一允许的跳过类型。
+
+### 验证证据
+
+**正向**（`output/task_mv4v7qp2_m8r0_final.mp4`）：
+
+| 检测项 | 结果 |
+|---|---|
+| blackFrame | passed，无黑帧 |
+| blur | passed，max blur 7.5（阈值 100） |
+| duplicate | passed，0 帧 |
+| duration | passed，35.0s |
+
+修复前同一文件：四项 `skipped=true`，实际执行 0 项，结论仍为通过。
+
+**负向**（证明能抓缺陷，非空壳）：
+
+| 用例 | 结果 |
+|---|---|
+| 纯黑视频 | 抓到「检测到黑帧」，判 fail ✅ |
+| 5 秒视频按 30 秒校验 | 抓到「时长异常 (5.0s, 期望 30s)」，判 fail ✅ |
+| 正常视频 5 秒按 5 秒校验 | 正确 pass ✅ |
+
+**降级路径**：FFmpeg 路径指向不存在位置时，`checkClip` / `checkConcat` / `checkFinal`
+三者均正确判 fail 并说明「FFmpeg 不可用」。
+
+---
+
+## ffmpeg 自包含
+
+`config.js` 新增 `resolveBundled()`，解析顺序：
+
+1. `.env` 中 `FFMPEG_PATH` / `FFPROBE_PATH` 显式配置
+2. 项目内 `tools/ffmpeg/bin/`
+3. 系统 PATH（云上 Linux 容器）
+
+二进制约 640MB，已在 `.gitignore` 排除（`tools/ffmpeg/bin/`）。
+新机器按 `tools/ffmpeg/README.md` 恢复。
+
+**许可证**：当前为 gyan.dev full build，含 `--enable-gpl`，属 **GPL v3**。
+本地/内部使用无影响；若将来打包进对外分发产品需评估义务。
+
+---
+
+## 尚未修复（截至本记录）
+
+| 缺口 | 位置 | 说明 |
+|---|---|---|
+| 无缝循环为假实现 | `src/videoProcessor.js` `_makeLoopFFmpeg` | 直接 `copyFileSync`，与「Android TV 屏保循环」卖点不符 |
+| NSFW 检测缺失 | `src/qualityChecker.js` | 需求申报表承诺「阈值 0.8」，代码中无实现 |
+| 流水线无档位 | `src/pipeline.js` | 7 步无条件全量执行，与《后续目标》「核心链必选 + 增强层可选」不符 |
+| 历史质检结论不可信 | 数据库 / `data/tasks/` | 修复前入库的 `pass` 均为伪造，需 `qcVersion` 标记区分 |
+
+---
+
+## 2026-10-19 · 配乐模块整体改造：逐片段混音 → 整片多轨时间轴
+
+**状态**：代码完成，已通过单元 / 真机 / 负向三类验证，待用户验收 UI 手感。
+
+### 背景（用户反馈与实测）
+
+用户反馈成片配乐「衔接不自然，同一段音乐被反复重放」。
+实测坐实且**修正了用户的描述**：
+
+- 用户以为是「前 7 秒循环五次」；实测循环窗口是 **2 秒**（旧 `audioMixer.js` 的 `aloop=loop=-1:size=88200`）。
+- 真实听感源自**混音挂在片段粒度**上：5 个片段各自从 `calm_01` 的 0 秒开始混，每段内部再 2 秒一循环。
+- 实测 `task_mv4v7qp2_m8r0_final.mp4` 逐秒音量呈**精确 7 秒周期**（7/14/21/28 秒处数值逐字相同），5 段曲线 0/2/4/6 秒处均为 -91/-84/-83/-87 dB 凹陷。
+- 结论：**不是调参数能救的问题，必须把混音粒度从「片段」上移到「整片」。**
+
+### 用户确认的产品决策
+
+| 项 | 决策 |
+|---|---|
+| 自动配乐 | 只含**轻音乐**；按整片时长铺满，一首放完按库存顺序接下一首；有默认开场曲用它，否则随机 |
+| 环境音 | **只出现在手动配乐**；自动配乐不参与 |
+| 主题选曲 | **删除**（一段成片通常含多个主题，单主题反推不可靠） |
+| 手动配乐 | 独立页面「添加配乐」，多轨时间轴，支持任意裁剪/变速/循环/关键帧 |
+| 预览与导出一致性 | **硬要求**：预览听到的必须与导出的一致 |
+| 覆盖策略 | 先写临时文件，校验通过才替换原成片 |
+
+### 架构决策：唯一引擎
+
+浏览器**不做任何音频计算**，只负责①画波形（Web Audio 解码）②把编辑结果变成 plan(JSON)。
+预览与导出**都走服务端 ffmpeg 同一套参数**，因此一致性是架构保证的，而不是靠两边算法对齐。
+实测 30 分钟成片音频处理仅需约 5 秒。
+
+### 新增 / 重写
+
+| 文件 | 内容 |
+|---|---|
+| `src/processors/bgmPlan.js`（新） | 纯函数：plan → ffmpeg filter_complex。含分段滤镜、关键帧音量表达式、多轨 amix、整体 loudnorm |
+| `src/processors/audioMixer.js` | 新增 `mixBgmPlan` / `buildAutoPlan` / `validateMixDuration` / prefs(顺序/默认开场曲)；**删除** `THEME_MOOD_MAP`、`matchTrackByTheme` 与 `aloop` 语义 |
+| `src/pipeline.js` | 新增第 6.5 步 `audio_mix`（整片混音）、`reapplyBgm`、`_ensureBgmPlan`、`_applyBgmPlan`、`_normalizePlan`、`_buildMasterFromClips`、`_resolveClipPath`；**删除** `_getBgmSegmentPath` 及全部逐段调用 |
+| `server.js` | 新增 `GET /api/tasks/completed`、`GET/PUT /api/tasks/:id/bgm-plan`、`POST /api/tasks/:id/bgm-auto-plan`、`POST /api/tasks/:id/bgm-preview`、`POST /api/tasks/:id/audio`、`PUT /api/bgm/prefs`；`/clips/:index/audio` 改为 **410 deprecated** |
+| `public/bgm-editor.html`（新） | 多轨时间轴编辑器：波形、拖拽、裁剪、分割、音量、淡入淡出、变速、循环/拉伸、关键帧 |
+| `public/index.html` | 配乐卡片改为「不配乐 / 自动配乐 + 开场曲」；删除逐段分配 UI、主题选曲、详情页逐段改配乐 |
+| `taskManager.js` | 新增 `task.bgm / bgmPlan / bgmResult / masterPath`；`PIPELINE_STEPS` 增 `audio_mix` |
+| `schema.sql` + postgres/sqlite 驱动 | 追加 `bgm_plan` / `bgm_result` 两列（增量 ALTER，不覆盖他人已改内容） |
+
+### 顺带修掉的两个真实缺陷
+
+1. **`loudnorm` 后采样率被抬到 96000**（成片体积翻倍）。已在其后显式 `aformat=sample_rates=44100` 钉死。
+2. **关键帧音量表达式的逗号未转义**，ffmpeg 报 `No option name near 'frame'`。**单测是过的，只有真机跑才暴露** —— 这正是「要跑得通」的价值。
+
+### 验收证据
+
+| 项 | 结果 |
+|---|---|
+| `scripts/test-bgm-plan.js` | 12 项通过 |
+| `scripts/test-bgm-auto.js` | 7 项通过（含 30 分钟铺满 14 段、跨曲衔接、只用轻音乐） |
+| `scripts/verify-bgm-plan.js` | 5/5 真机通过 |
+| `scripts/verify-bgm-mix.js` | 5/5 真机通过（跨曲/两轨/关键帧/变速/素材复用） |
+| `scripts/verify-bgm-storage.js` | Postgres 往返通过 |
+| `scripts/verify-bgm-negative.js` | 7 项负向防护全部命中 |
+| `scripts/verify-bgm-api.js` | 全通过（预览不覆盖、导出生效） |
+| `scripts/test-editor-logic.js` | 14 项通过 |
+| **原始案例修复** | 7 秒周期重复区块数 **4/4 → 0/4**；采样率 44100；时长 35.00s |
+
+### 已知限制
+
+- 历史任务的 `clip.videoPath` 可能指向迁移前的旧目录，已用 `_resolveClipPath` 按文件名在 `clips/` 兜底；若文件本身已删除则无法重出片。
+- 历史任务首次改配乐时会先重建一份无声母版（`_master.mp4`），耗时取决于片段数。
+- 浏览器端 UI 手感（拖拽、波形缩放）未在真实浏览器中验过——本环境浏览器驱动不可用，仅做 DOM 契约与数据逻辑验证，**需用户实际操作确认**。
+
+---
+
+## 2026-10-19 补记 · 自动配乐支持勾选轻音乐/环境音
+
+**起因**：用户指出「选择自动配乐时用户可以自己勾选轻音乐还是环境音，或者两个都要」，
+而上一版实现写死了「自动配乐只含轻音乐」。需求收集阶段这句话前后有冲突表述
+（早期说过「自动配乐把两项都勾时 -18dB」，后期说过「环境音只出现在手动配乐」），
+实现时采用了后者，属理解偏差，已按用户最新确认修正。
+
+### 修正后的规则（用户确认）
+
+| 项 | 规则 |
+|---|---|
+| 勾选 | 轻音乐 / 环境音，可只选其一，也可都选；**不允许都不选**（明确报错） |
+| 轻音乐 | 按库存顺序一首接一首铺满全片，不循环 |
+| 环境音 | **选一首，整片循环**（`fillMode: 'loop'`），不换曲 |
+| 两者同时 | 环境音在混音阶段压到 `ambientVolume`（默认 0.125 ≈ -18dB）垫底 |
+
+### 改动
+
+| 文件 | 改动 |
+|---|---|
+| `src/processors/audioMixer.js` | `buildAutoPlan` 重写：新增 `wantMusic` / `wantAmbient` / `ambientTrackId`，分别产出轻音乐轨与环境音轨 |
+| `src/taskManager.js` | `task.bgm` 新增 `wantMusic` / `wantAmbient` / `ambientTrackId` |
+| `src/pipeline.js` | `_ensureBgmPlan` 透传勾选组合 |
+| `public/index.html` | 配乐卡片加两个勾选框 + 环境音曲目下拉；未勾选的轨道隐藏其下拉 |
+
+### 验收
+
+| 脚本 | 结果 |
+|---|---|
+| `scripts/test-bgm-tracks.js` | 12 项：四种勾选组合 + 指定曲目，全部通过 |
+| `scripts/verify-bgm-tracks.js` | 真机 4 项：只环境音 / 只轻音乐 / 两轨 / 10s 源循环铺满 35s，全部通过 |
+
+### 同期排查：前端改动被覆盖
+
+用户反馈「配乐和以前一样」时发现两层原因：
+
+1. 访问的 3000 端口跑的是 **10-18 16:27 启动的旧进程**——Node 只在启动时读代码，改动未生效。
+2. `public/index.html` 被**另一个会话保存为改造前版本**（与 HEAD `0c6259a` 一致），
+   前端改动被整体覆盖；后端改动未受影响。
+
+已重做前端改动并复验。**教训**：多会话并行改同一文件时，改完必须重新读取核对内容，
+不能假设之前的编辑还在。
+
+
+---
+
+## 2026-10-19 · 无缝循环落地 + 循环质检去假通过
+
+**状态**：代码完成，验收 19/19 通过（含 4 类负向）。**尚未在完整任务上端到端跑过**（见「未验证」）。
+
+### 背景：两个缺陷叠加，导致「已做」的错觉
+
+| 缺陷 | 位置 | 表现 |
+|---|---|---|
+| 无缝循环是直通 | `videoProcessor._makeLoopFFmpeg` | 只有一行 `fs.copyFileSync`，返回体自带 `passthrough: true` / `note: '无缝循环未实现，按直通处理'`。循环回绕处是硬跳切 |
+| 循环质检是假通过 | `qualityChecker.checkLoop` | **无条件** `return { passed: true, reason: '循环过渡正常（模拟）', mock: true }`，从不对比任何帧 |
+
+两者叠加 = 「假实现 + 假质检」双保险：用户界面上的「无缝循环处理 ✅ 通过」从头到尾没有经过任何检测。
+这违反 §4.1（未执行不等于通过）与 §4.2（禁止假结论），但本文件此前的「尚未修复」表只记了「直通」，
+**没有记假质检这一条**，导致「功能没做」被误读成「已经做了」。
+
+### 修复一：真交叉淡化（`src/videoProcessor.js`）
+
+公式（设源时长 D，淡化 F，产物长度 = D − F）：
+
+```
+[main] = 源 [0, D-F)    → trim + setpts
+[head] = 源 [0, F)      → trim + setpts（把开头 F 秒叠到末尾）
+[mt][headt] xfade=transition=fade:duration=F:offset=D-2F  → [v]
+[0:a] atrim=0..D-F + afade=t=out:st=D-2F:d=F              → [a]（有音轨时）
+```
+
+**实测踩过的四个坑，改之前必读：**
+
+1. **xfade 的 offset 是相对「第一段输入」的时间轴**。若把头段用 `setpts=PTS-STARTPTS+offset/TB`
+   显式挪到 offset，淡化**不生效**：产物时长看着对（34.5s），但末尾亮度全程不变（142.3→142.3），
+   即根本没有融合。这是最隐蔽的失败模式——**只验时长会放过它**。正确做法是让头段从 0 开始，
+   由 xfade 负责锚定。
+2. **音频不能用 `-af`**。`-map 0:a -af afade=...` 会保留完整原音轨（35s），
+   容器时长被音频撑回 **35.015s**，而视频其实已是 34.5s。音频必须进 `filter_complex`
+   用 `atrim`+`asetpts` 截到 D−F，实测修正后 video/audio 均精确 **34.500000s**。
+3. **时长容差必须小于 F 本身**。原先沿用 `max(0.5, 2%)`，在 35s 素材上等于 0.69s，
+   而「淡化没发生」的偏差恰好是 0.5s → **缺陷被放行**。改为
+   `max(0.05, min(F/3, expected*1%))`（0.5s 淡化时为 0.167s）。`checkLoop` 同步采用该口径。
+4. **不用退出码 0 当成功**（§4.3）：产物生成后必须 ffprobe 实测时长，不符即判失败；
+   探测不到时长标记 `undetermined`，不当作通过。**不保留 copyFileSync 兜底**，
+   失败就返回 `success:false`，从结构上杜绝「直通冒充循环」复活。
+
+### 修复二：循环质检改实测（`src/qualityChecker.js`）
+
+判定口径（关键是与「首尾相似」区分开）：
+
+- **WRAP（主判据）**：产物【末尾】与【开头】的 SSIM。
+  真淡化的目的就是让结尾画面渐变成开头画面。
+  抽帧位置：头部 `min(0.5, d*5%)`，尾部 `d - min(0.05, d*1%)`。
+  **尾部必须贴末尾**——实测同一产物：34.0s→0.496、34.3s→0.738、34.45s→**0.934**、34.48s→0.934。
+  若沿用旧的 `d - min(0.5, d*5%)`（=34.0s），抽到的是「还没开始淡」的画面，
+  **会把正确产物误判为 fail**。
+- **BASE（对照）**：源素材首尾 SSIM，防止「素材首尾本来就一样」时把直通误判成通过。
+- **时长核验（结构性证据）**：产物时长必须 ≈ 源 − F。直通产物等于源时长，此维度必然不符。
+- 三态：无 ffmpeg / 抽帧不足 / 缺源时长 → 一律 `passed:false`，状态明确写 `detectorUnavailable`
+  或 `durationCheck:'skipped_no_source'`，**不允许当作通过**。返回体不设 `skipped` 字段（沿用 NSFW 的结构性约束）。
+
+配置项（`config.QC`，均已同步 `.env.example`）：`QC_LOOP_SSIM_THRESHOLD`（默认 0.9）、
+`LOOP_FADE_DURATION`（默认 0.5s），非法值告警回退。
+
+### 修复三：双路径一致（`src/pipeline.js`）
+
+新建路径（`pipeline.js:214` 附近）与改配乐重建路径（`pipeline.js:791` 附近）原本都硬编码 `1`，
+现均改为读 `config.QC.loopFadeDuration`（默认 0.5），并传 `sourceDuration`/`fadeDuration`
+给 `checkLoop` 以启用时长核验。`qcDetails` 额外记录 `loopProcess`（是否重编码、源/产物时长、错误原因）。
+
+### 实测数值（`node scripts/verify-loop.js`，素材 35s 成片）
+
+| 项 | 直通（修复前） | 真淡化（修复后） |
+|---|---|---|
+| 产物时长 | 35.000s（=源） | **34.500s**（=源−0.5），容差 0.167s |
+| 回绕 SSIM（末尾 vs 开头） | 0.5002 | **0.9495**（阈值 0.9） |
+| 素材基线 SSIM（对照） | 0.5002 | 0.5002 |
+| 视频/音频流时长 | — | 均 34.500000s |
+| 是否重编码 | 否（copyFileSync） | 是（`reencoded:true`） |
+| 处理耗时 | ~0s | 6.8s（35s 素材） |
+| 亮度曲线（末尾 2s） | 142.9→142.3 无变化 | 142.9→**94.0**（向开头 82.0 渐近） |
+
+**验收 19 项全绿**，其中负向四类：
+1. 用原片冒充循环产物 → `passed:false`，`wrap SSIM=0.5002`，`durationCheck=mismatch`
+2. 1.0s 短素材 → `success:false`，原因「素材时长 1.00s 过短，无法做 0.5s 首尾交叉淡化」
+3. 缺 `sourceDuration`/`fadeDuration` → `passed:false`，`durationCheck=skipped_no_source`
+4. 传入错误淡化时长（+3s）→ `passed:false`，`expected=31.5s` vs 实测 34.5s
+
+**回归**：`node scripts/verify-nsfw.js` 42 通过 / 0 失败；`checkClip`/`checkFinal` 除 NSFW
+（无 Key 走「未执行→fail」的既有设计）外 4 项全 passed，未受影响。
+
+### 未验证
+
+- **未在完整任务上端到端跑过**（片段生成→拼接→循环→转码→终检）。
+  本次验收是直接对已有成片调用 `makeSeamlessLoop` + `checkLoop`，未跑整条 pipeline。
+- 重建路径（改配乐）与新建路径的成片时长一致性：两条路径已改用同一配置值，
+  但**未实际各跑一条任务做比对**，仅做了代码层面对齐。
+- 30 分钟级长片的处理耗时未测（35s 素材 6.8s，估算不具代表性）。
+- 既有的 `_rebuildAfterBgmChange` 是否受 `masterPath` 影响未复核。
+
+### 已知遗留（本次范围外）
+
+- `pipeline.js` 的 Mock 模式仍跳过视觉质检（`passed:true, skipped:true`），属 §4.1 待办。
+- `videoProcessor.extractFrame` / `_transcodeFFmpeg` 等仍用 `stdio:'pipe'`，
+  在本环境会 EPERM；本次只给 `getVideoInfo`/`_hasAudioStream`/循环处理换了 `_execText` 降级路径，
+  **其余方法未动**。
+
+---
+
+## 2026-10-19 补记 · 重建母版路径补齐循环步骤（双路径一致性）
+
+### 起因
+
+上一节落地循环后，核对「新建任务」与「改配乐重建」两条路径时发现：
+`_rebuildAfterBgmChange` 已废弃为空壳（注释写明「不再被调用」），实际调用链是
+`reapplyBgm` → `_buildMasterFromClips`（历史任务无母版时）。
+
+而 `_buildMasterFromClips` 走的是 **拼接 → 转码**，**跳过了循环步骤**，与新建路径
+（拼接 → 循环 → 转码）不等长——正是原 `_makeLoopFFmpeg` 注释里「新建 34s / 重建 35s」担心的那件事，
+且它确实存在。
+
+### 实测（3 段 × 7s 合成片段，淡化 0.5s）
+
+| 路径 | 母版时长 |
+|---|---|
+| 旧 `_buildMasterFromClips`（拼接 → 转码） | **21.037s** |
+| 新建流程（拼接 → 循环 → 转码） | **20.533s** |
+| 差异 | **0.504s** ≈ 一个淡化时长 |
+
+### 修复（`src/pipeline.js` `_buildMasterFromClips`）
+
+补上同一步 `makeSeamlessLoop`，淡化时长与新建路径**同源**（`config.QC.loopFadeDuration`），
+中间产物 `<taskId>_master.loop.mp4` 用完即删。
+**循环失败不回退直通**：回退会让母版比新建路径长一个淡化时长，正是要消除的不一致；直接返回失败并写明原因。
+
+单片段路径（`paths.length === 1`）原先 `copyFileSync` 后仍走转码，本次保持，但同样经过循环步骤。
+
+### 复验
+
+- 修复后 `_buildMasterFromClips` 实测 **20.533s**，与新建路径同口径（帧对齐抖动 0.034s 内）
+- `scripts/verify-loop.js` 新增第 6 组用例（双路径一致性），**25 项全绿**
+  - 其中一条负向断言「旧路径与新建路径确实不等长」用于证明该缺陷真实存在，
+    若哪天有人又把循环从重建路径拿掉，这条会失败
+
+### 顺带记录的既有缺陷（不在本次范围，未修）
+
+`videoProcessor.concatenate` 的**重编码兜底路径硬编码了 `[0:a]`**：
+
+```js
+const filterParts = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
+```
+
+无音轨的片段（未配乐任务）会因 `Stream specifier ':a' matches no streams` 直接失败，
+连 `-c copy` 路径走不通时也没有兜底。实测触发方式：3 段无音轨合成片段 → 拼接失败。
+本项目的片段通常带音轨，故未被暴露；但**若将来出现无音轨片段，拼接会整条失败**。
+
+---
+
+## 2026-10-19 补记 · Mock 模式不再绕过视觉质检
+
+### 缺陷（违反 §4.1）
+
+`src/pipeline.js` 片段循环里曾有：
+
+```js
+const skipVisualQC = task.model === 'mock' || rc.visualQC === false;
+const contentResult = skipVisualQC
+  ? { passed: true, skipped: true, reason: '视觉质检跳过: 演示模式（合成画面）', level: 'skip' }
+  : await qualityChecker.checkContentMatch(...);
+```
+
+两个问题叠加：
+
+1. 用 `passed: true` 表达「跳过」——**skipped 冒充 passed**，正是 §4.1 明令禁止的形状；
+2. 下游判定是「`!contentResult.passed` 才拉低结论」，于是该分支被**无条件放行**。
+
+后果：Mock 模式下视觉质检被整体绕过。NSFW 属**合规项**，即便在演示模式也不应跳过
+（合成画面天然安全，真实调用不会误杀）。
+
+### 修复（`src/pipeline.js`）
+
+按语义拆成两件事，不再混为一条「跳过」：
+
+| 项 | Mock 模式下的处理 |
+|---|---|
+| NSFW 合规检测 | **照常执行**（由 `checkClip` 内部完成）。此处新增**存在性断言**：`qcResult.details.nsfw` 缺失即判 `passed:false`，防止将来有人把它从 `checkClip` 里摘掉 |
+| 内容匹配（画面是否符合提示词） | 对合成纯色/渐变画面**业务上不适用**，返回 `passed:false` + `legitimateSkip:true` + 理由，**不再用 `passed:true`** |
+
+判定改为：只有「真正执行过且失败」或「既非 pass 也非合法跳过」才拉低结论；
+`legitimateSkip:true` 不影响整体，其余 `skipped` 一律按未通过处理。
+
+用户主动关闭（`rc.visualQC === false`）同样记为合法跳过。
+
+### 验收（`scripts/verify-mock-vqc.js`，14 项全绿）
+
+| 用例 | 结果 |
+|---|---|
+| Mock 的内容匹配不再 `passed:true` | `passed=false` ✅ |
+| 标为合法跳过并写明理由 | `legitimateSkip=true` ✅ |
+| 技术项+NSFW 都通过时，合法跳过不拉低结论 | `passed=true` ✅ |
+| **质检结果缺少 NSFW 明细 → 判 fail** | `passed=false` ✅ |
+| 内容匹配「未执行且非合法跳过」→ 判 fail | `passed=false` ✅ |
+| 内容匹配真实失败 → 判 fail | `passed=false` ✅ |
+| 真实 `checkClip` 返回 NSFW 明细 | keys 含 `nsfw` ✅ |
+| 无 Key 时 NSFW 判 fail（不因 Mock 放行） | `passed=false` ✅ |
+| NSFW 失败结论不标记为 skipped | `skipped=false` ✅ |
+| Mock + 无 Key：整体结论 fail | `passed=false` ✅ |
+
+### 回归
+
+- `scripts/verify-nsfw.js` **42/0**
+- `scripts/verify-loop.js` **25/0**
+- `scripts/verify-mock-vqc.js` **13/0**
+
+**踩坑记录**：`verify-nsfw.js` **不接受 `--tmpdir` 参数**，传了会让它找测试样片失败，
+表现为 9 项「无法读取视频时长，抽帧失败」。批量跑脚本时注意各脚本参数不一致。
+### 修复过程中自查出的一个自引入回归（已修正，务必留意）
+
+第一版修复把判定写成：
+
+```js
+const notRun = contentResult.skipped === true && !legitSkip;
+if ((!contentResult.passed && !legitSkip) || notRun) { /* 拉低结论 */ }
+```
+
+问题：`checkContentMatch` 在**无多模态 Key** 时返回的是
+
+```js
+{ passed: true, skipped: true, reason: '视觉质检跳过: 未配置多模态 LLM Key' }
+```
+
+注意它 `passed` 是 **true**。而 `notRun` 条件只看 `skipped`，会把这条也拉低为 fail，
+后果是**没配多模态 Key 的真实任务全部失败**——这超出「修 Mock 绕过」的范围，属自引入回归。
+
+修正后的判定：
+
+```js
+const legitSkip = contentResult.legitimateSkip === true;
+if (!contentResult.passed && !legitSkip) { /* 拉低结论 */ }
+```
+
+语义变为：
+- `passed:true` 的任何结果（含 checkContentMatch 的「未配置 Key」跳过）→ 不拉低
+- `passed:false` 且非 `legitimateSkip` → 拉低（真实失败，或未执行且明确判了 false）
+- `passed:false` 且 `legitimateSkip:true`（Mock / 用户关闭）→ 不拉低
+
+验收脚本已加**回归防护用例**：「无多模态 Key 时（passed:true/skipped:true）不拉低结论」。
+将来谁若再把 `skipped` 一律判 fail，这条会先失败。
+
+**合规兜底仍在 NSFW 一侧**：`details.nsfw` 缺失即判 fail，不受内容匹配影响。
+
+---
+
+## 2026-10-19 补记 · 拼接对音轨差异的兼容（含一个静默丢音频的缺陷）
+
+### 缺陷一：重编码兜底硬编码 `[i:a]`
+
+`src/videoProcessor.js` `_concatenateFFmpeg` 的重编码兜底：
+
+```js
+const filterParts = clips.map((_, i) => `[${i}:v][${i}:a]`).join('');
+```
+
+遇【无音轨】片段直接失败：
+
+```
+Stream specifier ':a' in filtergraph description ... matches no streams.
+```
+
+`-c copy` 路径走不通时（编码参数不一致、时长校验失败等）即无任何兜底，整条拼接失败。
+本项目片段通常带音轨，故一直未暴露。
+
+### 缺陷二（本次实测新发现）：混合音轨时 `-c copy` 静默丢音频
+
+实测「1 段无音轨 + 1 段有音轨」用 `-f concat -c copy`：
+
+| 结果 | 值 |
+|---|---|
+| 退出码 | **0** |
+| 时长 | 6.000s（**正确**） |
+| 流 | **只有 video** —— 音频被丢弃 |
+
+**`_validateConcatDuration` 只校验时长，抓不到这种丢失**，属 §4.3 同类陷阱的变体：
+退出码为 0、时长也对，但产物已经损伤。
+
+### 修复
+
+拼接前先探测各片段音轨（`_hasAudioStream`），按三种情况分派：
+
+| 情况 | copy 路径 | 重编码兜底 |
+|---|---|---|
+| 全部有音轨 | 照常使用 | `[i:v][i:a]` + `concat=v=1:a=1` |
+| 全部无音轨 | 照常使用（实测正常） | 只取 `[i:v]` + `concat=v=1:a=0`，`-map [outv]` |
+| **混合** | **跳过**（会丢音频） | 先给无音轨片段补等长静音（`anullsrc` + `-shortest` + `-c:v copy`），再 `concat=v=1:a=1` |
+
+混合分支的临时文件 `<outputPath>.pad<i>.mp4` 用完即删（成功/失败/不可判定三条路径都清理）。
+返回值新增 `hasAudio`、`silencePadded`，便于上游与验收核对。
+
+**为什么不直接丢弃音频**：静默丢数据比失败更糟——用户不会发现。
+**为什么不直接报错**：补静音是唯一既保留原有音频、又不失败的方式。
+
+### 实测数值（`scripts/verify-concat-audio.js`，17 项全绿）
+
+素材：4 段 3s 合成片段（2 无音轨 / 2 有音轨，有音轨的为 500Hz、800Hz 正弦）。
+
+| 场景 | 结果 |
+|---|---|
+| 全有音轨 | success，6.023s，流 `video\|audio` ✅ |
+| 全无音轨 | success，6.000s，流 `video`，**不再报 matches no streams** ✅ |
+| 混合 | success，6.018s，流 `video\|audio`，`reencoded=true`，`silencePadded=1` ✅ |
+
+混合产物分段电平（证明「补的是静音、原音频没丢」）：
+
+| 区段 | mean_volume | 判定 |
+|---|---|---|
+| 前 3s（原无音轨段，已补静音） | **-91.0 dB** | 确为静音 ✅ |
+| 后 3s（原有音轨段） | **-24.1 dB** | 音频完好 ✅ |
+
+（对照：原 wa1.mp4 为 -21.1 dB，拼接重编码后略降属正常编码损失）
+
+临时文件残留检查：无 `.pad*`、无 `.txt` 残留 ✅
+
+### 回归
+
+- `scripts/verify-loop.js` **25/0**
+- `scripts/verify-nsfw.js` **42/0**
+- `scripts/verify-mock-vqc.js` **14/0**
+- `scripts/verify-concat-audio.js` **17/0**
+
+### 顺带确认
+
+`_probeDurationSec`（`stdio: ['ignore','pipe','ignore']`）与 `_validateConcatDuration`
+在本 EPERM 环境**工作正常**（实测返回 5s/35s 等正确数值），§4.3 的时长校验链路未被破坏。
+
+---
+
+## 2026-10-19 · 流水线档位：纯函数层落地（**尚未接入主流程**）
+
+**状态**：模块 + 验收完成（41 项）。**主流程编排一行未改**，档位目前不会影响实际执行。
+
+### 为什么先做这一层
+
+《后续目标》要求把「7 步线性全量执行」拆成「核心链必选 + 增强层可选」并预设档位，
+最大价值是**补跑**：今天跑快速验证档，明天只补配乐/转码，视频不重新生成、生成费不重复花。
+
+但直接改 `_runPipeline` 有两个硬约束：
+
+1. **无法验证**：真实流水线要跑生成 API，当前 `.env` 里 `DASHSCOPE_API_KEY` 等全空，
+   按 `generators/index.js` 的逻辑会静默降级成 Mock。在 Mock 上「验证」流水线编排，
+   等于验了个假——违反 §4.8。
+2. **风险高**：`_runPipeline` 是所有任务的唯一入口，改错会影响全部任务。
+
+所以先把「算清楚要跑哪些步骤」这段最容易出错的逻辑抽成纯函数模块，
+用纯单测覆盖全部边界，**不碰主流程**。
+
+### 新增 `src/pipelineStages.js`
+
+| 导出 | 作用 |
+|---|---|
+| `CORE_STAGES` / `ENHANCED_STAGES` / `ALL_STAGES` | 核心链 3 步、增强层 5 步、合计 8 步 |
+| `STAGE_DEPS` | 每步的前置依赖 |
+| `PRESETS` | 5 个档位：quick / daily / final / clips_only / custom |
+| `resolveStages(preset, customStages)` | 档位 → 步骤集合，含核心链强制、依赖传递补齐、顺序归一 |
+| `resolveResume({preset, completed})` | 补跑：算出 `pending`（要跑的）与 `reused`（复用的） |
+| `buildSnapshot(task)` | 生成参数快照（一键复跑用），**不含任何密钥** |
+
+### 关键设计
+
+1. **`audio_mix` 只依赖 `concatenation`，不依赖 `loop_processing`**。
+   配乐是整片混音，循环与否不影响混音；这样「只补做配乐」不会被迫重跑循环。
+2. **核心链必选**：自定义只勾增强层时，3 个核心步骤会被强制加入并记入 `coreForced`，
+   否则没有片段可用。
+3. **依赖传递补齐**：只勾 `final_qc` 会补齐 `transcoding → concatenation → clip_generation
+   → storyboard → prompt_optimize` 整条链，并在 `autoAdded` 里说明补了什么。
+4. **补跑做两类校验**（这是本模块最容易写错的地方）：
+   - 待跑步骤的依赖必须「已完成」或「也在待跑清单里」；
+   - **已完成步骤的依赖必须也已完成**——否则是**状态矛盾**。
+     例如「声称 transcoding 已完成，但从没生成过片段」：那份产物来源不明，
+     在其上继续补跑等于把坏产物当真。校验只用第 1 条会漏掉这种。
+5. **快照不含密钥**：只收 `model/resolution/clipDuration/totalClips/theme/aspectRatio/
+   isMultiPrompt/prompt` + `templateVersion`。`runtimeConfig` 里的 apiKey/secret 一律不落盘。
+
+### 验收（`scripts/verify-stages.js`，41 项全绿）
+
+| 组 | 覆盖 |
+|---|---|
+| [1] 步骤名对齐 | 与 `taskManager.getPipelineSteps()` 逐项比对，**无遗漏、无编造** |
+| [2] 预设档位 | quick/daily/final/clips_only 的步骤集合；daily 不含终检 |
+| [3] 核心链必选 | 只勾 audio_mix → 核心链被强制加入 + concatenation 被补齐 |
+| [4] 依赖传递 | 只勾 final_qc → 补出 6 步整链；audio_mix 不连带拉入 loop_processing |
+| [5] 补跑计算 | 完成快速验证档 → 目标 daily 只补 `loop_processing, audio_mix`，**片段不重跑** |
+| [6] 链路校验 | 自洽场景不误杀；状态矛盾被判失败并写明「状态矛盾」 |
+| [7] 非法输入 | 未知档位 / 空自定义 / 未知步骤名 全部判失败 |
+| [8] 顺序稳定 | 输出按 `ALL_STAGES` 固定顺序，不受勾选顺序影响 |
+| [9] 参数快照 | 字段完整、含模板版本、**无密钥**、缺失字段记入 `missing` 而非静默忽略 |
+
+实测补跑样例：
+```
+completed = [prompt_optimize, storyboard, clip_generation, concatenation]
+目标档位 = daily
+→ pending = [loop_processing, audio_mix]     ← 只补这两步
+→ reused  = 4                                ← 片段不重新生成
+```
+
+### 尚未接入（重要）
+
+- **`pipeline.js` 的 `_runPipeline` 一行未改**，仍是无条件全量执行。
+  档位要真正生效，还需要：
+  1. 任务创建时接收 `preset` 并落库（`task.preset`）；
+  2. `_runPipeline` 每步前加 `if (!stageSet[step]) { 标记 skipped; continue; }`；
+  3. 「补跑」入口：读任务已完成步骤（`task.steps`）→ `resolveResume` → 只跑 `pending`；
+  4. 前端档位选择 UI（`public/index.html`，UI 归属）。
+- 接入**必须用真实任务验证**（至少跑一遍 quick + 一次补跑），当前环境无生成 Key，无法验证。
+- 在此之前，档位模块只是「算得对」，**不代表流水线已经模式化**。
+
+### 回归
+
+- `scripts/verify-stages.js` **41/0**
+- `scripts/verify-concat-audio.js` **17/0**
+- `scripts/verify-loop.js` **25/0**
+- `scripts/verify-nsfw.js` **42/0**
+- `scripts/verify-mock-vqc.js` **14/0**
+
+---
+
+## 2026-10-19 补记 · 流水线档位**已接入主流程**（真机验证通过）
+
+上一节只落地了纯函数层并明确标注「尚未接入」。本节完成接入，**档位现在真正生效**。
+
+### 为什么 Mock 也足以验证编排
+
+上一节判断「接入必须用真实生成 API」是**过于保守**：
+`src/generators/mock.js` 用 ffmpeg 产出**真实视频文件**，整条流水线（拼接/循环/转码/配乐/质检）
+都会真实执行。档位控制的是**编排逻辑**，与生成器无关，所以 Mock 足以验证。
+（真正的生成质量仍需真实 API，但那不是档位要验证的东西。）
+
+### 接入内容
+
+| 文件 | 改动 |
+|---|---|
+| `src/taskManager.js` | `createTask` 解析档位：`preset` / `stageSet` / `stagePlan` 落库。**默认 final（8 步全量）**，与接入前行为完全一致 |
+| `src/taskDefaults.js` | 老任务补 `preset='final'` + `stageSet` 8 步全 true（当初就是全量执行，如实还原） |
+| `src/pipeline.js` | 新增 `_stageEnabled()` / `_markStageSkipped()`；在 concatenation / loop_processing / transcoding / audio_mix / final_qc 五处接入判断；产物用 `videoForNext` 链式传递 |
+
+### 接入时才暴露的四个问题（纯函数层测不出来）
+
+**1. `STAGE_DEPS` 写错了 `audio_mix` 的依赖**
+纯函数层里写的是 `audio_mix: ['concatenation']`，但代码里 `audio_mix` 读的是 **`masterPath`（转码产物）**。
+按原声明，`daily` 档不含 `transcoding`，接入后会出现「配乐拿不到母版」。
+已改为 `audio_mix: ['transcoding']`，并给 `daily` 档补上 `transcoding`。
+
+**2. `_stageEnabled` 用 `!== false` 判断，导致档位形同虚设**
+`stageSet` 的形状是「只列出要执行的步骤」，未列入的是 `undefined`。
+而 `undefined !== false` 为 `true` → 所有步骤都被判为「要执行」。
+**实测表现：quick 档（计划 4 步）8 步全跑了。** 已改为 `=== true`。
+
+**3. `concatenation` 漏了档位判断**
+第一次接入只给后 4 步加了判断，`clips_only` 档仍会拼接。
+
+**4. `clips_only` 需要特殊处理**
+该档的交付物是**片段包**，不是成片。跳过拼接后下游全依赖拼接产物，
+继续执行会在没有输入的情况下产出坏片。已改为：跳过拼接时直接结束流水线，
+`outputPath: null` + `fragmentOnly: true` + `fragmentCount`，明确告诉调用方「这是片段包」。
+
+> 这四个问题里，**只有第 1 个**纯函数层能靠「想」发现，另外三个必须真机跑才会暴露。
+> 这也回答了上一节的顾虑：不是「不能验证」，而是「必须用真机验证」。
+
+### 真机验收（`scripts/verify-stage-pipeline.js`，37 项全绿）
+
+用 Mock 生成器跑**真实流水线**，三个档位各跑一条完整任务：
+
+| 档位 | 实际执行 | 被跳过 | 产物 |
+|---|---|---|---|
+| **quick** | 提示词/分镜/片段/拼接 | 循环/转码/配乐/终检 | 成片 15KB ✅ |
+| **默认（不传 preset）** | 全部 8 步 | 无 | status=completed ✅ |
+| **clips_only** | 提示词/分镜/片段 | 拼接/循环/转码/配乐/终检 | `fragmentOnly=true`，不产成片 ✅ |
+
+关键断言：
+
+- quick 档跳过步骤标记 `legitimateSkip:true`，理由为「档位「quick」未包含此环节，按计划跳过」
+  ——**不是静默跳过**，任务详情里能看出区别
+- **默认档 skipped=0**：证明接入档位没有改变原有行为（零回归）
+- clips_only 不产出成片文件（`outputPath=null`），且报告 `fragmentCount`
+- 老任务（无 preset 字段）补成 final + 8 步全 true
+
+**测试注入说明**：脚本对 `qualityChecker.checkNSFW` 注入「通过」返回值。
+原因：当前 `.env` 无 `OPENAI_API_KEY`，NSFW 按既有设计判 fail，会让片段质检失败、
+流水线在「片段生成」就中止，根本走不到档位控制的步骤。NSFW 检测本身由
+`scripts/verify-nsfw.js` 独立验证 42 项，不受此注入影响。其余质检项（黑帧/模糊/重复/时长）真实执行。
+
+### 全量回归
+
+| 脚本 | 结果 |
+|---|---|
+| `verify-stage-pipeline.js` | **37/0**（新增，真机） |
+| `verify-stages.js` | **45/0** |
+| `verify-concat-audio.js` | **17/0** |
+| `verify-loop.js` | **25/0** |
+| `verify-nsfw.js` | **42/0** |
+| `verify-mock-vqc.js` | **14/0** |
+
+合计 **180 项全绿**。
+
+### 尚未完成
+
+- **补跑入口未接**：`resolveResume` 已实现并验证，但还没有 API/命令行入口把
+  「任务已完成到哪一步」喂给它。要真正实现「今天跑 quick、明天补成 final」，
+  还需要：读 `task.steps` 中已完成的步骤 → `resolveResume` → 只跑 `pending`。
+- **前端档位 UI 未做**：`public/index.html` 没有档位选择（UI 归属，需 UI 协作）。
+- 端到端仍未用真实生成 API 验证过（无 Key）。
+
+---
+
+## 2026-10-19 补记 · 补跑入口接通（`continueTask` + API）
+
+上一节记「补跑入口未接」。本节完成接线，**「今天跑 quick、明天补成 final 且不重生成片段」现在可用了**。
+
+### 新增
+
+| 位置 | 内容 |
+|---|---|
+| `pipeline.continueTask(taskId, {preset, completed})` | 补齐 pending 环节；已完成步骤自动复用 |
+| `pipeline._completedSteps(task)` | 从 `task.steps` 推断已完成（`completed` / `reused`；**`skipped` 不算**） |
+| `pipeline._resolveArtifact(taskId, step)` | 定位某步已产出的视频文件（含 >10KB 校验） |
+| `POST /api/tasks/:id/continue` | 触发补跑；非法档位返回 400 |
+| `GET /api/tasks/:id/continue-plan` | 只读预览「还需跑哪些」；任务不存在返回 404 |
+
+### 核心机制
+
+1. **片段复用**：`_batchGenerate` 跳过 `status==='success'` **且文件仍在**的片段（只看状态不够——文件可能被清理）。
+   全部复用时不记 `completed` 而记 `reused`，并写 `reusedClips`/`generatedClips` 统计。
+2. **产物复用**：`concatenation`/`loop_processing`/`transcoding`/`audio_mix` 各自检查 `<taskId>_*.mp4`
+   是否存在，存在且档位不含该步时直接复用。
+3. **状态区分**：`_markStageSkipped` 依据 `task.resumeReused` 把状态标成 `reused`（复用，passed）
+   而不是 `skipped`（档位外跳过），两者在任务详情里可区分。
+4. **状态切换**：补跑开始时把任务状态从 `completed` 切回 `pending`。
+
+### 接入时又暴露三个真机才有的问题
+
+**1. 补跑直接以「片段包」结束**
+`concatenation` 在补跑时同样不在 `stageSet`（它已完成、本次复用），而「clips_only 分支」无条件拦截
+`!stageEnabled('concatenation')` → 直接 return `fragmentOnly`，后 4 步全成 skipped。
+已改为**同时判断有无可复用的拼接产物**（`!enabled && !reusedConcat` 才走片段包分支）。
+
+**2. 补跑状态没切回运行中**
+`continueTask` 原先用 `updateTaskStatus(taskId, task.status, ...)`，`task.status` 是 `completed`，
+于是补跑刚启动，任务就已显示「已完成」——外部轮询/等待逻辑立即返回，看起来像补跑没生效。
+已改为切到 `pending`。
+
+**3. 片段被整批重新生成**
+核心链三步（提示词/分镜/片段生成）此前**没有任何档位判断**（设计上是「必选」）。
+但「必选」指**档位必须包含**，不等于**补跑要重跑**。
+实测：补跑到 final 时 2 个片段被重新生成了一遍（等于白花钱）。
+已在 `_batchGenerate` 内按片段粒度复用。
+
+> 这三个问题都是纯单测（`verify-stages.js` 45 项全绿）**测不出来**的，
+> 必须真机跑「先 quick 再补 final」这条路径才会暴露。
+
+### 真机验收（`scripts/verify-continue.js`，19 项全绿）
+
+流程：先用 quick 档跑一条 2 片段任务 → 再补跑到 final。
+
+| 断言 | 实测 |
+|---|---|
+| 补跑待跑 4 步 | `loop_processing,audio_mix,transcoding,final_qc` ✅ |
+| 补跑复用 4 步 | `prompt_optimize,storyboard,clip_generation,concatenation` ✅ |
+| **片段生成标记 reused** | `reused` ✅ |
+| **片段文件 mtime 未变** | 2/2 完全一致 ✅ |
+| 拼接标记 reused | `reused` ✅ |
+| 循环/转码/终检真实执行 | 均 `completed` ✅ |
+| 补跑后产出成片 + 母版 | 两者都存在 ✅ |
+| 再补跑同档位 | `alreadyDone: true` ✅ |
+| 无任何已完成步骤时补跑 | 被拒：「补跑需要拼接产物」✅ |
+| 非法档位 | 被拒 ✅ |
+
+**说明**：第 1、2 步（提示词优化/分镜）在补跑时**仍会重新执行**，状态如实记为 `completed`
+而非 `reused`——它们不调用视频生成、不产生生成费用，只是重算文本。这是如实记录，不是缺陷。
+
+### API 实测
+
+| 请求 | 结果 |
+|---|---|
+| `GET /api/tasks/<id>/continue-plan?preset=final` | 返回 `pending`/`completed` 清单 ✅ |
+| `GET /api/tasks/nope/continue-plan` | HTTP 404 ✅ |
+| `POST /api/tasks/<id>/continue` + `{"preset":"bogus"}` | HTTP 400 ✅ |
+
+### 全量回归
+
+| 脚本 | 结果 |
+|---|---|
+| `verify-continue.js` | **19/0**（新增，真机） |
+| `verify-stage-pipeline.js` | **37/0** |
+| `verify-stages.js` | **45/0** |
+| `verify-concat-audio.js` | **17/0** |
+| `verify-loop.js` | **25/0** |
+| `verify-nsfw.js` | **42/0** |
+| `verify-mock-vqc.js` | **14/0** |
+
+合计 **199 项全绿**。
+
+### 仍未完成
+
+- **前端补跑 UI**：API 已就绪，`public/index.html` 还没有「补跑」入口（UI 归属）。
+- 端到端仍未用真实生成 API 验证（无 Key）；本项目前用 Mock 生成器跑真实流水线验证。
+- 补跑时第 1、2 步会重跑并覆盖 `clips[i].prompt`（若用户手动改过片段提示词，会被重新优化覆盖）。
+
+---
+
+## 2026-10-19 补记 · 质检可信度暴露到 API + 修正一条不准确的环境记录
+
+### 一、质检可信度（qcVersion）终于能被前端读到
+
+`docs/spec/changelog.md` 的 2026-10-18 节里明确留了一个尾巴：
+
+> `taskManager.getAllTasks()` 直接读内存对象，**不会**自动带标注。
+> API 若要暴露，需在 `server.js` 的 `/api/tasks/:id` 等处调用 `storage.annotateTaskQC(task)`
+
+这条一直没做，导致**前端根本拿不到「历史未验证」信息**，`qcVersion` 机制等于只做了一半。
+
+本次补齐：
+
+| 接口 | 新增字段 |
+|---|---|
+| `GET /api/tasks/:id` | `qcVersion`、`qcTrusted`、`qcVersionSource`、`finalQC.qcLabel`、`clips[i].qcResult.qcLabel` |
+| `GET /api/tasks` | `qcVersion`、`qcTrusted`（列表页只给两个轻量标量，完整 `finalQC` 体积大，留给详情） |
+
+实测（真实任务）：
+
+| 任务 | qcVersion | qcTrusted | source |
+|---|---|---|---|
+| `task_mv4v7qp2_m8r0` | 2 | **true** | finalQC |
+| `task_mukptvrj_xbjn` | 2 | **true** | finalQC |
+| 其余 4 条历史任务 | null | false | null |
+
+### 二、顺带修掉一个误导性缺陷（`qcVersion.js` `annotateTask`）
+
+原实现只从**任务行**取版本：
+
+```js
+const taskVersion = normalize(task.qcVersion !== undefined ? task.qcVersion : task.qc_version);
+```
+
+但现实数据里「任务级 `qc_version`」经常是空的——版本写在 `finalQC` / `qcResult` 内部。
+于是 `taskVersion = null` → `qcTrusted = false`，**所有终检真实执行过的任务都会被标成
+`legacy_unverified`**。前端的「历史未验证」角标会变成「什么都标」，等于失效。
+
+修复：任务级版本缺失时**回退到 `finalQC` 的版本**，并新增 `qcVersionSource` 记录来源
+（`task` / `finalQC` / `null`），调用方需要更细粒度时自行看 `clips[i].qcResult.qcLabel`。
+
+四种组合实测：
+
+| 场景 | qcVersion | qcTrusted | source |
+|---|---|---|---|
+| 任务级无、finalQC=2 | 2 | true | finalQC |
+| 任务级=1、finalQC=1 | 1 | false | task |
+| 完全无版本 | null | false | null |
+| 任务级=2、finalQC=1 | 2 | true | task（任务级优先） |
+
+`passed` 原值一律不篡改（只新增字段），负向用例已覆盖 null / "abc" / -1 / 0。
+
+### 三、修正一条被实测证伪的环境记录
+
+`AGENTS.md` §2.3 原写「本环境里 `stdio:'pipe'` 会返回 EPERM」。**实测并非一律如此**：
+
+| 方法 | 调用方式 | 实测结果 |
+|---|---|---|
+| `extractFrame` | `execSync(cmd, { stdio:'pipe' })` | ✅ 正常（产出 41840 字节 JPEG） |
+| `transcode` | `execSync(cmd, { stdio:'pipe' })` | ✅ 正常 |
+| `concatenate`（copy 路径） | `execSync(cmd, { stdio:'pipe' })` | ✅ 正常（时长校验通过） |
+
+真正踩到 EPERM 的是**需要捕获 stdout 文本**的调用，如 `getVideoInfo` 的
+`execSync(cmd, { encoding:'utf8' })`，现象 `spawnSync C:\Windows\system32\cmd.exe EPERM`。
+
+已把 §2.3 改写为准确描述：**要读 stdout 的**走上层封装的降级路径；**只执行不读输出**的可以照常用。
+同时把 §6 缺口表里「`extractFrame` / `_transcodeFFmpeg` 等仍用 `stdio:'pipe'`」一条**删除**——
+它不是缺口，是被错误记录的风险。留着会让后人对已正常工作的代码做无谓改造。
+
+### 验收（`scripts/verify-qc-annotation.js`，32 项全绿）
+
+| 组 | 内容 |
+|---|---|
+| A 标注语义 | 版本 2/3 可信、1/0/null/"abc"/-1 不可信；`passed` 不被篡改 |
+| B 版本回退 | 无任务级版本时回退 finalQC；来源可查；任务级优先 |
+| C 存储/API | `taskManager.getTask` 不带标注（已知）；`storage.getTask` 带；**起临时服务实测两个 API** |
+
+C 组会启动一个临时 server（端口 3096）真实请求 API，断言返回体含 `qcTrusted` / `qcVersion` /
+`qcVersionSource` / `finalQC.qcLabel`，结束后按端口兜底清理进程。
+
+### 仍未完成
+
+- **前端 UI**：`public/index.html` 还没有
+  「历史未验证」角标、档位选择、补跑入口——三者后端都已就绪，属 UI 归属。
+- 端到端仍未用真实生成 API 验证（无 Key）。
+
+---
+
+## 2026-10-19 补记 · 对接前端：preset 透传缺失 + 单片段补跑缺陷
+
+### 一、档位功能此前**通过 API 完全不可用**
+
+上一节写完「补跑入口接通」后，本节要给前端写集成契约，逐条核对接口时发现：
+
+`POST /api/tasks` 的请求体解构里**没有 `preset` / `stages`**：
+
+```js
+const { prompt, prompts, clipTracks, bgm, model, theme, ..., strictQcItems } = req.body;
+//                                                                       ↑ 没有 preset
+```
+
+而 `taskManager.createTask` 是支持 `options.preset` 的（真机测过）。
+结果：前端传 `{preset:'quick'}` 会被**静默忽略**，任务永远用默认 `final`（8 步全量）。
+
+**实测**：传入 `preset=quick` → 任务 `preset=final`、`stageSet` 8 步。
+也就是说，前面几轮做的档位功能，**用户根本用不上**——只能直接调 Node API。
+
+修复：解构补上 `preset` / `stages`，并透传给 `createTask`。
+
+修复后实测：
+
+| 传入 | 任务 preset | stageSet 步数 |
+|---|---|---|
+| `quick` | quick | 4 |
+| `clips_only` | clips_only | 3 |
+| `final` | final | 8 |
+| 不传 | final | 8（默认行为不变） |
+| `bogus`（非法） | final | 8 + `stagePlan.notes` 记录回退原因 |
+
+### 二、单片段任务的补跑会被误判成「片段包」
+
+写契约校验时用 `totalClips=1` 跑，暴露了另一个缺陷。
+
+「clips_only 片段包」分支的判定是：
+
+```js
+if (!stageEnabled('concatenation') && !reusedConcat) { /* 片段包，直接 return */ }
+```
+
+其中 `reusedConcat` 靠找 `<taskId>_concat.mp4`。
+**但单片段任务的拼接步骤是「跳过拼接、直接用该片段」，根本不产出 `_concat.mp4`。**
+
+后果：1 片段的任务 quick 跑完再补 final → `reusedConcat=null` → 被当片段包 →
+下游 4 步全部标 `skipped`，补跑等于什么都没做。
+
+修复：拼接步骤本身已完成（`completed`/`reused`/`partial`）时，若没有 `_concat.mp4`
+就用那唯一的成功片段顶上（与主流程 `successClips.length === 1` 分支语义一致）。
+
+修复后：单片段补跑 → 循环/转码/配乐/终检全部真实执行。
+
+> 这两个缺陷都属于「功能做完了但用户用不上」或「特定数据形态下静默失效」，
+> **纯单测和多片段真机都测不出来**，是写前端契约（逐条核对真实 API）时逼出来的。
+
+### 三、新增前端集成契约
+
+新增 `docs/spec/frontend-integration-spec.md`，把三个 UI 功能的接口契约写清楚：
+
+| 功能 | 接口 |
+|---|---|
+| 档位选择 | `POST /api/tasks` 的 `preset` / `stages` |
+| 补跑 | `GET /api/tasks/:id/continue-plan`（预览）、`POST /api/tasks/:id/continue` |
+| 质检可信度角标 | `GET /api/tasks/:id` 与 `/api/tasks` 的 `qcVersion` / `qcTrusted` / `qcLabel` |
+
+内容包括：请求/响应示例、每个字段含义、`skipped` 与 `reused` 的视觉区分要求、
+错误分支（400/404 的具体 error 文案）、以及实测数据。
+
+### 四、契约一致性校验（`scripts/verify-frontend-contract.js`，49 项全绿）
+
+**文档与实现不符比没有文档更糟**，所以这个脚本把文档里承诺的每一条都真跑一遍：
+
+| 组 | 覆盖 |
+|---|---|
+| [1] | 4 种 preset 透传 + 不传的默认行为 |
+| [1b] | 非法 preset 回退 final 且写入 notes |
+| [2] | continue-plan 字段完整 + 任务不存在 404 |
+| [3] | continue 的错误分支（非法档位 400、任务不存在 400） |
+| [4] | 列表/详情的 qc* 字段 |
+| [5] | clips_only 的 `fragmentOnly` / `outputPath=null` / `fragmentCount` / 拼接标 `skipped` |
+| [6] | **真机补跑**：quick → final，片段 `reused`、文件 mtime 未变、循环真实执行、幂等 `alreadyDone` |
+
+新增测试专用 shim `scripts/_nsfw-pass-shim.js`：因为契约校验要起**独立 server 进程**，
+无法像前两个脚本那样在进程内 patch `checkNSFW`；改用
+`node --require ./scripts/_nsfw-pass-shim.js server.js` 预加载。
+（无 `OPENAI_API_KEY` 时 NSFW 判 fail 会让片段质检失败、流水线在片段生成就中止，
+档位/补跑相关步骤根本走不到。NSFW 本身由 `verify-nsfw.js` 独立验收 42 项。）
+
+### 五、修掉一个测试稳定性问题
+
+批量跑时 `qc-annotation` 出现 31/1（单跑 32/0）——原因是**端口冲突**：
+上一个脚本起的服务还没释放 3096，下一个脚本启动失败。
+已把 `qc-annotation` 与 `frontend-contract` 都改为**动态选端口**（先探测 20 个端口）。
+连跑 3 次验证稳定：32/0、32/0、32/0。
+
+### 全量回归（9 个脚本）
+
+| 脚本 | 结果 |
+|---|---|
+| `verify-frontend-contract.js` | **49/0**（新增） |
+| `verify-qc-annotation.js` | **32/0** |
+| `verify-continue.js` | **19/0** |
+| `verify-stage-pipeline.js` | **37/0** |
+| `verify-stages.js` | **45/0** |
+| `verify-concat-audio.js` | **17/0** |
+| `verify-loop.js` | **25/0** |
+| `verify-nsfw.js` | **42/0** |
+| `verify-mock-vqc.js` | **14/0** |
+
+**合计 280 项全绿，9 个脚本 exit 均为 0。**
+
+### 仍未完成
+
+- **前端 UI 仍未实现**：`public/index.html` 里没有档位选择、补跑按钮、历史未验证角标。
+  后端与契约都已就绪，属 UI 归属（`AGENTS.md` §3）。契约见
+  `docs/spec/frontend-integration-spec.md`。
+- 端到端仍未用真实生成 API 验证（无 Key）。
+- 4K/8K/HDR 仍未动（无 GPU、无超分 Key、万相封顶 1080p）。
+
+---
+
+## 2026-10-19 补记 · 前端 UI 落地（档位选择 / 补跑按钮 / 质检角标）
+
+### 背景与授权说明
+
+后端能力早已就绪，但界面看不见 = 用户用不上。本轮由用户明确指示后，
+**研发跨角色修改了 `public/index.html`**（`AGENTS.md` §3 约定该路径属 UI）。
+改动方式上做了两点约束，尽量降低越界风险：
+
+1. **只用增量 `edit` 精确插入，绝不整文件重写**——该文件此前已有
+   **1062 行新增 / 352 行删除的未提交改动**（1.5 小时未再变动，判定为有效的进行中工作）。
+   全程未删除或改写他人内容，只在 4 处插入。
+2. 只在既有设计系统内新增元素（复用 `.form-group` / `.form-label` / `.form-hint` /
+   `.qc-strict-list` / `.detail-item` / `.modal-section` 等既有类），不引入新视觉样式。
+
+### 四处改动
+
+| 位置 | 内容 |
+|---|---|
+| 创建表单（分辨率之后） | `#presetSelect` 五档下拉 + `#presetHint` 说明；custom 时展开 `#customStagesWrap` 的 8 个环节勾选框 |
+| 创建请求 | body 增加 `preset`，custom 时附带 `stages: [...]` |
+| 详情弹窗（耗时之后） | `#detailPreset`（档位）+ `#detailQcTrust`（质检可信度角标） |
+| 详情弹窗（新增 section） | `#continueSection`：补跑预览文案 + 「补成最终成片」按钮 |
+
+### 关键实现点
+
+- **档位联动**：custom 才显示勾选区；其余档位的步骤由后端 `resolveStages` 决定，
+  前端**不重复计算依赖**（避免与后端规则漂移）。
+- **补跑按钮的显示条件**：任务 `status === 'completed'` **且** `preset !== 'final'` **且**
+  `continue-plan` 返回的 `pending` 非空。先预览再确认，确认框写明「片段不会重新生成」。
+- **质检角标三态**：
+  - `qcTrusted === true` → 绿字「已核验」（tooltip 显示版本与来源）
+  - `qcVersion` 有值但不可信 → 橙字「历史未验证」（tooltip 说明修复前结论不可采信）
+  - `qcVersion` 为空 → 灰字「无质检结论」（quick 档不跑终检时属正常）
+- 详情页数据来自 `/api/tasks/:id/progress`（不含 qc/preset），因此**额外拉了一次**
+  `/api/tasks/:id`。失败不影响基础详情展示。
+
+### 验证：浏览器不可用，改用两层替代验证
+
+本环境 **Electron 未安装**，`dsh_browser_*` 全部不可用（changelog 早有记录）。
+改用两层：
+
+**第一层 —— 静态一致性（`scripts/verify-frontend-static.js`，43 项全绿）**
+
+| 组 | 内容 |
+|---|---|
+| [1] | HTML 结构完整（标签配对、无 U+FFFD） |
+| [2] | 2 个内联 script 块均可 `new Function()` 解析 |
+| [3] | **JS 引用的 165 个元素 id 全部存在或为动态创建** |
+| [4] | 本次新增的 9 个 id + 8 个步骤勾选框全部就位 |
+| [5] | `preset` / `stages` 确实出现在请求体里 |
+| [6] | 补跑确实调用了 continue-plan 与 continue（POST） |
+| [7] | 角标读取 qcTrusted / qcVersion / qcVersionSource |
+| [8] | 档位 change 监听、custom 切换、五档齐全 |
+| [9] | **既有元素与函数未被破坏**（9 个 id + 3 个函数） |
+
+**第二层 —— 端到端走一遍 UI 会发的请求（实测）**
+
+```
+创建 {preset:'quick'} → 任务 preset=quick、stageSet 4 步、status=completed
+详情字段            → preset=quick；qcVersion 为空 → 显示「无质检结论」（未跑终检，正确）
+continue-plan       → pending=[loop,audio_mix,transcoding,final_qc]
+                      reused=[prompt_optimize,storyboard,clip_generation,concatenation]
+POST continue       → success，补跑后 片段生成=reused、循环=completed、终检=completed
+```
+
+### 过程中发现的两个既有问题（均非本次引入）
+
+1. **`#genStatusDot` 在 HTML 里不存在**，但有 7 处 JS 引用 + `.gen-status-dot` 的 CSS。
+   属于「样式与逻辑写了、元素没加」的未完成功能，副作用只是侧边栏生成状态点不显示。
+   7 处引用中 6 处有 `if (dot)` 保护，1 处（`genDot`）是**声明后从未使用的死变量**，不会抛错。
+   已在验证脚本里标注为「已知既有缺口」并单独校验其安全性，**未擅自补元素**
+   （可能属于他人进行中的工作）。
+2. 验证脚本初版把「死变量」误判为「无 null 保护」，已修正判定逻辑。
+
+### 全量回归
+
+| 脚本 | 结果 |
+|---|---|
+| `verify-frontend-static.js` | **43/0**（新增） |
+| `verify-frontend-contract.js` | **49/0** |
+| `verify-qc-annotation.js` | **32/0** |
+| `verify-continue.js` | **19/0** |
+| `verify-stage-pipeline.js` | **37/0** |
+| `verify-stages.js` | **45/0** |
+| `verify-concat-audio.js` | **17/0** |
+| `verify-loop.js` | **25/0** |
+| `verify-nsfw.js` | **42/0** |
+| `verify-mock-vqc.js` | **14/0** |
+
+**合计 323 项全绿，10 个脚本 exit 均为 0。**
+
+### 仍未验证（重要）
+
+- **没有在真实浏览器里点过**。静态校验能查出「元素不存在 / 字段漏传 / 语法错」，
+  **查不出**布局错位、样式冲突、拖拽手感、弹窗遮挡这类问题。
+  按 `AGENTS.md` §5.4，UI 交付要求「在浏览器里实际操作一遍并截图/录屏」——
+  **这一步本环境做不到，需人工补做**。
+- 4K/8K/HDR 仍未动（无 GPU、无超分 Key、万相封顶 1080p）。
+
+---
+
+## 2026-10-19 补记 · 验收统一入口 + 浏览器不可用时的自检方案
+
+### 一、验收脚本终于有了统一入口
+
+本项目已有 10 个 `verify-*.js`，但此前只能逐个 `node scripts/xxx.js`——
+**没人会记得全部跑一遍，回归时漏跑一个就等于没验**。
+
+新增 `scripts/verify-all.js`：
+
+```powershell
+node scripts/verify-all.js          # 全部（约 3 分钟）
+node scripts/verify-all.js --fast   # 只跑纯逻辑/静态组（约 10 秒）
+node scripts/verify-all.js --only loop,stages
+```
+
+同时写入 `package.json`：
+
+| 命令 | 作用 |
+|---|---|
+| `npm run verify` | 全部 |
+| `npm run verify:fast` | 快速组 |
+| `npm run verify:frontend` | 前端静态 + 契约 |
+| `npm run verify:loop` | 循环相关 |
+| `npm run verify:stages` | 档位 + 补跑 |
+
+**未新增任何依赖**（`dependencies` 仍为 4 个，符合 §4.6）。
+
+实测一次全量（10 个脚本）：
+
+```
+stages             ✅  45/45    0.2s
+frontend-static    ✅  43/43    0.1s
+qc-annotation      ✅  32/32    5.0s
+frontend-contract  ✅  49/49   35.7s
+continue           ✅  19/19   14.8s
+stage-pipeline     ✅  37/37   27.9s
+concat-audio       ✅  17/17    4.3s
+loop               ✅  25/25   24.0s
+nsfw               ✅  42/42   47.0s
+mock-vqc           ✅  14/14    8.0s
+总计: 10 个脚本 | 323 项通过 / 0 项失败
+```
+
+### 二、浏览器验证：尝试过，但当前会话无法解决
+
+上一节遗留的「UI 未经真实浏览器验证」，本轮尝试解决：
+
+- 错误提示建议 `npx install-electron` 或设 `ELECTRON_PATH`。
+- 检查发现 `%LOCALAPPDATA%\electron\Cache` 里**有** `electron-v43.2.0-win32-x64.zip`（137MB）
+  与 `electron-v44.0.0-win32-x64.zip`（150MB），但**只有 zip、未解压**，全盘没有 `electron.exe`。
+- 关键限制：`dsh_browser_*` 读取 `ELECTRON_PATH` 发生在**进程启动时**，
+  即使现在解压并设置环境变量，**当前会话的工具也不会重新读取**。
+  因此本轮无法在本会话内完成真实浏览器验证。
+
+**没有假装验证过**——这一点在 §6 缺口表与本文都如实标注。
+
+### 三、替代方案：新增浏览器自检页 `public/_selftest.html`
+
+用户打开 `http://localhost:3001/_selftest.html` 即自动跑一遍检查，
+结果用「通过/失败」逐条显示，不需要开发者做什么。
+
+覆盖：
+
+| 组 | 内容 |
+|---|---|
+| 档位 | 用 `preset=quick` 创建 Mock 任务 → 断言任务 `preset=quick` 且 `stageSet` 为 4 步 |
+| 补跑 | `continue-plan` 返回 `pending`/`reused`；非法档位 400；任务不存在 404 |
+| 质检 | 详情返回 `qcTrusted` / `qcVersionSource` |
+| DOM | 拉取 `/index.html` 文本，检查 8 个新增元素与 8 个步骤勾选框是否就位、5 个既有元素未被破坏 |
+
+页面上还有「创建一条 quick 档测试任务」按钮，点完回主界面即可**目视**验证：
+任务详情应显示「执行档位：快速验证」与「补成最终成片」按钮。
+
+> 自检页会真实创建一个 Mock 任务（不产生费用），
+> 说明里已提示「可到 `data/tasks` 清理」。文件名以 `_` 开头，与既有 `_ptest.html` 同类。
+
+**实测**（起临时服务模拟自检页的全部请求）：
+
+```
+自检页 HTTP 200, 8.3KB
+preset=quick | steps=4 | qcTrusted=False | source=(空)
+DOM 元素缺失: 无
+步骤勾选框: 8 个
+```
+
+### 仍未完成
+
+- **真实浏览器验证**：需要在一个 `ELECTRON_PATH` 正确配置的会话里，或由人工打开
+  `_selftest.html` 与主页操作一遍。自检页只能证明「接口与元素正确」，
+  **证明不了布局、样式、点击手感**。
+- `public/_ptest.html` 是更早的临时验证页（配乐相关），目前仍在 `public/` 下。
+  未删除——不确定是否还有人在用。
+- 4K/8K/HDR 仍未动（无 GPU、无超分 Key、万相封顶 1080p）。
+
+### 四、修掉 `qc-annotation` 在批量跑时的假失败
+
+统一入口上线后第一次全量跑，`qc-annotation` 出现 **31/32**：
+
+```
+❌ GET /api/tasks/:id 暴露 finalQC.qcLabel — label=undefined
+```
+
+原因是该脚本的 C 组取 `realTasks[0]`（列表按创建时间降序，即**最新**的一条）来验证
+「`finalQC.qcLabel` 会被 API 暴露」。但**最新任务不保证跑过终检**——
+前面的验收脚本会不断创建/删除任务，顺序一变就取到没有 `finalQC` 的任务，断言假失败。
+
+这是**测试脆弱性**，不是功能缺陷（单独跑时 32/0）。
+
+修复：改为从「**有 `finalQC`** 的任务」里挑，没有则明确报错
+（`N 条任务都没有 finalQC`），而不是拿任意一条去断言。
+连跑 3 次验证稳定：32/0、32/0、32/0。
+
+> 教训：验收脚本依赖「真实数据」时，必须**显式挑选符合前提的那条**，
+> 不能假设「第一条就是合适的」——尤其在一个会被多个脚本反复创建/删除任务的环境里。
+
+---
+
+## 2026-10-20 补记 · 从「2 片段任务只出 1 个片段、成片点不开」查出的三个缺陷
+
+### 现场
+
+用户跑了一条 2 片段 480p 任务（`task_mvg18fjs_d0ok`），结果是：
+
+- 第一个片段**黑屏、点不开**
+- 任务**卡在 `mixing` 27 分钟**，`outputPath` 为 null（没有成片）
+- 但 8 个步骤**全部标记 completed**
+
+### 排查得到的三个真实缺陷
+
+#### 缺陷 1：拼接时「片段缺失」被静默当成通过
+
+`pipeline._runPipeline` 里单片段分支写死了：
+
+```js
+qcDetails: { passed: true, reason: '仅有1个成功片段，跳过拼接' }
+```
+
+它把两种情况混为一谈：
+- 任务本来只要 1 个片段 → 正常
+- 任务要 2 个但**丢了 1 个** → 不正常，却被记成 `passed: true`
+
+实测证据（该任务的拼接记录）：
+
+```json
+concatenation: {"passed":true,"reason":"仅有1个成功片段，跳过拼接"}
+```
+
+而片段生成阶段报的是 `passRate: 100%`（2/2 成功）。**用户完全没有任何提示**，
+直到看到成片只有一半。
+
+**修复**：区分两种情形，丢片段时 `passed:false + level:'fail'`，写明
+`片段缺失：应有 N 个，实际成功 M 个（丢失 K 个）`，并同时打 ERROR 级日志。
+
+#### 缺陷 2：任务卡在中间状态无人回收
+
+`audio_mix` 步骤先 `updateTaskStatus(taskId,'mixing')`，全部跑完才在末尾统一置
+`completed/partial`。**如果进程在这中间中断，任务就永远停在 mixing**：
+前端既看不到失败，也拿不到 `outputPath`（= 点击无反应）。
+
+**修复**：新增 `pipeline.reconcileInterruptedTasks()`，在服务启动时执行。
+原理：进程刚启动时不可能有任何任务在跑，所以处于
+`pending/generating/concatenating/looping/transcoding/mixing` 的任务必然是上次中断的残留。
+回收时标记为 `failed`（**不冒充 completed**），并写明：
+中断时状态、已完成哪些步骤、可直接补跑。
+
+实测（本次启动日志）：
+
+```
+任务 task_mvg18fjs_d0ok 状态: failed
+⚠️  回收了 1 个中断的任务（可直接点「补跑」继续）：
+    task_mvg18fjs_d0ok  原状态 mixing  已完成 8 步
+```
+
+> 注意：合并「内存 + 数据库」两个来源取任务。只读数据库会漏掉刚创建、
+> 异步写库尚未落盘的任务（验收时出现过这个竞态）。
+
+#### 缺陷 3：`checkFinal` 不传运行时配置
+
+三处 `checkFinal(finalPath)` **都没传第二个参数**，于是终检的 NSFW 永远用
+`.env` 默认值（`gpt-4o-mini` + 空 Key），**用户在设置里填的阿里云地址、
+多模态 Key、qwen3-vl-plus 完全没被用上**。
+
+实测证据：该任务 `final_qc` 里记录的 NSFW `model` 是 `gpt-4o-mini`，
+而片段级质检用的是 `qwen3-vl-plus` —— 同一条任务里两个模型，说明配置没透传。
+
+**修复**：新增 `pipeline._finalQcOptions(task)`，三处统一使用；Key 解析顺序
+与片段级一致（`multimodalApiKey || llmApiKey`），并携带 `syntheticSource`
+（Mock 任务）。
+
+### 顺带：日志落盘（解决「日志滚走了就查不到」）
+
+服务跑在用户自己的终端里，输出只在窗口滚动，出问题后无法追溯。
+`server.js` 现在把 `console.log/warn/error` 同时写入
+`app/data/logs/server-YYYY-MM-DD.log`，终端行为不变。
+
+### 仍未查清的一件事（如实记录）
+
+`clip_1` 文件在「质检通过之后、拼接之前」消失，**全盘搜索确认不存在**，
+磁盘有 191GB 可用，生产代码里也没有删除 `clips/` 下文件的逻辑。
+
+已确认的事实：
+- 质检读到过它（`duration: 6s`、NSFW 抽帧得到「山峰与云海」画面、blur 7.36）
+- 02:01:37 拼接时它已不在 → 「仅有 1 个成功片段」
+- 此后没有任何代码路径会写/删这个名字
+
+**未定位到删除者。** 但缺陷 1 的修复保证：这种情况以后会**明确报错**而不是静默通过。
+
+### 验收（`scripts/verify-pipeline-fixes.js`，28 项全绿）
+
+| 组 | 覆盖 |
+|---|---|
+| [1] 终检配置 | Key/BaseUrl/模型透传；只配 LLM Key 时回退；mock → syntheticSource；**三处无裸调用** |
+| [2] 片段缺失 | 旧静默写法已移除；`passed` 绑定 `lostClips`；可读原因；ERROR 日志 |
+| [3] 僵尸回收 | 构造 mixing 任务 → 被回收为 failed + 写明原因；**已完成任务不被误回收**（负向） |
+| [4] 日志落盘 | 双写劫持存在；日志目录有实际文件 |
+
+### 全量回归
+
+12 个脚本 **393 项全绿**（新增 `pipeline-fixes` 28 项）。
+
+### 遗留
+
+- `clip_1` 丢失原因未定位（见上）。
+- 用户那条任务已回收为 `failed`，可点「补跑」继续；
+  但 `clip_1` 需要重新生成（会产生一次生成费用）。
+
+---
+
+## 2026-10-20 · 片段库 + 单片段费用/耗时 + 剪辑页（拼接 × 配乐）
+
+**状态**：代码完成；本机可跑的验收全绿；**浏览器界面未经人工过一遍**（Electron 不可用，见「已知限制」）。
+
+### 背景（用户逐条确认的口径）
+
+用户要三件事：
+
+1. 能看到**单个视频片段的费用与耗时**；
+2. 有一个**片段库**装已经生成好的单个视频，跨任务复用；
+3. 能**从库里选片段拼成片**，也能一次生成多段自动拼接，并和「添加配乐」合成为一个「剪辑」页面。
+
+明确的口径（已写入实现）：
+
+| 项 | 决定 |
+|---|---|
+| 费用 | 自动估算：价目表单价 × 实际调用次数（重试算一次）；只算生成，不含质检/配乐 |
+| 历史 | 按当前价目表回算，标 `backfilled` |
+| 库范围 | 只收成功且有画面的片段；Mock/测试图/黑屏/蓝屏不收 |
+| 分组 | 默认「全部」，同时按分辨率分组；跨分辨率拼接时归一化，目标分辨率默认最高、可改 |
+| 成片 | 两段式：先生成母版（拼接+循环+转码，不配乐不终检），再到剪辑页配乐 + 导出（含终检） |
+| 成片记录 | 生成一条正常任务记录，进历史、可补跑 |
+| 视频轨 | 拖拽排序、删除、首尾裁剪、复制、在播放头分割 |
+| 片段生命周期 | 片段不随成片删除；只能在片段库删除，删条目连源文件一起删（二次确认） |
+| 重新生成 | 可改提示词/模型/分辨率；新增一条，旧片段保留并标「已被替代」；不进主历史 |
+| 收藏/标签 | 片段库页；收藏星标 + 预设标签（主题/模型/分辨率）筛选 |
+
+### 交付物
+
+| 层 | 内容 |
+|---|---|
+| 价目表 | 新增 `src/pricing.js`：服务端唯一价目表（SiliconFlow/Agnes 按个，可灵/Wan 按秒，Seedance 分型号，mock 0 元），生成时快照，历史回算标 `backfilled` |
+| 片段库 | 新增 `src/library.js` + `data/library/<id>.json`（一条片段一个文件，独立于任务 JSON）；`scripts/backfill-library.js` 回填历史 |
+| 计时/费用 | `pipeline._finishClipSuccess` / `_finishClipFailure` 统一收口：写 `clip.timing`（生成/质检两段）与 `clip.cost`，成功后自动入库 |
+| 拼接引擎 | `videoProcessor.concatenateSegments`：先按目标规格检查每段，只归一化不匹配的片段（缩放/补边/统一 30fps/SAR/像素格式），再走原 `concatenate`；额外做**完整解码校验** |
+| 成片任务 | `taskManager.createLibraryTask` / `setLibraryClips`；`pipeline` 对 `source=library` 跳过提示词/分镜/生成三步，直接拼接 |
+| 接口 | `GET /api/pricing`、`GET /api/library`、`PUT /api/library/:id`（收藏）、`DELETE /api/library/:id`、`POST /api/library/:id/regenerate`、`POST /api/assemble`；`GET /api/tasks/:id/clips` 增加费用/耗时/规格 |
+| 页面 | 新增 `public/clip-library.html`（全部/分辨率分组、费用/耗时、收藏、标签筛选、删除、重新生成、勾选去剪辑）；`public/bgm-editor.html` 改名「剪辑」并新增视频轨/片段库面板/生成母版，原有配乐功能保留；`public/index.html` 导航改名 + 片段库入口 + 片段卡片费用/耗时 + `library` 模型显示名 |
+
+### 实测验收
+
+**拼接兼容性（实现前先做的对照实验）**
+
+| 场景 | 结果 |
+|---|---|
+| 720p@30 × 2，`-c copy` 直拼 | 14.00s，0 解码错误 |
+| 720p@16 + 720p@30，copy 直拼 | 退出码 0，但 190 处 DTS 错误、11.31s（应 12.1s） |
+| 720p@16 + 720p@30，旧重编码兜底（无归一化） | 退出码 0，产物 2.4fps、89 处 DTS 错误 |
+| 同上，加 scale+fps 归一化 | 12.07s、30fps、0 错误 |
+| 480p@30 + 720p@30，copy 直拼 | 退出码 0，但流内分辨率在第 8 秒从 854×480 跳到 1280×720 |
+| 480p@30 + 720p@30，归一化到 720p | 12.00s、1280×720、0 错误 |
+
+**API 端到端（本机 3002 端口）**
+
+| 用例 | 结果 |
+|---|---|
+| 2 段 720p30（14s）→ assemble | 任务 completed；final 13.5s（循环淡化 0.5s）、1280×720@30、0 解码错误 |
+| 3 段 480p+720p16+720p30（17.06s）→ assemble | 归一化 2 段；拼接产物 17.07s、0 解码错误；final 16.6s |
+| 3+3+7=13s（含裁剪 + 同一片段重复用）→ assemble | 13.00s、归一化 2 段、0 解码错误；final 12.5s |
+| 成片后配乐导出（`POST /api/tasks/:id/audio`） | 成功；成片 13.5s，视频流 + AAC 2 声道音频 |
+| 片段库删除 | 条目与 `clips/` 源文件同时删除 |
+| 收藏 | 置位/复位均成功 |
+| 隐藏重新生成任务 | 不出现在 `/api/tasks` 与 `/api/tasks/completed` |
+| 历史回填 | 10 条成功片段入库，合计 ¥34.30；39 个 Mock 孤儿文件按规则不入库 |
+
+**本机可跑的验收脚本（全绿）**
+
+| 脚本 | 结果 |
+|---|---|
+| `scripts/verify-library.js`（新增） | 38 通过 / 0 失败（价目表/费用口径/归档/条目/分组/跨规格拼接） |
+| `verify-frontend-static.js` | 43 / 0 |
+| `verify-editor-dom.js` | 内联事件与 DOM 引用全部存在 |
+| `verify-stages.js` | 45 / 0 |
+| `verify-stats.js` | 42 / 0 |
+| `verify-pipeline-fixes.js` | 28 / 0 |
+| `verify-mock-vqc.js` | 14 / 0 |
+| `verify-pages.js` | 全部通过（含新增 `/clip-library.html`） |
+
+### 修复的两个环境缺陷（改动过程中实测暴露）
+
+1. **`videoProcessor` 的 ffmpeg 调用在受限环境 spawn EPERM**
+   新增 `_runFFmpeg()` / `_runCaptureStderr()`：管道失败时降级为 `stdio:'ignore'`；解码校验改为把 stderr 重定向到临时文件再读，不再依赖管道捕获。
+2. **`audioMixer` 的 `execFile` 在受限环境是「同步抛 EPERM」**
+   原代码只在回调里做 EPERM 降级，同步抛出时 Promise 直接 reject，导致配乐导出永远报「无法读取成片时长」。现 `probeDuration` / `_runProbe` / `runFfmpeg` 全部加 try/catch + 同步降级路径。
+
+### 已知限制
+
+- **浏览器界面未人工过一遍**：本机没有可用的 Electron，`dsh_browser_*` 不可用；已做静态检查（元素/函数/内联事件/脚本语法）与 API 端到端，但布局与手感仍未按 §5.4 要求人工确认。
+- `verify-all.js` 在本沙箱无法整体运行：它用 `execFile` 起子进程，会 `spawn EPERM`。本次改为逐脚本运行可跑部分；给用户环境（非沙箱）跑全量时应正常。
+- 历史片段的耗时只记录开始/结束，可能横跨暂停与重跑；界面标注「历史记录，含下载+质检」，不冒充生成耗时。
+- 片段库按本地文件存储；后续上云需要把 `src/library.js` 的存储层换成对象存储/数据库。
+
+### 改动文件
+
+`src/pricing.js`（新）、`src/library.js`（新）、`src/pipeline.js`、`src/taskManager.js`、`src/taskDefaults.js`、`src/videoProcessor.js`、`src/processors/audioMixer.js`、`server.js`、`scripts/backfill-library.js`（新）、`scripts/verify-library.js`（新）、`scripts/verify-all.js`、`scripts/verify-pages.js`、`public/clip-library.html`（新）、`public/bgm-editor.html`、`public/index.html`、`data/library/*.json`（回填产物）。
+
+---
+
+## 2026-10-20 · 登录墙：单机共享账号 + 会话级 cookie
+
+**状态**：代码完成，`scripts/verify-auth.js` 40 项全过。
+
+### 背景（需求是怎么收敛的）
+
+起点是「想加个登录页，有没有免费发验证码的」。查证结论（2026-10-20）：
+**中国大陆不存在个人可合法自用的免费短信验证码**——阿里云 2025-06-06、腾讯云 2025-09-18
+先后公告不再受理个人自用短信签名；华为云官方 FAQ 明确无免费额度；云片个人资质只支持国际短信。
+个人唯一合法路径是阿里云 PNVS「短信认证」（约 0.054 元/条，且不能自定义签名）。
+零成本替代只有 TOTP / Passkey / 把后台藏进内网（Tailscale、Cloudflare Access）。
+
+最终确认的需求边界（逐条与用户确认过）：
+
+| 决策 | 结论 |
+|---|---|
+| 登录要挡谁 | 只要「看起来正式」的外观，不是真实威胁模型 |
+| 部署形态 | 只在本机 `localhost:3001`，不上公网 |
+| 账号模型 | 多账号、**无管理员/普通成员分级**，任何持账号密码者权限相同 |
+| 任务数据 | **不做归属隔离**，所有人看到同一批任务 |
+| 验证方式 | 账号 + 密码（短信/邮箱验证码/TOTP/二维码全部放弃） |
+| 会话 | **会话级 cookie**，关浏览器即失效；刻意不设 Max-Age |
+| 拦截范围 | 页面 + `/api/*` 真拦截；`/output` `/clips` `/bgm` 不拦 |
+| 验收标准 | 截图能看 + 真拦截（401/302）+ 防爆破 |
+
+### 实现
+
+- `src/auth.js`（新）：scrypt 密码哈希（`crypto` 内置，零新依赖）、内存会话表、
+  cookie 解析、按 IP 失败锁定、首次启动引导建号。
+- `server.js`：鉴权中间件插在 `express.json()` 之后、静态目录之前；
+  新增 `/api/auth/login|logout|me` 与 `/api/users` 增删改查。
+- `src/wsManager.js`：`init(server, { authorize })`，握手阶段校验会话 cookie，
+  未登录直接 401；不传 `authorize` 时行为与改造前完全一致。
+- 存储层：`users` 表加进三个驱动 + `schema.sql`；postgres 驱动**懒建表**
+  （`create table if not exists`），避免「没手动跑 schema.sql 就登不进去」。
+  列表接口永不返回 `passwordHash`。
+- 前端：`public/login.html`（新）、`public/members.html`（新）；
+  `index.html` 加全局 401 兜底（38 处裸 `fetch` 一处不改）与侧边栏退出入口。
+
+### 关键行为
+
+| 场景 | 结果 |
+|---|---|
+| 未登录访问 `/`、任意 `.html` | 302 → `/login.html?next=原地址` |
+| 未登录访问 `/api/*` | 401 `{ code:'AUTH_REQUIRED' }` |
+| 未登录连 `/ws` | 握手 401 |
+| 登录成功 | 下发 `vs_session`（HttpOnly / SameSite=Lax / **无 Max-Age**） |
+| 连续 5 次失败 | 该 IP 锁 5 分钟（内存，重启清零） |
+| 重置密码 / 删除账号 | 该账号所有会话立即失效 |
+| 认证存储不可用 | 503（**绝不 fail-open**） |
+| `AUTH_ENABLED=false` | 全部放行（仅供验收脚本使用） |
+
+### 验收（可复述）
+
+```powershell
+cd app
+node scripts/verify-auth.js     # 40 项，含负向：篡改 cookie、错误密码、失败锁定、WS 握手
+```
+
+另有真实数据库探针（临时脚本，跑完已删）验证 postgres 路径：
+`driver=postgres, before=0, after=0`，建/查/列/删全部成功，`listUsers` 不含 `passwordHash`。
+
+回归（逐脚本跑，原因见「已知限制」）：
+
+| 脚本 | 结果 |
+|---|---|
+| `verify-auth.js` | 40 / 0 |
+| `verify-stages.js` | 45 / 0 |
+| `verify-frontend-static.js` | 43 / 0 |
+| `verify-pipeline-fixes.js` | 28 / 0 |
+| `verify-mock-vqc.js` | 14 / 0 |
+| `verify-stats.js` | 42 / 0（修复：spawn 服务时传 `AUTH_ENABLED=false`） |
+| `verify-qc-annotation.js` | 32 / 0（同上） |
+| `verify-frontend-contract.js` | 49 / 0（同上） |
+
+### 对验收脚本的影响（已修）
+
+三个「自己 spawn 服务」的验收脚本原本会被登录墙拦成 401，已在其 spawn env 里加
+`AUTH_ENABLED: 'false'`：`verify-stats.js`、`verify-qc-annotation.js`、`verify-frontend-contract.js`。
+
+**仍是手动运行**的脚本（`verify-bgm-api/negative/e2e2`、`verify-port3001`、`verify-pages`）
+直接打用户正在跑的服务，登录墙开启时会 401。跑它们前要么临时 `AUTH_ENABLED=false`，
+要么先登录拿 cookie。
+
+### 已知限制
+
+- **没有验证码**：短信（无法免费/需企业资质）、邮箱、TOTP 全部放弃，只剩账号密码。
+- **不隔离任务数据**：所有账号看到并操作同一批任务，`tasks` 没有 owner 字段。
+- **`/output` `/clips` `/bgm` 未拦**：公网部署时必须补，否则成片可被直接下载。
+- **会话在内存**：服务重启即全体登出；多实例部署时各实例会话互不相认。
+- **`app/docs/HuggingFace部署指南.md` 已过期**：该文档仍写「ACCESS_TOKEN 尚未接入鉴权」，
+  现在是 `AUTH_*` 一套；该目录按契约属只读存档，未改。
+- 浏览器界面仍未人工按 §5.4 走一遍（本机无可用 Electron）。
+
+### 改动文件
+
+`src/auth.js`（新）、`public/login.html`（新）、`public/members.html`（新）、`scripts/verify-auth.js`（新）、
+`server.js`、`config.js`、`.env.example`、`.gitignore`、`src/wsManager.js`、
+`src/storage/index.js`、`src/storage/drivers/{jsonfile,postgres,sqlite}.js`、`src/storage/schema.sql`、
+`public/index.html`、`scripts/verify-all.js`、`scripts/verify-stats.js`、
+`scripts/verify-qc-annotation.js`、`scripts/verify-frontend-contract.js`。
+
+### 补充（同日晚间真机实测发现并修复）
+
+- **首次启动建号与登录的竞态**：`server.listen` 回调里异步建号，而 `/api/status` 立刻返回 200，
+  于是「服务就绪的那一刻去登录」会被判成「账号或密码错误」。
+  真实 PostgreSQL 实测复现：服务就绪后立即登录 → **401**。
+  修法：`auth.bootstrap()` 改为幂等 Promise + 新增 `awaitBootstrap()`，登录路由在查询前先 await 它。
+  修复后真机 e2e 8 项全过，`verify-auth.js` 仍 40/0。
+- **真机 e2e（真实 PostgreSQL + 真实 HTTP）**：服务就绪、就绪后立刻登录成功、拿到会话 cookie、
+  带 cookie 访问 `/api/tasks` 200、未登录 401、未登录 `/` 302、成员列表不含密码哈希、
+  探针账号清理干净。
+- **踩到的坑（值得记住）**：用 PowerShell `Start-Process` 起子进程时，当前会话里的 `$env:` 覆盖
+  **没有传进去**，于是用默认名 `admin` + 随机密码建了号；这个账号密码没人知道，
+  却会**阻止下一次首次启动再建号**（因为库里已有账号）。清理后库里为空。
+  以后测这类启动逻辑，请用 Node `spawn` 并显式传 `env`——`verify-auth.js` 就是这么做的。
+
+---
+
+## 2026-10-20 · 片段间转场（交叉淡化）：接缝不再硬切
+
+**状态**：后端完成并实测通过；**默认关闭**（零回归）；页面开关与 `POST /api/tasks` 字段
+尚未接入（原因见「与并行任务的冲突处理」）。
+
+### 背景（用户反馈与实测）
+
+此前「拼接衔接自然」只解决了**首尾循环点**（`_makeLoopFFmpeg` 的 xfade），
+**片段与片段之间仍是硬切**：拼接只有 concat（copy 或重编码直拼），没有任何过渡。
+
+实测一条 3 片段成片（`task_mvglbfkw_w5vg_final.mp4`，湖景 → 湖景 → 星空）：
+
+| 位置 | 指标 | 数值 |
+|---|---|---|
+| 6.0s 接缝（湖 → 星空） | 相邻帧 SSIM | **0.238** |
+| 同上 | 逐帧亮度差 YAVG | **46.5**（正常帧间仅 2.4–4.5） |
+| 首尾循环点 | 处理后实际回绕 SSIM（灰度） | 0.919（未处理 0.298） |
+
+结论：循环点已解决；片段接缝未做转场。另发现该成片 0–6s 是**同一素材用了两次**
+（同一 libraryId、同一 1–4s 裁剪，SSIM 0.96），属选材重复，不是拼接代码缺陷。
+
+### 实现
+
+- 新增 `src/processors/transitionMixer.js`（独立模块，不依赖 videoProcessor 私有方法）：
+  - ffmpeg `xfade` 链：第 k 个接缝 offset = 累积时长 − F；每接一段累积 += d_k − F。
+  - 每个输入先 `trim + setpts` 归零；统一分辨率/帧率/SAR/像素格式（只重编码不匹配段）。
+  - 音频 `acrossfade` 链；混合音轨（部分片段无音轨）给无音轨段补等长静音；
+    全无音轨时只出视频流。
+  - 片段过短时自动收窄 F（F ≤ 最短片段/2 − 0.05）；收窄到 0.1s 仍不够则**判失败**
+    （不静默直通）。
+  - 不用退出码 0 当成功：产物时长必须 ≈ Σd − (N−1)F，并做完整解码校验。
+- `src/pipeline.js`：新增 `_transitionOptions(task)`；四条拼接路径全部接入
+  （新建主路径、补跑恢复路径、片段库路径、重建母版 `_buildMasterFromClips`）。
+  转场关闭时**仍走原 `videoProcessor.concatenate`**，行为与接入前完全一致。
+- `src/qualityChecker.js`：`checkConcat` 增加可选第 4 参数 `{ expectedDuration }`。
+  不传时沿用旧口径（Σ片段时长）。**这是必须的**：否则转场产物会被误判成「拼接被截断」。
+- `config.js`：新增 `TRANSITIONS`（enabled / duration / type），
+  `.env` 对应 `TRANSITION_ENABLED` / `TRANSITION_DURATION` / `TRANSITION_TYPE`。
+- `src/taskManager.js` / `src/taskDefaults.js`：任务新增 `transition` 字段（老任务补 null，
+  语义是「未设置 → 用全局配置」）；`createTask` 支持按任务覆盖。
+
+### 默认关闭的原因
+
+开启后成片时长 = Σ片段 − (N−1)×F，与既有「Σ片段」口径不同。
+若默认开启，所有既有验收脚本（`verify-continue` 等按 20.533s 断言）与历史重跑
+都会改变结果。为遵守「零回归」，默认 `TRANSITION_ENABLED=false`；
+需要时在 `app/.env` 打开并重启服务。
+
+### 实测数值
+
+`node scripts/verify-transitions.js` → **36 通过 / 0 失败**（含负向）：
+
+| 场景 | 实测 |
+|---|---|
+| 2 段 3s+3s，F=0.5 | 5.50s（期望 5.50s） |
+| 3 段 3s+4s+3s，F=0.5 | 9.00s（期望 9.00s） |
+| 接缝尖峰（硬切 vs 转场） | max YAVG diff **40.00 → 3.00**（比值 0.07） |
+| 混合音轨 | 有音频流，mean_volume=-27.2dB，无音轨段补静音 |
+| 全无音轨 | 成功且**不伪造音轨** |
+| 480p+720p → 720p | 归一化 1 段，1280×720，4.50s |
+| 首尾裁剪 [0.5,2.5] | 4.50s |
+| 0.6s+0.6s，请求 F=0.5 | 自动收窄 F=0.25，产物 0.967s |
+| 0.2s 片段 | **判失败**：「片段过短…至少需要 0.3s」 |
+| 质检不传 expectedDuration | **判失败**（5.00s vs 6.00s）；传入后通过 |
+| 转场产物再做循环 | 5.5s → 5.0s，循环质检 wrapSsim=0.9974 |
+
+**端到端（真实流水线，Mock 模型，quick 档，3 段×2s）**：
+拼接产物 5.00s（期望 5.00s），`qcDetails.transition = {type:fade, fadeDuration:0.5,
+transitions:2, durationCheck.ok:true, decodeCheck.errors:0}`，任务 completed。
+
+**回归**：`verify-stages` 45/0、`verify-pipeline-fixes` 28/0、
+`verify-concat-audio` 17/0、`verify-stage-pipeline` 37/0、`verify-loop` 25/0。
+（`verify-all.js` 在本沙箱仍因 `execFile → spawn EPERM` 无法整体运行，逐脚本跑。）
+
+### 与并行任务的冲突处理（重要）
+
+本次改动期间工作区有另一条任务在改：`server.js`（提示词助手禁用词）、
+`public/index.html`、`public/bgm-editor.html`、`src/videoProcessor.js`、`src/library.js`、
+`src/processors/audioMixer.js`。为避免覆盖未提交改动：
+
+- **未碰**上述 6 个文件；`server.js` 的 `transition` 字段与页面开关**留到对方落盘后**
+  再加（目标位置：`POST /api/tasks` 解构 + `createTask` options；生成表单的“转场”下拉）。
+- 只改**干净文件**：`config.js`、`src/pipeline.js`、`src/qualityChecker.js`、
+  `src/taskDefaults.js`、`src/taskManager.js`，以及新增模块/脚本。
+- 因此当前功能只能用 `.env` 全局开关，**无法按任务/在页面上选择**——这是刻意的取舍，
+  不是遗漏。
+
+### 已知限制
+
+- 页面无开关、API 不收 `transition` 字段（待并行任务落盘后补）。
+- 开启后拼接从 `-c copy` 变为整片重编码（720p/30fps 长片会明显变慢），
+  且后续循环/转码各再编码一次；画质与耗时需在长片上实测后再定默认值。
+- 成片比 Σ片段短 (N−1)×F；前端时长展示若仍按 Σ片段估算，需同步改为按实际返回值。
+- 只有当片段本身具备可融合内容时观感才自然；同一素材重复使用、镜头语言突变
+  仍会显得不自然（那是选材问题，不是转场能解决的）。
+
+### 改动文件
+
+`src/processors/transitionMixer.js`（新）、`scripts/verify-transitions.js`（新）、
+`src/pipeline.js`、`src/qualityChecker.js`、`config.js`、`src/taskManager.js`、`src/taskDefaults.js`。
+
+---
+
+## 2026-10-20 · fengguang skill：把摄影级风光规则接进提示词优化
+
+**状态**：代码完成，验收脚本 44 项全过；**真实生成效果未验证**（本机所有 LLM / 视频 Key 为空）。
+
+**背景**：用户要求把「摄影级自然风光提示词」skill 用到项目里，落点是"写提示词那里增加优化规则"。
+
+**做法**
+
+- 新增 `src/promptSkill.js`：按主题决定是否追加规则段；规则文件缺失或开关关闭时静默降级，不影响原流程。
+- 新增 `data/skill-fengguang.rules.md`：蒸馏版规则（约 1.8KB，中文），可编辑，改完下次调用生效。
+- `src/promptOptimizer.js`：把 systemPrompt 组装抽成 `buildSystemPrompt(theme)`，在其中叠加 skill 层。
+  作用域 `landscape/mountain/desert/lake/ocean/waterfall/aurora/space`；`city` 与"无主题"不追加。
+  开关 `SKILL_PROMPT_ENABLED=false`。
+- 新增 `scripts/verify-skill-prompt.js`（44 项，不联网、不花生成费），注册进 `verify-all.js` 的 fast 组。
+
+**验收实测**
+
+- `buildSystemPrompt('landscape')` = **3189 字符**，含「摄影级风光叠加规则」段；
+- `buildSystemPrompt('city')` = **1164 字符**，不含该段；
+- `verify-skill-prompt` **44/44**、`verify-stages` **45/45**、`verify-stats` **42/42**；
+- `require('./src/pipeline')`、`require('./src/taskManager')` 正常，模块图未破坏。
+
+**已知问题 / 待办**
+
+- **输出语种冲突**：`structureRef` 里原有"全英文输出"，skill 段要求中文，system prompt 会同时出现两条。
+  现以 skill 段为准（其开头声明"冲突时以本段为准"）；若要整站统一中文，需改 `structureRef` 那一句。
+- `verify-all.js` 在本机沙箱内 `spawn EPERM`（Node 起子进程被拦），只能逐个直跑；环境问题，非本次引入。
+- 模板路径（`optimizeWithTemplate`）是确定性词池、不经 LLM，**不叠加 skill**；要让模板也吃到，需把词库回填进池（skill v0.3）。
+- 未验证真实生成：`KLING` / `SEEDANCE` / `DASHSCOPE` / `SILICONFLOW` / `AGNES` 的 Key 全为空。
+
+**相关产物**
+
+- 开源仓库：<https://github.com/182han/fengguang-skill>（公开，v0.1.2）
+- 本机 skill 安装位置：`~/.dsh/skills/fengguang/`
+
+### 改动文件
+
+`src/promptSkill.js`（新）、`data/skill-fengguang.rules.md`（新）、
+`scripts/verify-skill-prompt.js`（新）、`src/promptOptimizer.js`、`scripts/verify-all.js`。
+
+---
+
+## 2026-10-20 补记 · 片段间转场：页面开关与 API 字段已接通
+
+**状态**：三条入口接线完成；HTTP 端到端跑通；默认仍关闭（页面默认不勾选）。
+
+并行任务（fengguang / 登录墙等）落盘后，补齐了此前刻意留空的入口。
+全部为**定点 edit**，未覆盖他人未提交改动。
+
+### 接线位置
+
+| 位置 | 内容 |
+|---|---|
+| `server.js` `POST /api/tasks` | 解构 `transition`，并透传给 `taskManager.createTask` |
+| `server.js` `POST /api/assemble` | 读 `body.transition`，传给 `createLibraryTask` |
+| `src/taskManager.js` `createLibraryTask` | 继续透传给 `createTask` |
+| `public/index.html` | 生成参数区（执行档位下方）新增「片段间转场」开关 + 淡化时长 + 类型；新增 `collectTransitionConfig()`，随 `POST /api/tasks` 提交 |
+| `public/bgm-editor.html` | 顶部「生成母版」栏（分辨率旁）新增转场开关 + 时长；`generateMaster()` 提交 `transition` |
+
+### HTTP 端到端（3002 临时服务，`AUTH_ENABLED=false`，json 存储）
+
+- `POST /api/tasks`（Mock，3 段×1s，quick，`transition.enabled=true`）：
+  200，任务对象 `transition={enabled:true,duration:0.3,type:fade}` 已落库。
+  （该次 Mock 生成因沙箱 `spawnSync cmd.exe EPERM` 全部失败——环境问题，
+  与转场逻辑无关；故完整成片改走片段库路径验证。）
+- `POST /api/assemble`（2 段 ×7s 库片段，F=0.5，720p）：
+  任务 completed；拼接 **13.5s = 14 − 0.5**，`transition={type:fade,fadeDuration:0.5,transitions:1}`，
+  `durationCheck.ok=true`，解码 **0 错误**；随后循环 13.0s，`wrapSsim=0.9547`（通过）。
+- 页面可达性与控件存在性：临时服务下 `/` 与 `/bgm-editor.html` 均 200，
+  两个页面都能检出 `#transitionEnabled` / `#transitionDuration`，请求体均带 `transition`。
+
+### 验收
+
+- 新增 `scripts/verify-transition-ui.js`：**19 通过 / 0 失败**
+  （逐环断言：控件 → 收集函数 → 请求体 → 路由 → 任务 → 流水线 → 配置，
+  防「勾了没效果」这类静默失效复发）。
+- 回归：`verify-transitions` 36/0、`verify-frontend-static` 43/0、`verify-editor-dom` 通过、
+  `verify-stages` 45/0、`verify-pipeline-fixes` 28/0、`verify-stage-pipeline` 37/0（exit 0）。
+- `verify-pages.js` 在 3001（登录墙开启）下会因 401 失败——环境原因，非本次改动；
+  页面/接口可达性已由临时服务实测覆盖。
+
+### 怎么用
+
+- 页面：生成页勾「片段间转场」；剪辑页勾「转场」后生成母版。默认不勾选。
+- 全局：`app/.env` 设 `TRANSITION_ENABLED=true`（可选 `TRANSITION_DURATION` / `TRANSITION_TYPE`）。
+- **改了 `server.js`，必须重启服务**；只刷新页面只会让控件出现，旧进程仍会忽略该字段。
+
+### 已知小偏差
+
+- 剪辑页在生成母版前的时长估计仍按「Σ片段」计算（未扣转场重叠，也未扣既有的循环淡化），
+  实际母版比估计短 1.0s 左右（2 段 7s、F=0.5 + 循环 0.5）。成片生成后以实际视频时长为准。
+  该偏差在加转场之前就存在（仅循环那 0.5s），本次未扩大改动范围。
+
+---
+
+## 2026-10-20 · 提示词链路全中文（指令 + 9 主题词池）
+
+**状态**：代码完成，验收 54 项全过；真实生成未验证（无 LLM / 视频 Key）。
+
+**背景**：用户要求"都改成中文"。此前只有 `data/optimization_rules.txt` 是中文，
+而 `DEFAULT_RULES`、`structureRef` 与 9 个主题的模板词池都是英文，导致输出中英混杂。
+
+**关键坑（改了才知道）**
+
+`promptOptimizer.loadTemplates()` 是**磁盘文件优先**：只要 `data/templates.json` 存在，
+源码里的 `DEFAULT_TEMPLATES` 就不生效。**只改源码，已有安装一个字都不会变。**
+所以必须源码 + 磁盘文件双改，后者由迁移脚本完成。
+
+**做法**
+
+- 新增 `src/templates.zh.js`：9 个主题的中文词池（`keywords` / `styleEnhancers` / `negative` / 七个池）。
+  以「覆盖层」形式在 `DEFAULT_TEMPLATES` 定义之后合并，避免动那 400+ 行最易被并发编辑的区域。
+- `promptOptimizer.js`：`DEFAULT_RULES` 改为"用中文输出"；`structureRef` 改为"全中文输出"并把留白示例换成中文。
+- 新增 `scripts/migrate-templates-zh.js`：把 `data/templates.json` 刷成中文，自动备份、支持 `--dry-run`。
+  只覆盖内置 9 个 id，UI 自建模板原样保留。
+- `data/templates.json`：已迁移（英文原文仍在源码 `DEFAULT_TEMPLATES` 里，可回滚）。
+- `scripts/verify-skill-prompt.js`：新增第 7 组断言，锁死「词池无英文残留 + 输出含中文」，防回退。
+
+**验收实测**
+
+- `verify-skill-prompt` **54/54**、`verify-stages` **45/45**、`verify-stats` **42/42**、
+  `verify-frontend-static` **43/43**；
+- 模板路径实跑（desert，seed=2）：
+  `沙丘上的日落, 静态锁定机位, 日落前的极低侧光…, 画面停在脊线上，没有新元素进入` → **英文残留：无**；
+- 允许保留的英文只有单位 `mm` 与通用词 `logo`。
+
+**注意**
+
+- 本次同时把 skill 仓库的范例改为中文（fengguang v0.1.3），已推 GitHub。
+- `SKILL_PROMPT_ENABLED` 这个新环境变量**没有写进 `.env.example`**：该文件正被并行任务修改，
+  强行追加会污染他人的 diff。等对方落盘后再补，或写进部署文档。
+- `public/index.html` 里模板编辑器的 placeholder 仍是英文示例（`tree, green, nature…`），
+  属 UI 域且有并行改动，本次未动。
+
+### 改动文件
+
+`src/templates.zh.js`（新）、`scripts/migrate-templates-zh.js`（新）、
+`src/promptOptimizer.js`、`scripts/verify-skill-prompt.js`、`data/templates.json`。
+
+---
+
+## 2026-10-20 · 补充：AI 路径端到端验证 + SKILL_PROMPT_ENABLED 入 .env.example
+
+**状态**：**通过**（不花钱）。真实模型输出质量仍未验证（Key 为空）。
+
+**新增**
+
+- `scripts/verify-skill-ai-path.js`（17 项）：起一个本地 OpenAI 兼容 mock 服务，把
+  `optimizeWithAI` 指过去，断言**出站请求的 system message 确实带上了 fengguang 规则段**；
+  `city` / 无主题 / `SKILL_PROMPT_ENABLED=false` 三种情形均不追加；返回内容被采纳为 `optimized`。
+  → 这条补上了此前只有「结构断言」、没有「真的发出去」的缺口。
+- `scripts/verify-skill-prompt.js` 第 8 组：9 个主题 seed=0 的逐段结构校验
+  （运镜/光影/氛围/结尾齐全 + 质感四项全量 + 无英文残留 + 长度 ≤2400），54 → **90 项**。
+- `.env.example`：补 `SKILL_PROMPT_ENABLED=true` 及说明（含作用域与"只在 AI 路径生效"）。
+  此文件先前被并行任务占用，现已落盘干净，才补上。
+
+**验收（逐条直跑，总计 265 项全过）**
+
+`verify-skill-prompt` 90/90 · `verify-skill-ai-path` 17/17 · `verify-stages` 45/45 ·
+`verify-stats` 42/42 · `verify-frontend-static` 43/43 · `verify-pipeline-fixes` 28/28
+
+**仍未验证 / 注意**
+
+- `app/.env` 的 `OPENAI_API_KEY` 仍为空。且 `pipeline.js:922` 只认 `task.runtimeConfig.llmApiKey`
+  （来自页面提交的 `llmApiKey`），**填 `.env` 不会激活 AI 路径**，必须在页面模型配置区填并测试连接。
+- 仍未跑真实生成对比，无法给出「加 skill 前后」的成片差异evidence。
+
+### 改动文件
+
+`scripts/verify-skill-ai-path.js`（新）、`scripts/verify-skill-prompt.js`、
+`scripts/verify-all.js`、`.env.example`。
+
+---
+
+## 2026-10-20 · 提示词助手接入 skill + 「添加到提示词框」不覆盖
+
+**状态**：代码完成，静态验收 276 项全过；**真实浏览器点击与真实 LLM 输出未验证**。
+
+**用户反馈的两个问题（都是真问题）**
+
+1. 「提示词升级了，在哪能看到？是助手学了 skill 吗？」
+   → **当时并没有**。提示词助手（悬浮球）有**自己独立的 system prompt**（`server.js` 的
+   `ASSISTANT_SYSTEM_PROMPT`），此前接的 `promptOptimizer` 只影响**生成任务**，管不到助手；
+   而且那份 prompt 还写着"给英文提示词"。
+2. 「助手写完我点『使用』，不要覆盖我框里已经写的」
+   → 旧代码是 `promptInput.value = text`，**直接覆盖**。
+
+**顺带查出的第 3 个问题**
+
+「✨ 智能优化提示词」按钮**实际是空操作**：前端固定 `theme: null`，后端只走
+`optimizeWithTemplate`，而模板在无主题时原样返回 → 点了等于没点，却还显示"优化成功"。
+
+**改动**
+
+- `server.js`
+  - 助手 system prompt 运行时叠加 `promptSkill.getSkillRules()`（`SKILL_PROMPT_ENABLED=false` 可关）。
+    助手产出物只服务自然风光（9 条禁用项已排除城市/人物/动物），故整段追加、不按主题过滤。
+  - 助手口径由英文改中文：对话规则 6/7 与输出格式同步。
+  - `/api/optimize-prompt`：改为 async；接受 `llmApiKey/llmBaseUrl/llmModel`；
+    行尾【主题】标签自动解析（`parseThemeTag`）；有 Key 走 `optimizeWithAI`（叠加 skill），
+    无 Key 走模板；无主题又无 Key 时返回 `hint` 说明原因，不再假装成功。
+- `public/index.html`
+  - 新增 `appendToPromptInput()`：非空时换行追加；**逐行去重**（连点两次不会加两遍）。
+  - 助手 `usePrompt()` 同步改为追加 + 去重。
+  - 两处按钮文案 `使用此提示词 / 使用这段提示词` → **`添加到提示词框`**。
+  - 智能优化请求带上设置里的 LLM 配置。
+- `scripts/verify-skill-prompt.js` 第 9 组（11 项）：锁住"助手确实吃 skill""不再要求英文"
+  "两处都走追加""不再出现整段覆盖写法""请求带 LLM 配置"。
+
+**验收**：`skill-prompt` 101/101、`skill-ai-path` 17/17、`frontend-static` 43/43、
+`stages` 45/45、`stats` 42/42、`pipeline-fixes` 28/28（合计 **276**）。
+
+**注意（给下一个人的坑）**
+
+- 多行模式是「每行 = 一个片段」，所以"追加"= 新增一个片段。用户若只想改其中一行需手动删。
+- 助手与 AI 优化都需要 LLM Key，且 **Key 来自设置（localStorage `vs_config`）**，
+  不是 `.env`；`.env` 的 `OPENAI_API_KEY` 只影响服务端兜底与部分接口。
+
+### 改动文件
+
+`server.js`、`public/index.html`、`scripts/verify-skill-prompt.js`。
+
+---
+
+## 2026-10-21 · 「生成成功但质检失败」的片段怎么救（recheck 工具）
+
+**状态**：CLI 工具**通过**（真实 Postgres 实测）；服务端 API 路由**未验证**（需重启后才有）。
+
+### 现象与语义澄清
+
+用户反馈「历史任务里能看到生成的片段，为什么显示失败？片段库也没有？」
+
+两件事都是设计而非 bug：
+
+| 现象 | 原因 |
+|---|---|
+| 有文件却 `status=failed` | 时间线是「生成成功 → 写 mp4 → 跑质检 → 质检 fail → 片段 failed → 任务 failed」。`status` 表示**能不能用**，不表示**有没有文件** |
+| 片段库没有 | `src/library.js` `ingestClip()` 硬条件 `clip.status !== 'success' → return null`（另有 mock 不入库） |
+
+### 已修/已加
+
+- `scripts/recheck-task-clips.js`（新）：**只重跑质检，不重新生成视频**。走 `storage` 层，
+  json/postgres 都支持，**不需要重启服务**；通过则片段转 `success` 并入片段库，
+  随后「补跑」可复用这些片段拼成片。落盘前经 `redact.redactTask()` 脱敏。
+- `pipeline.recheckClips()` + `POST /api/tasks/:id/recheck-clips`：同一逻辑的服务端版本，
+  供将来 UI 按钮调用（**未验证**：需重启后路由才存在）。
+
+### 验证（真实 Postgres）
+
+- `--dry-run`：正确列出 2 段待重检，不写盘；
+- 失败分支（不可达地址）：正确写回 `clip.error`，任务里**不含 Key**；
+- 通过分支（本地 mock，**临时任务**上跑）：`status=success`、`error=null`、`qc.passed=true`、
+  片段库条目生成、任务里**不含 Key**；
+- 测试痕迹已清理（临时任务软删后又用 SQL 硬删；库条目已移除），真实任务恢复原状。
+
+### ⚠️ 事故记录（必须记住）
+
+清理测试库条目时调用 `library.remove()`，它**会连带删除源文件**，而测试条目指向的正是真实片段
+`clips/task_mvgw4hbo_ajuc_clip_1.mp4` → **文件被删**。
+已从开工前建的备份 `app/data/keep/2026-10-21-task_mvgw4hbo_ajuc/` 还原：
+字节数 17,147,139 与 SHA256 `4F1F3268…6B06F` 与最初一致，ffprobe 可正常解码（6.0s）。
+
+教训：**凡是要删片段库条目的测试，先把条目指向的文件复制出参照路径**，或用不存在的临时路径。
+
+### 给用户的用法
+
+```powershell
+cd app
+node scripts/recheck-task-clips.js <taskId> --key sk-xxx [--base URL] [--model qwen-vl-max]
+```
+
+写的是数据库，**旧服务内存里看不到**——跑完要重启服务，再点「补跑」。
+
+### 改动文件
+
+`scripts/recheck-task-clips.js`（新）、`src/pipeline.js`、`server.js`、`.gitignore`（忽略 `data/keep/`）。
+
+
+
+## 2026-10-21 · 片段恢复四修复（覆盖付费片段 / 静默降级 / 重启丢 Key / NSFW 404 误报）
+
+### 背景（真实事故链）
+
+`task_mvgw4hbo_ajuc`（dashscope，2 片段）在 00:21 生成后因 NSFW 配置问题失败；用户点「重新生成」，
+但 Key 已随服务重启丢失（`redact` 落盘清空），生成器静默降级 Mock；NSFW 又把 Mock 测试图案
+当真实内容检测，再次失败。期间第 2 次生成还覆盖了第 1 次已付费的片段文件。
+
+### 已修
+
+1. **片段文件不再覆盖**：`_processSingleClip` 下载改用 `pipeline._nextClipPath()`
+   （`task_x_clip_N.mp4` 已存在则 `_v2`、`_v3`…）；`regenerateClip` 记录 `clip.previousVideoPath`。
+2. **Mock 降级可识别**：`createGenerator` 降级时打 `fallbackToMock/requestedModel`；
+   `pipeline` 记 `task.mockFallback`，四处 QC 统一走 `_isSynthetic(task)`（NSFW 合法跳过）。
+3. **重启后重新生成/补跑带当前设置**：前端 `collectTaskRuntimeConfig(model)` 随
+   `regenerate` / `continue` 请求发送；后端 `_mergeRuntimeConfig()` 只合并白名单字段到内存态
+   （Key 仍不落盘）。
+4. **NSFW 错误不再串**：`_callNsfwMultimodal` 增加 per-call `errorOut`，`checkNSFW` 优先读本地错误槽；
+   并发检查片段时 404 不会再被别的调用清成「120s 内无有效响应」。
+
+### 验证
+
+- `scripts/verify-recovery-fixes.js`：24/0（覆盖保护、降级标记、配置合并、404/403 并发隔离、
+  路由与前端接线静态断言）。
+- 回归：pipeline-fixes 28/0、mock-vqc 14/0、continue/stage-pipeline 退出 0、
+  frontend-contract 49/0、library 33/0、loop 25/0、concat-audio 17/0、stages 45/0、
+  transitions 36/0、qc-annotation 32/0。
+- 已知环境问题：`verify-pages.js` 的「自动配乐草稿」因登录墙返回登录页而失败（非本次引入）。
+
+### 改动文件
+
+`src/pipeline.js`、`src/qualityChecker.js`、`src/generators/index.js`、`server.js`、
+`public/index.html`、`scripts/verify-recovery-fixes.js`（新）；提交 `b941fe1`。
+
+### 已知边界
+
+- `mockFallback` 目前只写进任务/日志，前端尚未展示「实际为 Mock」角标；质检结论里的
+  NSFW 合法跳过理由可见。
+- 第一次重试被覆盖的付费片段无法恢复（第二次同名覆盖）；第二次重试的 2 个片段已从磁盘救回并重建。
+
+---
+
+## 2026-10-21 · 片段库缺档：恢复/复用的片段不入库（含运行中服务的缓存问题）
+
+### 现象
+
+`task_mvgw4hbo_ajuc` 两个已付费片段在 00:24 救回：文件在 `clips/`、任务片段 status=success、
+成片也重新拼出来了，但片段库页面仍看不到它们。
+
+### 根因（三层，缺一不可）
+
+1. **入库路径缺口**：`library.ingestClip` 只挂在两条路径上——`_processSingleClip`（生成成功）、
+   `recheckClips`（重检转成功）。手工恢复的片段两条都不走；补跑复用的片段（`_batchGenerate` 的
+   reusable 分支）也不入库。片段库页面只读 `data/library/*.json`，不扫任务，所以库里一条都没有。
+2. **进程内缓存**：`src/library.js` 的 `loadAll()` 缓存整库，只在 `saveEntry`/`remove` 后强制重读。
+   运行中的服务看不到**外部进程**新写入的库条目——用户刷新页面也没用。
+   已改为**目录签名失效**（文件名 + 大小 + mtime 变化即重读）：外部补库/删库后，下一次
+   `get`/`listAll` 就能看到，不需要重启或人工触发。修复前的临时手段是「收藏开→关」触发重读。
+3. **存储位置**：任务实际在 Postgres（`.env` 里 `DATABASE_TYPE=postgres`），`data/tasks/*.json`
+   只是 `taskManager._saveTask()` 的本地备份；片段库仍是本机 `data/library/` 文件。排查时改 JSON 不影响页面。
+
+### 已修
+
+- `library.ingestMissing(task)`：把任务里已成功、库里缺档案的片段补入库（幂等，跳过已有档案，
+  不覆盖收藏/替代关系）。
+- `pipeline._runPipeline`（片段生成/复用之后）与 `pipeline.recheckClips`（开头）各调用一次。
+- `scripts/recheck-task-clips.js`：对已成功片段顺手补库（不需要 Key）；新增
+  `scripts/ingest-task-clips.js <taskId>` 专用补库工具（走 storage，json/postgres 都支持）。
+- `library.buildEntry`：无片段级质检记录的条目从「无质检记录」改标「质检未验证」——
+  旧逻辑在前端落到红色「质检记录异常」，没记录 ≠ 记录异常。
+- `library.loadAll()`：缓存增加**目录签名**（文件名/大小/mtime），外部补库后运行中的服务
+  无需重启即可看到（新增用例：外部写入、外部删除各一条）。
+- 本次数据修复：`node scripts/ingest-task-clips.js task_mvgw4hbo_ajuc` 补入 2 条
+  （720p / 6s / 1280×720@30 / 17.1 MB + 6.2 MB），库内 8→10 条。
+
+### 验证
+
+- `scripts/verify-recovery-fixes.js` 28/0（新增 `ingestMissing` 行为用例 + 两处接线静态断言）。
+- `scripts/verify-library.js` 36/0（新增 3 条热加载用例：外部写入可见、外部删除失效、预热不可见）。
+- 快速组逐脚本：stages 45/0、frontend-static 43/0、stats 42/0、pipeline-fixes 28/0、mock-vqc 14/0、
+  skill-prompt 101/0、skill-ai-path 17/0。
+  （`verify-all.js --fast` 因本机 sandbox 的 `spawn EPERM` 无法整体跑，改为逐脚本执行。）
+- `scripts/verify-continue.js` 19/0（真机补跑；期间 Supabase 连接池偶发超时，不影响断言）。
+- 现场 API：`GET /api/library`（真实登录）→ 10 条，含 `task_mvgw4hbo_ajuc_c1/c2`；
+  `HEAD /clips/task_mvgw4hbo_ajuc_clip_1.mp4` → 200 / 17,147,139 B；`clip_2` → 200 / 6,247,232 B。
+
+### 现场事故与补救（2026-10-21 12:22–12:30）
+
+- `verify-stats.js` 会起真实服务（3085），其启动自检把用户**正在运行**的
+  `task_mvhlusmo_hs2w` 标成 failed；随后本地清理误删了这条任务记录及 4 个 output 文件。
+- 已用 `data/tasks/task_mvhlusmo_hs2w.json` 恢复记录（如实标 failed + 说明成片被删），
+  并把只在本地 JSON 里完成、未落库的 `task_mvhlxnm7_1mch`（同 7 片段、成片仍在）同步回数据库，
+  避免服务重启后被当成僵尸任务回收。
+- 教训：用户服务可能正在运行（本次是端口 3001，跑在另一会话的进程里，本进程看不到），
+  验收脚本里的临时服务启动自检会误伤真实任务；跑真机脚本前先确认用户服务是否在跑。
+
+### 已知边界
+
+- 这两个片段只有终检结论（NSFW 2% / 1280×720 / 11.5s），片段级质检未复跑 → 库里显示「质检未验证」。
+- 片段库是本机文件；在另一台机器/云端实例上看库，需要在对应机器上执行同一个补库脚本。
+
+---
+
+## 2026-10-26 · 前端技术栈迁移决定（React + Vite + Tailwind）+ 图片生成配置预留
+
+**状态**：**仅决策与配置预留，代码未开工**。本节点只记录"为什么这么定"和"已经踩到的代价"。
+
+### 一、技术栈：方案 B（React + Vite + Tailwind CSS）
+
+**决定人**：用户（产品负责人），2026-10-26。
+
+**背景**：用户要把产品从"展示型网页"改造为"可实际使用的工具/软件"，工作流同时从
+「提示词 → 视频」升级为「提示词 → 分镜 → **图片（人工确认）** → 视频」。
+现有前端是 `public/index.html` 单文件（实测 **8061 行 / 288.2 KB / 136 个全局函数**），
+工具化所需的状态管理、组件复用、草稿持久化在单文件结构里难以承载。
+
+**曾评估的三个选项**：
+
+| 选项 | 内容 | 结论 |
+|---|---|---|
+| A | 零构建原生 + ES Module 拆文件 | 可保住 §2.2，但用不了用户给的全部参考库（ReactBits / Aceternity 均为 React 组件），动效需全手写 |
+| **B** | **React + Vite + Tailwind** | **已选**。组件生态与状态管理成熟，工具化改造代价最低 |
+| C | 混合（主工作台 React、子页原生） | 否决。两套渲染体系并存，设计 token 与交互要维护两份，组件不可复用 |
+
+**已实测到的迁移代价（不是猜测）**：
+
+1. `app/server.js:226` 现为 `express.static(path.join(__dirname,'public'))`，需改为下发构建产物
+   （或 dev 态走 Vite 代理）。`server.js:223` 的注释「本项目没有构建步骤」也随之失效。
+2. **5 个 Node 脚本 + 1 个浏览器页静态解析 `public/index.html`，迁移后断言会失效**：
+   `check-inline-js.js` / `verify-frontend-static.js`（43 项）/ `verify-recovery-fixes.js` /
+   `verify-transition-ui.js`（19 项）/ `verify-skill-prompt.js`（6 项），另有 `public/_selftest.html`
+   （浏览器端 `fetch('/index.html')` 后正则查 id）。**必须同步重写，不得删除 assert 了事。**
+   **更正（同日，由 frontend-dev 实测）：** 本条初稿把 `verify-frontend-contract.js`（49 项）错列为受害者
+   —— 它**不读** `index.html`，是起真实服务逐条打 API 的契约测试，迁移后**原样可用**；
+   同时初稿漏了 `verify-skill-prompt.js` 与 `_selftest.html`。
+   **门禁洞（新增）**：`verify-all.js` 实为 **16 个套件**（§2.6 写"14 个"已过期），
+   5 个静态脚本里**只有 2 个在门禁内**（frontend-static、skill-prompt），
+   `check-inline-js` / `verify-recovery-fixes` / `verify-transition-ui` 弄坏了 `npm run verify` 照样全绿。
+   详见 `docs/spec/frontend-migration-plan.md` §5。
+
+3. `package.json` 目前 4 个依赖、**无 build 脚本、无前端依赖**。新增依赖须按 §4.6 记录理由/体积/许可证。
+4. §2.1 的"端口四处一致"约束会多一层：Vite dev server 端口与 `node server.js` 端口的关系需明确写入契约。
+
+### 二、「先图后视频」配置预留（已落地，未接入厂商）
+
+**用户登记的计划**：准备两个 API —— ① 文生图 ② 图生视频。
+
+**已落地**（纯配置层，可回滚，不影响现有流水线）：
+
+- `app/config.js` 新增 `IMAGE_GEN_*`（provider / apiKey / baseUrl / model / size / timeoutMs）
+  与 `I2V_*`（provider / apiKey / baseUrl / model）。`I2V_*` 留空时**回退到 `IMAGE_GEN_*`**，
+  以覆盖"同一家 Key 同时能做文生图与图生视频"的常见情形。
+- `app/.env.example` 新增对应模板与两种组合方式的说明。
+- 新增 `app/src/generators/imageGen.js`：配置齐备度检查 `getImageGenStatus()`、
+  `resolveI2VConfig()`、能力三态声明 `IMAGE_INPUT_CAPABILITY`。
+  **`generateImage()` 被调用时抛明确错误**，绝不返回占位图冒充结果（§4.8）。
+- `src/generators/index.js` 的 `getAvailableModels()` 为 6 个模型新增 `supportsImageInput`，
+  默认 **`null = 未核实`**；`mock` 为 `false`。**`null` 不得被当成支持。**
+
+**为什么没有直接实现调用**：各厂商 image-to-video 的入参、图片格式、URL 时效均不同，
+未逐家核实前写代码必返工。且部分模型可能根本不支持图生视频，届时"人工确认的图"
+语义会退化成"参考图"，等于退回被否决的方案 B（旧编号）。**先做能力核查表，再写调用。**
+
+### 三、验证记录（三态）
+
+- **通过**：`config.js` / `src/generators/index.js` / `src/generators/imageGen.js` 均通过 `node --check`；
+  模块加载实测输出 `getImageGenStatus() = {ready:false, missing:['IMAGE_GEN_API_KEY','IMAGE_GEN_BASE_URL','IMAGE_GEN_MODEL']}`，
+  `getAvailableModels()` 输出 `mock:false siliconflow:null agnes:null seedance:null kling:null dashscope:null`，符合预期。
+- **未验证**：`node scripts/verify-all.js --fast` **无法运行**，报 `spawn EPERM`
+  （本机 sandbox 限制，§2.3 有记载）。因此"是否引入回归"这一项**不能算通过**。
+- **未开始**：任何 React / Vite / Tailwind 代码、任何图生视频调用、任何人工确认门。
+
+
+---
+
+## 2026-10-27 接缝质量：转场默认开启 + 新增 `seam` 质检项
+
+### 一、背景：用户说"衔接不够自然"，但系统里没有任何一项在测它
+
+用户原话："目前仍然还是衔接的不够自然""首要就是提升无缝衔接"。
+
+排查结论（读码 + 实测，报告见 `docs/spec/seam-quality-spec.md`）：
+现有 11 个质检项**没有任何一项读画面判断"拼接是否自然"**——
+`checkConcat` 只校验"产物时长 ≈ 各片段时长之和"（防 `-c copy` 静默截断），
+`checkLoop` 只测成片【首尾】的 SSIM。于是"片段之间那道缝"完全处于未被测量的状态。
+实测：`task_mvhrynuu_ehtn_concat.mp4` 6 道缝相邻帧 SSIM 0.42~0.54、
+像素级差异达同段自然运动的 10~51 倍，而全部质检项照样"通过"。
+
+### 二、病因判定：主要是"内容跳变"，不是色调/亮度
+
+对 4 条真实成片（15 道缝）逐缝量化（见 `app/scripts/analyze-seams.js`）：
+
+| 样本 | 缝数 | 转场设置 | 实测 |
+|---|---|---|---|
+| `task_mvhrynuu_ehtn_concat` | 6 | 关闭（硬切） | 全部硬切；minSSIM 0.42~0.54、ΔE76 1.5~48.2、\|ΔY\| 最高 90.7、MAD ×9.8~48 |
+| `task_mvglaff4_y3lw_concat` | 1 | 无字段（硬切） | 硬切；SSIM 0.536、ΔE76 36.6、MAD ×51 |
+| `task_mvglbfkw_w5vg_concat` | 2 | 无字段 | 1 道硬切（SSIM 0.537 / MAD ×52）；1 道**近同源**（SSIM 0.908、ΔE76 0.21） |
+| `task_mvhlxnm7_1mch_concat` | 6 | **开启 0.4s fade** | 6 道全部真淡化；minSSIM 0.83~0.95、**ΔE76 ≤ 0.42、\|ΔY\| ≤ 0.39** |
+
+**决定性证据**：已开转场那条的色差与亮度差已接近 0，用户仍说"不自然" →
+说明调色匹配/亮度归一化**不是瓶颈**；真正的病因是"两个不相干镜头被接在一起"，
+而淡化只是把它摊成"糊"（转场组 MAD 仍是自然运动的 1.8~7.0 倍，影片条里可见双重曝光鬼影）。
+另有正对照：`task_mvglbfkw_w5vg` 缝 #1 是硬切但两段画面几乎相同 → 观感上不刺眼。
+**结论：决定观感的是镜头之间是否语义连续，而不是接缝技术。**
+
+### 三、决定与依据（2026-10-27 用户拍板）
+
+**决定 1：片段间转场默认开启，但用户可以取消。**
+
+- 默认 `TRANSITION_ENABLED=true`、`TRANSITION_DURATION=0.4`；
+- 页面勾选框默认勾选，**取消后该任务传 `transition:{enabled:false}`**，
+  `pipeline._transitionOptions()` 优先取任务参数 → 回到 `-c copy` 直拼；
+- `quick` 档不受开关影响，一律 `-c copy`（`disabledByPreset:'quick'`）。
+
+为什么改默认（性能实测，不是估计）：
+
+| 方案（47s / 7 段 / 720p） | 实测耗时 | 吞吐 |
+|---|---|---|
+| `-c copy` 直拼 | **0.46 s** | 102 秒成片/秒墙钟 |
+| 整片重编码直拼（medium crf23） | **8.13 s** | 5.78× |
+| 生产转场（6 道 0.4s fade） | **11.36 s** | 4.14× |
+
+- **转场 / 重编码直拼 = 1.40×**；**重编码 / copy = 17.6×**。
+  30 分钟成片推算：copy 0.3 分钟 → 重编码 5.2 分钟 → **转场 7.3 分钟**。
+- 即："长片会明显变慢"的幅度是 **+2.1 分钟**，不是数量级恶化；
+  真正的成本跃升来自"放弃 `-c copy`"这一步，而不是转场本身。
+- 收益：接缝相邻帧 SSIM 由 0.42~0.54 升到 0.83~0.95。收益/代价明显划算。
+
+**决定 2：新增 `seam` 质检项（第 12 项）。**
+
+- `qualityChecker.checkSeam(videoPath, clipDurations, options)`：逐缝测
+  SSIM / ΔE76（CIELAB）/ ΔY / 像素级 MAD 倍数；
+- 接入点 `checkFinal`，三处调用共用 `pipeline._finalQcOptions()` → `_seamQcOptions()`
+  （缝位置用**拼接步骤的实际转场留痕**，不用当前配置，避免补跑历史产物时整体偏移）；
+- 三态语义严格按 §4.1：测不到 = `passed:false`；唯一合法跳过 = 仅 1 个片段（`legitimateSkip:true`）；
+  Mock/合成素材按 `_isSynthetic` 合法跳过；
+- 阈值 `.env` 可覆盖：`QC_SEAM_SSIM_MIN`(0.75) / `QC_SEAM_DE76_MAX`(25) /
+  `QC_SEAM_DY_MAX`(30) / `QC_SEAM_MAD_RATIO_MAX`(8) / `QC_SEAM_MAX_SEAMS`(8)。
+
+**决定 3：语义连续性（相邻镜头同场景延续）本期只出设计，不实现。**
+合并方案见 `docs/spec/review-gate-design.md`「静帧审核门 + 语义连续性」一节。
+
+### 四、改动清单（文件:行 级）
+
+| 文件 | 改动 |
+|---|---|
+| `config.js` | `TRANSITIONS.enabled` 默认 `true`、`duration` 默认 `0.4`；新增 `QC.seam*` 五项阈值 + `seamNum()` 校验器（非法值回退并告警） |
+| `.env.example` | 注释与示例值改为默认开启 / 0.4，并写明 `quick` 档仍直拼 |
+| `src/pipeline.js` | `_transitionOptions()` 增加 `quick` 档强制关闭（唯一转场判定入口，4 条拼接路径全覆盖）；新增 `_seamQcOptions()`，并入 `_finalQcOptions()` |
+| `src/qualityChecker.js` | `QC_ITEMS` 增加 `seam`；新增 `checkSeam()` + `_yuvAvgFromBase64()` / `_madFromBase64()` / `_deltaE76FromYuv()` / `_parseSignalStats()`；`checkFinal()` 增加 seam 子项；构造函数读入 seam 阈值 |
+| `scripts/verify-seam-qc.js`（新） | 48 项验收：静态断言、档位策略、**坏缝负向用例**、真转场正向用例、三态语义、阈值可配/抽样、真实成片只读、**转场开关 A/B 端到端** |
+| `scripts/verify-transition-ui.js` | 默认值断言由 `false` 改为 `true`（保留"能关掉"与 `quick` 直拼的回归断言，未删断言） |
+
+### 五、验证记录（三态，2026-10-27 实测）
+
+**通过（逐脚本单跑，均 exit 0）：**
+
+| 脚本 | 结果 | 说明 |
+|---|---|---|
+| `verify-seam-qc.js`（新） | **48 / 0** | 含坏缝负向用例；真实成片双向验证（硬切那条 fail、转场那条 pass） |
+| `verify-transitions.js` | 36 / 0 | 真 ffmpeg |
+| `verify-transition-ui.js` | 22 / 0 | 默认值断言已同步为 true |
+| `verify-pipeline-fixes.js` | 28 / 0 | |
+| `verify-stages.js` | 45 / 0 | |
+| `verify-stage-pipeline.js` | 37 / 0 | 真机 Mock 三条任务（`DATABASE_TYPE=json` 下 exit 0） |
+| `verify-continue.js` | 19 / 0 | |
+| `verify-qc-annotation.js` | 32 / 0 | 起临时服务 |
+| `verify-concat-audio.js` | 17 / 0 | |
+| `verify-mock-vqc.js` | 14 / 0 | |
+| `verify-nsfw.js` | exit 0 | |
+| `verify-frontend-static.js` | 43 / 0 | |
+| `verify-recovery-fixes.js` / `verify-skill-prompt.js` | exit 0 | |
+
+**不通过（1 项，且证明与本改动无关）：**
+
+- `verify-loop.js`：**24 通过 / 1 失败** —— "回绕相似度显著高于素材基线（证明淡化真的起作用）"
+  实测 `wrap=1 vs base=1`。原因：该脚本用 `color=c=red` 纯色源造素材
+  （`scripts/verify-loop.js:251`），纯色画面首尾帧 SSIM 恒为 1.0，
+  断言 `wrap > base + 0.15` **在数学上不可满足**。
+  `git diff` 已确认本改动**没有触碰** `checkLoop` / `makeSeamlessLoop` / `loopSsim` 任何逻辑
+  （仅新增一处注释提到 checkLoop）。属**既有测试用例缺陷**，未在本任务修复（一次提交只做一件事）。
+  建议后续把源素材换成有纹理/运动的内容，或改为与"直通基线"比对。
+
+**未验证 / 未跑：**
+
+- `verify-auth.js`（40 项）、`verify-frontend-contract.js`（49 项）：需起服务 + 登录墙，
+  本任务未触及这两块契约，**未跑**。
+- `verify-library.js` / `verify-stats.js` / `verify-skill-ai-path.js`：与本次改动无关，**未跑**。
+- `node scripts/verify-all.js`：**跑不了**（本机 `spawn EPERM`，§2.3 有记载）。
+  上面的结论全部来自逐脚本单跑。
+- 本机 `.env` 是 postgres 且不可达，`verify-stage-pipeline.js` 直跑会因
+  `timeout exceeded when trying to connect` 以 exit 1 结束（37 项仍全过）；
+  改用 `DATABASE_TYPE=json` 后 exit 0。这是环境问题，不是代码回归。
+- **前端勾选框的默认勾选状态未在真实浏览器验证**（本环境 `dsh_browser_*` 不可用，§6 已知缺口）。
+  后端契约（`transition:{enabled:false}` 可覆盖）已有端到端证据，但"页面默认勾着"这一条属 UI 侧，未验证。
+
+### 六、实测证据（可复述命令）
+
+```powershell
+cd "C:\Users\14872\Desktop\测试\app"
+
+# 1) 接缝量化诊断（只读 output/，报告写 data/reports/）
+node scripts/analyze-seams.js --video output/task_mvhlxnm7_1mch_concat.mp4
+node scripts/analyze-seams.js --video output/task_mvhrynuu_ehtn_concat.mp4
+
+# 2) 转场性能基准（产物写系统临时目录）
+node scripts/bench-seam-perf.js --task task_mvhrynuu_ehtn --fade 0.4
+
+# 3) 接缝质检验收（含转场开关 A/B 端到端）
+$env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
+```
+
+关键实测数值：
+
+- 硬切缝（真实成片）：`ssim=0.475, ΔE76=41.99, ΔY=-42.64, MAD ×29.9` → **不通过**
+- 真转场缝（真实成片，6 道）：`worstSsim=0.7605, worstDe76=8.03` → **通过**
+- 转场开关 A/B（2 段 × 3s，fade 0.4）：`transition:false` → 无转场留痕、时长 **6.02s**；
+  `transition:true` → 1 道 fade、时长 **5.60s**，`durationCheck {ok:true, actual:5.6, expected:5.6}`
+  （证明 `checkConcat` 的 `expectedDuration` 路径成立，不会把转场产物误判成"拼接被截断"）
+
+### 七、遗留与后续
+
+1. `verify-loop.js` 的纯色素材缺陷（见上，建议另开一次提交修）。
+2. 语义连续性（相邻镜头同场景延续）**未实现**，只出设计；需与"先图后视频"合并改造。
+3. 接缝检测耗时实测约 **2.3s/道缝**（6 道 ≈ 14s）。`QC_SEAM_MAX_SEAMS` 默认 8，
+   长片缝多时会抽样并在 `details.summary.sampled` 标注。
+   可优化空间：把 `signalstats×2 + blend-difference` 合成一次 ffmpeg 调用，约可省 30%。
+4. 历史任务（片段无 `duration` 字段）在终检里会得到 `seam` 不通过（"无法定位接缝"），
+   属 §4.1 的正确语义，但会让旧任务的终检结论变差；如需兼容需先回填片段时长。
+
+### 八、同日补充（2026-10-27 晚）：提交落地 + 两处假绿/覆盖面修正
+
+**提交（6 条，一条一事）**
+
+| # | commit | 内容 |
+|---|---|---|
+| 1 | `d36aa0a` chore(config) | IMAGE_GEN/I2V 配置预留 + imageGen 预留层 + supportsImageInput 三态；转场默认 true / 0.4（config.js 为共享文件，message 内逐条列明） |
+| 2 | `92675ed` feat(qc) | 新增 seam 接缝质检项 + verify-seam-qc.js |
+| 3 | `5efde9e` feat(pipeline) | 转场默认开启，quick 档强制直拼 + _seamQcOptions |
+| 4 | `4759be6` test(seam) | 转场默认值断言 + analyze-seams / bench-seam-perf |
+| 5 | `f729566` test(loop) | 修 verify-loop 假绿断言 + 隔离 SSIM 的负向用例 |
+| 6 | `303c839` fix(qc) | 抽样时 seam 结论显式说明「仅检测 N/M 道缝」 |
+
+**① verify-loop.js 的「永不可判」断言（task-8）**
+
+- 现象：`verify-loop.js` 24/1，失败项 `wrap=1 vs base=1`。
+- 根因：`pickSource()` 按「时长最长」挑素材，恰好挑到 **Mock 的 145s 静态纯色样片**
+  （`task_mvhmjcbv_512n_concat.mp4`，`scdet` 逐帧 mafd=0）。纯色画面首尾帧 SSIM 恒为 1.0，
+  断言 `wrap > base + 0.15` 在数学上**不可满足**。
+- 性质：这不只是"用例碰巧失败"，而是**该断言从来没真正验证过「循环是否自然」**——
+  属 AGENTS.md §4.1「skipped 冒充 passed」的同构问题：测不了的测试比没有测试更危险。
+- 修法：① `pickSource()` 排除 `model=mock` 产物，改用最长真实成片；
+  只剩 Mock 时用 `testsrc`（有运动/纹理）造合成素材兜底；
+  ② 新增护栏断言 `baseSsim < 0.999`（基线无区分度即判该用例失败，防止再次退回"永不可判"）；
+  ③ 新增负向用例 `[5b]`：把源素材裁到 (源时长−淡化) 且不做淡化，构造
+  **「时长核验通过、但回绕不自然」**的产物，证明 checkLoop 会因 wrap SSIM 判 fail（隔离了时长变量）。
+- 实测（`node scripts/verify-loop.js`）：**29 通过 / 0 失败 / exit 0**。
+  正向 `wrap=0.9115 vs base=0.5965`；负向 `[5b]` `durationCheck=ok` 但 `wrap=0.5957` → fail。
+  断言数 25 → 29（净增 4），**未删除或放宽任何既有断言**。
+
+**② seam 抽样覆盖面必须可见（task-7 反馈第 3 点）**
+
+- 问题：`checkSeam` 对缝数超过 `QC_SEAM_MAX_SEAMS`（默认 8）的成片做**均匀抽样**，
+  但只有「通过」分支在结论里提了一句抽样，不通过分支完全不提 → 用户会误以为全测了。
+- 修法：`summary` 增加 `unscanned` / `partialCoverage`；抽样时把
+  「本次仅检测 N/M 道缝（均匀抽样），未检测的 X 道不计入结论」写进 **pass / fail 两条 reason**；
+  未抽样时不得出现该措辞（验收有正反两条断言）。
+- 性质：仍是 §4.1 的同构要求——没测到的部分不能靠沉默变成"通过"。
+- 实测：`verify-seam-qc.js` **51 通过 / 0 失败**。
+
+**③ 仍未完成的**
+
+- `data/reports/` 的 `.gitignore` 条目由他人加入（未包含在我这 6 条提交里，工作区仍显示 ` M .gitignore`）。
+- 语义连续性（静帧审核门合并方案）**只出设计**，见 `review-gate-design.md` 附录。
+- 前端勾选框默认勾选状态仍未在真实浏览器验证（本环境 `dsh_browser_*` 不可用）。
+
+---
+
+## 2026-10-27 · 剪映「拼接 + 配乐」模块逆向（REA，只读取证）
+
+**目的**：用户希望复用剪映专业版 11.6.0.14552 的「剪视频拼接配乐」能力到本项目，
+但**不使用剪映提供的音乐素材**（改用 `app/assets/bgm/` 自有曲库）。
+
+**边界（重要）**：本次**没有**修改 `app/` 任何代码；产出全部在 `docs/spec/re-jianying/`。
+取证对象只读，未启动剪映 GUI、未联网。
+
+### 交付物
+
+| 文件 | 内容 |
+|---|---|
+| `re-jianying/jy-protocol.md` | 协议层：XMLDraft 轨道/时间算术/转场/音量/节拍/响度开关（538 行） |
+| `re-jianying/jy-native-audio.md` | 算法层：拍点/镜头检测/响度体系/配乐拼接契约（938 行） |
+| `re-jianying/jy-draft-cipher.md` | 加密层：草稿 `base64 + 带 nonce 对称加密`，未解出明文，附函数 RVA |
+| `re-jianying/jy-splice-music-spec.md` | **复刻规格**：规则表 + 与本项目逐条差异 + 落地顺序 |
+| `re-jianying/proto/ducking-check.mjs` | 可运行原型：侧链闪避，自带 ffmpeg、零依赖、不走管道 |
+
+### 关键结论（区分观测/推断）
+
+1. **[观测]** 「拼接」= 主轨 `<main>` 的**文档顺序**；主轨片段不写 `start`，只写
+   `duration` / `material_start` / `speed`，累积位置隐式决定。
+2. **[观测]** 转场是**边界属性**，只能挂有后继的左侧片段，末段禁止；推荐 **300–800 ms**；
+   协议无上限、无样式枚举（样式在平台资源 `ref` 里）；且**不参与主轨时间线累计**。
+3. **[观测]** BGM 必定在副轨 `<audio>`（`multi` 容器）；`volume` 是**线性幅度百分比**
+   （100=原幅，范围 0–1000）；「配乐轻于原声」原文区间 **30–60**，「突出音乐」**120–200**。
+4. **[观测]** 响度统一的目标值有硬数字：**-23 / -12 / -12 / -14 LUFS**
+   （默认 / 抖音 / TikTok / YouTube），度量 **ebur128**，合法区间 `[-70,0]`；响度过低**拒绝处理**。
+5. **[观测]** 配乐铺满长片的真实接口是 `splicing_info`：`loop_order`（可重复）+
+   `valid_crossfade_loops` + `cross_fading_frame_len`（**单位是帧**）+ `beat_times` + `output_duration_sec`。
+6. **[观测]** 剪映 PC 端**没有** ducking / EQ（`po` 18211 条中 `闪避|duck|避让|压低` 命中 0）；
+   底层库有 sidechain 压缩但无产品入口 → 本项目若要「人声出现压音乐」必须自研。
+
+### 可验证原型（实测数值）
+
+`proto/ducking-check.mjs`：`sidechaincompress=threshold=0.12:ratio=4:attack=20:release=250:makeup=1`
+在真实 BGM（`assets/bgm/calm/morning.mp3`）上实测：
+
+| 处理 | 人声段 | 静音段 |
+|---|---|---|
+| BGM 单独 | −21.3 dB | −21.1 dB |
+| 闪避后 | −30.0 dB | −21.1 dB |
+
+→ 人声段额外 **−8.7 dB**，静音段 0 dB 变化。参数扫描见规格 §6。
+另实测坑：`sidechaincompress` 输出比输入短（8.000s → 7.895s），必须 `apad` 补齐。
+
+### 与本项目现有实现的差异（只记录，未改）
+
+- `bgmPlan.js:146-155` 用 `atempo` 拉伸源区间 → 与剪映「禁止变速拉长」相悖。
+- `audioMixer.js:579` 整条混音一次 `loudnorm=I=-20` → 剪映是逐片段 `average_loudness` → 目标 LUFS。
+- 全仓 `duck|sidechain|agate` 0 命中 → 侧链闪避缺失。
+- `waveform.js:30` 解码 8 kHz，拍点分析若要做需单独 22.05 kHz。
+
+### 未解 / 不可复刻
+
+- 草稿明文（`jianying_draft_encrypt_v2`，密钥不落地）；转场样式观感；平台资源 ref 体系；
+  模型内拍点参数；默认交叉淡化/淡入淡出时长（服务端 AB 下发，本地无）。
+- 转场是否缩短成片总时长：协议只说「不参与累计」，导出行为**未取证**。
+
+---
+
+## 2026-10-27 · 决议：界面主题分层 / 成片响度目标 / 不实现 ducking
+
+承接上一节（剪映逆向）。三条都是**决策**，不是实现细节，后续不用再逐页争论。
+
+### 1. 界面主题分层（已写入 `docs/spec/ui-theme-rule.md`）
+
+> **深色 = 正在看画面的状态；浅色 = 操作状态。**
+
+- 深色：剪辑、影院/播放、全屏预览、登录页（全屏视频背景）。
+- 浅色：工作台、历史记录、片段库、配乐库存、成员管理、设置。
+- **不整体换深色**。理由：工作台是表单/长文本，深色压低可读性；剪辑时要判断画面色彩亮度，浅色边框会干扰观感。
+- 深色页统一用剪映 `video-edit` token；浅色页沿用现有 Notion 风变量；同页内不混用（深色页的弹窗/输入框也必须深色）。
+
+### 2. 成片响度目标：`-20` → **`-16 LUFS`**（待真机 A/B 确认）
+
+| 参考 | 值 |
+|---|---|
+| 剪映内置预设 | 默认 `-23` / YouTube `-14` / 抖音·TikTok `-12` |
+| 本项目现状 | `loudnorm I=-20:TP=-1.5:LRA=11` |
+| **建议目标** | **`I=-16` / `TP=-1.5 dBTP` / `LRA=11`** |
+
+理由：成片是 Android TV **屏保循环长播**——高于广播级 `-23`（电视端普遍偏轻），低于短视频 `-12/-14`（避免久播疲劳），与 Apple Podcasts 的 `-16` 同档。
+**状态：未落地**。改动点是 `audioMixer.buildMixArgs`（`loudness` 默认值）与 `bgmPlan.buildMixCommand` 的 `loudnorm` 参数；
+改完必须做真机 A/B（同一段 `-20` vs `-16`）并给 `volumedetect` 实测，不接受只听一次。
+
+### 3. 侧链闪避（ducking）：**明确不做**
+
+- 本项目生成的片段**默认没有原生音轨**，成片里不存在需要保护的人声；ducking 没有作用对象。
+- 剪映 PC 端本身也没有该功能（`po` 18211 条中 `闪避|duck|避让|压低` 命中 0），不存在“照抄剪映”的依据。
+- 原型保留在 `docs/spec/re-jianying/proto/ducking-check.mjs`（实测 `threshold=0.12:ratio=4` → 人声段额外 −8.7 dB），
+  若将来成片带原声再启用，**不要再另写一版**。
+- 结论：`bgmPlan.buildMixCommand` / `audioMixer.buildMixArgs` **不接入**，相关待办关闭。
+
+---
+
+## 2026-10-27 · React 迁移起步：`/app` 共存 + 零 npm 方案（实测）
+
+> 与前文「前端技术栈迁移决定（方案 B = React + Vite + Tailwind）」的关系：
+> **React + Tailwind 不变，Vite 放弃**。原因见下，是实测出来的硬约束，不是偏好变化。
+
+### 1. 硬约束：这台机器没有 npm
+
+| 项 | 实测结果 |
+|---|---|
+| `npm` / `npx` / `corepack` | **全部不存在**（`CommandNotFoundException` / 无匹配文件） |
+| node 来源 | DSH 内置精简运行时 `...\runtime\primary-runtime\dependencies\node\bin\node.exe`（v24.21.0） |
+| `registry.npmjs.org` | ✅ 通（node `fetch` 200，959ms，取到 `react@19.3.1`） |
+| `unpkg.com` | ✅ 通 |
+| `cdn.jsdelivr.net` | ❌ 不通 |
+| `github.com` Releases | ✅ 通（40MB 单文件 16s） |
+| PowerShell `Invoke-WebRequest` 直连外网 | ❌ 失败（TLS 中断），**只有 node `fetch` 可靠** |
+
+结论：**拿不到 npm，但拿得到 npm 上的产物。** Vite 是 npm 包，因此不可用。
+
+### 2. 采用的零 npm 方案（已落地并验证）
+
+| 原方案 | 现方案 | 体积 |
+|---|---|---|
+| React（npm 装） | **React 18.3.1 UMD** 预下载到 `app/web/vendor/` | 143 KB（3 文件，**入库**） |
+| JSX + Babel | **htm 3.1.1**（类 JSX 模板字符串，浏览器直接跑） | 含在上行 |
+| Vite 打包 + HMR | **浏览器原生 ES Module**（无需打包器） | — |
+| Tailwind（npm 装） | **Tailwind 独立 CLI 单文件程序** `app/tools/tailwind/tailwindcss.exe` | 40 MB（**不入库**） |
+
+**新增依赖登记（AGENTS §4.6）**
+
+- `react@18.3.1` / `react-dom@18.3.1` UMD：MIT，体积小，社区标准；无法自研。
+- `htm@3.1.1`：Apache-2.0，1.3 KB，在无 Babel 时提供 JSX 级可读性；自研模板引擎成本远高于收益。
+- Tailwind CLI 3.4.17：MIT，**单文件 40MB 二进制**，仅构建期使用，不参与运行时；已 `.gitignore`，
+  恢复命令写在 `.gitignore` 注释里（`github.com` Releases 直下）。
+- **没有新增任何 npm 依赖到 `package.json`**——`node_modules` 完全未变。
+
+### 3. 落地内容
+
+- `server.js`：新增 `/app` 静态挂载（`index:false, redirect:false`，防多余 301）+ SPA 兜底 `GET /^\/app(\/.*)?$/`。
+- **修既有安全缺陷**：旧判据 `isPage = p === '/' || p.endsWith('.html')` 让 `/app/create` 这类
+  SPA 路由（不带 `.html`）被当成静态资源**直接放行、绕过登录墙**。
+  现按 `SPA_ASSET` 前缀排除静态资源，其余 `/app/*` 一律算页面。19 条边界断言见
+  `scripts/_check-spa-auth.mjs`。
+- `app/web/`：`index.html`、`src/{app,router,store}.js`、`src/screens/workbench.js`、
+  `src/components/{taskDrawer,assistant,boundary}.js`、`styles/{src,app}.css`、`vendor/`、`assets/poster-2k.jpg`。
+- 冒烟：`scripts/_smoke-app-route.js`（14 条路由/静态资源全 200，含 SPA 深链）。
+
+### 4. 已踩到的两个真实缺陷（记录以免重犯）
+
+1. **列表接口字段是 `taskId`，不是 `id`**。写 `t.id` 得到 `undefined`，表现是「点击没反应」而非报错。
+2. **`prompts` 是对象数组** `[{text}]`，直接渲染 `${p}` 会让 React 抛
+   `Objects are not valid as a React child` → **整棵树卸载、白屏**。
+   现改为取 `p.text`，并加了 `Boundary` 错误边界：任何渲染错误只降级那一块并显示原文，不再整页白屏。
+
+### 5. 迁移期边界（重要）
+
+- **`public/**` 一行未改**，旧版仍在 `/` 提供服务；新版在 `/app`。
+- 因此 `check-inline-js` / `verify-frontend-static` / `verify-editor-dom` / `test-editor-logic` / `verify-pages`
+  **当前仍然可用**（它们解析的旧文件没变）。真正的破坏点是「把 `/` 切到新版」那一刻，
+  那个动作会单独提交并单独知会。
+- 新旧入口：旧版 `app/启动.bat` → `/`；新版 `打开新版前端.bat`（工作区根） → `/app`。
+
+### 6. 未验证
+
+- **`/app` 的视觉与交互只在人工浏览器里过过一遍**（Lead 无浏览器）。已人工确认：
+  登录墙拦截生效、任务列表可取、三屏切换、任务抽屉、提示词助手悬浮球。
+- Tailwind 的 `prefers-reduced-motion`、移动端断点未验证。
+
+---
+
+## 2026-10-27 · 决议：图片生成不做自动质检，改为人工确认
+
+> 用户原话：「照片的生成不需要质检环节 我人工来就行」
+
+### 决议
+
+| 环节 | 质检方式 | 说明 |
+|---|---|---|
+| **图片生成**（先图后视频的第一步） | **不做自动质检**，由人工看图确认 | 不新增图片类 QC 项；不把 `checkClip` 那套搬到图片上 |
+| **视频生成 / 拼接 / 成片** | 保留现有 12 项 QC（含 `seam`） | 不变 |
+
+### 由此产生的一个结构性变化（重要）
+
+审核环节的**性质变了**：
+
+- 旧设想：生成完**视频片段** → 抽 4 张静帧 + 3 道缝 → 人工判「接得自不自然」
+- 新事实：人工在**图片阶段**就确认了 → 不满意改提示词重做那张图 → 满意才花钱生成视频
+
+也就是说 **暂停点从「视频之后」前移到「图片之后、视频之前」**。
+这正是用户最初提这个流程的目的：*「如果不满意可以改提示词，等满意后再去生成视频，这样质量会高一点，重试几率小一点，还便宜一点。」*
+
+### 对实现的影响
+
+1. **`awaiting_review` 状态仍然需要**，但它挂在图片步骤之后，不是拼接之后。
+2. 前端「审核」屏 = **图片确认屏**（逐张看 / 单张重做 / 通过后继续），不是静帧判缝屏。
+3. **视频侧的 `seam` 质检不变**：它是成片后的自动体检，用于"这条成片能不能交付"，
+   与"这张图我喜不喜欢"是两件事，不要合并。
+4. 图片步骤尚未接入 pipeline（`src/generators/imageGen.js` 目前只有配置就绪层，
+   `generateImage()` 明确抛错、不返回假图）。因此图片确认屏**暂时无法端到端验证**。
+
+### 状态
+
+- 已定：图片不做自动质检 ✔
+- 未做：图片确认屏 UI、`awaiting_review` 状态、图片生成器接入
+- 阻塞：后两者都需要改 `src/pipeline.js`，该文件当前由另一个会话持有（见
+  `docs/spec/re-jianying/plan-color-continuity.md` §5 的并行协议），需错开合并窗口。
+
+---
+
+## 2026-10-27 · 镜头色彩连续性（colorContinuity）已落地（批次 1，`32b3d69` + `7a61c1a`）
+
+### 为什么加
+
+`checkSeam` 只在**接缝中心帧**测相似度；转场开启时那里是混合帧，于是「两个镜头本身色调差很多」测不出来。
+实测（`docs/spec/re-jianying/seam-experiment.md`）：pair3 接缝 ΔE76 仅 **0.29**（按现有阈值通过），
+但相邻镜头均值 ΔE76 高达 **25.49** —— 转场瞬间顺、前后镜头色调却不连贯。
+
+### 做了什么
+
+- `qualityChecker.checkColorContinuity(videoPath, clipDurations, options)`：
+  取「缝前 0.6s」与「缝后 0.6s」两帧（**刻意避开转场混合区**），算 Y/U/V 均值 ΔE76。
+- `QC_ITEMS` 新增 `colorContinuity`（`post`，名称「镜头色彩连续性」）；`QC_VERSION` **2 → 3**
+  （`qcVersion.js` 的 `TRUSTED_FROM=2`，旧任务 v2 仍标 verified，不误标）。
+- 接入 `checkFinal`；三处调用共用 `pipeline._finalQcOptions()` → `_colorContinuityQcOptions()`，只改一处全覆盖。
+- 配置：`QC_COLOR_DE76_WARN=15`、`QC_COLOR_DE76_MAX=40`（`.env.example` 已同步）；
+  另预留 `COLOR_MATCH_ENABLED=false` / `COLOR_MATCH_MAX_GAIN=0.15`（批次 2 用）。
+
+### 三档（用户 2026-10-27 拍板）
+
+| 镜头级 ΔE76 | 结论 |
+|---|---|
+| ≤ 15 | 通过 |
+| 15 – 40 | `level:'warn'`，**不拉低通过率**（冷暖对比可能是刻意创作） |
+| > 40 | 失败 |
+
+### §4.1 语义（关键）
+
+- 校色状态随结果记录：`colorMatchState` / `colorMatchReason`。
+- `disabled`（校色默认关）：照常测色差，结论里注明「本次未校色」，**不判失败**。
+- `skipped` / `failed`（要了没做成）：`skipped:true` + `legitimateSkip:false` →
+  进 `notRunItems` → **整体不通过**，`reason` 里直接可读「校色未执行」。
+- 未提供片段时长 → 判**未执行（fail）**，不静默放行。
+
+### 验收（实测）
+
+- `node scripts/verify-color-continuity.js` → **34 通过 / 0 失败**；
+  三档真命中：同色 ΔE76=0 pass、`eq=brightness=0.14:saturation=1.4` ΔE76=22.49 warn、
+  橙vs蓝 ΔE76=119.7 fail；负向覆盖 `skipped`/`failed`/缺参数三条路径。
+- 回归：`verify-seam-qc` **55/0**（原 51，新增 4 条静态检查）、`verify-pipeline-fixes` 28/0、
+  `verify-qc-annotation` 32/0、`verify-nsfw` 47/0、`verify-stage-pipeline` exit 0。
+- 修订：`verify-seam-qc.js` 的 `seamBlock` 原截到「// 单帧的平均 Y/U/V」，新方法插入其间被误算，
+  skipped 计数虚高（50/1）。已改为取最近分隔点，并给新方法补同等级检查（保留原断言强度）。
+
+### 与另一个会话的关系（更新）
+
+- `src/pipeline.js` 的占用**已解除**：批次 1 只新增了 `_colorContinuityQcOptions()` 与
+  `_finalQcOptions` 里一行字段，**未改任何既有分支**。对方现在可以改该文件，
+  只需保留这两个新增（删掉会让终检报「未执行」）。
+- 批次 2（`transitionMixer` 内自动校色，默认关）尚未开始，**只会在批次 2 碰 `transitionMixer.js`**。
+
+---
+
+## 2026-10-27 · 拼接自动校色（colorMatch）已落地（批次 2，`089c589` + `7856a3e`）
+
+### 做了什么
+
+- `transitionMixer.concatWithTransitions()` 新增可选校色，**默认关**（`COLOR_MATCH_ENABLED=false`）：
+  抽 5 帧 → 逐通道均值/方差 → 与**首段**对齐（Reinhard 式线性变换）→ `lutrgb` 注入现有滤镜链。
+- **不额外编码**：只在「转场开启」这条本来就要重编码的路径里做；转场关闭走 `-c copy` 时不校色。
+- 参考段固定首段（`reference:'first'`），不链式（防长片累积偏色）；单通道增益限幅 ±`COLOR_MATCH_MAX_GAIN`。
+- 返回 `colorMatch: { state: disabled|applied|failed, reason, reference, maxGain, luts }`；
+  三处拼接记录点写进 `steps.concatenation.qcDetails.colorMatch` 留痕。
+- `pipeline._colorContinuityQcOptions()` 改为**以留痕为准**：
+  - 有 `applied` → 终检 applied；
+  - 有 `failed` → 终检 failed（进 notRun → 整体不通过）；
+  - 请求了但无留痕 → `skipped`（未执行 ≠ 通过）；
+  - 没请求 → `disabled`（合法跳过）。
+- `taskManager.createTask()` 接住 `options.colorMatch`；「校色 + 转场关闭」属互斥组合，
+  写进 `stagePlan.notes` 而**不抛错**（createTask 外层无 try/catch，抛错会变成未处理拒绝）。
+
+### 实测（`scripts/verify-color-match.js`，24 项全过）
+
+| 项 | 结果 |
+|---|---|
+| 效果 | 镜头级 ΔE76 **103.28 → 0.53**（3 段蓝/橙/绿，不校色 vs 校色） |
+| 结构 | 开/关产物时长一致（8.2s） |
+| 限幅 | `maxGain=0.01` → 增益 1.01，`clamped:true`（用 testsrc2+gblur 造方差，纯色片 sd=0 触发不了） |
+| 成本 | 8s×2 长片段：1998ms → 2464ms，**1.23×**（只多采样，无额外整段编码） |
+| 接线 | 4 处 `concatWithTransitions` 均传 `colorMatch`（静态断言） |
+
+回归：`verify-transitions` 36/0、`verify-seam-qc` 55/0、`verify-color-continuity` 34/0、
+`verify-stage-pipeline` exit 0。
+
+### 遗留：`server.js` 还没接 `colorMatch`（归另一个会话）
+
+目前只有 `.env` 全局开关能开启；**任务级** `colorMatch:{enabled:true}` 传不进来
+（`server.js` 的 `req.body` 解构里没有这个字段，`createTask` 收不到）。
+需要两处小改（都属对方文件，等其合入）：
+
+```diff
+@@ server.js:1134  POST /api/tasks 的解构
+-  ... strictQcItems, preset, stages, transition } = req.body;
++  ... strictQcItems, preset, stages, transition, colorMatch } = req.body;
+
+@@ server.js:1214  传给 createTask 的 options（transition 那一行下面）
+     transition: (transition && typeof transition === 'object') ? transition : null,
++    // 拼接校色：{ enabled, maxGain }，默认不传 = 关（.env COLOR_MATCH_ENABLED 可全局开）
++    colorMatch: (colorMatch && typeof colorMatch === 'object') ? colorMatch : null,
+```
+
+未接之前行为是安全的：全局关 → 所有任务 `disabled`（合法跳过）；若用 `.env` 全局开 →
+所有任务都会校色，且终检如实报 `applied`。
+
+---
+
+## 2026-10-31 · 暂停能力：两处事故级状态机缺陷修复 + `verify-pause.js`（71 项）
+
+裁定依据 `docs/spec/pause-decision.md`；契约与验收口径已回写到
+`docs/spec/pause-capability-spec.md`（由「需求说明」改写为「已实现契约」）。
+
+### 修了什么（后端）
+
+1. **`paused` 重启后永久卡死（事故级）**
+   - `src/pipeline.js:1130`：`reconcileInterruptedTasks()` 的 `IN_PROGRESS` 白名单补入
+     `paused / regenerating / processing / optimizing`。这 4 个状态以前不在白名单，
+     重启后永远不会被回收（`pausedTasks` 是内存 Set，重启即空，点「继续」必然失败，
+     用户没有任何出口）。
+   - `src/pipeline.js:1153-1170`：`paused` 被回收为 `failed` + `interruptedFrom:'paused'`
+     + `failureCode:'pause_interrupted'` + `recoverable:true`，文案写明「暂停期间服务被重启，
+     可点补跑」；同时清掉可能残留的内存暂停标记。**不是标 completed。**
+2. **暂停超时静默丢弃（事故级）**
+   - `src/pipeline.js:1820`：新增 `_pauseMaxWaitMs()`，上限由 `PAUSE_MAX_WAIT_MS` 覆盖（默认 30 分钟）。
+   - `src/pipeline.js:1853-1875`：超时不再只 `return false`。现在：ERROR 日志
+     + 状态 `failed` + `failureCode:'pause_timeout'` + `pauseTimedOutAt` + `recoverable:true`。
+   - `src/pipeline.js:1349-1354`：`_runPipeline` 收到 `batchInfo.aborted` 立即返回，
+     **不再继续拼接/配乐**（旧行为会把 `paused` 覆盖成 `concatenating`，用户看到
+     「暂停后自己跑完了，还少了几段」）。
+   - `src/pipeline.js:1941-1950`：worker 改 `try/finally`，保证 `activeWorkers--` 一定执行。
+     旧写法在所有 worker 提前 `return` 时 Promise 永不 resolve，流水线会永久挂住。
+     同时汇总 `aborted` 供上层判断。
+   - `src/pipeline.js:1924`：worker 每轮先按任务状态再拦一次（`failed/cancelled` → 退出），
+     防止超时后其它 worker 以为「已恢复」继续生成。
+3. **顺带修（同类缺陷，单独列出，不混在暂停名下）**：`regenerating / processing / optimizing`
+   也纳入重启回收（同一条白名单）。
+4. **HTTP 状态码**（`server.js:1582-1593`）：`POST /pause`、`/unpause` 对「任务不存在」
+   返回 **404**，其余不可操作返回 **400**。原实现对两者都返回 400。
+5. **前端可区分失败类型**：任务对象新增/使用 `failureCode` / `recoverable`，
+   并在**列表接口**透出（`server.js:1290-1291`）；详情接口原本就透出
+   `error` / `pauseTimedOutAt` / `interruptedFrom`。
+
+`failureCode` 三态（前端契约）：
+
+| 值 | 含义 | 界面建议 |
+|---|---|---|
+| `pause_timeout` | 暂停等待超过上限被中止 | 不是生成失败；显示「已中止 · 可补跑」 |
+| `pause_interrupted` | 暂停期间服务重启 | 同上 |
+| 缺失 / `null` | 普通失败 | 走原有失败样式 |
+
+### 验收
+
+- 新增 `app/scripts/verify-pause.js`，**71 通过 / 0 失败**；已注册进 `scripts/verify-all.js`
+  （`pause` 套件，`group='real'`）。
+- 覆盖：粒度 A（暂停后只跑完在跑的片段；恢复后不重复生成）、幂等、超时
+  （不前进 / `failureCode` / `aborted`）、`_runPipeline` 不进入拼接与配乐、
+  重启回收（含负向：completed 不回收、普通失败不被套 `pause_*`）、HTTP 404/400/200、
+  列表透出 `failureCode`/`recoverable`、源码级防回归断言。
+- **环境事实（重要）**：本机 DSH 沙箱下「捕获子进程输出」会 `EPERM`
+  （`execFile` / `stdio:'pipe'` 均失败；`stdio:'ignore'` / `'inherit'` 正常），
+  因此 `node scripts/verify-all.js` **无法在前台运行**——它用 `execFile` 默认 pipe
+  去起每个套件。本次按 `pause-decision §6` 改为**后台 job 逐套件跑**；
+  `verify-pause.js` 起临时服务时用 `stdio:'ignore'`。
+- 回归（后台 job，逐个套件）：`pipeline-fixes 28/0`、`frontend-static 43/0`、
+  `mock-vqc 14/0`、`stages 45/0`（前次）、`stage-pipeline exit 0`、`continue exit 0`。
+
+### 已知失败（非本次引入，未修）
+
+- `scripts/verify-loop.js:211` 断言 `qcVersion === 2`，而 `src/qualityChecker.js:42`
+  已是 `QC_VERSION = 3`（colorContinuity 引入，见本文件「镜头色彩连续性」一节
+  `QC_VERSION 2 → 3`）。属既有过期断言；按 `pause-decision §6`（不扩范围）未改。
+  实测：`verify-loop.js` 28 通过 / 1 失败，失败项仅此一条。
+- 运行时库连接偶发 `timeout exceeded when trying to connect`（Supabase pooler）：
+  不影响验收结论（脚本自动清理），但属于环境侧不稳定，单独记录。
+
+### 数据改动（`app/data/tasks/`）
+
+- 已备份：`app/data/trash/tasks-backup-20261031-1950/`（18 个 JSON）。
+- **本次修复真实回收了 1 个历史卡死任务**：`task_mvevgt8w_k5y1`
+  （`paused` → `failed` + `failureCode=pause_interrupted` + 可补跑）。
+  这是「重启后 paused 永久卡死」缺陷的第一个真实受害者证据。
+- 按 `pause-decision §7.1` 记录此前启动回收改过的 2 个：
+  `task_mvqk0e5e_i2s7`、`task_mvqk1dkj_9d9x`（`pending` → `failed`，均为 1 段 mock 任务、无成片）。
+- 本次验收创建的测试任务全部经 `scripts/_test-cleanup.js` 清理；`data/tasks` 维持 18 条。
+
+### 交接给 review-gate
+
+`reconcileInterruptedTasks()` 的白名单与 `paused` 分支已由本项改完
+（`src/pipeline.js:1122-1175`）。review-gate 若新增 `awaiting_review`，请**在上次改动基础上增量改**，
+不要整段覆盖；且 `awaiting_review` 必须**不**进入回收清单（重启后原地保留）。
+
+### 已知限制（已写进文档，未实现）
+
+拼接/循环/转码/配乐阶段没有暂停检查点：这些阶段按暂停只改状态字符串，
+不会真的停住 ffmpeg（`pause-decision §4.3`）。
+
+### AGENTS.md 与仓库现状不符（执行方只列出，不修改 AGENTS.md）
+
+1. 前端已存在 `app/web/`（React + htm + vendor，零 npm），`/app` 与旧 `public/index.html` 并存；
+   AGENTS.md 仍写「无 React / 无构建 / 单文件为主」。
+2. `scripts/` 下已有 **34 个** `verify-*.js`，但 `verify-all.js` 只注册 **17 个**
+   （本次新增 pause 后）；AGENTS.md 写「14 个 / 16 个」均过期。
+3. AGENTS.md 写「`dsh_browser_*` 不可用」；当前会话浏览器工具可用。
+4. AGENTS.md 写 `public/index.html` 约 249 KB；实测 295,955 B。
+5. 新增了 `colorMatch`（拼接自动校色）、`colorContinuity` 质检项、`QC_VERSION=3` 等，
+   AGENTS.md 的质检项清单（11 项）与验收脚本清单均未覆盖。

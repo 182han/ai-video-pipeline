@@ -1,0 +1,80 @@
+
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>大模型对比 · 5 组提示词入口（含万相 3.0 已有画面）</title>
+<style>
+body{margin:0;padding:24px;font-family:"Microsoft YaHei","PingFang SC",sans-serif;color:#26251e;background:#faf9f7}
+h1{font-size:26px;margin:0 0 6px}h1 small{font-size:14px;color:#8a877c;font-weight:400;margin-left:12px}
+p.sum{color:#5f5d55;font-size:14px;margin:0 0 18px;line-height:1.7}
+.hint{background:#fff;border:1px solid #e6e3dc;border-radius:8px;padding:12px 16px;font-size:13px;color:#5f5d55;margin-bottom:20px;line-height:1.8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:1500px}
+.card{background:#fff;border:1px solid #e6e3dc;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.card img{width:100%;aspect-ratio:16/9;object-fit:cover;background:#ddd;display:block}
+.body{padding:14px 16px 16px;flex:1;display:flex;flex-direction:column;gap:10px}
+.tagrow{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:#8a877c}
+.tag{background:#f2f0eb;border-radius:999px;padding:2px 10px}
+.dir{font-size:15px;font-weight:700}
+.meta{font-size:12px;color:#8a877c;line-height:1.6}
+.prompt{white-space:pre-wrap;background:#f6f4ef;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.7;user-select:all;max-height:240px;overflow:auto;border:1px solid #eeeae2}
+.btn{display:inline-block;background:#2456d6;color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none}
+.btn.ghost{background:#f2f0eb;color:#26251e} .btn:active{transform:translateY(1px)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<h1>大模型对比 · 5 组提示词入口<small>左侧为本项目已有画面（万相 3.0 真实生成）</small></h1>
+<p class="sum">同一个提示词、同一个分辨率（720P / 16:9 / 6 秒左右），把这 5 段分别喂给你想测的平台，生成后把视频发我。每段提示词都是自包含的，直接整段复制即可。</p>
+<div class="hint">
+<b>三个注意点（决定对比公不公平）：</b><br>
+1. 所有平台统一选 <b>720P / 1280×720</b>、<b>16:9</b>、<b>6 秒左右</b>。<br>
+2. 关掉平台的<b>提示词自动改写 / prompt 增强</b>。提示词里已经写全了运镜、光影、质感，被改写就变成“另一个提示词”。<br>
+3. 尽量关掉<b>模型自带声音</b>，声音由项目配乐负责。
+</div>
+<div class="grid" id="grid"></div>
+<script>
+const data = [
+ {t:"A · 蓝调湖面",dir:"测：主体清晰度、三层纵深、雾与倒影",meta:"万相 3.0 · task_mv4v7qp2_m8r0_clip_1 · 1280×720 · 30fps · 7s",
+  img:"../docs/model-selection/assets/wan30_wideshot_web.png",big:"../docs/model-selection/assets/wan30_wideshot_web.png",
+  prompt:"A high-altitude serene lake at blue hour, thin mist drifting across the still water surface, distant mountain silhouettes against deep blue sky. Static locked-off tripod time-lapse, extremely slow push-in, minimal movement. Soft blue hour light, mist catching faint ambient glow, gentle reflection shifts on calm water. Cinematic documentary grade, high dynamic range, fine natural grain, rich texture detail, National Geographic still photography quality. Quiet, vast, meditative calm. No people, no animals, no text, no subtitles, no watermarks, no logos, no UI. No camera shake, no fast zoom, no hard cuts. Just the lake holding still."},
+ {t:"B · 星空银河",dir:"测：星点密度、噪点控制、星云纹理",meta:"万相 3.0 · task_mv4v7qp2_m8r0_clip_2 · 1280×720 · 30fps · 7s",
+  img:"../docs/model-selection/assets/wan30_clip2_web.png",big:"../docs/model-selection/assets/wan30_clip2_web.png",
+  prompt:"Deep space astrophotography, the Milky Way stretches across the entire frame, vast and majestic. Colored nebulae — deep reds, teals, and soft violets — drift and flow with extreme slowness, their gaseous textures unfolding over time. Stars twinkle gently, pinpricks of light pulsing with soft halos against the infinite black. Interstellar dust lanes carve dark silhouettes through luminous clouds of gas. Static locked-off tripod shot, zero camera movement, pure time-lapse of the cosmos. Simulated long-exposure, astrophotography-grade detail, faint interstellar emission in natural astronomical colors. Cinematic IMAX space documentary quality, high dynamic range, rich nebular dust textures, low-noise deep-sky detail, natural color grading, fine grain. Silent, vast, and quietly awe-inspiring. No people, no text, no subtitles, no watermarks, no logos, no UI — just the universe breathing in stillness."},
+ {t:"C · 清晨森林雾",dir:"测：体积光、树木纹理、纵深",meta:"万相 3.0 · task_mv4v7qp2_m8r0_clip_3 · 1280×720 · 30fps · 7s",
+  img:"../docs/model-selection/assets/wan30_mist_web.png",big:"../docs/model-selection/assets/wan30_mist_web.png",
+  prompt:"Deep, secluded valley. Dense morning forest. Milky white morning mist drifting slowly through the trees. Soft diffused dawn light. Gentle volumetric god rays filtering through the canopy. Rich bark texture and detailed foliage. Fresh, true-to-life color grading. Tranquil, healing atmosphere. Static locked-off tripod time-lapse shot. Mist and light shifting imperceptibly slowly. Extremely subtle push-in, zoom 0 to 0.05, nearly imperceptible. Stable frame throughout. Cinematic documentary quality, high dynamic range, fine natural film grain. No people, no text, no watermark, no logo, no UI. No panning, no fast zoom, no shake, no hard cuts."},
+ {t:"D · 黄昏草原丁达尔",dir:"测：暖调光感、风动草浪、云影移动",meta:"万相 3.0 · task_mvgw4hbo_ajuc_clip_1 · 1280×720 · 30fps · 6s",
+  img:"../docs/model-selection/assets/wan30_mountain_clouds.png",big:"../docs/model-selection/assets/wan30_mountain_clouds.png",
+  prompt:"黄昏时分连绵起伏的草原山丘全景，高高的草丛在风中轻轻摇曳，大片云影缓缓飘过山坡，远处薄雾淡淡浮动，云层与光线逐渐变化。极缓慢平稳的镜头向前漂移，移动幅度极小，全程画面稳定，柔和淡入淡出过渡。温暖的低角度金色阳光扫过地面，自然光照，柔和胶片颗粒，高动态范围，丰富纹理细节，色调写实克制自然，写实纪录片风格，国家地理级电影质感，延时摄影，氛围宁静平和。"},
+ {t:"E · 冰原冰川（对照）",dir:"测：冷调、高光控制、冰面纹理",meta:"万相 3.0 · task_mv4v7qp2_m8r0_clip_4 · 1280×720 · 30fps · 7s",
+  img:"../docs/model-selection/assets/wan30_glacier_web.png",big:"../docs/model-selection/assets/wan30_glacier_web.png",
+  prompt:"辽阔极地冰原，巨大冰川矗立，淡蓝冰壁布满天然冰裂纹理，轻薄云雾缓慢从冰峰间飘过，冰面细腻自然纹理。静态固定机位延时摄影，镜头极缓慢平滑向前推进，移动幅度极小。冷调柔和天光，色彩写实克制，保留大地自然色调，拒绝过度艳丽饱和失真。写实摄影，高动态范围，丰富纹理细节，电影级纪录片质感，国家地理风格，高光受控天空不过曝。空旷圣洁，静谧宏大。"}
+];
+const grid = document.getElementById('grid');
+data.forEach(d => {
+  const c = document.createElement('div');
+  c.className = 'card';
+  c.innerHTML = `<img src="${d.img}" alt="${d.t} 已有画面" width="1280" height="720" loading="lazy">
+    <div class="body">
+      <div class="tagrow"><span class="tag">${d.t}</span></div>
+      <div class="dir">${d.dir}</div>
+      <div class="meta">${d.meta}</div>
+      <div class="prompt">${d.prompt}</div>
+      <div class="row">
+        <button class="btn" data-copy="${d.t}">复制提示词</button>
+        <a class="btn ghost" href="${d.big}" target="_blank" rel="noopener">看大图</a>
+      </div>
+    </div>`;
+  grid.appendChild(c);
+});
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]'); if (!b) return;
+  const t = b.dataset.copy;
+  const src = data.find(x => x.t === t).prompt;
+  try { await navigator.clipboard.writeText(src); b.textContent = '已复制 ✓'; }
+  catch (err) {
+    const r = document.createRange();
+    r.selectNodeContents(b.closest('.body').querySelector('.prompt'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    try { document.execCommand('copy'); b.textContent = '已复制 ✓'; } catch (e2) { b.textContent = '请手动选中复制'; }
+  }
+  setTimeout(() => { b.textContent = '复制提示词'; }, 1600);
+});
+</script>
+</body></html>

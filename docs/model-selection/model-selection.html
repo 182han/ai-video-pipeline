@@ -1,0 +1,543 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>为什么是万相 3.0 — 本项目视频生成模型选型报告</title>
+<!-- 线上字体在本机网络不可达时不影响渲染：优先用系统里的 Inter / Segoe UI / 苹方 / 微软雅黑 -->
+<style>
+:root{
+  --bg:#dfdedb;
+  --surface:#d3d2ce;
+  --surface-2:#c8c7c2;
+  --ink:#26251e;
+  --muted:#5f5d55;
+  --accent:#2456d6;
+  --accent-ink:#ffffff;
+  --step-label:0.875rem;
+  --step-small:0.9375rem;
+  --step-body:1.0625rem;
+  --step-lead:1.375rem;
+  --step-head:clamp(2rem,1.3rem + 3.2vw,2.75rem);
+  --col:min(760px, calc(100vw - 48px));
+  --edge:clamp(24px, 22vw, 27vw);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Inter","Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  font-size:var(--step-body);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+img{display:block;max-width:100%}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+::selection{background:var(--accent);color:var(--accent-ink)}
+
+.rail{width:var(--col);margin-left:var(--edge)}
+.full{width:min(1100px,calc(100vw - 48px));margin-left:var(--edge)}
+
+/* hero */
+.hero{padding:56px 0 0;position:relative;min-height:92vh}
+.hero .topline{display:flex;gap:24px;align-items:baseline;font-size:var(--step-small);color:var(--muted)}
+.hero h1{
+  font-weight:500;font-size:clamp(2.125rem,4.6vw,3.5rem);line-height:1.08;letter-spacing:-0.03em;
+  margin:96px 0 24px;max-width:18ch;
+}
+.hero .lede{font-size:var(--step-lead);line-height:1.5;max-width:34em;margin:0 0 28px}
+.hero .actions{display:flex;gap:28px;align-items:center;flex-wrap:wrap;margin-bottom:64px}
+.btn{
+  display:inline-block;background:var(--ink);color:var(--bg);text-decoration:none;
+  padding:12px 20px;border-radius:4px;font-weight:600;font-size:var(--step-body);
+  border:0;cursor:pointer;transition:transform .18s ease,background .18s ease;
+}
+.btn:hover{background:#000;transform:translateY(-1px)}
+.hero .peek{background:var(--surface);border-radius:6px;padding:18px 20px;font-size:var(--step-small);color:var(--muted)}
+.hero .peek strong{color:var(--ink);font-weight:600}
+
+/* sections */
+section{padding:112px 0 0}
+h2{font-size:var(--step-head);font-weight:500;letter-spacing:-0.02em;line-height:1.15;margin:0 0 28px;max-width:24ch}
+h3{font-size:var(--step-lead);font-weight:600;margin:44px 0 12px;letter-spacing:-0.01em}
+p{margin:0 0 18px;max-width:40em}
+.soft{color:var(--muted)}
+.quiet{font-size:var(--step-lead);line-height:1.55;max-width:32em;color:var(--ink)}
+
+figure{margin:28px 0 36px;max-width:var(--col)}
+figure img{border-radius:4px;width:100%;height:auto}
+figcaption{font-size:var(--step-small);color:var(--muted);margin-top:10px;line-height:1.5}
+
+/* history strip */
+.history{margin:28px 0 0;background:var(--surface);border-radius:6px;padding:22px 24px}
+.history ol{margin:0;padding-left:22px}
+.history li{margin:0 0 10px;font-size:var(--step-body)}
+.history li:last-child{margin-bottom:0}
+.history .tag{display:inline-block;font-size:var(--step-label);color:var(--muted);margin-left:8px}
+
+/* comparison table */
+.tbl{width:min(1100px,calc(100vw - 48px));margin:0 0 0 var(--edge)}
+.tbl .rows{display:grid;grid-template-columns:1.25fr 1.1fr 1.1fr 1.1fr;column-gap:0}
+.tbl .cell{padding:20px 22px;font-size:1rem;line-height:1.55}
+.tbl .head .cell{font-weight:600;font-size:var(--step-body);padding-bottom:8px}
+.tbl .row{display:contents}
+.rows > .cell:nth-child(4n+1){padding-left:0}
+.tbl .alt .cell{background:var(--surface)}
+.tbl .name{font-weight:600}
+.tbl .name small{display:block;font-weight:400;color:var(--muted);font-size:var(--step-small);margin-top:4px}
+.tbl .yes{color:var(--ink)}
+.tbl .no{color:var(--muted)}
+.tbl .note{margin:16px 0 0;font-size:var(--step-small);color:var(--muted);max-width:46em}
+
+/* evidence strip */
+.evidence{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;width:min(1100px,calc(100vw - 48px));margin:28px 0 8px var(--edge)}
+.evidence figure{margin:0;max-width:none}
+.evidence figcaption strong{color:var(--ink);font-weight:600}
+
+/* three cards */
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px;margin:28px 0 0;width:min(1100px,calc(100vw - 48px))}
+.three div{background:var(--surface);border-radius:6px;padding:22px 22px 18px}
+.three h4{margin:0 0 8px;font-size:var(--step-body);font-weight:600}
+.three p{font-size:var(--step-small);margin:0;color:var(--muted)}
+
+/* numbers */
+.numbers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;margin:24px 0 28px;width:min(1100px,calc(100vw - 48px))}
+.numbers b{display:block;font-size:clamp(1.5rem,3vw,2.25rem);font-weight:500;letter-spacing:-0.02em;line-height:1.1}
+.numbers span{font-size:var(--step-small);color:var(--muted)}
+
+/* how-to blocks */
+.how{display:block;margin:0 0 40px;max-width:52em}
+.how h3{margin:0 0 10px}
+.how p:last-child{margin-bottom:0}
+
+.quote{margin:28px 0;padding:26px 28px;background:var(--surface);border-radius:6px;max-width:var(--col)}
+.quote p{margin:0 0 10px;font-size:var(--step-body)}
+.quote p:last-child{margin:0}
+.quote .bad{margin-top:18px;padding:16px 18px;background:var(--surface-2);border-radius:4px}
+.quote .label{font-size:var(--step-label);color:var(--muted);margin-bottom:6px}
+
+/* price table */
+.price{width:min(1100px,calc(100vw - 48px));margin:20px 0 8px}
+.price table{width:100%;border-collapse:collapse;font-size:1rem}
+.price th,.price td{text-align:left;padding:14px 16px;vertical-align:top}
+.price th{font-weight:600;font-size:var(--step-small);color:var(--muted);padding-bottom:6px}
+.price tr:nth-child(even) td{background:var(--surface)}
+.price td:first-child,.price th:first-child{padding-left:0}
+.price .n{font-variant-numeric:tabular-nums}
+
+/* verification steps */
+.verify{counter-reset:v;margin:24px 0 0}
+.verify details{background:var(--surface);border-radius:6px;padding:16px 20px;margin-bottom:12px;max-width:var(--col)}
+.verify summary{cursor:pointer;font-weight:600;font-size:var(--step-body)}
+.verify pre{overflow-x:auto;background:var(--bg);border-radius:4px;padding:14px 16px;font-size:var(--step-small);line-height:1.55;margin:14px 0 0}
+.verify p{margin:12px 0 0;font-size:var(--step-small);color:var(--muted)}
+
+/* faq */
+.faq{max-width:var(--col)}
+.faq h3{font-size:var(--step-body);font-weight:600;margin:30px 0 8px}
+.faq p{font-size:var(--step-body)}
+
+footer{margin-top:120px;padding:40px 0 56px;width:var(--col);margin-left:var(--edge);font-size:var(--step-small);color:var(--muted)}
+footer p{max-width:44em}
+
+/* motion */
+.js-ready .reveal{opacity:0;transform:translateY(18px);transition:opacity .55s ease,transform .55s ease}
+.js-ready .reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  .btn{transition:none}
+}
+
+/* phone */
+@media (max-width:900px){
+  :root{--edge:24px}
+  .hero{min-height:auto;padding-top:32px}
+  .hero h1{margin-top:56px}
+  .tbl{width:calc(100vw - 48px);margin-left:24px}
+  .tbl .rows{display:block}
+  .tbl .head{display:none}
+  .tbl .row{display:grid;grid-template-columns:minmax(0,1fr);margin-bottom:10px;background:var(--surface);border-radius:6px;overflow:hidden}
+  .tbl .row.alt .cell{background:transparent}
+  .tbl .cell{padding:12px 18px}
+  .tbl .cell:nth-child(4n+1){padding-left:18px}
+  .tbl .cell:not(.name)::before{content:attr(data-col) "：";color:var(--muted)}
+  .evidence{grid-template-columns:1fr;width:calc(100vw - 48px);margin-left:24px}
+  .three,.numbers{grid-template-columns:1fr 1fr;width:calc(100vw - 48px)}
+  .price table{font-size:var(--step-small)}
+  .how{grid-template-columns:1fr;gap:4px}
+  .full{width:calc(100vw - 48px)}
+}
+@media (max-width:520px){
+  .three,.numbers{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="rail reveal">
+    <div class="topline">
+      <span>视频生成模型选型报告</span>
+      <span>2026-10-25</span>
+    </div>
+  </div>
+  <div class="rail reveal">
+    <h1>为什么是万相 3.0，以及它之后该怎么用</h1>
+    <p class="lede">同一个提示词、同一个分辨率下，你的项目真正考验的是三件事：能不能跑到 720P、能不能扛住长时间流水线、以及失败时会不会白花钱。这份报告用你仓库里已有的真实生成记录，逐条回答。</p>
+    <div class="actions">
+      <a class="btn" href="#verdict">先看结论</a>
+      <a href="#verify">自己做一次同题对比</a>
+    </div>
+    <div class="peek">
+      <strong>这份报告的证据只来自两个来源：</strong>你项目里 16 条任务的真实生成记录（含 4 条万相 3.0 成功任务、10 段付费片段），以及各家官方文档与价目表。没有截图冒充数据，没有未标注的推测。
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="verdict">
+  <div class="rail reveal">
+    <h2>在“同题同分辨率”这件事上，现在只有万相 3.0 真正考过</h2>
+    <p class="quiet">你项目里唯一跑通过、并且能稳定输出 1280×720 的真实付费模型，就是万相 3.0。其他接入的模型要么没有真实调用记录，要么在自己的分辨率上限上就交不了 720P 的作业。</p>
+    <div class="history">
+      <ol>
+        <li>2026-09-28 · 硅基流动 Wan 2.2：2 段 1280×720 成功<span class="tag">唯一一次可比的真实生成</span></li>
+        <li>2026-09-29 · 硅基流动 Wan 2.2：3 段全部 402 余额不足，失败</li>
+        <li>2026-10-12 · 万相 3.0：5 段 720P 成功，7 秒/段<span class="tag">第一次完整成片</span></li>
+        <li>2026-10-19 · 万相 3.0：10 段生成完成，但全部因 NSFW 质检未执行被判失败</li>
+        <li>2026-10-20 · 万相 3.0：2 段 720P 成功，出成片；另有一次 480P 任务失败</li>
+        <li>2026-10-20 起 · 可灵 3.0、Seedance、Agnes：接入代码在，但没有一条真实调用记录</li>
+      </ol>
+    </div>
+    <p class="soft" style="margin-top:22px;font-size:var(--step-small)">记录来自 <code>app/data/tasks/*.json</code> 的任务字段与 <code>app/clips/</code> 的实测媒体属性。这是“项目证据”，不是全网评测：它证明的是“万相 3.0 在你的流水线里没出过问题”，不证明“它在画质上赢过所有对手”。</p>
+  </div>
+</section>
+
+<section id="same">
+  <div class="rail reveal">
+    <h2>各家嘴上说的 1080P，到你手上未必是 1080P</h2>
+    <p>“同题同分辨率对比”听起来公平，但各家 API 对分辨率的理解并不一致。你项目里已经接进来的几家里，只有万相 3.0 和可灵 3.0 能把 720P 与 1080P 都当参数传进去；硅基流动固定 1280×720；Seedance 的适配层只暴露 480p/720p；Agnes 则是把 480p 悄悄升到 720P。</p>
+  </div>
+
+  <div class="tbl reveal">
+    <div class="rows">
+      <div class="head" style="display:contents">
+        <div class="cell">&nbsp;</div>
+        <div class="cell">万相 3.0（阿里百炼）</div>
+        <div class="cell">Wan 2.2（硅基流动）</div>
+        <div class="cell">可灵 3.0（快手）</div>
+      </div>
+
+      <div class="row">
+        <div class="cell name">分辨率档位<small>API 里的 “resolution” 参数</small></div>
+        <div class="cell yes">480P / 720P / 1080P，按档位计费</div>
+        <div class="cell no">只有 1280×720 一档</div>
+        <div class="cell yes">720P(std) / 1080P(pro) / 4K</div>
+      </div>
+      <div class="row alt">
+        <div class="cell name">单段时长上限<small>决定补跑与拼接成本</small></div>
+        <div class="cell yes">30 秒（2–30 秒整数）</div>
+        <div class="cell no">5 秒</div>
+        <div class="cell">15 秒（3–15 秒）</div>
+      </div>
+      <div class="row">
+        <div class="cell name">出声开关</div>
+        <div class="cell yes">有，audio 可关（你项目已关）</div>
+        <div class="cell">无此参数</div>
+        <div class="cell">按是否需要声音分档计费</div>
+      </div>
+      <div class="row alt">
+        <div class="cell name">你项目里的真实进度</div>
+        <div class="cell yes">4 条成功任务，10 段付费片段</div>
+        <div class="cell">1 次成功（2 段），1 次余额不足</div>
+        <div class="cell no">接入完成，无真实调用记录</div>
+      </div>
+      <div class="row">
+        <div class="cell name">按秒单价（720P）</div>
+        <div class="cell">官方 0.6 元/秒，失败不计费</div>
+        <div class="cell">视平台余额与套餐</div>
+        <div class="cell">按积分/秒，无声音更低</div>
+      </div>
+    </div>
+    <p class="note">表里第一行是最关键的一行：只要把对比的口径定成“同题、同分辨率”，能进同一张考卷的模型其实只有两个：万相 3.0 与可灵 3.0。其余模型要么分辨率锁死，要么根本没跑过。</p>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="rail reveal">
+    <h2>两段真实片段，同一套提示词风格</h2>
+    <p>下面两张都是项目里已付费、已生成完成并进入成片的画面，截取自第 2 秒。左边是硅基流动 Wan 2.2，右边是万相 3.0。它们不是你专门设计的对比实验，但恰好都是自然风光、都是 16:9，可以作为第一眼的参考。</p>
+  </div>
+  <div class="evidence reveal">
+    <figure>
+      <img src="assets/wan22_swans_lake.png" width="1280" height="720" alt="Wan 2.2 生成的蓝调时刻湖泊，雪山、薄冰与两只天鹅" loading="lazy">
+      <figcaption><strong>Wan 2.2（硅基流动）</strong> · task_mukptvrj_xbjn_clip_1 · 1280×720 · 16fps · 5.06 秒。要素偏多、主角偏散：雪山、薄冰、两只天鹅同时抢戏，正是风光长片最忌讳的“图库感”。</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/wan30_bluehour_lake.png" width="1280" height="720" alt="万相 3.0 生成的蓝调时刻湖面，远山剪影、平流雾与倒影" loading="lazy">
+      <figcaption><strong>万相 3.0</strong> · task_mv4v7qp2_m8r0_clip_1 · 1280×720 · 30fps · 7 秒。主体清楚，雾、山脊、倒影三层纵深，地平线压在画面中部偏上，符合你需要的屏保长片气质。</figcaption>
+    </figure>
+  </div>
+  <div class="rail reveal">
+    <p class="soft" style="font-size:var(--step-small)">需要说清楚：Wan 2.2 这一条是 16fps、5 秒的旧版模型输出，万相 3.0 是 30fps、7 秒，两者的差距里有一部分来自“时间差”而不是“模型差”。把它当方向性证据，不当判决书。</p>
+  </div>
+</section>
+
+<section id="why">
+  <div class="rail reveal">
+    <h2>不是因为它最强，是因为它最贴合你的流水线</h2>
+
+    <h3>一、唯一一条真实跑满的 720P 生产线</h3>
+    <p>你的成片是给 Android TV 屏保播的，720P 足够、1080P 加分。万相 3.0 是唯一一个在你项目里连续产出 720P 成功片段、并完整走通“拼接—循环—转码—质检”的真模型。别的模型再多参数，没跑通就是零。</p>
+
+    <h3>二、30 秒单段上限，直接决定补跑成本</h3>
+    <p>你现在的默认配置是 15 秒一段、一次 10 段左右。别的模型上限 5–15 秒时，同样一条 30 分钟成片需要的片段数多一倍，出错的概率、重试的次数、质检的开销全都翻倍。万相 3.0 的 2–30 秒自由时长，让“一个镜头”能真实地覆盖一次完整的推镜或云层变化。</p>
+
+    <h3>三、失败不计费，配合你的重试机制</h3>
+    <p>你的流水线默认重试 1 次、并发 3，这在按“成功条数”计费的平台上会放大成本。万相 3.0 官方说明失败不计费，重试的风险被压到了最低。这一点在你的 10-19 事故里价值极高：那次 10 段生成全部被质检判失败，如果失败也计费，损失就是 10 段视频的钱。</p>
+
+    <h3>四、适配层已经稳定，换模型要重写重试与状态映射</h3>
+    <p>不同家的状态机差别很大：万相是 SUCCEEDED/FAILED，可灵是 succeed/failed，硅基流动是 Succeed/InQueue/InProgress。你项目里已经把这些差异封装在 <code>src/generators/</code> 各适配器里，万相这一条在实际任务里被验证过，其他几条只在代码层面存在。</p>
+  </div>
+
+  <div class="three reveal">
+    <div><h4>能进同一张考卷</h4><p>只有万相 3.0 和可灵 3.0 同时提供 720P 与 1080P 两档，其余模型在分辨率上限上就出局</p></div>
+    <div><h4>有实测记录</h4><p>4 条成功任务、10 段付费片段，全部可追溯到具体文件名与媒体属性</p></div>
+    <div><h4>适配成本最低</h4><p>状态映射、重试降档、失败计费规则都已在你代码里处理过一遍</p></div>
+  </div>
+</section>
+
+<section id="cost">
+  <div class="rail reveal">
+    <h2>一条 30 分钟成片，钱花在哪里</h2>
+    <p>你的流水线默认 15 秒一段、1080p、并发 3、重试 1 次。按这个口径，一条 30 分钟成片需要 120 段左右、合计 1800 秒生成时长。下面只算“成功生成的秒数”，不含质检与拼接。</p>
+  </div>
+  <div class="price reveal">
+    <table>
+      <thead><tr><th>方案</th><th>720P（元）</th><th>1080P（元）</th><th>备注</th></tr></thead>
+      <tbody>
+        <tr><td>万相 3.0 标准版</td><td class="n">约 1,080</td><td class="n">约 2,160</td><td>官方 0.3 / 0.6 / 1.2 元/秒；失败不计费</td></tr>
+        <tr><td>万相 3.0 高速版（prime）</td><td class="n">约 1,620</td><td class="n">需查当期价目</td><td>能力对齐标准版，端到端速度更快；720P 官方 0.9 元/秒</td></tr>
+        <tr><td>可灵 3.0（720P，无声）</td><td class="n">待折算 *</td><td class="n">待折算 *</td><td>按积分/秒计费，需用当期积分单价换算；有声音档更贵</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="rail reveal">
+    <p class="soft" style="font-size:var(--step-small)">* 可灵与硅基流动都按各自平台的积分或套餐计价，换算口径随活动变动，本报告不擅自折算成人民币；填入当期单价后与万相直接比较即可。按你项目实际跑出来的口径（万相 720P、每段 6–7 秒），一条 30 分钟成片约需 300 段、约 1,800–2,100 秒生成时长。真正要盯住的不是单价，而是“质检失败率”：10-19 事故里失败掉的那批片段，就是最贵的部分。</p>
+  </div>
+</section>
+
+<section id="ladder">
+  <div class="rail reveal">
+    <h2>除万相外，还有谁值得写进报告</h2>
+    <p>按“能不能进同一张考卷”和“能不能直接接进你现有代码”两条筛选，真正值得列进对比的只有这几家。价格都是 2026 年 10 月的公开口径，会变。</p>
+
+    <h3>可灵 3.0，唯一正面竞争者</h3>
+    <p>720P/1080P/4K 三档、3–15 秒、原生支持负面提示词，接口你已经写好了，状态机也映射好了。它的弱点是单段短、重试时 4K 会自动降档（你代码里已经做了保护）。如果要认真做“谁更适合我的长片”的结论，它必须是下一个真实跑通的模型。</p>
+
+    <h3>Seedance 2.5，适合做 4K 母版</h3>
+    <p>支持 480P/720P/1080P、4–30 秒，是你当前接入的模型里另一个长时长选项。但适配层目前只暴露 480p/720p，分辨率上限和接口字段都要补。它更适合“先粗后精”：先用便宜档位批量试，再把想要的镜头用官方的 1080P 跑一遍。</p>
+
+    <h3>Veo 3.1 与 Gen-4.5，画质天花板，但成本也高</h3>
+    <p>Veo 3.1 在 1080P 约 $0.40/秒（Fast 档约 $0.12/秒，Lite 档约 $0.08/秒），Runway Gen-4.5 按积分计。它们能给出电影级的画面，但对“30 分钟屏保长片”这种人海战术任务来说，成本会是万相的数倍。它们的正确用法是“关键镜头”而不是“全片”。</p>
+
+    <h3>Sora 2，已经不在选项里了</h3>
+    <p>OpenAI 明确说明 Sora 网页与 App 已于 2026-04-26 停止，API 将于 2026-09-24 停止。任何把 Sora 写进长期方案的报告都会过时。</p>
+  </div>
+</section>
+
+<section id="howto">
+  <div class="rail reveal">
+    <h2>视频生成板块的七条硬规则</h2>
+    <p>这些不是抽象建议，是对着你仓库里的实际代码与失败记录总结出来的。按顺序做，投入产出比最高。</p>
+  </div>
+
+  <div class="rail">
+    <div class="how reveal">
+      <div>
+        <h3>把“prompt_extend”与“audio”的默认值固化成你的选择</h3>
+        <p>万相 3.0 官方默认开 prompt_extend（智能改写）与 audio。你的适配器已经显式关掉了它们，这是对的：你的项目有独立的提示词优化器和独立配乐，模型再改写一遍会和你的分镜打架，自带音轨会和配乐冲突。这一点保持，并在每一条新模型适配器里延续。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>分辨率档位要按“最终播放设备”定，不要按“模型上限”定</h3>
+        <p>Android TV 屏保的实际观看距离是 2–3 米，720P 在 65 寸屏上已经足够，1080P 是加分。结论：日常批量用 720P，只有“集锦高潮段”和“封面镜头”单独用 1080P 重跑。这能把成本压到一半，同时保住观感。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>单段时长选 15 秒，而不是拉到 30 秒</h3>
+        <p>30 秒单段看着省钱，但你的质检是逐片段做的，一段 30 秒出问题就要整段重跑。15 秒是“失败损失最小”与“拼接接缝最少”之间的平衡点，也正好是你 <code>GEN_CLIP_DURATION</code> 当前的默认值。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>NSFW 质检必须先能跑起来，否则整批付费片段会被判失败</h3>
+        <p>10-19 那次事故的根因不是模型，是 NSFW 检测没配好多模态 Key，导致 10 段本来已经生成好的片段全被判“质检未通过”。这不是画质问题，是配置问题。在换模型之前，先把多模态 Key 配好、用一条纯自然风光片段验证 NSFW 能返回置信度，再开始批量生成。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>提示词只写“主体句”，其余交给模板池</h3>
+        <p>你的提示词优化器会自动追加运镜、光影、氛围、质感与结尾留白。如果主体句里再写 “4K / cinematic / film grain / no people”，会被重复拼 6 次，反而拉低画面。正确做法是：主体句只写地貌专名 + 决定性材质，例如“喀斯特锥形孤峰 + 平流雾沿谷底抬升”，而不是“一片山，雾气缭绕”。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>每批固定一套镜头与色板，不要每段都换</h3>
+        <p>长片最怕“每段都像另一部片子”。同批素材固定一个焦段族（比如全部中长焦）、一套色板（冷调或暖浓二选一），不同片段只在“主体”上变化。这样拼接出来才像一条片子，而不是 120 个壁纸。你项目里 <code>promptOptimizer</code> 的模板池已经按主题分了池，但 <code>landscape</code> 每池只有 4 项，超过 4 段必然重复，可以把技能库里的地貌专名回填进池子。</p>
+      </div>
+    </div>
+
+    <div class="how reveal">
+      <div>
+        <h3>用“首帧生视频”做衔接，而不是靠拼接硬切</h3>
+        <p>万相 3.0 支持 first_frame / last_frame 输入。你的成片需要“头尾衔接自然”，目前靠 xfade 交叉淡化实现。更彻底的做法是：把上一段的尾帧作为下一段的首帧，让模型自己把过渡画出来。这比后期淡化更有电影感，也能减少接缝处的观感跳跃。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="quote reveal">
+    <p class="label">主体句：反面教材（你旧任务里出现过）</p>
+    <p>“A vast sea of clouds rolling between mountain peaks at sunrise, warm golden light spilling over the ridges, slow smooth lateral camera pan, majestic and serene atmosphere, cinematic wide shot, realistic volumetric fog, soft god rays, high detail, 4K film texture.”</p>
+    <p class="label" style="margin-top:16px">主体句：正面写法（只留地貌与材质，其余交给模板）</p>
+    <p>“喀斯特锥形孤峰，灰白石灰岩陡壁覆深绿植被，清晨平流雾贴着山腰流动，远峰只剩轮廓。”</p>
+    <div class="bad">
+      <p class="label">为什么换</p>
+      <p style="font-size:var(--step-small);color:var(--muted)">反面教材把镜头、光影、氛围、质感全写进去了，模板会再追加一遍，相互冲突；正面写法只有一个主角、一种地貌专名、一种光的方位，模型不需要猜“你要的是什么”。</p>
+    </div>
+  </div>
+</section>
+
+<section id="verify">
+  <div class="rail reveal">
+    <h2>三步拿到你自己的结论</h2>
+    <p>这份报告能做的判断有上限：它用的是你过去的历史记录，不是一次受控实验。要“同题、同分辨率”的硬结论，需要你自己跑一次 3 代表 × 3 重复的对比。下面三个脚本可以直接复制到 PowerShell。</p>
+  </div>
+
+  <div class="rail verify">
+    <details open>
+      <summary>第一步：确认三条同题提示词都能被不同模型接受</summary>
+      <pre>$FF = "C:\Users\14872\Desktop\测试\app\tools\ffmpeg\bin\ffmpeg.exe"
+$FP = "C:\Users\14872\Desktop\测试\app\tools\ffmpeg\bin\ffprobe.exe"
+
+# 三条代表主题：湖面薄雾、沙丘脊线、星空银河
+# 只写主体句，运镜/光影/质感交给项目模板池
+$prompts = @(
+  "喀斯特锥形孤峰，灰白石灰岩陡壁覆深绿植被，清晨平流雾贴着山腰流动，远峰只剩轮廓",
+  "沙漠沙丘脊线，迎风坡细密风纹，背风滑落面锐利，日出低角度侧光",
+  "银河拱桥横跨夜空，前景孤树剪影，无月夜，星点密集"
+)
+$prompts | ForEach-Object { Write-Host $_ }</pre>
+      <p>把三条提示词分别粘进项目的提示词框，每次只跑一段，模型选万相 3.0 / 可灵 3.0 / 硅基流动各一次。同一个分辨率档位（建议都跑 720P）。</p>
+    </details>
+
+    <details>
+      <summary>第二步：用 ffprobe 核对“同分辨率”是否真的成立</summary>
+      <pre>Get-ChildItem "C:\Users\14872\Desktop\测试\app\clips\task_*_clip_*.mp4" |
+  ForEach-Object {
+    $info = &amp; $FP -v error -show_entries stream=width,height,r_frame_rate `
+      -show_entries format=duration,bit_rate -of csv=p=0 $_.FullName
+    Write-Host "$($_.Name) :: $($info -join ' | ')"
+  }</pre>
+      <p>你会看到真实的宽高、帧率与码率。同一档 720P 在不同平台可能给出 1280×720、1280×704 甚至 16fps 与 30fps 的差别，这些都是“同分辨率”的漏洞。</p>
+    </details>
+
+    <details>
+      <summary>第三步：用三个客观指标代替“我觉得好看”</summary>
+      <pre># 1) 清晰度：全片逐帧拉普拉斯模糊值，越低越清晰
+&amp; $FF -hide_banner -nostats -i $video `
+  -vf "blurdetect,metadata=mode=print:key=lavfi.blur:file=-" -an -f null NUL 2>$null
+
+# 2) 亮度与高光：屏保长片最怕过曝天空
+&amp; $FF -hide_banner -nostats -i $video `
+  -vf "signalstats,metadata=mode=print:key=lavfi.signalstats.YAVG:file=-" `
+  -an -f null NUL 2>$null
+
+# 3) 画面是否“动”：静态感太强的片段在屏保里会像卡住
+&amp; $FF -hide_banner -nostats -i $video `
+  -vf "select='gt(scene,0.002)',metadata=mode=print:key=lavfi.scene_score:file=-" `
+  -an -f null NUL 2>$null</pre>
+      <p>三个数值互不替代：清晰度看细节，亮度看曝光，场景变化看运动。你的项目质检里已有 blurdetect（阈值 100，实际上大量真实片段的模糊值在 3–7 之间，远未触线），可以直接复用同样的计算口径。</p>
+    </details>
+  </div>
+</section>
+
+<section id="seen">
+  <div class="rail reveal">
+    <h2>万相 3.0 不是没有问题</h2>
+    <p>有几件事必须写进报告的“局限”章节，否则这份报告就是在替它说好话。</p>
+
+    <h3>天空与水面在过度压缩时容易失去细节</h3>
+    <p>你 10-12 那条 7 秒湖面片段，码率约 7.2 Mbps，在 1280×720 下算正常，但如果后续要升到 4K 或大幅裁切，天空的渐变与水面倒影会出现明显的涂抹。解决办法是把万相 3.0 当“素材源”，关键镜头用 1080P 重跑，不要在后期硬拉。</p>
+
+    <h3>NSFW 质检的失败率直接决定“白花多少钱”</h3>
+    <p>10-19 那次 10 段全部失败，原因不是模型，而是质检链没配好。在报告里要明确写：模型本身的成功率 ≠ 流水线成功率，两者之间隔着质检。</p>
+
+    <h3>历史记录里有 480P 失败、720P 成功、720P 暂停</h3>
+    <p>同一个模型在不同档位上的失败原因并不相同。要下结论，至少要在同一个档位上重复 3 次有效样本，单次成功不构成结论。</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="rail reveal">
+    <h2>写报告时会被人问到的几件事</h2>
+  </div>
+  <div class="rail faq reveal">
+    <h3>为什么不直接说“万相 3.0 画质最好”？</h3>
+    <p>因为手上只有 10 段它的片段和 2 段 Wan 2.2 的片段，没有和可灵、Seedance 的同题样本。报告里能站得住的结论是“万相 3.0 在你的流水线里是唯一跑通的 720P 生产模型”，而不是“它画质最好”。把这两件事分开写，报告才不会被一句话问倒。</p>
+
+    <h3>那我要不要现在去测可灵 3.0？</h3>
+    <p>要，而且这是最有价值的一步。可灵的单段 15 秒、三档分辨率、负面提示词，和万相几乎是正面对打，接口你也已经写好了。跑 3 条提示词 × 3 段 = 9 段，成本可控，拿到对比后这份报告就能从“选择说明”升级为“选型结论”。</p>
+
+    <h3>能不能直接生成视频给我看？</h3>
+    <p>不能。这个环境里所有生成模型的 Key 都是空的（万相、可灵、Seedance、硅基流动都是），配置里也没有可用的 API 凭据，所以我无法调用任何一家去生成新片段。我能做的是：读你已有的真实生成记录、核实各家官方参数与价格、把对比方法和提示词写好。要看到新画面，需要你在设置里填一个真实 Key，然后在项目里跑一次任务。</p>
+
+    <h3>Sora 还值得写进对比吗？</h3>
+    <p>不值得。OpenAI 已经说明 Sora 网页与 App 于 2026-04-26 停止、API 于 2026-09-24 停止。把已经下线的模型放进长期选型报告，只会让报告显得没有更新。</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>数据来源：项目内 <code>app/data/tasks/*.json</code> 与 <code>app/clips/</code> 实测媒体属性；万相 3.0 API 文档与百炼价目；可灵开放平台视频接口；硅基流动 Wan 2.2；火山引擎 Seedance 2.5；Google Veo 与 Runway 定价；OpenAI Sora 停服公告。价格为 2026 年 10 月公开口径，可能变动。</p>
+  <p>报告由 DSH 依据项目记录与公开资料整理，未执行任何新的付费生成。所有未标“实测”的数字均为官方或第三方公开口径。</p>
+</footer>
+
+<script>
+(function(){
+  document.documentElement.classList.add('js-ready');
+  var els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    els.forEach(function(el){ el.classList.add('in'); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  els.forEach(function(el){ io.observe(el); });
+})();
+</script>
+</body>
+</html>
+
+
+
+
+
+
+

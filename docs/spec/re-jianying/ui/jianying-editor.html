@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>剪映风编辑器 · 设计还原稿</title>
+<style>
+/* ============================================================
+   Token 全部来自剪映 11.6.0.14552 内置 Web 的 video-edit 主题对象
+   （Resources/canvas_agent/app/static/js/ai-creation~24.d127b52d.js）
+   标注 [T] 的是直接抄的，[A] 是按截图观感补的近似值。
+   ============================================================ */
+:root{
+  /* [T] clip */
+  --clip-bg:#303030; --clip-stroke:rgba(255,255,255,.06);
+  --clip-video:#243743; --clip-audio:#262626; --clip-effect:#3e495d;
+  --clip-text:rgba(156,73,55,.3); --clip-filter:rgba(71,65,139,.3);
+  --clip-sticker:rgba(240,138,52,.3); --clip-radius:8px;
+  --clip-selected:#fff; --waveform:rgba(255,255,255,.2);
+  /* [T] ruler / track */
+  --ruler-bg:rgba(38,38,38,.96); --ruler-tick:rgba(255,255,255,.15);
+  --ruler-label:rgba(255,255,255,.2);
+  --track-bg:rgba(255,255,255,.012); --track-divider:rgba(255,255,255,.06);
+  /* [T] interaction */
+  --snap:#00cae0; --placeholder-fill:rgba(0,193,205,.1);
+  --placeholder-stroke:rgba(0,193,205,.2);
+  --tooltip-bg:rgba(48,48,48,.8); --tooltip-fg:#e0e0e0;
+  /* [T] typography */
+  --font:"PingFang SC","Microsoft YaHei",Inter,ui-sans-serif,system-ui,sans-serif;
+  --tl-font:10px; --fg:#e0e0e0;
+  /* [A] 外壳层级：按剪映深色观感补 */
+  --bg:#141414; --panel:#1c1c1c; --panel-2:#262626; --panel-3:#303030;
+  --line:rgba(255,255,255,.06); --line-2:rgba(255,255,255,.1);
+  --fg-2:#949494; --fg-3:#7a7a7a;
+  --accent:#00c1cd; --cta:#3370ff;
+  /* [T] 时间线几何（默认档，非 node 档） */
+  --ruler-h:40px; --track-label-w:28px; --tl-pad-top:12px;
+  --track-h:52px; --tl-h:300px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--fg);font-family:var(--font);
+  font-size:12px;-webkit-font-smoothing:antialiased;overflow:hidden;
+  display:flex;flex-direction:column;user-select:none;
+}
+
+/* ---------------- 顶栏 ---------------- */
+.topbar{
+  height:48px;flex:0 0 48px;display:flex;align-items:center;gap:12px;
+  padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:8px;padding-right:8px}
+.brand .logo{
+  width:22px;height:22px;border-radius:6px;display:grid;place-items:center;
+  background:linear-gradient(135deg,#00c1cd,#0b8f99);color:#001a1c;
+  font-weight:700;font-size:12px;
+}
+.brand .pname{font-size:12px;color:var(--fg);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar .sep{width:1px;height:18px;background:var(--line-2)}
+.menu{display:flex;gap:2px}
+.menu button{
+  background:none;border:0;color:var(--fg-2);font:inherit;padding:6px 10px;
+  border-radius:6px;cursor:pointer;
+}
+.menu button:hover{background:var(--panel-2);color:var(--fg)}
+.menu button.on{color:var(--fg);background:var(--panel-2)}
+.spacer{flex:1}
+.tbtn{
+  height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line-2);
+  background:var(--panel-2);color:var(--fg-2);font:inherit;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.tbtn:hover{color:var(--fg);border-color:rgba(255,255,255,.18)}
+.tbtn.cta{
+  background:var(--cta);border-color:transparent;color:#fff;font-weight:500;
+  padding:0 16px;
+}
+.tbtn.cta:hover{background:#4a83ff}
+.avatar{width:26px;height:26px;border-radius:50%;background:#3b3b3b;display:grid;place-items:center;font-size:11px;color:var(--fg-2)}
+
+/* ---------------- 主体三栏 ---------------- */
+.main{flex:1;display:flex;min-height:0}
+.side{background:var(--panel);display:flex;min-height:0}
+.side.left{width:340px;flex:0 0 340px;border-right:1px solid var(--line)}
+.side.right{width:300px;flex:0 0 300px;border-left:1px solid var(--line)}
+
+/* 左侧图标轨 */
+.rail{
+  width:56px;flex:0 0 56px;background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px;
+}
+.rail .item{
+  width:48px;padding:8px 0 6px;border-radius:8px;display:flex;flex-direction:column;
+  align-items:center;gap:4px;color:var(--fg-3);cursor:pointer;font-size:10px;
+}
+.rail .item svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.4}
+.rail .item:hover{color:var(--fg);background:var(--panel-2)}
+.rail .item.on{color:var(--accent);background:rgba(0,193,205,.1)}
+
+/* 左侧内容 */
+.left-body{flex:1;display:flex;flex-direction:column;min-width:0}
+.panel-head{height:40px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.panel-head .t{font-size:12px;color:var(--fg)}
+.panel-head .sub{font-size:11px;color:var(--fg-3)}
+.search{
+  margin:10px 12px 0;height:28px;border-radius:6px;background:var(--panel-2);
+  border:1px solid var(--line);display:flex;align-items:center;gap:6px;padding:0 8px;
+  color:var(--fg-3);font-size:11px;
+}
+.search svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6}
+.chips{display:flex;gap:6px;padding:10px 12px 6px;flex-wrap:wrap}
+.chip{
+  height:22px;padding:0 9px;border-radius:11px;background:var(--panel-2);
+  color:var(--fg-2);font-size:11px;display:inline-flex;align-items:center;cursor:pointer;
+}
+.chip.on{background:rgba(0,193,205,.14);color:var(--accent)}
+.grid{
+  flex:1;overflow:auto;padding:4px 12px 12px;display:grid;
+  grid-template-columns:repeat(3,1fr);gap:8px;align-content:start;
+}
+.card{position:relative;border-radius:8px;overflow:hidden;background:var(--panel-2);cursor:pointer}
+.card .thumb{aspect-ratio:16/9;background:linear-gradient(135deg,#2c3a44,#1d262c)}
+.card:nth-child(3n+2) .thumb{background:linear-gradient(135deg,#3a2f45,#241c2c)}
+.card:nth-child(3n) .thumb{background:linear-gradient(135deg,#2b3f33,#1b2620)}
+.card .badge{
+  position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.6);
+  color:#dcdcdc;font-size:9px;border-radius:3px;padding:1px 4px;font-variant-numeric:tabular-nums;
+}
+.card .name{
+  position:absolute;left:0;right:0;bottom:0;padding:12px 5px 4px;font-size:10px;color:#cfcfcf;
+  background:linear-gradient(transparent,rgba(0,0,0,.72));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.card.add{
+  display:grid;place-items:center;border:1px dashed rgba(255,255,255,.14);
+  background:transparent;color:var(--fg-3);font-size:20px;aspect-ratio:16/9;
+}
+
+/* 中间预览 */
+.center{flex:1;display:flex;flex-direction:column;min-width:0;background:#0d0d0d}
+.stage{flex:1;display:grid;place-items:center;min-height:0;padding:16px}
+.frame{
+  background:#000;aspect-ratio:16/9;max-height:100%;max-width:100%;
+  border-radius:4px;box-shadow:0 12px 40px rgba(0,0,0,.6);position:relative;overflow:hidden;
+  display:grid;place-items:center;
+}
+.frame .art{
+  width:100%;height:100%;
+  background:
+    radial-gradient(60% 45% at 30% 78%,#24343c 0%,transparent 60%),
+    radial-gradient(45% 40% at 72% 30%,#2f3d52 0%,transparent 62%),
+    linear-gradient(180deg,#0b1016 0%,#0a0e13 60%,#070a0d 100%);
+}
+.frame .art::after{
+  content:"";position:absolute;inset:0;
+  background:radial-gradient(120% 80% at 50% 120%,rgba(0,193,205,.10),transparent 60%);
+}
+.frame .tc{
+  position:absolute;left:10px;top:8px;font-size:10px;color:rgba(255,255,255,.5);
+  font-variant-numeric:tabular-nums;
+}
+.transport{
+  height:44px;flex:0 0 44px;display:flex;align-items:center;gap:10px;
+  padding:0 12px;border-top:1px solid var(--line);background:var(--panel);
+}
+.transport .time{font-size:11px;color:var(--fg-2);font-variant-numeric:tabular-nums;min-width:120px}
+.transport .grow{flex:1}
+.icobtn{
+  width:26px;height:26px;border-radius:6px;display:grid;place-items:center;
+  color:var(--fg-2);cursor:pointer;
+}
+.icobtn:hover{background:var(--panel-2);color:var(--fg)}
+.icobtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6}
+.icobtn.play svg{fill:currentColor;stroke:none}
+.pill{
+  height:22px;padding:0 8px;border-radius:4px;background:var(--panel-2);
+  color:var(--fg-2);font-size:10px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;
+}
+
+/* 右侧属性 */
+.right-body{flex:1;display:flex;flex-direction:column;min-width:0}
+.ptabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line)}
+.ptabs span{
+  padding:6px 10px;font-size:11px;color:var(--fg-3);border-radius:6px 6px 0 0;cursor:pointer;
+}
+.ptabs span.on{color:var(--fg);background:var(--panel-2);box-shadow:inset 0 -2px 0 var(--accent)}
+.pbody{flex:1;overflow:auto;padding:12px 12px 20px}
+.group{margin-bottom:16px}
+.group h4{font-size:11px;color:var(--fg-2);font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.group h4::after{content:"";flex:1;height:1px;background:var(--line)}
+.row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.row label{width:44px;color:var(--fg-3);font-size:11px;flex:0 0 44px}
+.slider{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.12);position:relative}
+.slider i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--fg-2)}
+.slider b{
+  position:absolute;top:50%;width:10px;height:10px;border-radius:50%;background:#d8d8d8;
+  transform:translate(-50%,-50%);
+}
+.num{
+  width:52px;height:22px;border-radius:4px;background:var(--panel-2);border:1px solid var(--line);
+  color:var(--fg);font:inherit;font-size:11px;text-align:center;font-variant-numeric:tabular-nums;
+}
+.seg{display:flex;background:var(--panel-2);border-radius:6px;padding:2px;gap:2px}
+.seg span{flex:1;text-align:center;font-size:11px;color:var(--fg-3);padding:4px 0;border-radius:4px;cursor:pointer}
+.seg span.on{background:var(--panel-3);color:var(--fg)}
+.sec{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+
+/* ---------------- 时间线 ---------------- */
+.timeline{
+  flex:0 0 var(--tl-h);height:var(--tl-h);background:var(--panel);
+  border-top:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
+}
+.tl-tools{
+  height:36px;flex:0 0 36px;display:flex;align-items:center;gap:6px;
+  padding:0 10px;border-bottom:1px solid var(--line);
+}
+.tl-tools .grow{flex:1}
+.zoom{display:flex;align-items:center;gap:6px;color:var(--fg-3);font-size:10px}
+.zoom .track{width:72px;height:3px;border-radius:2px;background:rgba(255,255,255,.12);position:relative}
+.zoom .track i{position:absolute;inset:0 45% 0 0;background:var(--fg-2);border-radius:2px}
+.zoom .track b{position:absolute;left:55%;top:50%;width:9px;height:9px;border-radius:50%;background:#d8d8d8;transform:translate(-50%,-50%)}
+
+.tl-body{flex:1;display:flex;min-height:0;position:relative}
+.labels{
+  width:calc(var(--track-label-w) + 8px);flex:0 0 auto;background:var(--panel);
+  border-right:1px solid var(--line);padding-top:var(--ruler-h);
+}
+.labels .lbl{
+  height:var(--track-h);display:flex;align-items:center;justify-content:center;
+  color:var(--fg-3);font-size:9px;
+}
+.labels .lbl.sp{height:calc(var(--ruler-h))}
+.scroll{flex:1;overflow:hidden;position:relative}
+.ruler{
+  height:var(--ruler-h);background:var(--ruler-bg);border-bottom:1px solid var(--line);
+  position:relative;overflow:hidden;
+}
+.ruler .tick{position:absolute;bottom:0;width:1px;background:var(--ruler-tick)}
+.ruler .tick.major{height:8px}
+.ruler .tick.minor{height:4px;opacity:.6}
+.ruler .lab{
+  position:absolute;top:6px;font-size:var(--tl-font);color:var(--ruler-label);
+  transform:translateX(3px);font-variant-numeric:tabular-nums;
+}
+.tracks{padding-top:var(--tl-pad-top);background:var(--track-bg);position:relative}
+.track{height:var(--track-h);position:relative;border-bottom:1px solid var(--track-divider)}
+.track.virtual{background:rgba(255,255,255,.025)}
+.clip{
+  position:absolute;top:6px;bottom:6px;border-radius:var(--clip-radius);
+  background:var(--clip-bg);border:1px solid var(--clip-stroke);overflow:hidden;
+  font-size:var(--tl-font);color:#c8c8c8;display:flex;align-items:flex-start;
+  padding:4px 6px;cursor:pointer;
+}
+.clip.video{background:var(--clip-video)}
+.clip.text{background:var(--clip-text);border-color:rgba(156,73,55,.5)}
+.clip.audio{background:var(--clip-audio)}
+.clip.effect{background:var(--clip-effect)}
+.clip.filter{background:var(--clip-filter)}
+.clip.sticker{background:var(--clip-sticker)}
+.clip.sel{border-color:var(--clip-selected);box-shadow:0 0 0 1px var(--clip-selected) inset}
+.clip .cap{opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.clip .wave{position:absolute;left:0;right:0;bottom:0;height:60%;opacity:.9}
+.clip .wave svg{width:100%;height:100%;display:block}
+.clip .wave path{stroke:var(--waveform);fill:none;stroke-width:1}
+.playhead{
+  position:absolute;top:0;bottom:0;width:1px;background:var(--snap);z-index:5;
+  pointer-events:none;
+}
+.playhead::before{
+  content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);
+  border-left:5px solid transparent;border-right:5px solid transparent;
+  border-top:8px solid var(--snap);border-radius:1px;
+}
+.ph-time{
+  position:absolute;top:6px;left:8px;background:var(--snap);color:#00262a;
+  font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;z-index:6;
+  font-variant-numeric:tabular-nums;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+
+<!-- ================= 顶栏 ================= -->
+<div class="topbar">
+  <div class="brand">
+    <div class="logo">剪</div>
+    <div class="pname">9月20日 · 屏保长片</div>
+  </div>
+  <div class="sep"></div>
+  <div class="menu">
+    <button class="on">编辑</button>
+    <button>素材</button>
+    <button>文本</button>
+    <button>音频</button>
+    <button>转场</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="tbtn">快速导出</button>
+  <button class="tbtn cta">导出</button>
+  <div class="avatar">Z</div>
+</div>
+
+<!-- ================= 主体 ================= -->
+<div class="main">
+
+  <!-- 左：素材库 -->
+  <div class="side left">
+    <div class="rail">
+      <div class="item on">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>
+        媒体
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>
+        音频
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+        文本
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>
+        贴纸
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg>
+        特效
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><path d="M4 8h8l2-4h6M4 16h8l2 4h6"/></svg>
+        转场
+      </div>
+      <div class="item">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        调节
+      </div>
+    </div>
+
+    <div class="left-body">
+      <div class="panel-head">
+        <span class="t">媒体</span>
+        <span class="sub">本地 · 42 项</span>
+      </div>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        搜索素材
+      </div>
+      <div class="chips">
+        <span class="chip on">全部</span>
+        <span class="chip">视频</span>
+        <span class="chip">图片</span>
+        <span class="chip">音频</span>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">极光_01.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">雪山_02.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:04</span><span class="name">银河_03.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">海岸_04.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">沙丘_05.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:04</span><span class="name">梯田_06.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">林间_07.mp4</span></div>
+        <div class="card"><div class="thumb"></div><span class="badge">00:05</span><span class="name">星空_08.mp4</span></div>
+        <div class="card add">＋</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中：预览 -->
+  <div class="center">
+    <div class="stage">
+      <div class="frame">
+        <div class="art"></div>
+        <span class="tc">00:00:12:08</span>
+      </div>
+    </div>
+    <div class="transport">
+      <span class="time">00:00:12:08 / 00:30:00:00</span>
+      <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M11 5L4 12l7 7M20 5l-7 7 7 7"/></svg></div>
+      <div class="icobtn play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+      <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M5 5l7 7-7 7M13 5l7 7-7 7"/></svg></div>
+      <div class="grow"></div>
+      <span class="pill">16:9</span>
+      <span class="pill">1080p</span>
+      <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></div>
+    </div>
+  </div>
+
+  <!-- 右：属性 -->
+  <div class="side right">
+    <div class="right-body">
+      <div class="ptabs">
+        <span class="on">画面</span><span>音频</span><span>变速</span><span>动画</span>
+      </div>
+      <div class="pbody">
+        <div class="group">
+          <h4>基础</h4>
+          <div class="row"><label>缩放</label><div class="slider"><i style="width:62%"></i><b style="left:62%"></b></div><input class="num" value="100%" /></div>
+          <div class="row"><label>位置</label><input class="num" value="0" /><input class="num" value="0" /></div>
+          <div class="row"><label>旋转</label><div class="slider"><i style="width:50%"></i><b style="left:50%"></b></div><input class="num" value="0°" /></div>
+        </div>
+        <div class="group">
+          <h4>不透明度</h4>
+          <div class="row"><div class="slider"><i style="width:100%"></i><b style="left:100%"></b></div><input class="num" value="100" /></div>
+        </div>
+        <div class="group sec">
+          <h4>音频</h4>
+          <div class="row"><label>音量</label><div class="slider"><i style="width:35%"></i><b style="left:35%"></b></div><input class="num" value="35" /></div>
+          <div class="row"><label>淡入</label><div class="slider"><i style="width:20%"></i><b style="left:20%"></b></div><input class="num" value="1.0s" /></div>
+          <div class="row"><label>淡出</label><div class="slider"><i style="width:20%"></i><b style="left:20%"></b></div><input class="num" value="2.0s" /></div>
+          <div class="row" style="margin-top:10px">
+            <div class="seg" style="flex:1"><span class="on">关</span><span>开</span></div>
+            <span style="color:var(--fg-3);font-size:10px">响度统一</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 时间线 ================= -->
+<div class="timeline">
+  <div class="tl-tools">
+    <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></svg></div>
+    <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M15 4L5 14l5 5L20 9z"/></svg></div>
+    <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg></div>
+    <div class="sep" style="width:1px;height:16px;background:var(--line-2)"></div>
+    <span class="pill">分割</span>
+    <span class="pill">删除</span>
+    <span class="pill" style="color:var(--accent)">自动踩点</span>
+    <div class="grow"></div>
+    <div class="zoom">
+      <span>−</span><div class="track"><i></i><b></b></div><span>＋</span>
+    </div>
+  </div>
+
+  <div class="tl-body">
+    <div class="labels">
+      <div class="lbl sp" style="height:var(--ruler-h)"></div>
+      <div class="lbl">视频</div>
+      <div class="lbl">视频</div>
+      <div class="lbl">文字</div>
+      <div class="lbl">音频</div>
+    </div>
+
+    <div class="scroll">
+      <div class="ruler" id="ruler">
+        <div class="ph-time">00:12</div>
+      </div>
+
+      <div class="tracks">
+        <!-- 主视频轨 -->
+        <div class="track">
+          <div class="clip video" style="left:0;width:180px"><span class="cap">极光_01</span></div>
+          <div class="clip video sel" style="left:184px;width:200px"><span class="cap">雪山_02</span></div>
+          <div class="clip video" style="left:388px;width:170px"><span class="cap">银河_03</span></div>
+          <div class="clip video" style="left:562px;width:210px"><span class="cap">海岸_04</span></div>
+          <div class="clip video" style="left:776px;width:180px"><span class="cap">沙丘_05</span></div>
+        </div>
+        <!-- 画中画 -->
+        <div class="track">
+          <div class="clip sticker" style="left:388px;width:120px"><span class="cap">光斑</span></div>
+        </div>
+        <!-- 文字 -->
+        <div class="track">
+          <div class="clip text" style="left:0;width:340px"><span class="cap">极光在夜里醒来</span></div>
+          <div class="clip text" style="left:420px;width:300px"><span class="cap">雪山之上 无风</span></div>
+        </div>
+        <!-- 音频 -->
+        <div class="track">
+          <div class="clip audio" style="left:0;width:956px">
+            <span class="cap" style="position:absolute;left:6px;top:3px;font-size:9px;opacity:.7">冰岛晨光 · 153.3s</span>
+            <span class="wave"><svg viewBox="0 0 100 20" preserveAspectRatio="none"><path d="M0 10 Q4 3 8 10 T16 10 T24 10 T32 10 T40 10 T48 10 T56 10 T64 10 T72 10 T80 10 T88 10 T96 10 T100 10"/></svg></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 播放头放在 .scroll 层，跨标尺与轨道 -->
+      <div class="playhead" style="left:196px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 刻度：每秒一根，整 5 秒标数字（剪映风：10px、rgba(255,255,255,.2)）
+(function(){
+  const ruler = document.getElementById('ruler');
+  const PPS = 40;                     // 每秒钟像素（缩放后）
+  const width = ruler.clientWidth || 1000;
+  const seconds = Math.ceil(width / PPS);
+  const frag = document.createDocumentFragment();
+  for (let s = 0; s <= seconds; s++) {
+    const major = s % 5 === 0;
+    const tick = document.createElement('div');
+    tick.className = 'tick ' + (major ? 'major' : 'minor');
+    tick.style.left = (s * PPS) + 'px';
+    frag.appendChild(tick);
+    if (major) {
+      const lab = document.createElement('div');
+      lab.className = 'lab';
+      lab.style.left = (s * PPS) + 'px';
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      lab.textContent = mm + ':' + ss;
+      frag.appendChild(lab);
+    }
+  }
+  ruler.appendChild(frag);
+})();
+</script>
+</body>
+</html>

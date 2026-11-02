@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>fengguang skill 能力状态与前后对比（v0.1 → v0.2.6）</title>
+<style>
+  :root{--ink:#1c1b19;--muted:#6b6862;--line:#e6e2da;--bg:#faf8f4;--old:#b4452f;--new:#2f6b4f;--card:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 80px}
+  h1{font-size:30px;line-height:1.3;margin:0 0 8px}
+  .sub{color:var(--muted);margin:0 0 28px}
+  h2{font-size:20px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .lead{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--new);padding:16px 20px;border-radius:6px}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:15px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#f2efe8}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0}
+  .kpi div{flex:1 1 200px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .kpi b{display:block;font-size:26px;line-height:1.2}
+  .kpi span{color:var(--muted);font-size:13px}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .box h3{margin:0 0 8px;font-size:15px}
+  .old h3{color:var(--old)} .new h3{color:var(--new)}
+  .box pre{white-space:pre-wrap;word-break:break-word;margin:0;font:14px/1.8 "SFMono-Regular",Consolas,monospace}
+  .why{background:#fbf7ee;border:1px dashed #d9cfb8;border-radius:6px;padding:10px 14px;margin:0 0 26px;font-size:14px}
+  .why li{margin:4px 0}
+  .tag{display:inline-block;font-size:12px;padding:1px 7px;border-radius:10px;margin-right:6px;background:#eee}
+  .ok{color:var(--new);font-weight:600} .no{color:var(--old);font-weight:600}
+  small{color:var(--muted)}
+  @media(max-width:760px){.pair{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>fengguang skill：现在到哪一步了</h1>
+<p class="sub">v0.1（2026-10-20）→ v0.2.6（2026-10-30）· 同一批需求的前后对照 · 不开生成也能看</p>
+
+<div class="lead">
+  <b>一句话结论：</b>写作质量本身提升有限（v0.1 已经能写“好看”的提示词），
+  v0.2.6 提升的是<b>可靠性</b>——极光颜色不再写成紫雾、运镜不再出双轴、阴天有光向、能只改一个维度、能管 5 段连续性，
+  并且有 3 套可复跑的盲测门禁。文本侧到“可回归”，画面侧还没验证。
+</div>
+
+<h2>1. 能力矩阵：多出来的不是形容词，是能力</h2>
+<table>
+  <tr><th style="width:22%">能力</th><th style="width:39%">v0.1</th><th style="width:39%">v0.2.6</th></tr>
+  <tr><td>写单条提示词</td><td>三判据 + 七段 + 两档 + 三色板</td><td>+ 机位族→焦段池、光线表扩到 13 档、纹理特写第 6 条</td></tr>
+  <tr><td>极光</td><td>笼统“帘幕、绿/紫”</td><td>四型（帘幕/弧/贴地/冠冕）+ 氧原子绿规则 + 光位按型分池</td></tr>
+  <tr><td>改一条已有词</td><td class="no">没有</td><td>§十七 单维度改写 + 3 张“可改/不许”表 + 光依赖 N/A</td></tr>
+  <tr><td>多段连续性</td><td class="no">没有</td><td>§十八 运镜轮换、静机位不配摇臂、光位时序、首尾循环</td></tr>
+  <tr><td>片源筛选</td><td class="no">没有</td><td>真/净/耐三关 + 五个屏保杀手 + 22 条案例 + 30 秒验证法</td></tr>
+  <tr><td>语料反拆</td><td class="no">没有</td><td>17 字段 schema + 校验器 + 50 行语料 / 129 变体</td></tr>
+  <tr><td>质量门禁</td><td class="no">没有</td><td>A/B 27:6 · 模糊 30:16 · 多段 PASS，三套可复跑</td></tr>
+  <tr><td>词库</td><td>50 条日常词→专名</td><td>+ 35 条材质级专名（狭缝峡谷、风蚀垄脊、蓝冰裂纹…）</td></tr>
+</table>
+
+<h2>2. 同一需求，前后各写一条</h2>
+<p><small>左=旧规则（app 里 v0.1 的 rules 原文），右=当前 v0.2.6。两边都是完整可投喂提示词。</small></p>
+
+<div class="pair">
+  <div class="box old"><h3>旧版 · c1 冰岛极光</h3><pre>绿色极光帘幕自天顶垂落，边缘泛淡紫，长曝拖尾拉出垂直光带。前景海岸玄武岩与苔原剪影压住下缘，远处小镇灯火极小、偏右下角作尺度参照。固定机位，24mm 广角，地平线压在下三分之一。光源为天顶极光本体，冷绿主调，暖色只剩地平线一线。海上薄雾浮动，空气潮湿。亮度压至 80，暗部约 27%，高光受控、天空不过曝，轻微颗粒。画面停在帘幕与海岸线交接处，无新元素进入。</pre></div>
+  <div class="box new"><h3>新版 · c1 冰岛极光</h3><pre>冰岛黑沙滩海岸，一整片氧绿极光帘幕从头顶垂到海平线，竖直光柱缓慢起伏，远处小镇只余几点暖黄灯火。碎浪在黑沙上反复推铺。海岸低机位 14mm 极慢前推，前景压一角玄武岩。无月夜，绿光自上落下，湿沙与海面映出微弱青绿，洋红只留在帘幕边缘。安静辽阔。暗底冷调，绿与青灰分离，暖点只有那几点灯，高光受控、天空不过曝。画面停在帘幕与灯火之间，无新元素进入。</pre></div>
+</div>
+<div class="why"><b>差在哪：</b>
+  <li><b>颜色规则</b>：旧版“边缘泛淡紫”——正是 skill 失败表里的“紫雾/紫边”风险；新版“氧绿为主、洋红只留在边缘”。</li>
+  <li><b>参数 vs 画面</b>：旧版把“亮度 80、暗部 27%”写进提示词，模型不认这些数；新版换成“暗底冷调、绿与青灰分离”。</li>
+  <li><b>机位焦段</b>：旧版 24mm 固定机位，新版低机位 14mm 极慢前推——按机位族选焦段，且只一条运动轴。</li>
+</div>
+
+<div class="pair">
+  <div class="box old"><h3>旧版 · c2 丹霞</h3><pre>丹霞赤壁与层理状红色砂砾岩峰丛自低雾中露出，雾沿脊线切齐。航拍斜俯，极慢推进，24mm。日出侧逆光，光源在画面右后方，峰顶受光发亮、山体沉入暗面，冷蓝天光与暖红岩体对撞。薄雾贴脊流动，空气通透。亮度 105，饱和 0.30，高光受控、天空不过曝，对比略收、细颗粒。峰丛居中偏左，负空间 40%，一条脊线斜切画面。画面停在最远一道峰丛与雾层交界，无新元素进入。</pre></div>
+  <div class="box new"><h3>新版 · c2 丹霞</h3><pre>丹霞峰丛从低雾里一层层露出来，赤壁的层理被雾切成上下两截，云顶被照亮、山体仍暗。低雾沿谷地缓慢漫过峰腰。航拍中位 35mm 极慢推进，机头不带俯冲。日出后十分钟的侧逆光从右后方斜切，雾顶镶暖边，峰体留在冷暗里。清冷而克制。暖浓偏收敛，赭红只在受光边缘，暗部保留层理，高光受控、云顶不过曝。画面停在雾与峰脊交界，无新元素进入。</pre></div>
+</div>
+<div class="why"><b>差在哪：</b>
+  <li>旧版同样把“亮度 105、饱和 0.30”写进画面描述；新版只留“暖浓偏收敛”。</li>
+  <li>新版补了“航拍中位 35mm，机头不带俯冲”——把“别双轴”写死在句子里，旧版只靠“极慢推进”约束。</li>
+</div>
+
+<div class="pair">
+  <div class="box old"><h3>旧版 · c3 沙漠孤独感</h3><pre>沙丘迎风坡的风纹自画面前景斜向深处，一道脊线切成明暗两半。只有风在动，沙粒顺脊背薄薄滑落。固定机位，85mm 长焦压缩，地平线落在上三分之一。日落后的低角度暖光从左侧掠来，阳面泛金、背风滑落面沉成冷紫。空气干燥，热浪轻微。亮度 110，饱和 0.28，高光受控、天空不过曝，细颗粒、低对比。负空间 60%，无尺度点景。画面停在沙脊消失于暗部处，没有新元素进入。</pre></div>
+  <div class="box new"><h3>新版 · c3 沙漠孤独感</h3><pre>一道沙丘脊线斜切过画面，迎风坡刻满细密风纹，背风面滑落成一片干净的暗面，四周没有任何足迹与草木。细沙被风从脊线扬起，贴着坡面缓慢横移。400mm 长焦静态机位，压缩脊线的弧度。日落前极低侧光，亮面暖金、暗面沉进冷蓝，明暗交界锋利如刃。孤独到近乎空。近似单色的暖调，只留一个主色，细腻颗粒，高光受控、天空不过曝。画面停在空荡的脊线上，除了沙什么都不动，没有新元素进入。</pre></div>
+</div>
+<div class="why"><b>差在哪：</b>
+  <li>旧版“阳面泛金、背风面沉成冷紫”——紫调阴影是极光/月光题材之外的另一个惯性；新版“暗面沉进冷蓝”。</li>
+  <li>新版把“孤独”落到可拍的东西：没有足迹、没有草木、只有沙；旧版靠“负空间 60%”这种参数表达。</li>
+</div>
+
+<div class="pair">
+  <div class="box old"><h3>旧版 · c4 瀑布清凉</h3><pre>帘状跌水从玄武岩崖壁整幅垂落，水线细密，砸入潭面激起白雾。水雾从潭面浮起漫过岩壁，苔藓与湿石压住前景一角。极慢推进，35mm，地平线在画面下三分之一。阴天散射光自上方均布，冷青主调，岩壁暗部偏蓝绿。空气潮湿冰凉，可见细小水珠。亮度 105，饱和 0.26，高光受控、水花不死白，低对比、细颗粒。画面停在水雾漫过瀑口处，没有新元素进入。</pre></div>
+  <div class="box new"><h3>新版 · c4 瀑布清凉</h3><pre>峡谷深处的多级跌水瀑布，水帘从苔藓覆盖的岩阶上一层层砸下，湿岩发黑，水雾贴着潭面浮起。水雾缓慢上升、被风带偏。贴壁 24mm 极慢横移，前景压一角湿苔石。阴天散射，天光从谷口上方落下，岩壁与水面都无硬影。清凉、湿润、安静。极冷极淡，青灰与苔绿为主，水沫高光受控、不炸成纯白。画面停在瀑布与潭面的雾里，无新元素进入。</pre></div>
+</div>
+<div class="why"><b>差在哪：</b>
+  <li>旧版“阴天散射光自上方均布”——没有方向，等于没写光位；新版“天光从谷口上方落下”（§八 新规则：阴天必须补光从哪来）。</li>
+  <li>旧版“极慢推进 35mm”是地面平视；新版“贴壁 24mm 极慢横移”，机位族与焦段匹配，且只一条轴。</li>
+</div>
+
+<h2>3. 可复跑的硬指标</h2>
+<div class="kpi">
+  <div><b>27 : 6</b><span>A/B 盲测（8 条口语，满分 27）· 有 skill vs 无 skill</span></div>
+  <div><b>30 : 16</b><span>模糊需求（6 条空词，满分 30）· 对照组还写了 4 处 4K/8K</span></div>
+  <div><b>PASS</b><span>多段连续性：4 种运镜、5/5 单轴/高光/锁句、首尾同色系同运镜</span></div>
+  <div><b>0 error</b><span>语料 50 行 / 129 变体差分校验；51 条 warning 全是推断/隔离标记</span></div>
+</div>
+
+<h2>4. 现在能做什么、还不能做什么</h2>
+<table>
+  <tr><th style="width:50%">能做（已验证）</th><th>还不能 / 未验证</th></tr>
+  <tr>
+    <td>
+      <li>一句口语 → 七段可投喂提示词</li>
+      <li>只改一个维度（运镜/光/焦段），主体句与锁句不动</li>
+      <li>5 段连续镜头不串味、首尾可循环</li>
+      <li>判断一条 B 站片源能不能当屏保（三关）</li>
+      <li>把核验过的画面反拆成 17 字段语料</li>
+      <li>改规则后跑三套门禁防退化</li>
+    </td>
+    <td>
+      <li><b>生成画面未验证</b>：前端还没起来，所有结论都停在文本侧</li>
+      <li>30 分钟长片只做了 5 段代理，镜头配比与节奏仍需人工看片</li>
+      <li>极光冠冕仍 0 条真实 4K 样本（等授权）</li>
+      <li>城市题材 0 条；沙丘/瀑布纹理仍偏少</li>
+      <li>盲测是单模型评判，绝对值会偏高，只看有/无 skill 的差</li>
+    </td>
+  </tr>
+</table>
+
+<p style="margin-top:36px"><small>生成方式：旧版 4 条用 app 里 v0.1 规则原文（git origin/main:data/skill-fengguang.rules.md）驱动；新版用当前 SKILL.md v0.2.6 驱动；同题、同字数区间、各自由独立 agent 写，未参照彼此。文件：<code>docs/spec/fengguang-能力对比-20261030.html</code></small></p>
+
+</div>
+</body>
+</html>
