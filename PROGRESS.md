@@ -15,7 +15,7 @@
 | 门禁 | `verify-all.js` 在本机 `spawn EPERM`，只能逐个套件跑 |
 | 测试基线（2026-11-02 13:28–13:47） | 17 个注册套件 / 660 条断言 / **644 通过、16 失败**；15 绿、2 红 |
 | 红灯 | `verify-auth` 11/15（`data/users.json` 残留 `tmp_negative_probe`）；`verify-loop` 28/1（断言 `qcVersion===2`，代码 `=3`） |
-| 数据库 | `.env` 为 `DATABASE_TYPE=postgres`，**不可达**（测试打印 `timeout exceeded`） |
+| 数据库 | `.env` 为 `DATABASE_TYPE=postgres`；2026-11-02 15:06 实测**库可达**（users 1 行、tasks 201 行），但批量测试仍打 `timeout exceeded`，持久化断言只覆盖内存/JSON 侧 |
 
 ## 本轮产出
 
@@ -26,6 +26,20 @@
 | `app/KNOWN_UNKNOWNS.md` | 新建（测绘第 6 部分的缺口，原样收录） |
 | `app/prompts/resume.md` | 新建（接手流程模板） |
 | `app/PROGRESS.md` | 重写（原调色链交接原文已保留在文末附录） |
+
+## BGM 配乐模块（2026-11-02 15:20–15:35，commits `ad77b54` / `6ee1b50`）
+
+已完成：
+- **P0-1 三个红脚本跑绿**：`node scripts/verify-bgm-suite.js` → 3/3（隔离 `DATA_DIR`/`OUTPUT_DIR`，起独立服务；不碰正式成片，实测 mtime 仍 10/19）。
+- **P0-3 闪避**：`config.BGM.ducking`（sidechaincompress），默认关；`verify-bgm-ducking.js` 11/0。
+- **P0-2 响度**：`config.BGM.loudness` 默认 **-16 LUFS**（任务 `bgm.volume` 优先；`BGM_LOUDNESS` 可覆盖）。实测 -16 比 -20 高约 4dB（mean -19.0 vs -22.9）。
+- **P1-4 上传**：base64 落盘通道可用；body 解析移到登录墙之后，`POST /api/bgm` 放宽到 64MB，其余接口仍 100KB；273KB 上传实测成功。
+- **P1-5 UI**：新版 `/app/bgm`、`/app/bgm/:id`；时间轴拖拽移动 + 左右裁剪 32/32（Chrome/REA 真机，3011 隔离实例）。
+- **P2-7 门禁**：`verify-all.js` 注册套件 17 → 23（新增 6 个 bgm）。
+
+未完成：
+- P2-9 预览=导出自动断言；上传 UI；关键帧编辑（本轮判定暂不加）；30 分钟长片/人工视觉。
+- 本机门禁仍 `spawn EPERM`，只能逐个套件跑。
 
 ## 已确认的产品决策（2026-11-02 15:0x）
 

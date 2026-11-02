@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **37**（36 个套件 + `verify-all.js`） |
-| 门禁注册 | **17**（`verify-all.js:22-125`；运行时首行打印「共 17 个脚本」） |
-| 未注册 | **19**（含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-bgm-*`×5、`verify-adjust-*`×2） |
+| `scripts/verify-*.js` 实有 | **39**（38 个套件 + `verify-all.js`） |
+| 门禁注册 | **23**（`verify-all.js:22-151`；运行时首行打印「共 23 个脚本」） |
+| 未注册 | **15**（38 个套件 − 23 注册；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
 
 ### 2.4 本机限制（重要）
 
