@@ -231,6 +231,15 @@ class TaskManager {
       }
       : null;
 
+    // 剪映「调节」复刻（2026-10-31）：双开关 —— 全局 ADJUST_ENABLED 打开 **且** 任务带 adjust 才生效。
+    // normalizeParams 负责白名单 + 范围钳制 + 丢弃非法值（防注入串进入 ffmpeg 滤镜）。
+    // 存 null 表示「没有调节」，与 JSON 序列化后缺字段等价。
+    let adjustOption = null;
+    if (config.ADJUST && config.ADJUST.enabled && options.adjust && typeof options.adjust === 'object') {
+      // 延迟 require：避免与 pipeline/processors 形成加载环
+      adjustOption = require('./processors/adjustChain').normalizeParams(options.adjust) || null;
+    }
+
     // 互斥组合：校色只在「转场开启」的重编码路径里做。
     // 要了校色却把转场关掉 → 不静默改成"没要求"，而是记一条 note 让原因可见；
     // 终检会据实际留痕报「校色未执行」并判不通过（AGENTS §4.1）。
@@ -272,6 +281,8 @@ class TaskManager {
       transition: transitionOption,
       // 拼接校色：{ enabled, maxGain } 或 null（null = 用 .env 全局，默认关）
       colorMatch: colorMatchOption,
+      // 剪映「调节」参数：规范化后的对象，或 null（null = 不调节）
+      adjust: adjustOption,
       currentStep: 'created',
       currentStepKey: null,
       outputPath: null,

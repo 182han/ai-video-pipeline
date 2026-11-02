@@ -335,6 +335,19 @@ module.exports = {
     type: env('TRANSITION_TYPE', 'fade')
   },
 
+  // ===== 剪映「调节」复刻（默认关闭）=====
+  // 只有 ADJUST_ENABLED=true 且任务带 adjust 参数时才生效；否则行为与改动前完全一致。
+  // 算法与对照验证见 docs/spec/re-jianying/jy-adjust.md
+  ADJUST: {
+    enabled: /^(1|true|yes)$/i.test(String(env('ADJUST_ENABLED', 'false')).trim()),
+    // LUT 资源目录（光感/褪色需要内置 LUT）
+    lutDir: require('path').join(__dirname, 'assets', 'adjust'),
+    // cube 缓存目录（按参数哈希命名，运行时产物，不入库）
+    cubeDir: env('ADJUST_CUBE_DIR', require('path').join(__dirname, 'data', 'adjust')),
+    // 缓存过期小时数；0 表示不清理（复用 seamNum 的数字校验逻辑）
+    cubeMaxAgeHours: seamNum('ADJUST_CUBE_MAX_AGE_HOURS', 24, 0, 24 * 30)
+  },
+
   // ===== 存储配置 =====
   STORAGE: {
     // 本地存储路径

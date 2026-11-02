@@ -122,6 +122,7 @@ class Pipeline {
       taskManager.updateTaskStatus(taskId, 'failed', { error: err.message });
     }).finally(() => {
       this.runningTasks.delete(taskId);
+      this.pausedTasks.delete(taskId);  // 任务结束，清掉暂停标记
     });
 
     return { success: true, taskId, index, message: `正在重新生成片段 ${index + 1}` };
@@ -302,7 +303,7 @@ class Pipeline {
     const transcodeResult = await videoProcessor.transcode(
       loopResult.success ? loopPath : concatPath,
       finalPath,
-      { resolution: task.resolution, fps: 30 }
+      { resolution: task.resolution, fps: 30, ...this._adjustOptionsFor(task) }
     );
 
     if (!transcodeResult.success) {
@@ -603,12 +604,39 @@ class Pipeline {
     console.warn(`[${taskId}] ⚠️ 所选模型 ${requested} 未配置 API Key，本次实际为 Mock 合成画面`);
   }
 
+  // ===== 剪映「调节」复刻（2026-10-31）=====
+  //
+  // 返回可直接塞进 ffmpeg -vf 的滤镜串；没有调节 / 全局关闭 / 参数非法 → 返回 ''。
+  // 调用方把它作为 transcode 的 options.adjustFilter 传下去，**只作用一次**（在产出
+  // master/final 的那一步转码里），不会在后续 -c:v copy 的步骤里重复叠加。
+  // 失败时**降级为不调节并打日志**，绝不静默把失败当成成功（AGENTS §4.1 的语义精神）。
+  _adjustOptionsFor(task) {
+    if (!config.ADJUST || !config.ADJUST.enabled) return {};
+    const params = task && task.adjust;
+    if (!params || typeof params !== 'object') return {};
+    try {
+      const adjust = require('./processors/adjustChain');
+      if (!adjust.hasAdjust(params)) return {};
+      const r = adjust.prepareAdjust(params, {
+        cubeDir: config.ADJUST.cubeDir,
+        lutDir: config.ADJUST.lutDir,
+        ffmpegPath: config.FFMPEG_PATH
+      });
+      if (!r || !r.filter) return {};
+      task.adjustApplied = { filter: r.filter, cubePath: r.cubePath || null };
+      console.log(`[${task.taskId}] 调节滤镜: ${r.filter}`);
+      return { adjustFilter: r.filter, adjustCwd: require('path').dirname(r.cubePath) };
+    } catch (e) {
+      console.warn(`[${task && task.taskId}] 调节滤镜生成失败，已降级为不调节: ${e.message}`);
+      return {};
+    }
+  }
+
   // ===== 片段间转场：解析任务级覆盖 + 全局默认 =====
   //
   // 只决定「接缝要不要做交叉淡化」，不影响档位/片段数量。
   // enabled=false 时调用方必须走原来的 concatenate（硬切），保证默认行为零变化。
-  _transitionOptions(task) {
-    const global = (config.TRANSITIONS && typeof config.TRANSITIONS === 'object') ? config.TRANSITIONS : {};
+  _transitionOptions(task) {    const global = (config.TRANSITIONS && typeof config.TRANSITIONS === 'object') ? config.TRANSITIONS : {};
     const t = (task && task.transition && typeof task.transition === 'object') ? task.transition : {};
     const enabled = typeof t.enabled === 'boolean' ? t.enabled : !!global.enabled;
     const duration = Number.isFinite(Number(t.duration)) && Number(t.duration) > 0
@@ -779,7 +807,7 @@ class Pipeline {
       return { success: false, error: '母版循环处理失败: ' + (loopResult.error || '未知原因') };
     }
 
-    const tr = await videoProcessor.transcode(loopTmp, master, { resolution: task.resolution, fps: 30 });
+    const tr = await videoProcessor.transcode(loopTmp, master, { resolution: task.resolution, fps: 30, ...this._adjustOptionsFor(task) });
     cleanup();
     if (!tr.success) return { success: false, error: '母版转码失败: ' + tr.error };
     const info = videoProcessor.getVideoInfo(master);
@@ -1120,7 +1148,14 @@ class Pipeline {
   // 标记为 failed 而不是 completed：产物可能不完整，不能冒充成功（§4.1 同理）。
   // 但保留已完成步骤信息 + 明确提示可「补跑」，用户不用从头再来。
   async reconcileInterruptedTasks() {
-    const IN_PROGRESS = ['pending', 'generating', 'concatenating', 'looping', 'transcoding', 'mixing'];
+    // 2026-10-31：补入 paused / regenerating / processing / optimizing。
+    // 这 4 个状态以前不在白名单里，于是「暂停中重启」的任务会永远停在 paused：
+    // pausedTasks 是内存 Set（重启即空），点「继续」必然得到「任务未处于暂停状态」，
+    // 用户没有任何出口（见 docs/spec/pause-decision.md §4.1 的降级方案）。
+    // paused 会被专门标注 failureCode='pause_interrupted'，前端据此区分
+    // 「暂停被重启打断」与普通生成失败；其余三个是同类的历史中间态，一并回收。
+    const IN_PROGRESS = ['pending', 'generating', 'concatenating', 'looping', 'transcoding', 'mixing',
+      'paused', 'regenerating', 'processing', 'optimizing'];
     // 合并两个来源：内存（一定有最新状态）+ 数据库（历史全量）。
     // 只读数据库会漏掉「刚创建、异步写库还没落盘」的任务（实测出现竞态）；
     // 只读内存则会漏掉「服务重启后尚未载入」的任务。两者合并才完整。
@@ -1143,13 +1178,22 @@ class Pipeline {
         .filter(([, v]) => v && v.status === 'completed')
         .map(([k]) => k);
       const prev = t.status;
+      const wasPaused = prev === 'paused';
+      if (wasPaused) this.pausedTasks.delete(t.taskId);  // 清掉可能残留的内存标记
       taskManager.updateTaskStatus(t.taskId, 'failed', {
-        error: `服务进程中断导致流水线停止（中断时状态：${prev}）。`
-          + `已完成步骤：${done.length ? done.join('、') : '无'}。`
-          + '可直接点「补跑」从断点继续，已生成的片段不会重新生成。',
+        // 暂停中的任务不能"恢复"（内存 worker 已随进程消失），但必须给出明确出口：
+        // 标 failed + failureCode='pause_interrupted'，文案指向「补跑」。
+        error: wasPaused
+          ? '暂停期间服务被重启，任务已中止（不会自动继续）。'
+            + `已完成步骤：${done.length ? done.join('、') : '无'}。`
+            + '已生成的片段保留，可点「补跑」从断点继续（不会重新生成已完成的片段）。'
+          : `服务进程中断导致流水线停止（中断时状态：${prev}）。`
+            + `已完成步骤：${done.length ? done.join('、') : '无'}。`
+            + '可直接点「补跑」从断点继续，已生成的片段不会重新生成。',
         interruptedFrom: prev,
         interruptedAt: new Date().toISOString(),
-        recoverable: done.length > 0
+        recoverable: wasPaused || done.length > 0,
+        ...(wasPaused ? { failureCode: 'pause_interrupted' } : {})
       });
       recovered.push({ taskId: t.taskId, from: prev, completedSteps: done.length });
     }
@@ -1182,6 +1226,10 @@ class Pipeline {
       taskManager.updateTaskStatus(taskId, 'failed', { error: err.message });
     }).finally(() => {
       this.runningTasks.delete(taskId);
+      // 任务结束必须清掉暂停标记：
+      // 否则「在拼接/转码阶段按了暂停（无检查点）」的任务跑完后会残留 isPaused=true，
+      // 下一次同 id 任务或状态查询会读到错误的暂停态。
+      this.pausedTasks.delete(taskId);
     });
 
     return { success: true, taskId, message: '任务已启动' };
@@ -1330,6 +1378,13 @@ class Pipeline {
     this._markMockFallback(taskId, task, generator);
 
     const batchInfo = await this._batchGenerate(taskId, generator);
+    if (batchInfo && batchInfo.aborted) {
+      // 硬中止（暂停超时）：状态已由 _waitIfPaused 写成 failed + failureCode='pause_timeout'。
+      // 这里必须立刻结束流水线，否则下游步骤会把 paused/failed 覆盖成 concatenating，
+      // 用户看到「暂停后自己跑完了，而且还少了几段」（pause-decision §4.2）。
+      console.warn(`[${taskId}] ⏸ 暂停超时已中止流水线：不再继续拼接/循环/配乐（failureCode=pause_timeout）`);
+      return { success: false, aborted: true, failureCode: 'pause_timeout' };
+    }
 
     // 补跑复用的片段（以及任何已成功但库里没档案的片段）补入库。
     // 入库原先只挂在「生成成功」和「重检转成功」两条路径上，复用路径从不入库。
@@ -1665,7 +1720,7 @@ class Pipeline {
       const transcodeResult = await videoProcessor.transcode(
         videoForNext,
         masterPath,
-        { resolution: task.resolution, fps: 30 }
+        { resolution: task.resolution, fps: 30, ...this._adjustOptionsFor(task) }
       );
 
       if (!transcodeResult.success) {
@@ -1787,10 +1842,24 @@ class Pipeline {
   // ===== 暂停 / 继续 =====
   // 粒度：只在「取下一个片段之前」检查，正在生成中的片段会正常跑完再停。
   // 这样不会中断已经发出去的生成请求（那会白花一次调用）。
+  //
+  // 已知限制（不实现，见 pause-decision §4.3）：拼接/循环/转码/配乐阶段没有检查点，
+  // 这些阶段按暂停只会改状态字符串，不会真的停住 ffmpeg。
+  //
+  // 暂停上限：PAUSE_MAX_WAIT_MS（默认 30 分钟）。超时不再静默 `return false`，
+  // 而是「日志 + 状态显式转 failed + failureCode='pause_timeout' + 中止流水线」，
+  // 让前端能把「暂停超时」和普通生成失败区分开（pause-decision §4.2）。
+  _pauseMaxWaitMs() {
+    const raw = Number(process.env.PAUSE_MAX_WAIT_MS);
+    if (Number.isFinite(raw) && raw > 0) return raw;
+    return 30 * 60 * 1000;
+  }
+
   pauseTask(taskId) {
     const task = taskManager.getTask(taskId);
     if (!task) return { success: false, error: '任务不存在' };
     if (!this.runningTasks.has(taskId)) return { success: false, error: '任务未在运行' };
+    // 幂等：重复 pause 返回 200 + 当前状态，不报错
     if (this.pausedTasks.has(taskId)) return { success: true, alreadyPaused: true };
     this.pausedTasks.add(taskId);
     taskManager.updateTaskStatus(taskId, 'paused', { currentStep: '已暂停' });
@@ -1812,13 +1881,29 @@ class Pipeline {
     return this.pausedTasks.has(taskId);
   }
 
-  // 等待恢复；超时或任务已从运行集合移除（被取消/结束）时返回 false
-  async _waitIfPaused(taskId, maxWaitMs = 30 * 60 * 1000) {
+  // 等待恢复；返回 true=继续执行，false=不要继续（任务已结束 / 暂停超时被中止）
+  async _waitIfPaused(taskId, maxWaitMs = this._pauseMaxWaitMs()) {
     if (!this.pausedTasks.has(taskId)) return true;
     const start = Date.now();
     while (this.pausedTasks.has(taskId)) {
       if (!this.runningTasks.has(taskId)) return false;  // 任务已结束/取消
-      if (Date.now() - start > maxWaitMs) return false;
+      if (Date.now() - start > maxWaitMs) {
+        // 不允许静默吞掉：日志 + 状态变更 + 可区分的 failureCode
+        const limitText = maxWaitMs >= 60000
+          ? `${Math.round(maxWaitMs / 60000)} 分钟`
+          : `${Math.max(1, Math.round(maxWaitMs / 1000))} 秒`;
+        console.error(`[${taskId}] ⏸ 暂停等待超过 ${limitText}（PAUSE_MAX_WAIT_MS=${maxWaitMs}），中止任务：不再生成后续片段。`);
+        this.pausedTasks.delete(taskId);
+        taskManager.updateTaskStatus(taskId, 'failed', {
+          error: `暂停等待超过 ${limitText}，已中止任务（未继续生成后续片段）。`
+            + '已完成的片段保留，可点「补跑」从断点继续。'
+            + '（这是暂停超时，不是生成失败。）',
+          failureCode: 'pause_timeout',
+          pauseTimedOutAt: new Date().toISOString(),
+          recoverable: true
+        });
+        return false;
+      }
       await this._sleep(500);
     }
     return true;
@@ -1853,34 +1938,49 @@ class Pipeline {
     let generated = 0;
 
     return new Promise((resolve) => {
+      // 说明：旧实现在 worker 里提前 `return` 时不会执行 `activeWorkers--`，
+      // 若所有 worker 都因暂停/取消提前返回，Promise 永远不会 resolve，流水线会永久挂住。
+      // 现在用 try/finally 保证「每个 worker 只减一次、最后一个负责 resolve」。
       const startWorker = async () => {
-        while (currentIndex < total) {
-          // 暂停检查点：在取下一个片段之前拦住。
-          // 放在 currentIndex++ 之前，保证暂停不会跳号丢弃片段。
-          if (this.pausedTasks.has(taskId)) {
-            const stillRunning = await this._waitIfPaused(taskId);
-            if (!stillRunning) return;  // 任务已结束/取消
-          }
-          if (!this.runningTasks.has(taskId)) return;  // 已被取消
-          const index = currentIndex++;
-          if (reusable.has(index)) {
-            // 该片段已成功且文件在，跳过生成（补跑场景）
-            skippedReused++;
-            continue;
-          }
-          await this._processSingleClip(taskId, index, generator);
-          generated++;
+        try {
+          while (currentIndex < total) {
+            // 暂停检查点：在取下一个片段之前拦住。
+            // 放在 currentIndex++ 之前，保证暂停不会跳号丢弃片段。
+            if (this.pausedTasks.has(taskId)) {
+              const stillRunning = await this._waitIfPaused(taskId);
+              if (!stillRunning) return;  // 任务已结束/取消，或暂停超时被中止
+            }
+            // 暂停超时会把任务标 failed 并清掉 pausedTasks；
+            // 必须按任务状态再拦一次，否则其它 worker 会以为"已恢复"继续生成。
+            const cur = taskManager.getTask(taskId);
+            if (!cur || cur.status === 'failed' || cur.status === 'cancelled') return;
+            if (!this.runningTasks.has(taskId)) return;  // 已被取消
+            const index = currentIndex++;
+            if (reusable.has(index)) {
+              // 该片段已成功且文件在，跳过生成（补跑场景）
+              skippedReused++;
+              continue;
+            }
+            await this._processSingleClip(taskId, index, generator);
+            generated++;
 
-          const prog = taskManager.getProgress(taskId);
-          if (!prog) return; // 任务已删除，退出当前 worker
-          if (prog.success + prog.failed >= total) {
-            break;
+            const prog = taskManager.getProgress(taskId);
+            if (!prog) return; // 任务已删除，退出当前 worker
+            if (prog.success + prog.failed >= total) {
+              break;
+            }
           }
-        }
-
-        activeWorkers--;
-        if (activeWorkers === 0) {
-          resolve({ reused: skippedReused, generated });
+        } finally {
+          activeWorkers--;
+          if (activeWorkers === 0) {
+            const finalTask = taskManager.getTask(taskId);
+            resolve({
+              reused: skippedReused,
+              generated,
+              // aborted=true：任务已被硬中止（目前只有暂停超时），上层必须停止流水线
+              aborted: !!(finalTask && finalTask.status === 'failed')
+            });
+          }
         }
       };
 

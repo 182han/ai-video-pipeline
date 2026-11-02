@@ -1295,7 +1295,12 @@ app.get('/api/tasks', (req, res) => {
       qcVersion: annotated.qcVersion,
       qcTrusted: annotated.qcTrusted,
       preset: t.preset,
-      fragmentOnly: t.fragmentOnly || false
+      fragmentOnly: t.fragmentOnly || false,
+      // 失败原因分类：前端据此把「暂停超时 / 暂停被重启打断」与普通失败分开显示。
+      // 取值见 docs/spec/pause-capability-spec.md §4：
+      //   pause_timeout / pause_interrupted / null（普通失败或无失败）
+      failureCode: t.failureCode || null,
+      recoverable: !!t.recoverable
     };
   }));
 });
@@ -1582,15 +1587,21 @@ app.post('/api/assemble', (req, res) => {
 
 // ===== 暂停 / 继续（仅片段生成阶段有效）=====
 // 注意：已有 /api/tasks/:id/resume 的语义是「用已成功片段继续」，与暂停无关，故此处用 pause/unpause
+// 状态码口径（docs/spec/pause-decision.md §3）：
+//   404 = 任务不存在；400 = 任务存在但未在运行 / 未处于暂停状态；重复 pause 幂等返回 200。
+// 暂停超时/重启回收的失败用 task.failureCode 区分（pause_timeout / pause_interrupted），
+// 不占用 HTTP 状态码。
+const pauseErrorStatus = (result) => (result.error === '任务不存在' ? 404 : 400);
+
 app.post('/api/tasks/:id/pause', (req, res) => {
   const result = pipeline.pauseTask(req.params.id);
-  if (!result.success) return res.status(400).json(result);
+  if (!result.success) return res.status(pauseErrorStatus(result)).json(result);
   res.json(result);
 });
 
 app.post('/api/tasks/:id/unpause', (req, res) => {
   const result = pipeline.resumeTask(req.params.id);
-  if (!result.success) return res.status(400).json(result);
+  if (!result.success) return res.status(pauseErrorStatus(result)).json(result);
   res.json(result);
 });
 

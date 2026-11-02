@@ -65,3 +65,6 @@ Thumbs.db
 .idea/
 .vscode/
 data/keep/
+
+# 剪映调节复刻的 cube 缓存（运行时产物）
+data/adjust/

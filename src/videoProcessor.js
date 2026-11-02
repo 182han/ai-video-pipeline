@@ -41,16 +41,18 @@ class VideoProcessor {
   // 执行只关心成功/失败的 ffmpeg 命令。
   // 本环境（DSH 沙箱）里 execSync 带 stdio:'pipe' 会 spawn EPERM（与 AGENTS.md §2.3 一致），
   // 降级为 stdio:'ignore' 重跑；生产环境第一次就能成功，行为不变。
-  _runFFmpeg(cmd) {
+  _runFFmpeg(cmd, opts = {}) {
+    // opts.cwd：调节 LUT 用相对文件名（Windows 下 lut3d 不接受绝对路径）
+    const exeOpts = opts && opts.cwd ? { cwd: opts.cwd } : {};
     try {
-      execSync(cmd, { stdio: 'pipe' });
+      execSync(cmd, Object.assign({ stdio: 'pipe' }, exeOpts));
       return { success: true };
     } catch (e) {
       if (!(e && (e.code === 'EPERM' || /EPERM|EACCES/.test(String(e.message || ''))))) {
         return { success: false, error: e.message };
       }
       try {
-        execSync(cmd, { stdio: 'ignore' });
+        execSync(cmd, Object.assign({ stdio: 'ignore' }, exeOpts));
         return { success: true, fallback: true };
       } catch (e2) {
         return { success: false, error: e2.message };
@@ -444,14 +446,19 @@ class VideoProcessor {
     const resolution = options.resolution || '720p';
     const fps = options.fps || 30;
     const codec = options.codec || 'libx264';
+    // 剪映「调节」复刻：调用方（pipeline）生成的滤镜片段，必须排在 scale/pad 之前。
+    // 未传时为空串，行为与改动前完全一致。
+    const adjustFilter = typeof options.adjustFilter === 'string' ? options.adjustFilter.trim() : '';
+    // 调节滤镜里的 LUT 用相对文件名，必须在该目录下执行 ffmpeg
+    const adjustCwd = typeof options.adjustCwd === 'string' && options.adjustCwd ? options.adjustCwd : '';
 
     if (this.hasFFmpeg) {
-      return this._transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec);
+      return this._transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec, adjustFilter, adjustCwd);
     }
     return this._mockTranscode(inputPath, outputPath, resolution, fps);
   }
 
-  _transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec) {
+  _transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec, adjustFilter = '', adjustCwd = '') {
     const sizeMap = {
       '480p': '854x480',
       '720p': '1280x720',
@@ -461,10 +468,14 @@ class VideoProcessor {
     const size = sizeMap[resolution] || '1280x720';
     const [width, height] = size.split('x');
 
-    const cmd = `"${FFMPEG_PATH}" -y -i "${inputPath}" -vf "scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2" -c:v ${codec} -crf 23 -preset medium -r ${fps} -c:a aac -b:a 128k -pix_fmt yuv420p "${outputPath}"`;
+    // 调节滤镜在前，缩放/补边在后；顺序不能反（LUT 需作用在原分辨率上）
+    const baseVf = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`;
+    const vf = adjustFilter ? `${adjustFilter},${baseVf}` : baseVf;
+
+    const cmd = `"${FFMPEG_PATH}" -y -i "${inputPath}" -vf "${vf}" -c:v ${codec} -crf 23 -preset medium -r ${fps} -c:a aac -b:a 128k -pix_fmt yuv420p "${outputPath}"`;
 
     try {
-      const run = this._runFFmpeg(cmd);
+      const run = adjustCwd ? this._runFFmpeg(cmd, { cwd: adjustCwd }) : this._runFFmpeg(cmd);
       if (!run.success) return { success: false, error: run.error };
       return { success: true, outputPath, resolution, fps };
     } catch (e) {

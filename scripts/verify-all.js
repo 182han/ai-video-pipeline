@@ -115,6 +115,12 @@ const SUITES = [
     script: 'verify-skill-ai-path.js',
     group: 'fast',
     desc: 'skill 规则是否真的随请求发给 LLM（本地 mock 服务，端到端，不花钱）'
+  },
+  {
+    name: 'pause',
+    script: 'verify-pause.js',
+    group: 'real',
+    desc: '暂停/继续（粒度 A、幂等、超时不静默、重启回收可补跑、HTTP 400/404、failureCode 三态）'
   }
 ];
 
