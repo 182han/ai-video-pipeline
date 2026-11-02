@@ -1,0 +1,161 @@
+# FEATURES — 功能清单（基线 2026-11-02，HEAD `1d3c693`）
+
+> 判定三态：**[x] 已实现且有证据** ／ **[ ] 未实现** ／ **[~] 存在但未验证**（代码有、没证据证明能用）。
+> 「证据」列优先给 commit；没有单一 commit 的，给文件/测试。测试项数字来自 2026-11-02 13:28–13:47 实测。
+> commit 只写到 7 位；`1c39bcc`/`1d3c693` 之后是当前基线。
+
+---
+
+## A. 已实现（[x]）
+
+### A1. 流水线与档位
+
+- [x] 8 步流水线编排（提示词→分镜→生成→拼接→循环→转码→配乐→终检）
+  - 证据：`src/pipeline.js`(2326 行)、`src/pipelineStages.js:22-33`；`verify-stage-pipeline.js` 37/0
+  - commit：`2e9cfe7`（档位/补跑首版，混合提交）
+- [x] 5 个档位 + 依赖校验（quick/daily/final/clips_only/custom）
+  - 证据：`src/pipelineStages.js:55-91`；`verify-stages.js` 45/0
+- [x] 补跑 continue（复用已完成步骤，片段不重生成）
+  - 证据：`POST /api/tasks/:id/continue`（`server.js:1646`）+ `GET .../continue-plan`（`:1677`）；`verify-continue.js` 19/0
+- [x] 僵尸任务重启回收
+  - 证据：`pipeline.reconcileInterruptedTasks()`；`verify-pipeline-fixes.js` 28/0
+
+### A2. 生成器
+
+- [x] 6 个可插拔生成器工厂（mock / seedance / kling / agnes / siliconflow / dashscope）
+  - 证据：`src/generators/index.js:6-45,52-61`
+- [~] 真实厂商调用
+  - 只有 Mock 走过端到端；无 Key，**真实 API 未验证**
+
+### A3. 质检（13 项，QC_VERSION=3）
+
+- [x] 13 项质检定义 + 三态语义
+  - 证据：`src/qualityChecker.js:15-34`（prompt/storyboard/blackFrame/blur/duplicate/duration/nsfw/concat/seam/colorContinuity/loop/transcode/final）、`:42` `QC_VERSION=3`
+- [x] NSFW 多模态检测（每分钟 1 帧、阈值 0.8）
+  - 证据：`checkNSFW`；`verify-nsfw.js` 47/0、`verify-nsfw-adversarial.js` 51/0（注入 fetch）
+  - commit：`9af1fb4` 起（见 changelog「NSFW 合规检测落地」）
+- [x] 接缝质量 seam（SSIM / ΔE76 / ΔY / MAD）
+  - 证据：`checkSeam`（`:440`）；`verify-seam-qc.js` **未注册、本次未跑**
+  - commit：`1c39bcc` 邻域？实际为 2026-10-27 批次（changelog 记 `32b3d69`/`7a61c1a` 为 colorContinuity）
+- [x] 镜头色彩连续性 colorContinuity（三档）
+  - 证据：`checkColorContinuity`（`:686`）；commit `32b3d69`
+- [x] 循环质检（末尾 vs 开头 SSIM）
+  - 证据：`checkLoop`（`:1037`）；`verify-loop.js` 28/1（1 条是过期断言，不是功能失败）
+- [x] Mock 模式不绕过视觉质检
+  - 证据：`verify-mock-vqc.js` 14/0
+- [x] QC 可信度标注（qcVersion / qcTrusted / qcVersionSource）
+  - 证据：`GET /api/tasks` 与 `/:id` 返回；`verify-qc-annotation.js` 31/0
+- [x] 统计口径（成功率/质检通过率）
+  - 证据：`src/stats.js`；`GET /api/stats`（`server.js:1690`）；`verify-stats.js` 42/0
+
+### A4. 视频处理
+
+- [x] 拼接（含音轨全有/全无/混合三种分派 + 时长校验）
+  - 证据：`src/videoProcessor.js` `_concatenateFFmpeg` / `_validateConcatDuration`；`verify-concat-audio.js` 17/0
+- [x] 片段间转场 xfade（默认开，0.4 s）
+  - 证据：`src/processors/transitionMixer.js`(597)、`config.js` TRANSITIONS 默认 true；`verify-transition-ui.js` 22/0
+- [x] 无缝循环（真交叉淡化）
+  - 证据：`videoProcessor._makeLoopFFmpeg`；`verify-loop.js`（同 A3）
+- [x] 转码 / 抽帧 / 探测
+  - 证据：`src/videoProcessor.js`(722)
+- [x] 拼接自动校色 colorMatch（默认关）
+  - 证据：`verify-color-match.js`（未注册、本次未跑）；commit `089c589`
+- [x] 剪映「调节」复刻（12 项 + HSL/曲线/色轮）+ 自研 33³ LUT
+  - 证据：`src/processors/adjustChain.js`(487)、`pipeline.js:618`；`verify-adjust-chain.js` 13/0、`verify-adjust-pipeline.js` 12/0（**均未注册进门禁**）
+  - commit：`1c39bcc`（接入）、`b17bbdd`（自研 LUT 替换剪映资源）
+  - **无 UI 面板**，只能经 API/CLI 触发；`.env` 默认 `ADJUST_ENABLED=false`
+
+### A5. 配乐
+
+- [x] 整片多轨配乐（plan → ffmpeg filter）
+  - 证据：`src/processors/audioMixer.js`(760)、`bgmPlan.js`(303)；`verify-bgm-plan.js` 5/5
+- [x] 波形峰值服务端生成
+  - 证据：`src/processors/waveform.js`、`GET /api/bgm/waveform/:id`（`server.js:325`）
+- [x] BGM 库存 CRUD + 偏好
+  - 证据：`server.js:303-365`
+- [~] 配乐文件上传
+  - **未实现**（见 B3）
+
+### A6. 任务与资产
+
+- [x] 任务状态机 / 步骤 / 进度 / WebSocket 推送
+  - 证据：`src/taskManager.js`(922)、`src/wsManager.js`(201) `/ws` + 4 种广播
+- [x] 暂停 / 继续（含超时、重启回收、failureCode 三态）
+  - 证据：`server.js:1596-1609`；`verify-pause.js` **71/0**；commit `1c39bcc`
+- [x] 单片段重生成 / 整任务重试 / 重检片段
+  - 证据：`server.js:1616,1622,1660`；`verify-recovery-fixes.js` 28/0（未注册）
+- [x] 片段库（入库 / 补档 / 收藏 / 跨任务复用 / 热加载）
+  - 证据：`src/library.js`(437)、`server.js:1402-1528`；`verify-library.js` 36/0；commit `238a10e`
+- [x] 垃圾箱（软删 / 恢复 / 清空）
+  - 证据：`server.js:1718-1735`
+- [x] 费用价目表
+  - 证据：`src/pricing.js`；`GET /api/pricing`（`:1397`）
+
+### A7. 提示词
+
+- [x] 提示词优化（模板 / 关键词 / 可选 AI）
+  - 证据：`src/promptOptimizer.js`(886)、`src/templates.zh.js`(321)；`POST /api/optimize-prompt`（`:885`）
+- [x] fengguang skill 规则注入（作用域 / 开关 / 全中文）
+  - 证据：`src/promptSkill.js`、`data/skill-fengguang.rules.md`；`verify-skill-prompt.js` 109/0、`verify-skill-ai-path.js` 17/0
+- [x] 提示词助手（悬浮球对话）
+  - 证据：`POST /api/assistant/chat`（`:1046`）、`web/src/components/assistant.js`
+- [x] 模板 CRUD + 规则编辑
+  - 证据：`server.js:819-880`；commit `f667d7d`（GET /api/templates）
+
+### A8. 账号与页面
+
+- [x] 登录墙（会话 cookie / 5 次锁 5 分钟 / 首账号 bootstrap / WS 握手鉴权）
+  - 证据：`src/auth.js`(355)、`server.js:73-107,112-233`；commit `497c4d3`（首建号竞态修复）
+- [x] 成员管理（增删 / 改密）
+  - 证据：`server.js:170-233`、`web/src/screens/settingsPage.js:62-155`；commit `368f096`
+- [x] 旧版前端（单文件 `public/index.html`，295,955 B / 8085 行）
+  - 最后提交 `8283549`（10-27）；**已冻结加功能**
+- [x] 新版前端外壳（深绿黑+香槟金、左侧导航）
+  - 证据：`web/src/screens/shell.js`；commit `f11b34b`
+- [x] 六步创作向导
+  - 证据：`web/src/screens/create.js:17`；commit `2637cf4`
+- [x] 生成中页 / 任务抽屉 / 顶栏任务条
+  - 证据：`web/src/screens/gen.js`、`components/taskDrawer.js`、`components/jobBar.js`；commit `8331a4d`
+- [x] 库存三页（片段 / 照片 / 配乐）
+  - 证据：`web/src/screens/inventory.js`；commit `a3c6df9`
+- [x] 历史 + 垃圾箱
+  - 证据：`web/src/screens/history.js`；commit `8c396cb`
+- [x] 模板库
+  - 证据：`web/src/screens/templates.js`；commit `4daf3e7`
+- [x] 设置整页
+  - 证据：`web/src/screens/settingsPage.js`
+- [x] 产出页
+  - 证据：`web/src/screens/output.js`
+- [x] 登录页 v3 深色稿 + 登录后默认跳 `/app`
+  - 证据：`public/login.html:516`；commit `da2b310`、`881aa42`
+  - [~] 视觉未人眼验证；兜底海报仍是白天雾山（2560×1440）
+- [x] 日志落盘（终端 + `data/logs/server-YYYY-MM-DD.log` 双写）
+  - 证据：`server.js:15-32`
+
+---
+
+## B. 未实现（按优先级）
+
+| 优先级 | 功能 | 现状 | 阻塞点 |
+|---|---|---|---|
+| **P0** | 人工审核门 `awaiting_review` | 全仓 0 命中；设计已完成（`docs/spec/review-gate-design.md` 747 行，含 ≥20 条验收用例） | **需产品先定 D1–D8**（整组/逐张、驳回回退点、超时、哪些档位、旧任务升级、图是否公网可读、图片厂商、是否留痕）；且必须先做前置① |
+| **P0** | 图片生成真实现 | `src/generators/imageGen.js` 零引用，自述「配置预留层，未接入厂商」，调用即抛错 | 需定厂商（D7）；`IMAGE_GEN_*` 配置位已在 `.env.example` |
+| **P1** | 配乐文件上传 | `POST /api/bgm` 只收 JSON 元信息；无 multipart、无 multer | 无设计文档；需定存储落点 |
+| **P1** | 审核门前置①：状态机缺陷修复 | `paused` 重启永久卡死、暂停超时静默丢弃、多个历史状态不在回收白名单 | 设计文档 §4/§15 要求先做（否则新增状态必踩同坑） |
+| **P2** | 剪映「调节」UI 面板 | 后端与 LUT 已完成，`.env` 默认关 | `app/web/**` 属 UI 写权限，**需用户授权** |
+| **P2** | 对象存储接入服务链 | `src/storage/objectStore.js` 只被 `scripts/upload-videos.js` 引用 | 服务运行时从不上传 |
+| **P2** | 里程碑目录内容 | `docs/milestones/` 存在但**空** | 归属产品 |
+| **P3** | 根文档纳入版本管理 | 根 `AGENTS.md`/`PROJECT_STATE.md`/`docs/` 在 git 外 | 需决定仓库结构 |
+
+---
+
+## C. 工程债（不是功能，但会挡住功能）
+
+| 优先级 | 事项 | 证据 |
+|---|---|---|
+| **P0** | 门禁入口不可执行（`spawn EPERM`） | `verify-all.js:162`；本机实测 |
+| **P0** | 2 个注册套件是红的 | `verify-auth` 11/15（数据污染）、`verify-loop` 28/1（断言过期） |
+| **P1** | 19 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 37 实有 vs 17 注册 |
+| **P1** | Postgres 不可达，持久化未验证 | `.env` + 测试日志 `timeout exceeded` |
+| **P2** | `data/logs/console-3001.log.err` 已入库 | `git ls-files data/logs`；`.gitignore:27` 只有 `*.log` |
+| **P2** | 双锁文件并存 | `package-lock.json` + `pnpm-lock.yaml` |
