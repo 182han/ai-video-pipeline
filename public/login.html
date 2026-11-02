@@ -87,7 +87,7 @@
   .fs-ridge.far{height:58%;opacity:.62;background:#123a2b;clip-path:polygon(0 56%, 14% 30%, 28% 52%, 42% 22%, 58% 48%, 72% 26%, 86% 50%, 100% 34%, 100% 100%, 0 100%)}
   .fs-ridge.near{height:42%;opacity:.96;background:#06130e;clip-path:polygon(0 66%, 16% 44%, 32% 62%, 48% 34%, 64% 60%, 80% 40%, 100% 58%, 100% 100%, 0 100%)}
   .bg-fallback .fallback-scene{background-image:
-    linear-gradient(180deg, rgba(4,16,11,.12) 0%, rgba(4,16,11,.22) 100%),
+    linear-gradient(180deg, rgba(4,16,11,.55) 0%, rgba(4,16,11,.62) 100%),
     url("/assets/hq/poster-2k.jpg");
     background-size:cover;background-position:center}
   .bg-fallback .bg{display:none}
@@ -135,9 +135,17 @@
   /* 中文主诉 */
   .brand-cn{
     display:block;margin-top:clamp(24px,3.4vh,44px);
-    font-size:clamp(15px,1.25vw,22px);
+    font-size:clamp(16px,1.4vw,25px);
     letter-spacing:.16em;line-height:1.6;
-    color:rgba(255,255,255,.95);
+    color:#FFFFFF;
+    text-shadow:0 2px 26px rgba(0,0,0,.62), 0 0 40px rgba(255,255,255,.16);
+  }
+  /* 钩子：次级亮度，落在主诉和四项能力之间 */
+  .brand-hook{
+    display:block;margin-top:clamp(14px,2vh,24px);
+    font-size:clamp(13px,1.02vw,17px);
+    letter-spacing:.1em;line-height:1.7;
+    color:rgba(255,255,255,.78);
   }
   /* 分隔线 */
   .brand-rule{
@@ -378,7 +386,8 @@
 <div class="brand">
   <span class="brand-name">Video Studio</span>
   <span class="brand-en">One sentence, an entire landscape film</span>
-  <span class="brand-cn">一句话，生成整条风景长片</span>
+  <span class="brand-cn">一句话，换一整夜的风景</span>
+  <span class="brand-hook">说一句你想要的山，剩下的它自己会拍</span>
   <span class="brand-rule"></span>
   <span class="brand-feats">
     <span class="brand-feat"><b>自动分镜</b><i>Storyboard</i></span>
@@ -386,7 +395,6 @@
     <span class="brand-feat"><b>自动配乐</b><i>Soundtrack</i></span>
     <span class="brand-feat"><b>循环播放</b><i>Loop ready</i></span>
   </span>
-  <span class="brand-foot">一句话，换一整夜的风景</span>
 </div>
 
 <div class="hints" aria-hidden="true">
