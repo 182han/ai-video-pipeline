@@ -1,10 +1,11 @@
-const BASE='http://127.0.0.1:3100';
+const BASE = process.env.BGM_TEST_BASE || 'http://127.0.0.1:3001';
 const fs=require('fs'), path=require('path');
 const { execSync } = require('child_process');
 const config = require('../config');
-function cap(cmd){ try{return execSync(cmd,{encoding:'utf8',maxBuffer:64*1024*1024});}catch(e){ if(!(e&&(e.code==='EPERM'||/EPERM|EACCES/.test(String(e.message||''))))) return String((e.stdout||'')+(e.stderr||'')); const t=path.join(__dirname,'..','output','_c'+process.pid+'.txt'); try{execSync(cmd+' > "'+t+'" 2>&1',{stdio:'ignore'});}catch(e2){} try{return fs.existsSync(t)?fs.readFileSync(t,'utf8'):'';}finally{try{fs.unlinkSync(t);}catch(e3){}} } }
+const OUT = process.env.BGM_TEST_OUTPUT_DIR || path.join(__dirname,'..','output');
+function cap(cmd){ try{return execSync(cmd,{encoding:'utf8',maxBuffer:64*1024*1024});}catch(e){ if(!(e&&(e.code==='EPERM'||/EPERM|EACCES/.test(String(e.message||''))))) return String((e.stdout||'')+(e.stderr||'')); const t=path.join(OUT,'_c'+process.pid+'.txt'); try{execSync(cmd+' > "'+t+'" 2>&1',{stdio:'ignore'});}catch(e2){} try{return fs.existsSync(t)?fs.readFileSync(t,'utf8'):'';}finally{try{fs.unlinkSync(t);}catch(e3){}} } }
 const shq=p=>'"'+String(p).replace(/"/g,'\\"')+'"';
-const TID = process.argv[2] || 'task_mukptvrj_xbjn';
+const TID = process.env.BGM_TEST_TASK_ID || process.argv[2] || 'task_mukptvrj_xbjn';
 
 (async()=>{
   let fail=0; const check=(c,m)=>{console.log((c?'  PASS  ':'  FAIL  ')+m); if(!c)fail++;};

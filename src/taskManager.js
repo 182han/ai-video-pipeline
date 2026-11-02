@@ -11,7 +11,7 @@ const redact = require('./utils/redact');
 const { applyTaskDefaults } = require('./taskDefaults');
 const { resolveStages } = require('./pipelineStages');
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'tasks');
+const DATA_DIR = config.STORAGE.dataDir;
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
 
 // 确保目录存在
@@ -175,7 +175,7 @@ class TaskManager {
       fadeInSec: Number.isFinite(Number(bgmOpt.fadeInSec)) ? Number(bgmOpt.fadeInSec) : 2,
       fadeOutSec: Number.isFinite(Number(bgmOpt.fadeOutSec)) ? Number(bgmOpt.fadeOutSec) : 2,
       crossfadeSec: Number.isFinite(Number(bgmOpt.crossfadeSec)) ? Number(bgmOpt.crossfadeSec) : 1.5,
-      volume: Number.isFinite(Number(bgmOpt.volume)) ? Number(bgmOpt.volume) : -20,
+      volume: Number.isFinite(Number(bgmOpt.volume)) ? Number(bgmOpt.volume) : config.BGM.loudness,
       ambientVolume: Number.isFinite(Number(bgmOpt.ambientVolume)) ? Number(bgmOpt.ambientVolume) : 0.125,
       migratedFromClipTracks: false
     };

@@ -56,9 +56,6 @@ const PORT = config.SERVER.port || 3000;
 // 不传（或 AUTH_ENABLED=false）时行为与改造前完全一致。
 wsManager.init(server, auth.isEnabled() ? { authorize: (req) => auth.authorizeRequest(req) } : null);
 
-// 中间件
-app.use(express.json());
-
 // ===== 登录墙 =====
 //
 // 拦截范围（有意为之，见 docs/spec/changelog.md「登录墙」一节）：
@@ -104,6 +101,16 @@ app.use((req, res, next) => {
   }
   req.auth = session;
   next();
+});
+
+// ===== JSON body 解析（放在登录墙之后）=====
+// 未认证请求不会先被解析大体积 body；配乐上传是 base64 JSON，单独放宽到 64MB，
+// 其余接口保持 express 默认 100KB（登录接口也走这里）。
+const jsonDefault = express.json();
+const jsonBgmUpload = express.json({ limit: '64mb' });
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path === '/api/bgm') return jsonBgmUpload(req, res, next);
+  return jsonDefault(req, res, next);
 });
 
 // ===== 认证接口 =====
@@ -262,7 +269,7 @@ app.get(/^\/app(\/.*)?$/, (req, res, next) => {
 });
 
 // 输出文件静态访问（用于视频播放和下载）
-app.use('/output', express.static(path.join(__dirname, 'output'), {
+app.use('/output', express.static(config.STORAGE.outputDir, {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.mp4')) {
       res.setHeader('Content-Type', 'video/mp4');
@@ -273,7 +280,7 @@ app.use('/output', express.static(path.join(__dirname, 'output'), {
 
 // 片段静态访问（任务详情页的"片段列表"播放/下载用）
 // 只暴露 clips 目录下的 mp4，且禁止路径穿越
-app.use('/clips', express.static(path.join(__dirname, 'clips'), {
+app.use('/clips', express.static(config.STORAGE.clipsDir, {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.mp4')) {
       res.setHeader('Content-Type', 'video/mp4');
@@ -380,11 +387,11 @@ app.post('/api/bgm/mix', async (req, res) => {
     return res.status(400).json({ error: '视频文件不存在: ' + videoPath });
   }
   const outName = 'mix_' + Date.now().toString(36) + '.mp4';
-  const outputPath = path.join(__dirname, 'output', outName);
+  const outputPath = path.join(config.STORAGE.outputDir, outName);
   try {
     const result = await audioMixer.mixBgm(inputVideo, outputPath, {
       track: track || 'auto',
-      loudness: loudness || -20,
+      loudness: loudness || config.BGM.loudness,
       fadeSeconds: fadeSeconds || 2
     });
     if (!result.success) return res.status(500).json({ error: result.error });
@@ -1334,7 +1341,7 @@ app.get('/api/tasks/:id/clips', (req, res) => {
     return res.status(404).json({ error: '任务不存在' });
   }
 
-  const clipsDir = path.join(__dirname, 'clips');
+  const clipsDir = config.STORAGE.clipsDir;
 
   res.json(task.clips.map(c => {
     // 费用/耗时优先取任务里的快照；历史任务没有，就回退到片段库档案

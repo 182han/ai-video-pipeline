@@ -16,8 +16,8 @@ const llmService = require('./services/llmService');
 const pricing = require('./pricing');
 const library = require('./library');
 
-const CLIPS_DIR = path.join(__dirname, '..', 'clips');
-const OUTPUT_DIR = path.join(__dirname, '..', 'output');
+const CLIPS_DIR = config.STORAGE.clipsDir;
+const OUTPUT_DIR = config.STORAGE.outputDir;
 
 // 确保目录存在
 [CLIPS_DIR, OUTPUT_DIR].forEach(d => {
@@ -418,8 +418,10 @@ class Pipeline {
         return { success: false, skipped: true, reason: '未启用配乐' };
       }
       const r = await audioMixer.mixBgmPlan(inputVideo, outputPath, prep.plan, {
-        loudness: (task.bgm && task.bgm.volume) || -20,
-        ambientVolume: (task.bgm && task.bgm.ambientVolume) || 0.125
+        loudness: (task.bgm && task.bgm.volume) || config.BGM.loudness,
+        ambientVolume: (task.bgm && task.bgm.ambientVolume) || 0.125,
+        // 闪避：全局配置默认关（BGM_DUCKING_ENABLED=false），不影响既有成片听感
+        ducking: config.BGM.ducking
       });
       taskManager.updateTaskStatus(taskId, task.status, {
         bgmResult: {

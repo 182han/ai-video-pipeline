@@ -121,6 +121,42 @@ const SUITES = [
     script: 'verify-pause.js',
     group: 'real',
     desc: '暂停/继续（粒度 A、幂等、超时不静默、重启回收可补跑、HTTP 400/404、failureCode 三态）'
+  },
+  {
+    name: 'bgm-plan',
+    script: 'verify-bgm-plan.js',
+    group: 'real',
+    desc: '配乐计划：自动配乐/时间轴分段/两轨（真 ffmpeg）'
+  },
+  {
+    name: 'bgm-mix',
+    script: 'verify-bgm-mix.js',
+    group: 'real',
+    desc: '整片多轨混音：跨曲衔接/两轨/关键帧/变速（真 ffmpeg）'
+  },
+  {
+    name: 'bgm-tracks',
+    script: 'verify-bgm-tracks.js',
+    group: 'real',
+    desc: '配乐音轨：源区间/循环填充/变速对齐（真 ffmpeg）'
+  },
+  {
+    name: 'bgm-storage',
+    script: 'verify-bgm-storage.js',
+    group: 'real',
+    desc: '配乐计划存储往返（任务字段）'
+  },
+  {
+    name: 'bgm-ducking',
+    script: 'verify-bgm-ducking.js',
+    group: 'real',
+    desc: '配乐闪避：滤镜图 + 真 ffmpeg 混音（默认关闭）'
+  },
+  {
+    name: 'bgm-suite',
+    script: 'verify-bgm-suite.js',
+    group: 'real',
+    desc: '配乐 API/负向/端到端三套件（隔离 DATA_DIR/OUTPUT_DIR 起独立服务）'
   }
 ];
 

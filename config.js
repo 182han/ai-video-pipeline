@@ -348,12 +348,29 @@ module.exports = {
     cubeMaxAgeHours: seamNum('ADJUST_CUBE_MAX_AGE_HOURS', 24, 0, 24 * 30)
   },
 
+  // ===== 配乐（整片多轨）=====
+  // 闪避（ducking）：环境声作为 sidechain，出现时压低音乐。默认关闭，避免改变既有成片听感。
+  // 参数全部走环境变量；算法见 src/processors/bgmPlan.js 的 buildMixCommand。
+  BGM: {
+    // 整片混音的目标响度（LUFS，越接近 0 越响）。-16 ≈ 电视/流媒体常见档；-20 更轻。
+    // 任务级 task.bgm.volume 优先于这里；旧任务文件里已存的值不变。
+    loudness: seamNum('BGM_LOUDNESS', -16, -40, -5),
+    ducking: {
+      enabled: /^(1|true|yes)$/i.test(String(env('BGM_DUCKING_ENABLED', 'false')).trim()),
+      threshold: seamNum('BGM_DUCK_THRESHOLD', 0.05, 0.001, 1),
+      ratio: seamNum('BGM_DUCK_RATIO', 4, 1, 20),
+      attackMs: seamNum('BGM_DUCK_ATTACK_MS', 20, 1, 2000),
+      releaseMs: seamNum('BGM_DUCK_RELEASE_MS', 500, 10, 5000),
+      makeup: seamNum('BGM_DUCK_MAKEUP', 1, 1, 20)
+    }
+  },
+
   // ===== 存储配置 =====
   STORAGE: {
-    // 本地存储路径
-    clipsDir: env('CLIPS_DIR', './clips'),
-    outputDir: env('OUTPUT_DIR', './output'),
-    dataDir: env('DATA_DIR', './data/tasks'),
+    // 本地存储路径（解析成绝对路径，避免不同工作目录启动时落到不同位置）
+    clipsDir: require('path').resolve(__dirname, env('CLIPS_DIR', './clips')),
+    outputDir: require('path').resolve(__dirname, env('OUTPUT_DIR', './output')),
+    dataDir: require('path').resolve(__dirname, env('DATA_DIR', './data/tasks')),
     // S3 兼容存储配置（可选）
     s3: {
       enabled: env('S3_ENABLED', 'false') === 'true',

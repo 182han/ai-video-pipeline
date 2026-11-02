@@ -50,6 +50,21 @@ function sec(v) {
   return (Math.round(v * 1000) / 1000).toFixed(3);
 }
 
+// 闪避参数归一化：只有 enabled 明确为真才启用；其余值 clamp 到安全范围，
+// 避免把 NaN/越界值拼进 ffmpeg 参数（与音轨参数同一套防御口径）。
+function duckingOptions(d) {
+  if (!d) return null;
+  const on = d.enabled === true || d.enabled === 1 || d.enabled === 'true';
+  if (!on) return null;
+  return {
+    threshold: clamp(num(d.threshold, 0.05), 0.001, 1),
+    ratio: clamp(num(d.ratio, 4), 1, 20),
+    attack: Math.round(clamp(num(d.attackMs, 20), 1, 2000)),
+    release: Math.round(clamp(num(d.releaseMs, 500), 10, 5000)),
+    makeup: clamp(num(d.makeup, 1), 1, 20)
+  };
+}
+
 // ===== 单个片段的合法性校验 =====
 // 返回 { ok, reason }，不抛异常，由调用方决定整片失败还是跳过该段
 function validateSegment(seg, videoDuration) {
@@ -201,6 +216,7 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
   const sr = num(opts.sampleRate, DEFAULT_SAMPLE_RATE);
   const loudness = num(opts.loudness, -20);
   const ambientVolume = num(opts.ambientVolume, 0.125); // -18dB ≈ 0.125
+  const duck = duckingOptions(opts.ducking);
 
   const music = Array.isArray(plan && plan.music) ? plan.music : [];
   const ambient = Array.isArray(plan && plan.ambient) ? plan.ambient : [];
@@ -261,11 +277,24 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
     return { ok: false, error: '所有片段均不合法，无法生成混音', warnings };
   }
 
-  // 两轨合并
+  // 两轨合并（可选闪避：环境声作为 sidechain 压低音乐；只有单轨时无法闪避）
   let mergedLabel;
   if (musicOut && ambientOut) {
     mergedLabel = 'merged';
-    filterParts.push(`${musicOut}${ambientOut}amix=inputs=2:normalize=0:dropout_transition=0[${mergedLabel}]`);
+    if (duck) {
+      // ambient 分两路：一路保留用于混合，一路做 sidechain key。
+      // sidechaincompress 只输出 music，环境声本身仍按原样混入，不会丢。
+      filterParts.push(`${ambientOut}asplit=2[ambfork][ambside]`);
+      filterParts.push(
+        `${musicOut}[ambside]sidechaincompress=`
+        + `threshold=${sec(duck.threshold)}:ratio=${sec(duck.ratio)}`
+        + `:attack=${duck.attack}:release=${duck.release}:makeup=${sec(duck.makeup)}`
+        + '[musicduck]'
+      );
+      filterParts.push(`[musicduck][ambfork]amix=inputs=2:normalize=0:dropout_transition=0[${mergedLabel}]`);
+    } else {
+      filterParts.push(`${musicOut}${ambientOut}amix=inputs=2:normalize=0:dropout_transition=0[${mergedLabel}]`);
+    }
   } else {
     mergedLabel = musicOut ? 'musicout' : 'ambientout';
   }

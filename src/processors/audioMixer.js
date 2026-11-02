@@ -247,8 +247,10 @@ async function validateMixDuration(filePath, expectedDuration, toleranceSec = 0.
 function buildMixArgs(inputVideo, outputPath, plan, videoDuration, opts = {}) {
   const planner = require('./bgmPlan');
   const built = planner.buildMixCommand(plan, videoDuration, {
-    loudness: opts.loudness === undefined ? -20 : Number(opts.loudness),
-    ambientVolume: opts.ambientVolume === undefined ? 0.125 : Number(opts.ambientVolume)
+    loudness: opts.loudness === undefined ? config.BGM.loudness : Number(opts.loudness),
+    ambientVolume: opts.ambientVolume === undefined ? 0.125 : Number(opts.ambientVolume),
+    // 闪避默认读全局配置；调用方显式传 opts.ducking 时以调用方为准（便于测试/任务级覆盖）
+    ducking: opts.ducking === undefined ? config.BGM.ducking : opts.ducking
   });
   if (!built.ok) return { ok: false, error: built.error, warnings: built.warnings || [] };
 
@@ -515,7 +517,7 @@ function buildAutoPlan(videoDuration, options = {}) {
 // ===== 旧接口兼容：单曲整片混音（供 /api/bgm/mix 演示接口使用）=====
 // 注意：这里已不使用 aloop 循环，改为「整曲 + 淡入淡出」。
 async function mixBgm(inputVideo, outputPath, opts = {}) {
-  const { track: trackArg = 'auto', theme = '', loudness = -20, fadeSeconds = 2 } = opts;
+  const { track: trackArg = 'auto', theme = '', loudness = config.BGM.loudness, fadeSeconds = 2 } = opts;
   const resolved = resolveTrack(trackArg, theme);
   if (!resolved) {
     return { success: false, error: '配乐库存为空，请先入库音源' };
@@ -557,7 +559,7 @@ async function mixBgm(inputVideo, outputPath, opts = {}) {
 
 // 旧实现（保留以便回溯对照，已不再调用；2026-10-19 配乐改造移除 aloop 循环）
 async function _legacyMixBgmWithAloop(inputVideo, outputPath, opts = {}) {
-  const { track: trackArg = 'auto', theme = '', loudness = -20, fadeSeconds = 2 } = opts;
+  const { track: trackArg = 'auto', theme = '', loudness = config.BGM.loudness, fadeSeconds = 2 } = opts;
   const resolved = resolveTrack(trackArg, theme);
   if (!resolved) {
     return { success: false, error: '配乐库存为空，请先入库音源' };

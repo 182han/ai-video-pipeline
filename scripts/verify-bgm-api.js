@@ -1,12 +1,12 @@
 // 接口端到端测试（Node 内置 fetch，避免 PowerShell JSON 序列化坑）
-// 端口可配置：默认用项目 .env 的 3001，避免写死端口导致换环境后脚本失效
+// 端口可配置：BGM_TEST_BASE；任务/输出目录可通过 BGM_TEST_TASK_ID / BGM_TEST_OUTPUT_DIR 指向隔离副本
 const BASE = process.env.BGM_TEST_BASE || 'http://127.0.0.1:3001';
-const TID = process.argv[2] || 'task_mv4v7qp2_m8r0';
+const TID = process.env.BGM_TEST_TASK_ID || process.argv[2] || 'task_mv4v7qp2_m8r0';
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const OUTPUT = path.join(__dirname, '..', 'output');
+const OUTPUT = process.env.BGM_TEST_OUTPUT_DIR || path.join(__dirname, '..', 'output');
 const finalPath = path.join(OUTPUT, TID + '_final.mp4');
 function md5(p) { return fs.existsSync(p) ? crypto.createHash('md5').update(fs.readFileSync(p)).digest('hex') : 'MISSING'; }
 
@@ -33,7 +33,7 @@ const plan = {
   check(r.ok && j.previewUrl, '预览生成: ' + (j.previewUrl || j.error));
   check(md5(finalPath) === before, '预览后原成片未被改动');
 
-  const previewFile = j.previewUrl ? path.join(__dirname, '..', j.previewUrl.replace(/^\//, '')) : null;
+  const previewFile = j.previewUrl ? path.join(OUTPUT, path.basename(j.previewUrl)) : null;
   if (previewFile && fs.existsSync(previewFile)) {
     console.log('        预览文件: ' + path.basename(previewFile) + ' size=' + fs.statSync(previewFile).size);
   }
@@ -50,8 +50,8 @@ const plan = {
 
   // 4) 校验成片本身
   const after = await (await fetch(BASE + '/api/tasks/' + TID + '/bgm-plan')).json();
-  check(after.result && after.result.applied === true, '任务记录 bgmResult.applied=true');
-  console.log('        bgmResult: ' + JSON.stringify(after.result).slice(0,200));
+  check(!!(after.result && after.result.applied === true), '任务记录 bgmResult.applied=true');
+  console.log('        bgmResult: ' + JSON.stringify(after.result || {}).slice(0,200));
 
   console.log('\n结果: ' + (fail === 0 ? '全部通过' : fail + ' 项失败'));
   process.exit(fail ? 1 : 0);

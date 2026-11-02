@@ -1,8 +1,9 @@
 // 负向验证：证明防护能拦住坏输入（AGENTS.md §5.1 要求缺陷类修复必须有负向证据）
-// 端口可配置：默认用项目 .env 的 3001，避免写死端口导致换环境后脚本失效
+// 端口/任务/输出目录可配置：指向隔离副本时不会碰正式成片
 const BASE = process.env.BGM_TEST_BASE || 'http://127.0.0.1:3001';
+const TID = process.env.BGM_TEST_TASK_ID || 'task_mukptvrj_xbjn';
+const OUT = process.env.BGM_TEST_OUTPUT_DIR || require('path').join(__dirname, '..', 'output');
 const plan = require('../src/processors/bgmPlan');
-const TID='task_mukptvrj_xbjn';
 let fail=0; const check=(c,m)=>{console.log((c?'  PASS  ':'  FAIL  ')+m); if(!c)fail++;};
 
 (async()=>{
@@ -31,9 +32,9 @@ let fail=0; const check=(c,m)=>{console.log((c?'  PASS  ':'  FAIL  ')+m); if(!c)
   const path=require('path'), fs=require('fs'), os=require('os');
   const { execSync } = require('child_process');
   const config = require('../config');
-  const out = path.join(__dirname,'..','output','_silent_test.mp4');
+  const out = path.join(OUT,'_silent_test.mp4');
   // 造一个静音音轨文件
-  const silentMp3 = path.join(__dirname,'..','output','_silent.mp3');
+  const silentMp3 = path.join(OUT,'_silent.mp3');
   const cmd = '"'+config.FFMPEG_PATH+'" -y -hide_banner -loglevel error -f lavfi -i anullsrc=r=44100:cl=stereo -t 10 "'+silentMp3+'"';
   try { execSync(cmd,{stdio:'ignore'}); } catch(e){}
   const chk = await mixer.validateMixedOutput(silentMp3).catch(e=>({ok:false,reason:'异常:'+e.message}));
@@ -41,13 +42,14 @@ let fail=0; const check=(c,m)=>{console.log((c?'  PASS  ':'  FAIL  ')+m); if(!c)
   try{fs.unlinkSync(silentMp3);}catch(e){}
 
   console.log('\n=== N6. 时长不一致必须被判失败 ===');
-  // 用 5s 视频冒充 30s 期望
-  const v5 = path.join(__dirname,'..','output','task_mukptvrj_xbjn_master.mp4');
+  // 用真实母版时长做基准：传错期望值必须拒绝，传对必须通过
+  const v5 = path.join(OUT, TID+'_master.mp4');
   if (fs.existsSync(v5)) {
-    const dc = await mixer.validateMixDuration(v5, 999);
+    const actual = await mixer.probeDuration(v5);
+    const dc = await mixer.validateMixDuration(v5, actual + 999);
     check(dc.ok===false && /时长异常/.test(dc.reason||''), '时长偏差过大被拒: '+dc.reason);
-    const dc2 = await mixer.validateMixDuration(v5, 10.13);
-    check(dc2.ok===true, '正常时长通过: '+(dc2.actual||'').toFixed?dc2.actual.toFixed(2):dc2.actual);
+    const dc2 = await mixer.validateMixDuration(v5, actual);
+    check(dc2.ok===true, '正常时长通过: '+dc2.actual.toFixed(2)+'s');
   }
 
   console.log('\n=== N7. 旧逐段接口应返回 410 ===');

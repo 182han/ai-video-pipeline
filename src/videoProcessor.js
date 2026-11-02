@@ -8,7 +8,7 @@ const path = require('path');
 const { execSync, exec } = require('child_process');
 const config = require('../config');
 
-const OUTPUT_DIR = path.join(__dirname, '..', 'output');
+const OUTPUT_DIR = config.STORAGE.outputDir;
 
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });

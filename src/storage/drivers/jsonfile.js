@@ -7,12 +7,15 @@
 
 const fs = require('fs');
 const path = require('path');
+const config = require('../../../config');
 
 // 固定以项目根目录为基准（app/），不依赖进程的当前工作目录，
 // 否则从不同目录启动服务会在不同位置生成 data/ 目录。
 const ROOT = path.join(__dirname, '..', '..', '..');
 const DATA_DIR = path.join(ROOT, 'data');
-const TASKS_DIR = path.join(DATA_DIR, 'tasks');
+// 任务目录支持 DATA_DIR 覆盖（测试隔离；默认仍是 data/tasks）。
+// 用户/模板/提示词等其它文件保持 data/ 下不变。
+const TASKS_DIR = config.STORAGE.dataDir;
 const PROMPTS_FILE = path.join(DATA_DIR, 'prompts.json');
 const ASSETS_FILE = path.join(DATA_DIR, 'video-assets.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
