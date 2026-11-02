@@ -121,6 +121,27 @@ function frameMeanLuma(video, tmp) {
   assert(!tD.adjustApplied, '开关关闭时不生成滤镜');
   config.ADJUST.enabled = savedEnabled;
 
+  // ---------- E. 负向：滤镜生成被“弄丢”，必须判失败而非静默 ----------
+  console.log('\n[E. 负向：请求了调节但滤镜生成失败]');
+  const origAdjustOptions = pipeline._adjustOptionsFor;
+  // 模拟「有人改流水线把参数传丢」：强制返回空选项
+  pipeline._adjustOptionsFor = () => ({});
+  let tE = null;
+  let threw = null;
+  try {
+    tE = await runTask({ adjust: { brightness: 50 } });
+  } catch (e) {
+    threw = e.message;
+  } finally {
+    pipeline._adjustOptionsFor = origAdjustOptions;
+  }
+  if (tE) created.push(tE.taskId);
+  const eFailed = (tE && (tE.status === 'failed' || tE.status === 'partial'))
+    || /调节未执行/.test(threw || '');
+  assert(eFailed, '任务被判失败（不静默通过）', `status=${tE && tE.status}${threw ? ', 异常=' + threw : ''}`);
+  const stepError = tE && tE.steps && tE.steps.transcoding && tE.steps.transcoding.error;
+  assert(/调节未执行/.test(stepError || threw || ''), '失败原因写明「调节未执行」', stepError || threw);
+
   // ---------- 清理 ----------
   if (!KEEP) {
     for (const id of created) {

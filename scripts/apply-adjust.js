@@ -59,20 +59,18 @@ function findLut(name, jyRel) {
   if (fs.existsSync(jy)) return jy;
   return null;
 }
-const lightMax = findLut('lightSensation_max.png', 'contrast_v3\\AmazingFeature\\image\\lightSensation_max.png');
-const lightMin = findLut('lightSensation_min.png', 'contrast_v3\\AmazingFeature\\image\\lightSensation_min.png');
-const fadeLut = findLut('fade_max.texture', 'contrast_v3\\AmazingFeature\\image\\fade_max.texture');
+// 光感：优先自研 .cube（不依赖剪映安装）；没有则回退剪映 PNG
+const lightMax = findLut('lightSensation_max.cube', 'contrast_v3\\AmazingFeature\\image\\lightSensation_max.png');
+const lightMin = findLut('lightSensation_min.cube', 'contrast_v3\\AmazingFeature\\image\\lightSensation_min.png');
 
 const warnings = [];
 if (params.lightSensation) {
   const f = params.lightSensation > 0 ? lightMax : lightMin;
-  if (f) params.lightLut = adjust.loadLut(f, cfg.FFMPEG_PATH, 0);
-  else warnings.push('光感 LUT 缺失，已跳过该项');
+  if (f && f.endsWith('.cube')) params.lightLut = adjust.loadCube(f);
+  else if (f) params.lightLut = adjust.loadLut(f, cfg.FFMPEG_PATH, 0);
+  else warnings.push('光感资源缺失，已跳过该项');
 }
-if (params.fade) {
-  if (fadeLut) params.fadeLut = adjust.loadLut(fadeLut, cfg.FFMPEG_PATH, 0);
-  else warnings.push('褪色 LUT 缺失，已跳过该项');
-}
+// 褪色：自研公式（不需要资源文件），由 adjustChain 内部处理
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'adjust-'));
 try {

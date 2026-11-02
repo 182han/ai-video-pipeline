@@ -386,6 +386,48 @@ function loadLut(file, ffmpegPath, half) {
   }
 }
 
+// ---------------- 自研 .cube 加载（不依赖剪映素材）----------------
+function loadCube(file) {
+  const txt = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const sizeLine = txt.find((l) => l.startsWith('LUT_3D_SIZE'));
+  if (!sizeLine) throw new Error('不是合法 .cube: ' + file);
+  const n = Number(sizeLine.split(/\s+/)[1]);
+  if (!(n > 1)) throw new Error('.cube 尺寸非法: ' + file);
+  const data = txt.filter((l) => /^\d/.test(l)).map((l) => l.trim().split(/\s+/).map(Number));
+  if (data.length !== n * n * n) throw new Error(`.cube 数据行数不对: ${data.length} != ${n ** 3}`);
+  const at = (r, g, b) => data[((b * n + g) * n + r)];
+  return (rgb) => {
+    const fr = rgb[0] * (n - 1), fg = rgb[1] * (n - 1), fb = rgb[2] * (n - 1);
+    const r0 = Math.min(n - 1, Math.floor(fr)), g0 = Math.min(n - 1, Math.floor(fg)), b0 = Math.min(n - 1, Math.floor(fb));
+    const r1 = Math.min(n - 1, r0 + 1), g1 = Math.min(n - 1, g0 + 1), b1 = Math.min(n - 1, b0 + 1);
+    const dr = fr - r0, dg = fg - g0, db = fb - b0;
+    const out = [0, 0, 0];
+    for (let c = 0; c < 3; c++) {
+      const c00 = at(r0, g0, b0)[c] * (1 - dr) + at(r1, g0, b0)[c] * dr;
+      const c10 = at(r0, g1, b0)[c] * (1 - dr) + at(r1, g1, b0)[c] * dr;
+      const c01 = at(r0, g0, b1)[c] * (1 - dr) + at(r1, g0, b1)[c] * dr;
+      const c11 = at(r0, g1, b1)[c] * (1 - dr) + at(r1, g1, b1)[c] * dr;
+      out[c] = (c00 * (1 - dg) + c10 * dg) * (1 - db) + (c01 * (1 - dg) + c11 * dg) * db;
+    }
+    return out;
+  };
+}
+
+// ---------------- 自研「褪色」公式（无剪映素材）----------------
+// 近似剪映的褪色观感：黑场上抬、对比降低、轻微去饱和。
+// 注意：没有对照素材，属**近似实现**，不是逐像素复刻。
+function fadeSelfMade(c, v) {
+  const a = Math.min(Math.abs(v) / 50, 1);
+  if (!a) return c;
+  const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return c.map((ch) => {
+    // 1) 黑场上抬 0.12a、白场略降 0.06a（S 曲线变平）
+    const lifted = ch * (1 - 0.10 * a) + 0.12 * a * (1 - ch) + 0.02 * a * ch;
+    // 2) 轻微去饱和：向亮度靠拢 12%
+    const desat = lifted + (lum - lifted) * 0.12 * a;
+    return clamp01(desat);
+  });
+}
 // ---------------- 完整链 ----------------
 function adjustChain(rgb, p) {
   if (!p) return rgb;
@@ -398,7 +440,7 @@ function adjustChain(rgb, p) {
   c = shadow(c, p.shadow);
   c = blackWhite(c, p.white, p.black);
   if (p.lightLut) c = lutMix(c, p.lightSensation, p.lightLut);
-  if (p.fadeLut) c = lutMix(c, p.fade, p.fadeLut);
+  if (p.fade) c = p.fadeLut ? lutMix(c, p.fade, p.fadeLut) : fadeSelfMade(c, p.fade);
   if (p.curve) c = applyCurve(c, p.curve);
   if (p.wheel) c = applyWheel(c, p.wheel);
   if (p.hsl) c = applyHSL(c, p.hsl);
@@ -452,14 +494,15 @@ function prepareAdjust(params, opts = {}) {
     fs.mkdirSync(cubeDir, { recursive: true });
     // 光感/褪色需要 LUT：优先 opts.lutDir，其次不注入（明确降级）
     const p = { ...params };
-    if (p.lightSensation && !p.lightLut && opts.lutDir && opts.ffmpegPath) {
-      const f = path.join(opts.lutDir, p.lightSensation > 0 ? 'lightSensation_max.png' : 'lightSensation_min.png');
-      if (fs.existsSync(f)) p.lightLut = loadLut(f, opts.ffmpegPath, 0);
+    // 光感：优先用自研 .cube（不依赖剪映素材），没有则回退旧 PNG
+    if (p.lightSensation && !p.lightLut && opts.lutDir) {
+      const base = p.lightSensation > 0 ? 'lightSensation_max' : 'lightSensation_min';
+      const cube = path.join(opts.lutDir, base + '.cube');
+      const png = path.join(opts.lutDir, base + '.png');
+      if (fs.existsSync(cube)) p.lightLut = loadCube(cube);
+      else if (fs.existsSync(png) && opts.ffmpegPath) p.lightLut = loadLut(png, opts.ffmpegPath, 0);
     }
-    if (p.fade && !p.fadeLut && opts.lutDir && opts.ffmpegPath) {
-      const f = path.join(opts.lutDir, 'fade_max.texture');
-      if (fs.existsSync(f)) p.fadeLut = loadLut(f, opts.ffmpegPath, 0);
-    }
+    // 褪色：自研公式，不需要资源文件（保留 fadeLut 兼容旧调用）
     const keySrc = JSON.stringify(params) + '|' + (p.lightLut ? 'L' : '-') + (p.fadeLut ? 'F' : '-');
     const hash = crypto.createHash('sha1').update(keySrc).digest('hex').slice(0, 16);
     cubePath = path.join(cubeDir, `${hash}.cube`);
@@ -481,6 +524,8 @@ module.exports = {
   buildSpatialFilters,
   escapeFilterPath,
   loadLut,
+  loadCube,
+  fadeSelfMade,
   prepareAdjust,
   // 单项（供验收脚本用）
   brightness, contrast, saturation, shadow, highlight, saturationFactor: SAT_W

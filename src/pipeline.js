@@ -315,6 +315,10 @@ class Pipeline {
       throw new Error('转码失败: ' + transcodeResult.error);
     }
 
+    // 调节自检（2026-11-02）：请求了 adjust 却没生成滤镜 → 判失败，不让它静默变成「没调色」。
+    // 与「校色未执行」同一套语义（AGENTS §4.1：没执行 = 没通过，不是跳过）。
+    this._assertAdjustApplied(taskId, task);
+
     const transcodeQC = await qualityChecker.checkTranscode(finalPath, task.resolution, 30);
     taskManager.recordStepComplete(taskId, 'transcoding', {
       qcResult: transcodeQC.passed ? 'pass' : transcodeQC.level,
@@ -605,7 +609,28 @@ class Pipeline {
   }
 
   // ===== 剪映「调节」复刻（2026-10-31）=====
-  //
+  // 运行时自检（2026-11-02）：请求了调节就必须真的执行。
+  // 若任务带 adjust、但转码时没有生成滤镜（例如有人改流水线把参数传丢、或滤镜生成异常），
+  // 这里判「调节未执行」并让任务失败 —— 绝不让成片静默变成「没调色」。
+  // 与既有「校色未执行」同一套三态语义（AGENTS §4.1）。
+  _assertAdjustApplied(taskId, task) {
+    if (!config.ADJUST || !config.ADJUST.enabled) return;
+    if (!task || !task.adjust) return;
+    if (task.adjustApplied && task.adjustApplied.filter) return;
+    const msg = '调节未执行：任务请求了 adjust，但转码时没有生成调节滤镜';
+    try {
+      taskManager.recordStepComplete(taskId, 'transcoding', {
+        status: 'failed',
+        qcResult: 'fail',
+        error: msg
+      });
+    } catch (e) {
+      console.warn(`[${taskId}] 记录调节自检失败时出错: ${e.message}`);
+    }
+    console.error(`[${taskId}] ❌ ${msg}`);
+    throw new Error(msg);
+  }
+
   // 返回可直接塞进 ffmpeg -vf 的滤镜串；没有调节 / 全局关闭 / 参数非法 → 返回 ''。
   // 调用方把它作为 transcode 的 options.adjustFilter 传下去，**只作用一次**（在产出
   // master/final 的那一步转码里），不会在后续 -c:v copy 的步骤里重复叠加。
@@ -1731,6 +1756,9 @@ class Pipeline {
         });
         throw new Error('转码失败: ' + transcodeResult.error);
       }
+
+      // 调节自检（2026-11-02）：请求了 adjust 却没生成滤镜 → 判失败，不静默变成「没调色」
+      this._assertAdjustApplied(taskId, task);
 
       taskManager.updateTaskStatus(taskId, 'transcoding', { masterPath });
       const masterInfo = videoProcessor.getVideoInfo(masterPath);
