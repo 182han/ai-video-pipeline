@@ -20,6 +20,20 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const GRID = 17;
 
+// ---------------- 标定系数 ----------------
+// 引擎公式是权威来源，但「公式 → 像素」之间还隔着剪映自己的色彩管线与导出编码。
+// 这些系数默认 1（= 完全按引擎公式），只在拿真实对照视频做整链标定时才偏离 1。
+// 每个值都在 jy-adjust.md 里记录拟合依据与 PSNR，不能凭感觉改。
+const CALIB = {
+  // 2026-11-02 用对照视频整链标定（480x270、libx264 veryfast crf18、t=1/2.5/4 均值）：
+  //   contrast: xfScale 1→37.78、1.01→39.46、1.03→39.10、1.06→37.49（单峰，取 1.01）；pivot 0.43
+  //     注：t=2.5 单帧（文档既有口径）40.32 dB；三帧均值 39.46，被 t=4 水波运动帧拖低。
+  //   saturation: scale 1→39.98、0.99→40.01、1.01→39.78（取 0.99）
+  // 这些不是引擎原始值，是「公式 → 实际导出」之间的整链补偿；详见 jy-adjust.md §16。
+  contrast: { xfScale: 1.01, pivot: 0.43, endpointScale: 1 },
+  saturation: { scale: 0.99 }
+};
+
 // ---------------- 参数白名单 ----------------
 const NUM_KEYS = ['temperature', 'tone', 'saturation', 'brightness', 'contrast',
   'highlight', 'shadow', 'white', 'black', 'lightSensation', 'fade',
@@ -84,8 +98,10 @@ function contrast(c, v) {
   if (!v) return c;
   const I = v / 50;
   const param = I <= 0 ? I * 0.4 + 1 : I * 0.6 + 1;
-  const xf = contrastXFactor(param);
-  const pivot = CONTRAST_PIVOT;
+  const xf = contrastXFactor(param) * CALIB.contrast.xfScale;
+  const pivot = CALIB.contrast.pivot;
+  // 引擎 colorAdjust.frag 的端点校正：sig 含 pivot-0.5 偏移，leftDiff/rightDiff 也用同一 sig。
+  // （2026-11-02 试过改成纯 logistic，con50 掉到 28.7 dB，证明原式是对的，勿再改。）
   const sig = (t) => 1 / (1 + Math.exp(-xf * (t - pivot))) + pivot - 0.5;
   const dsig = (t) => { const s = 1 / (1 + Math.exp(-xf * (t - pivot))); return xf * s * (1 - s); };
   const pivotSlope = dsig(pivot);
@@ -94,8 +110,8 @@ function contrast(c, v) {
   return c.map((ch) => {
     let res = sig(ch);
     const k = dsig(ch);
-    if (ch <= pivot) { if (lsd) { const s = (pivotSlope - k) / lsd; res += s * s * ld; } }
-    else if (rsd) { const s = (pivotSlope - k) / rsd; res += s * s * rd; }
+    if (ch <= pivot) { if (lsd) { const s = (pivotSlope - k) / lsd; res += s * s * ld * CALIB.contrast.endpointScale; } }
+    else if (rsd) { const s = (pivotSlope - k) / rsd; res += s * s * rd * CALIB.contrast.endpointScale; }
     return clamp01(res);
   });
 }
@@ -103,7 +119,7 @@ function contrast(c, v) {
 const SAT_W = [0.208540, 0.702086, 0.089374];
 function saturation(c, v) {
   if (!v) return c;
-  const s = 1 + v / 50;
+  const s = 1 + (v / 50) * CALIB.saturation.scale;
   const y = SAT_W[0] * c[0] + SAT_W[1] * c[1] + SAT_W[2] * c[2];
   return c.map((ch) => clamp01(y + s * (ch - y)));
 }
@@ -448,11 +464,14 @@ function adjustChain(rgb, p) {
 }
 
 // ---------------- 产物 ----------------
-function buildCubeText(params, title) {
-  const lines = ['TITLE "' + (title || 'jianying-adjust') + '"', 'LUT_3D_SIZE ' + GRID,
+function buildCubeText(params, title, opts = {}) {
+  // 网格尺寸：默认 17³（与剪映资源同精度）。33³ 可降低烘培量化误差，
+  // 代价是 cube 文件从 ~130 KB 涨到 ~1 MB（每任务缓存一份，可接受）。
+  const n = Number(opts.grid) > 1 ? Number(opts.grid) : GRID;
+  const lines = ['TITLE "' + (title || 'jianying-adjust') + '"', 'LUT_3D_SIZE ' + n,
     'DOMAIN_MIN 0.0 0.0 0.0', 'DOMAIN_MAX 1.0 1.0 1.0', ''];
-  for (let b = 0; b < GRID; b++) for (let g = 0; g < GRID; g++) for (let r = 0; r < GRID; r++) {
-    const out = adjustChain([r / (GRID - 1), g / (GRID - 1), b / (GRID - 1)], params);
+  for (let b = 0; b < n; b++) for (let g = 0; g < n; g++) for (let r = 0; r < n; r++) {
+    const out = adjustChain([r / (n - 1), g / (n - 1), b / (n - 1)], params);
     lines.push(out.map((v) => clamp01(v).toFixed(6)).join(' '));
   }
   return lines.join('\n') + '\n';
@@ -492,6 +511,11 @@ function prepareAdjust(params, opts = {}) {
   let cubePath = null;
   if (pointwise) {
     fs.mkdirSync(cubeDir, { recursive: true });
+    // 网格：调用方可指定；默认「带光感用 65³、其余 33³」。
+    // 17³ 的烘培量化误差会吃掉约 0.2~0.6 dB（实测 grid17→33：饱和度 +0.11、对比度 +0.21、
+    // 光感 +0.42），所以整链验收与 pipeline 都用更细的网格；buildCubeText 默认仍是 17
+    // （供 verify-adjust-chain 的旧断言与轻量场景用）。
+    const grid = Number(opts.grid) > 1 ? Number(opts.grid) : (params.lightSensation ? 65 : 33);
     // 光感/褪色需要 LUT：优先 opts.lutDir，其次不注入（明确降级）
     const p = { ...params };
     // 光感：优先用自研 .cube（不依赖剪映素材），没有则回退旧 PNG
@@ -503,10 +527,11 @@ function prepareAdjust(params, opts = {}) {
       else if (fs.existsSync(png) && opts.ffmpegPath) p.lightLut = loadLut(png, opts.ffmpegPath, 0);
     }
     // 褪色：自研公式，不需要资源文件（保留 fadeLut 兼容旧调用）
-    const keySrc = JSON.stringify(params) + '|' + (p.lightLut ? 'L' : '-') + (p.fadeLut ? 'F' : '-');
+    const keySrc = JSON.stringify(params) + '|' + JSON.stringify(CALIB) + '|'
+      + (p.lightLut ? 'L' : '-') + (p.fadeLut ? 'F' : '-') + '|g' + grid;
     const hash = crypto.createHash('sha1').update(keySrc).digest('hex').slice(0, 16);
     cubePath = path.join(cubeDir, `${hash}.cube`);
-    if (!fs.existsSync(cubePath)) fs.writeFileSync(cubePath, buildCubeText(p, hash));
+    if (!fs.existsSync(cubePath)) fs.writeFileSync(cubePath, buildCubeText(p, hash, { grid }));
     // ffmpeg 在 Windows 上无法接受 lut3d 的绝对路径（盘符冒号会被当分隔符），
     // 必须 cwd 到 cube 所在目录 + 只用文件名。调用方据此设置 ffmpeg 的 cwd。
     parts.push('lut3d=' + path.basename(cubePath));
@@ -517,6 +542,7 @@ function prepareAdjust(params, opts = {}) {
 
 module.exports = {
   GRID,
+  CALIB,
   hasAdjust,
   normalizeParams,
   adjustChain,
