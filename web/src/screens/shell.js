@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 // 路由（/app 前缀，见 router.js）：
 //   /            创作（六步向导）
-//   /edit        剪辑（另一会话实现，占位）
+//   /edit        剪辑台（调节滑杆；2026-11-02 落地）
 //   /clips       库存 · 视频片段
 //   /photos      库存 · 照片
 //   /music       库存 · 配乐
@@ -27,6 +27,7 @@ import { HistoryView } from './history.js';
 import { TemplatesView } from './templates.js';
 import { SettingsView } from './settingsPage.js';
 import { OutputScreen } from './output.js';
+import { AdjustEditorView } from './adjustEditor.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -34,7 +35,7 @@ const { useEffect } = React;
 
 const NAV = [
   { key: 'create', route: '/', label: '创作', icon: '◆' },
-  { key: 'edit', route: '/edit', label: '剪辑', icon: '✂', tail: '另会话' },
+  { key: 'edit', route: '/edit', label: '剪辑', icon: '✂' },
   { section: '库存' },
   { key: 'clips', route: '/clips', label: '视频片段', icon: '▤', sub: true },
   { key: 'photos', route: '/photos', label: '照片', icon: '◫', sub: true },
@@ -126,14 +127,7 @@ export function AppShell({ route }) {
           ${view === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
           ${view === 'templates' && html`<${Boundary}><${TemplatesView} /></${Boundary}>`}
           ${view === 'settings' && html`<${Boundary}><${SettingsView} /></${Boundary}>`}
-          ${view === 'edit' && html`
-            <div className="h-full grid place-items-center">
-              <div className="text-center">
-                <p className="font-display text-[20px] text-ink3">剪辑</p>
-                <p className="mt-2 text-[12px] text-ink3">该模块由另一会话实现（bgm-editor.html），此处仅保留入口。</p>
-              </div>
-            </div>
-          `}
+          ${view === 'edit' && html`<${Boundary}><${AdjustEditorView} /></${Boundary}>`}
         </div>
       </div>
 

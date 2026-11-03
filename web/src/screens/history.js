@@ -24,6 +24,13 @@ function fetchJson(url, opt) {
     });
 }
 
+// 打开剪辑台（/app/edit?task=<id>）。用 pushState + popstate 让 shell 重新解析路由，
+// 不整页刷新；剪辑台自己会读 location.search 的 task。
+function openEdit(taskId) {
+  window.history.pushState({}, '', '/app/edit?task=' + encodeURIComponent(taskId));
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 export function HistoryView({ onChanged }) {
   const [tab, setTab] = useState('all');
   const [tasks, setTasks] = useState([]);
@@ -163,6 +170,13 @@ export function HistoryView({ onChanged }) {
                   </span>
                 </button>
                 <span className=${'text-[11px] shrink-0 ' + st.cls}>${st.text}</span>
+                ${t.adjust && html`<span className="text-[10px] text-accent shrink-0">已调节</span>`}
+                ${['completed', 'partial'].includes(t.status) && t.outputPath && html`
+                  <button onClick=${() => openEdit(t.taskId)}
+                    className="h-7 px-2 rounded-[5px] text-[11px] text-accent hover:bg-white/[.06]"
+                    title="在剪辑台打开调节面板"
+                  >剪辑</button>
+                `}
                 <button onClick=${() => moveToTrash(t)} disabled=${busy === t.taskId}
                   className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06] disabled:opacity-40"
                 >删除</button>

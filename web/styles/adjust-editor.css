@@ -1,0 +1,304 @@
+/* ============================================================
+   剪辑台 · 调节面板（/app/edit）
+   ------------------------------------------------------------
+   纯手写 CSS，零构建、零依赖。颜色全部取 styles/src.css 的 token。
+   ============================================================ */
+
+.adj-page {
+  padding: 20px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+.adj-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.adj-title {
+  font-family: theme('fontFamily.display');
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  color: var(--ink);
+  margin: 0;
+}
+.adj-sub {
+  font-size: 11px;
+  color: var(--ink3);
+  font-family: theme('fontFamily.num');
+}
+.adj-spacer { flex: 1; }
+
+.adj-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(244, 247, 245, .10);
+  background: transparent;
+  color: var(--ink2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.adj-btn:hover:not(:disabled) { background: rgba(244, 247, 245, .06); color: var(--ink); }
+.adj-btn:disabled { opacity: .38; cursor: not-allowed; }
+.adj-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--onaccent);
+  font-weight: 500;
+}
+.adj-btn.primary:hover:not(:disabled) { background: #e0c07a; color: var(--onaccent); }
+.adj-btn.danger { color: var(--danger); border-color: rgba(240, 138, 132, .5); }
+
+.adj-select {
+  height: 32px;
+  max-width: 320px;
+  border-radius: 6px;
+  border: 1px solid rgba(244, 247, 245, .10);
+  background: var(--s2);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.adj-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .adj-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- 预览 ---------- */
+.adj-preview {
+  background: var(--s1);
+  border: 1px solid rgba(244, 247, 245, .08);
+  border-radius: 8px;
+  padding: 12px;
+}
+.adj-video-wrap {
+  position: relative;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+}
+.adj-video-wrap video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.adj-video-empty { color: rgba(255, 255, 255, .55); font-size: 12px; }
+.adj-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ink3);
+  font-family: theme('fontFamily.num');
+}
+.adj-preview-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink3);
+}
+.adj-status {
+  font-size: 11px;
+  font-family: theme('fontFamily.num');
+  color: var(--ink3);
+}
+.adj-status.ok { color: var(--accent); }
+.adj-status.err { color: var(--danger); }
+.adj-status.busy { color: var(--warn); }
+
+/* ---------- 任务列表 ---------- */
+.adj-list { display: grid; gap: 8px; }
+.adj-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--s1);
+  border: 1px solid rgba(244, 247, 245, .08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--ink);
+  transition: border-color .15s, background .15s;
+}
+.adj-card:hover { border-color: rgba(214, 179, 106, .45); background: var(--s2); }
+.adj-card-title {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adj-card-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--ink3);
+  font-family: theme('fontFamily.num');
+}
+.adj-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: theme('fontFamily.num');
+  border: 1px solid rgba(214, 179, 106, .4);
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+.adj-empty {
+  padding: 36px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink3);
+}
+
+/* ---------- 调节面板 ---------- */
+.adj-panel {
+  background: var(--s1);
+  border: 1px solid rgba(244, 247, 245, .08);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 150px);
+}
+.adj-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(244, 247, 245, .07);
+  flex: 0 0 auto;
+}
+.adj-panel-title { font-size: 13px; color: var(--ink); font-weight: 500; }
+.adj-panel-body { overflow-y: auto; padding: 4px 12px 12px; }
+
+.adj-group { padding-top: 10px; }
+.adj-group + .adj-group { border-top: 1px solid rgba(244, 247, 245, .06); margin-top: 8px; }
+.adj-group-title {
+  font-size: 10px;
+  letter-spacing: .14em;
+  color: var(--ink3);
+  text-transform: uppercase;
+  font-family: theme('fontFamily.num');
+  margin: 0 0 4px;
+}
+
+.adj-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 46px 18px;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+}
+.adj-label {
+  font-size: 12px;
+  color: var(--ink2);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.adj-label.zeroing { color: var(--ink3); }
+.adj-val {
+  text-align: right;
+  font-size: 11px;
+  font-family: theme('fontFamily.num');
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.adj-val.zero { color: var(--ink3); }
+.adj-reset {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.adj-reset:hover { color: var(--accent); background: rgba(214, 179, 106, .10); }
+
+/* 滑杆：细轨 + 圆点 + 中点零刻度 */
+.adj-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+.adj-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--track, rgba(244, 247, 245, .14));
+}
+.adj-range::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--track, rgba(244, 247, 245, .14));
+}
+.adj-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--s1);
+  box-shadow: 0 0 0 1px rgba(214, 179, 106, .55);
+  transition: transform .1s;
+}
+.adj-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--s1);
+  box-shadow: 0 0 0 1px rgba(214, 179, 106, .55);
+}
+.adj-range:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.adj-range:focus { outline: none; }
+.adj-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 2px rgba(214, 179, 106, .35); }
+
+.adj-panel-foot {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(244, 247, 245, .07);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.adj-panel-foot .adj-spacer { flex: 1; }
+.adj-foot-note {
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--ink3);
+  margin: 0;
+}

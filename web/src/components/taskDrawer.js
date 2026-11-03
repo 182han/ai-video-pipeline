@@ -14,6 +14,18 @@ const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
 
+const ADJ_LABELS = {
+  temperature: '色温', tone: '色调', saturation: '饱和度',
+  brightness: '亮度', contrast: '对比度', highlight: '高光',
+  shadow: '阴影', white: '白色', black: '黑色', lightSensation: '光感'
+};
+
+// 打开剪辑台（/app/edit?task=<id>）：pushState + popstate 让 shell 重新解析路由。
+function openEdit(taskId) {
+  window.history.pushState({}, '', '/app/edit?task=' + encodeURIComponent(taskId));
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 const STEP_ORDER = [
   'prompt_optimize',
   'storyboard',
@@ -270,9 +282,11 @@ export function TaskDrawer({ taskId, onClose }) {
                   className="h-7 px-2.5 inline-flex items-center rounded-[5px] border border-white/[.10]
                              text-[11px] text-ink2 hover:bg-white/[.06]">下载成片</a>
               `}
-              <a href="/bgm-editor.html" target="_blank" rel="noreferrer"
-                className="h-7 px-2.5 inline-flex items-center rounded-[5px] border border-white/[.10]
-                           text-[11px] text-ink2 hover:bg-white/[.06]">去剪辑</a>
+              ${videoUrl && html`
+                <button onClick=${() => openEdit(t.taskId)}
+                  className="h-7 px-2.5 rounded-[5px] border border-accent/40 text-[11px] text-accent
+                             hover:bg-accent/[.08]">在剪辑台打开</button>
+              `}
               ${actErr && html`<span className="text-[11px] text-danger">${actErr}</span>`}
             </div>
 
@@ -296,6 +310,32 @@ export function TaskDrawer({ taskId, onClose }) {
                     `}
                   </span>
                 </div>
+              `;
+            })()}
+
+            <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">调节</h4>
+            ${(() => {
+              const adj = t.adjust && typeof t.adjust === 'object' ? t.adjust : null;
+              const items = adj
+                ? Object.keys(ADJ_LABELS).filter((k) => adj[k] !== undefined && adj[k] !== 0)
+                : [];
+              if (!items.length) {
+                return html`<p className="text-[12px] text-ink3 py-[5px]">未调节</p>`;
+              }
+              return html`
+                <div className="flex flex-wrap gap-x-4 gap-y-1 py-[5px] text-[12px] text-ink2">
+                  ${items.map((k) => html`
+                    <span key=${k}>
+                      ${ADJ_LABELS[k]}
+                      <b className="font-num text-ink font-normal">${adj[k] > 0 ? '+' + adj[k] : adj[k]}</b>
+                    </span>
+                  `)}
+                </div>
+                <p className="text-[10px] leading-[1.6] text-ink3">
+                  ${t.adjustApplied && t.adjustApplied.filter
+                    ? '导出时已应用：' + t.adjustApplied.filter
+                    : '参数已保存，尚未应用到成片'}
+                </p>
               `;
             })()}
 
