@@ -96,7 +96,18 @@ async function cleanupTask(taskId, taskManager) {
     } catch (e) {}
   }
 
-  return { ok: true, removed };
+  // 5. 复核：迟到的写入可能把 JSON 重新写回（taskManager._saveTask 在状态更新时同步落盘）。
+  //    最多重试 8 次 × 200ms；文件已不存在时立即返回，正常路径不多等。
+  //    背景：2026-11-03 实测一次「流水线卡在 looping、脚本超时」后留下 status=looping 的任务行，
+  //    之后即使补跑清理也可能被并发保存写回，因此这里以「文件确实不存在」作为成功判据。
+  for (let i = 0; i < 8; i++) {
+    const jf3 = path.join(TASKS_DIR, `${taskId}.json`);
+    if (!fs.existsSync(jf3)) return { ok: true, removed };
+    await new Promise((r) => setTimeout(r, 200));
+    try { fs.unlinkSync(jf3); } catch (e) {}
+    await deleteOnce();
+  }
+  return { ok: false, removed, skipped: '删除后仍被重新写入（存在并发保存）' };
 }
 
 /**

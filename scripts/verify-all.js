@@ -51,6 +51,12 @@ const SUITES = [
     desc: '三缺陷修复（终检配置透传/片段缺失告警/僵尸任务回收/日志落盘）'
   },
   {
+    name: 'test-hygiene',
+    script: 'verify-test-hygiene.js',
+    group: 'fast',
+    desc: '验收脚本自清理（造任务的脚本必须走 _test-cleanup，且 data/tasks 无测试残留）'
+  },
+  {
     name: 'qc-annotation',
     script: 'verify-qc-annotation.js',
     group: 'real',

@@ -24,6 +24,8 @@ const config = require('../config');
 const taskManager = require('../src/taskManager');
 const pipeline = require('../src/pipeline');
 const qualityChecker = require('../src/qualityChecker');
+// 测试任务自清理：内存 + data/tasks + 数据库 + 产物，见 scripts/_test-cleanup.js
+const { cleanupMany } = require('./_test-cleanup');
 
 // 注入 NSFW 通过（理由同 verify-stage-pipeline.js：本环境无 NSFW Key）
 qualityChecker.checkNSFW = async function () {
@@ -31,6 +33,9 @@ qualityChecker.checkNSFW = async function () {
 };
 
 const KEEP = process.argv.includes('--keep');
+// 负向自测钩子：VERIFY_ADJUST_SIMULATE_TIMEOUT=1 时第一次任务只等 1ms 就判超时，
+// 用于验证「脚本异常退出时 finally 清理仍然执行」。日常验收不要设置。
+const SIMULATE_TIMEOUT = process.env.VERIFY_ADJUST_SIMULATE_TIMEOUT === '1';
 let pass = 0, fail = 0;
 const failures = [];
 const assert = (cond, name, detail) => {
@@ -50,12 +55,14 @@ async function waitDone(taskId, timeoutMs = 240000) {
   throw new Error('任务超时');
 }
 
-async function runTask(extra) {
+async function runTask(extra, tracker) {
   const task = taskManager.createTask('极光下的雪山与冰川', {
     model: 'mock', totalClips: 2, clipDuration: 3, resolution: '720p', failRate: 0, ...extra
   });
+  // 先登记再等：流水线超时/异常时，finally 清理也必须知道这条任务
+  if (Array.isArray(tracker)) tracker.push(task.taskId);
   pipeline.startTask(task.taskId);
-  const done = await waitDone(task.taskId);
+  const done = await waitDone(task.taskId, SIMULATE_TIMEOUT ? 1 : 240000);
   console.log(`  任务 ${task.taskId} 终态=${done.status} ${done.error ? 'error=' + done.error : ''}`);
   return done;
 }
@@ -81,17 +88,20 @@ function frameMeanLuma(video, tmp) {
   const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'adjpipe-'));
   const created = [];
 
+  // 2026-11-03：清理放进 finally。实测流水线在 looping 阶段卡住、脚本超时抛异常时，
+  // 原实现直接走 .catch 退出，**清理代码一行没跑**，留下一条 status='looping' 的僵尸任务
+  // （历史页会永远显示「生成中」）。现在无论正常结束还是抛异常都会回收。
+  try {
+
   // ---------- A. 无调节 ----------
   console.log('\n[A. 无 adjust]');
-  const tA = await runTask({});
-  created.push(tA.taskId);
+  const tA = await runTask({}, created);
   assert(tA.status === 'completed' || tA.status === 'partial', '流水线正常结束', `status=${tA.status}`);
   assert(tA.adjust === null || tA.adjust === undefined, 'task.adjust 为空');
 
   // ---------- B. 有调节 ----------
   console.log('\n[B. adjust={brightness:50,contrast:999}]');
-  const tB = await runTask({ adjust: { brightness: 50, contrast: 999 } });
-  created.push(tB.taskId);
+  const tB = await runTask({ adjust: { brightness: 50, contrast: 999 } }, created);
   assert(tB.status === 'completed' || tB.status === 'partial', '流水线正常结束', `status=${tB.status}`);
   assert(tB.adjust && tB.adjust.brightness === 50, 'brightness 保留', JSON.stringify(tB.adjust));
   assert(tB.adjust && tB.adjust.contrast === 50, 'contrast 被钳到 50', JSON.stringify(tB.adjust));
@@ -115,8 +125,7 @@ function frameMeanLuma(video, tmp) {
   console.log('\n[D. 关闭 ADJUST_ENABLED 时传 adjust]');
   const savedEnabled = config.ADJUST.enabled;
   config.ADJUST.enabled = false;
-  const tD = await runTask({ adjust: { brightness: 50 } });
-  created.push(tD.taskId);
+  const tD = await runTask({ adjust: { brightness: 50 } }, created);
   assert(tD.adjust === null || tD.adjust === undefined, '开关关闭时不解析 adjust', JSON.stringify(tD.adjust));
   assert(!tD.adjustApplied, '开关关闭时不生成滤镜');
   config.ADJUST.enabled = savedEnabled;
@@ -129,32 +138,40 @@ function frameMeanLuma(video, tmp) {
   let tE = null;
   let threw = null;
   try {
-    tE = await runTask({ adjust: { brightness: 50 } });
+    tE = await runTask({ adjust: { brightness: 50 } }, created);
   } catch (e) {
     threw = e.message;
   } finally {
     pipeline._adjustOptionsFor = origAdjustOptions;
   }
-  if (tE) created.push(tE.taskId);
   const eFailed = (tE && (tE.status === 'failed' || tE.status === 'partial'))
     || /调节未执行/.test(threw || '');
   assert(eFailed, '任务被判失败（不静默通过）', `status=${tE && tE.status}${threw ? ', 异常=' + threw : ''}`);
   const stepError = tE && tE.steps && tE.steps.transcoding && tE.steps.transcoding.error;
   assert(/调节未执行/.test(stepError || threw || ''), '失败原因写明「调节未执行」', stepError || threw);
 
+  } finally {
   // ---------- 清理 ----------
+  // 2026-11-03：原实现只删 output 里的产物，**任务记录留在 data/tasks**。
+  // 实测每跑一次就在历史页堆 3 条「极光下的雪山与冰川」Mock 任务（累计 46 条）。
+  // 现统一走 _test-cleanup：内存 + 本地 JSON + 数据库 + 视频产物一起清。
   if (!KEEP) {
+    const cleaned = await cleanupMany(created, taskManager);
+    const okCount = cleaned.filter((r) => r.ok).length;
+    console.log(`  已清理测试任务 ${okCount}/${cleaned.length} 条（内存+JSON+数据库+产物）`);
+    cleaned.filter((r) => !r.ok).forEach((r) => {
+      console.log(`    ⚠️ 未清理 ${r.taskId}: ${r.skipped || '原因未知'}`);
+    });
     for (const id of created) {
-      for (const suffix of ['_final.mp4', '_master.mp4', '_concat.mp4', '_loop.mp4']) {
-        const f = path.join(__dirname, '..', 'output', `${id}${suffix}`);
-        try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) { /* ignore */ }
-      }
       for (const f of fs.readdirSync(path.join(__dirname, '..', 'output'))) {
         if (f.startsWith(id)) { try { fs.unlinkSync(path.join(__dirname, '..', 'output', f)); } catch (e) { /* ignore */ } }
       }
     }
+  } else {
+    console.log(`  --keep：保留 ${created.length} 条测试任务：${created.join(', ')}`);
   }
-  fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  }
 
   console.log('\n' + '='.repeat(64));
   console.log(`结果: ${pass} 通过 / ${fail} 失败`);

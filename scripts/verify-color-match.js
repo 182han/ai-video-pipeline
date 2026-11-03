@@ -23,6 +23,8 @@ const qc = require('../src/qualityChecker');
 const mixer = require('../src/processors/transitionMixer');
 const pipeline = require('../src/pipeline');
 const taskManager = require('../src/taskManager');
+// 测试任务自清理：内存 + data/tasks + 数据库 + 产物，见 scripts/_test-cleanup.js
+const { cleanupTask } = require('./_test-cleanup');
 
 const FF = cfg.FFMPEG_PATH;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'colormatch-'));
@@ -189,10 +191,13 @@ function makeVarClip(out, vf) {
     ok(notes.some(n => String(n).includes('校色已请求')), '校色请求 + 转场关闭 → 写 note，不抛错', notes.join(' / ').slice(0, 60));
     ok(created.colorMatch && created.colorMatch.enabled === true, '任务上保留了 colorMatch 请求（不静默改成没要求）');
   } finally {
-    // 清理临时任务，避免污染列表
+    // 清理临时任务，避免污染列表（内存 + data/tasks + 数据库 + 产物）。
+    // 2026-11-03：原实现调 taskManager.tasks.delete(...)——tasks 是普通对象不是 Map，
+    // 没有 delete 方法，等于什么都没清，于是每次跑都留一条测试任务在历史页。
     try {
-      if (created && taskManager.tasks && typeof taskManager.tasks.delete === 'function') {
-        taskManager.tasks.delete(created.taskId);
+      if (created) {
+        const r = await cleanupTask(created.taskId, taskManager);
+        console.log('  临时任务清理：' + (r.ok ? '已清理 ' + r.removed.join('+') : '跳过 ' + r.skipped));
       }
     } catch { /* ignore */ }
   }
