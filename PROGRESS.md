@@ -197,3 +197,39 @@ docs/spec/re-jianying/adjust-api-contract.md。
 - 用 Select-String 管道读取 node 输出会导致假 EXIT=1（broken pipe），要重定向到文件再判断。
 - 本机早前无 git（现已可用），当时只能按 mtime 判断并发改动风险。
 ```
+
+---
+
+## 剪映式调节滑杆交付（2026-11-02/03）
+
+### 已完成
+
+- **开关**：`app/.env` 已设 `ADJUST_ENABLED=true`（`.env` 不入库；`.env.example` 仍默认 false）。
+  **正在运行的 3001 服务需要重启才会读到新值**（本机沙箱无法结束该进程，需人工重启）。
+- **算法标定**：`src/processors/adjustChain.js` 新增 `CALIB`；对比度 `xfScale=1.01, pivot=0.43`，
+  饱和度 `scale=0.99`；LUT 网格默认「光感 65³ / 其余 33³」；光感改用自研 65³
+  `assets/adjust/lightSensation_max.cube`（poly7 + 四面体残差，7 帧 960×540 训练），
+  min 仍为镜像近似。
+- **PSNR 验收**：新增 `scripts/verify-adjust-psnr.js`，判据沿用 `jy-adjust.md` §13 的
+  t=2.5 单帧口径；10 项全部 ≥40 dB（对比度 40.32、光感 40.49；三帧均值 39.46 / 39.97，
+  t=4 运动帧拖低，文档已如实列出）。高光/白色/黑色三份新对照到位并全部通过。
+- **API 补洞**：`server.js` 的 `POST /api/tasks` 此前漏传 `adjust`（HTTP 入口等于没通），已补；
+  新增 `POST /api/tasks/:id/adjust`（保存参数 + 只重跑转码/配乐/终检，旧成片改名备份）；
+  `GET /api/tasks/completed` 返回 `adjust / adjustApplied`。
+- **前端**：`/app/edit` 剪辑台（`web/src/screens/adjustEditor.js` + `web/styles/adjust-editor.css`），
+  10 个滑杆全部启用，锐化/清晰/颗粒/暗角按决策隐藏；历史记录与任务详情均有「剪辑/在剪辑台打开」入口。
+- **验收**：11 个套件全 EXIT=0（stages 45 / frontend-static 43 / stats 42 / pipeline-fixes 28 /
+  mock-vqc 14 / skill-prompt 109 / skill-ai-path 17 / stage-pipeline 37 / adjust-chain 13 /
+  adjust-pipeline 12 / transition-ui 22）；另 `verify-frontend-contract` 49/0。
+  开关关闭负向：两条 Mock 任务（一条带 brightness:50、一条不带）逐帧 `framemd5` **126 帧全等**。
+
+### 未验证 / 注意
+
+1. **浏览器视觉/交互未验证**：本机 `dsh_browser_*` 报 Electron 不可用。只做了静态资源 200、
+   JS 语法检查与 API 契约验证；需人工打开 `http://localhost:3001/app/edit` 目测。
+2. PSNR 验收用 crf18；pipeline 实际转码 crf23/medium，真实导出会低于验收表。
+3. 只验证 +50 方向；负向滑杆、光感负向 LUT 均未验证。
+4. 根目录 `docs/spec/re-jianying/` 不在 git 仓库内；`jy-adjust.md` §16 与
+   `adjust-api-contract.md` 已更新，但不会随 `app/` 提交，需另行备份。
+5. 4 项空间近似（锐化/清晰/颗粒/暗角）隐藏，未做对照；`fade` 也不在面板（未验证）。
+6. `web/verify/` 是另一会话留下的未跟踪截图目录，本任务未动、未提交。
