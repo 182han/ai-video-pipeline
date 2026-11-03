@@ -424,6 +424,9 @@ app.get('/api/tasks/completed', (req, res) => {
       outputUrl: '/output/' + path.basename(t.outputPath),
       hasBgm: !!(t.bgmResult && t.bgmResult.applied),
       bgm: t.bgm || null,
+      // 调节：前端剪辑台用它回填滑杆；null = 未调节
+      adjust: t.adjust || null,
+      adjustApplied: t.adjustApplied && t.adjustApplied.filter ? { filter: t.adjustApplied.filter } : null,
       completedAt: t.completedAt,
       createdAt: t.createdAt
     }));
@@ -1150,7 +1153,7 @@ app.post('/api/assistant/chat', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1234,6 +1237,9 @@ app.post('/api/tasks', (req, res) => {
     // 拼接时自动校色：{ enabled }。不传 = 关闭（默认关，会改变画面观感，必须用户知情）。
     // 与 transition 互斥：enabled 时必须开启转场，校验在 taskManager.createTask（2026-10-27）。
     colorMatch: (colorMatch && typeof colorMatch === 'object') ? colorMatch : null,
+    // 剪映「调节」：{ brightness, contrast, ... }。不传/全 0 = 不调节。
+    // 2026-11-02 补：此前 API 入口漏了透传，taskManager/pipeline 的接线等于没通到 HTTP。
+    adjust: (adjust && typeof adjust === 'object') ? adjust : null,
     // 兼容：老前端仍传 clipTracks 时保留透传，由 createTask 收敛为整片主曲
     clipTracks: Array.isArray(clipTracks) ? clipTracks.slice(0, count) : undefined,
     // 保存前端传入的 API 配置（运行时使用）
@@ -1659,6 +1665,77 @@ app.post('/api/tasks/:id/continue', async (req, res) => {
   });
   if (!result.success) return res.status(400).json(result);
   res.json(result);
+});
+
+// ===== 调节：保存参数 + 重新导出（2026-11-02）=====
+//
+// 语义：
+//   1) adjustChain.normalizeParams 做白名单 + 钳制（非法值丢弃）；null = 清空调节
+//   2) 只重跑 transcoding / audio_mix / final_qc，复用拼接/循环产物，不重新生成片段
+//   3) 旧成片先改名备份为 <taskId>_final_v<时间戳>.mp4，再写新成片；失败时 outputPath
+//      仍指向旧成片，前端不会看到「成片消失」
+//   4) 失败必须把 error 返回给前端（AGENTS §4.8：不许静默成功）
+app.post('/api/tasks/:id/adjust', async (req, res) => {
+  try {
+    if (!config.ADJUST || !config.ADJUST.enabled) {
+      return res.status(400).json({ success: false, error: '调节功能未启用（ADJUST_ENABLED=false）' });
+    }
+    const taskId = req.params.id;
+    const task = taskManager.getTask(taskId);
+    if (!task) return res.status(404).json({ success: false, error: '任务不存在' });
+    if (pipeline.runningTasks.has(taskId)) {
+      return res.status(409).json({ success: false, error: '任务正在运行中，请稍后再试' });
+    }
+
+    const body = req.body || {};
+    const raw = body.adjust !== undefined ? body.adjust : body;
+    const normalized = require('./src/processors/adjustChain').normalizeParams(raw);
+
+    const oldFinal = task.outputPath && fs.existsSync(task.outputPath) ? task.outputPath : null;
+    if (!oldFinal) {
+      return res.status(400).json({ success: false, error: '该任务还没有可重新导出的成片' });
+    }
+
+    const DROP = ['transcoding', 'audio_mix', 'final_qc'];
+    const completed = pipeline._completedSteps(task).filter((s) => !DROP.includes(s));
+    if (!completed.includes('concatenation')) {
+      return res.status(400).json({ success: false, error: '缺少拼接产物，无法重新导出' });
+    }
+
+    // 旧成片改名备份（同盘 rename，不复制大文件）
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = oldFinal.replace(/\.mp4$/i, '') + '_v' + stamp + '.mp4';
+    try {
+      fs.renameSync(oldFinal, backup);
+    } catch (e) {
+      return res.status(500).json({ success: false, error: '旧成片备份失败：' + e.message });
+    }
+
+    // outputPath 先指向备份：重导出运行中/失败时，前端仍能播放旧成片
+    taskManager.updateTaskStatus(taskId, task.status, {
+      adjust: normalized || null,
+      adjustApplied: null,
+      outputPath: backup
+    });
+
+    const result = await pipeline.continueTask(taskId, { preset: 'final', completed });
+    if (!result.success) {
+      // 未起跑：把旧成片改回原名，避免留下一个悬空 outputPath
+      try { if (!fs.existsSync(oldFinal)) fs.renameSync(backup, oldFinal); } catch (e) { /* ignore */ }
+      return res.status(400).json(result);
+    }
+    res.json({
+      success: true,
+      taskId,
+      adjust: normalized || null,
+      backup: path.basename(backup),
+      pending: result.pending,
+      message: result.message || '已开始重新导出'
+    });
+  } catch (e) {
+    console.error('[adjust] 失败:', e.message);
+    res.status(500).json({ success: false, error: '调节重新导出失败：' + e.message });
+  }
 });
 
 // 重新质检：对「已生成但质检失败」的片段只重跑质检，不重新生成视频。
