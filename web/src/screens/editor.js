@@ -79,6 +79,15 @@ export function EditorView() {
   const [libQuery, setLibQuery] = useState('');
   const [pps, setPps] = useState(26);
   const [dragOver, setDragOver] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [playhead, setPlayhead] = useState(0);
+
+  const pastRef = useRef([]);
+  const futureRef = useRef([]);
+  const segTimerRef = useRef(null);
+  const moveIndexRef = useRef(null);
+  const trimRef = useRef(null);
+  const segmentsRef = useRef([]);
 
   const projectRef = useRef(null);
   const revisionRef = useRef(0);
@@ -89,8 +98,13 @@ export function EditorView() {
     projectRef.current = p;
     revisionRef.current = Number(p.revision) || 1;
     nameRef.current = p.name || '';
+    segmentsRef.current = Array.isArray(p.segments) ? p.segments : [];
     setProject(p);
     setNameDraft(p.name || '');
+    setSelectedId(null);
+    setPlayhead(0);
+    pastRef.current = [];
+    futureRef.current = [];
     setSaveState('saved');
     try { localStorage.setItem(LAST_KEY, p.id); } catch (e) { /* ignore */ }
     try { history.replaceState({}, '', '/app/edit?project=' + encodeURIComponent(p.id)); } catch (e) { /* ignore */ }
@@ -157,28 +171,215 @@ export function EditorView() {
     });
   }
 
+  function round3(v) {
+    return Math.round((Number(v) || 0) * 1000) / 1000;
+  }
+
+  function assetMaxDur(assetId) {
+    const hit = libItems.find((x) => x.id === assetId);
+    return hit ? (Number(hit.durationSec) || 0) : 0;
+  }
+
+  function historyPush() {
+    pastRef.current.push(segmentsRef.current.map((s) => ({ ...s })));
+    if (pastRef.current.length > 50) pastRef.current.shift();
+    futureRef.current = [];
+  }
+
+  function scheduleSegSave() {
+    if (segTimerRef.current) clearTimeout(segTimerRef.current);
+    setSaveState('saving');
+    segTimerRef.current = setTimeout(() => {
+      const cur = projectRef.current;
+      if (!cur) return;
+      api('/api/projects/' + encodeURIComponent(cur.id), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision: revisionRef.current, segments: segmentsRef.current })
+      }).then((j) => {
+        revisionRef.current = j.project.revision;
+        projectRef.current = j.project;
+        setProject(j.project);
+        setSaveState('saved');
+      }).catch((e) => {
+        setSaveState(e.code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
+        setToast(e.message || '保存失败');
+      });
+    }, 400);
+  }
+
+  function commitSegments(next, opts = {}) {
+    if (opts.history !== false) historyPush();
+    segmentsRef.current = next;
+    const p = projectRef.current;
+    if (p) {
+      projectRef.current = { ...p, segments: next };
+      setProject(projectRef.current);
+    }
+    scheduleSegSave();
+  }
+
+  function undo() {
+    const prev = pastRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push(segmentsRef.current.map((s) => ({ ...s })));
+    segmentsRef.current = prev;
+    const p = projectRef.current;
+    if (p) { projectRef.current = { ...p, segments: prev }; setProject(projectRef.current); }
+    setSelectedId(null);
+    scheduleSegSave();
+  }
+
+  function redo() {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(segmentsRef.current.map((s) => ({ ...s })));
+    segmentsRef.current = next;
+    const p = projectRef.current;
+    if (p) { projectRef.current = { ...p, segments: next }; setProject(projectRef.current); }
+    setSelectedId(null);
+    scheduleSegSave();
+  }
+
   function addClip(item) {
-    const cur = projectRef.current;
-    if (!cur || !item || !item.id) return;
+    if (!item || !item.id) return;
     const dur = Number(item.durationSec) || 0;
     const seg = {
       id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
       assetId: item.id,
       inSec: 0,
-      outSec: dur > 0 ? Math.round(dur * 1000) / 1000 : null,
+      outSec: dur > 0 ? round3(dur) : null,
       adjust: {}
     };
-    savePatch({ segments: [...(cur.segments || []), seg] })
-      .then(() => setToast('已加入时间线：' + (item.prompt || item.id).slice(0, 24)))
-      .catch(() => {});
+    commitSegments([...segmentsRef.current, seg]);
+    setSelectedId(seg.id);
+    setToast('已加入时间线：' + (item.prompt || item.id).slice(0, 24));
+  }
+
+  function splitSelected() {
+    const segs = segmentsRef.current;
+    if (!segs.length) return;
+    let idx = selectedId ? segs.findIndex((s) => s.id === selectedId) : -1;
+    if (idx < 0) idx = 0;
+    const seg = segs[idx];
+    const dur = segDuration(seg);
+    if (dur < 0.4) { setToast('片段太短，无法分割'); return; }
+    let acc = 0;
+    for (let i = 0; i < idx; i++) acc += segDuration(segs[i]);
+    let local = playhead - acc;
+    if (!(local > 0.15 && local < dur - 0.15)) local = dur / 2;
+    const cut = round3((Number(seg.inSec) || 0) + local);
+    const a = { ...seg, outSec: cut };
+    const b = {
+      ...seg,
+      id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+      inSec: cut
+    };
+    const next = [...segs.slice(0, idx), a, b, ...segs.slice(idx + 1)];
+    commitSegments(next);
+    setSelectedId(b.id);
+  }
+
+  function deleteSelected() {
+    if (!selectedId) return;
+    commitSegments(segmentsRef.current.filter((s) => s.id !== selectedId));
+    setSelectedId(null);
+  }
+
+  function onRulerClick(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const t = Math.max(0, (e.clientX - rect.left) / pps);
+    setPlayhead(Math.round(t * 100) / 100);
+  }
+
+  function onTrackClick(e) {
+    if (e.target !== e.currentTarget) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPlayhead(Math.max(0, Math.round(((e.clientX - rect.left) / pps) * 100) / 100));
+    setSelectedId(null);
+  }
+
+  function beginTrim(e, index, side) {
+    e.stopPropagation();
+    e.preventDefault();
+    const seg = segmentsRef.current[index];
+    if (!seg) return;
+    setSelectedId(seg.id);
+    historyPush();
+    trimRef.current = {
+      index,
+      side,
+      startX: e.clientX,
+      inSec: Number(seg.inSec) || 0,
+      outSec: Number(seg.outSec) || 0,
+      max: assetMaxDur(seg.assetId)
+    };
+    const move = (ev) => {
+      const t = trimRef.current;
+      if (!t) return;
+      const delta = (ev.clientX - t.startX) / pps;
+      const list = segmentsRef.current.map((s) => ({ ...s }));
+      const target = list[t.index];
+      if (!target) return;
+      if (t.side === 'left') {
+        const out = Number(target.outSec) || 0;
+        target.inSec = round3(Math.max(0, Math.min(out - 0.2, t.inSec + delta)));
+      } else {
+        const inn = Number(target.inSec) || 0;
+        const max = t.max > 0 ? t.max : (Number(target.outSec) || 0) + 1000;
+        target.outSec = round3(Math.max(inn + 0.2, Math.min(max, t.outSec + delta)));
+      }
+      segmentsRef.current = list;
+      const p = projectRef.current;
+      if (p) { projectRef.current = { ...p, segments: list }; setProject(projectRef.current); }
+    };
+    const up = () => {
+      trimRef.current = null;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      scheduleSegSave();
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  }
+
+  function onClipDragStart(e, index) {
+    moveIndexRef.current = index;
+    try {
+      e.dataTransfer.setData('text/plain', 'move:' + index);
+      e.dataTransfer.effectAllowed = 'move';
+    } catch (err) { /* ignore */ }
   }
 
   function onDropClip(e) {
     e.preventDefault();
     setDragOver(false);
-    const id = e.dataTransfer.getData('text/plain');
-    if (!id) return;
-    const item = libItems.find((x) => x.id === id);
+    const data = e.dataTransfer.getData('text/plain') || '';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const time = Math.max(0, (e.clientX - rect.left) / pps);
+
+    if (data.indexOf('move:') === 0) {
+      const from = Number(data.slice(5));
+      const segs = segmentsRef.current;
+      if (!(from >= 0 && from < segs.length)) return;
+      let acc = 0;
+      let insertAt = segs.length;
+      for (let i = 0; i < segs.length; i++) {
+        const d = segDuration(segs[i]);
+        if (time < acc + d / 2) { insertAt = i; break; }
+        acc += d;
+      }
+      const moved = segs[from];
+      const rest = segs.filter((_, i) => i !== from);
+      let idx = from < insertAt ? insertAt - 1 : insertAt;
+      idx = Math.max(0, Math.min(rest.length, idx));
+      rest.splice(idx, 0, moved);
+      commitSegments(rest);
+      setSelectedId(moved.id);
+      return;
+    }
+
+    const item = libItems.find((x) => x.id === data);
     if (item) addClip(item);
   }
 
@@ -269,9 +470,10 @@ export function EditorView() {
   const segments = Array.isArray(project.segments) ? project.segments : [];
   const layout = [];
   let acc = 0;
-  for (const seg of segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
     const d = segDuration(seg);
-    layout.push({ seg, left: acc * pps, width: Math.max(24, d * pps), dur: d });
+    layout.push({ seg, i, left: acc * pps, width: Math.max(24, d * pps), dur: d, start: acc, end: acc + d });
     acc += d;
   }
   const duration = acc;
@@ -404,10 +606,10 @@ export function EditorView() {
 
       <section className="ed-timeline">
         <div className="ed-tl-tools">
-          <span className="ed-tool">撤销</span>
-          <span className="ed-tool">重做</span>
-          <span className="ed-tool">分割</span>
-          <span className="ed-tool">删除</span>
+          <button className="ed-tool ed-act" onClick=${undo} disabled=${pastRef.current.length === 0} title="撤销">撤销</button>
+          <button className="ed-tool ed-act" onClick=${redo} disabled=${futureRef.current.length === 0} title="重做">重做</button>
+          <button className="ed-tool ed-act" onClick=${splitSelected} disabled=${!selectedId && segments.length === 0} title="在播放头分割">分割</button>
+          <button className="ed-tool ed-act" onClick=${deleteSelected} disabled=${!selectedId} title="删除选中片段">删除</button>
           <span className="ed-spacer"></span>
           <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.max(PPS_MIN, v - 6))}>−</button>
           <span className="ed-tool">缩放</span>
@@ -421,7 +623,7 @@ export function EditorView() {
             <div className="ed-tl-label">音频</div>
           </div>
           <div className="ed-tl-scroll">
-            <div className="ed-ruler" style=${{ width: trackWidth + 'px' }}>
+            <div className="ed-ruler" style=${{ width: trackWidth + 'px' }} onClick=${onRulerClick}>
               ${rulerTicks.map((s) => html`
                 <span key=${s} className=${'ed-tick' + (s % (rulerStep * 5) === 0 ? ' major' : '')} style=${{ left: (s * pps) + 'px' }}>
                   ${s % (rulerStep * 5) === 0 ? fmtTime(s) : ''}
@@ -434,20 +636,31 @@ export function EditorView() {
               onDragOver=${(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave=${() => setDragOver(false)}
               onDrop=${onDropClip}
+              onClick=${onTrackClick}
             >
               ${layout.length === 0
                 ? html`<span className="ed-track-empty">从左侧点选或拖入素材</span>`
-                : layout.map(({ seg, left, width, dur }, i) => html`
-                    <span key=${seg.id || i} className="ed-clip" style=${{ left: left + 'px', width: Math.max(24, width - 2) + 'px' }} title=${seg.assetId + ' · ' + dur.toFixed(2) + 's'}>
+                : layout.map(({ seg, i, left, width, dur }) => html`
+                    <span
+                      key=${seg.id || i}
+                      className=${'ed-clip' + (selectedId === seg.id ? ' sel' : '')}
+                      style=${{ left: left + 'px', width: Math.max(24, width - 2) + 'px' }}
+                      title=${seg.assetId + ' · ' + dur.toFixed(2) + 's'}
+                      draggable=${true}
+                      onDragStart=${(e) => onClipDragStart(e, i)}
+                      onClick=${(e) => { e.stopPropagation(); setSelectedId(seg.id); }}
+                    >
+                      <span className="ed-handle l" title="拖动裁剪入点" onPointerDown=${(e) => beginTrim(e, i, 'left')}></span>
                       <span className="ed-clip-name">${seg.assetId}</span>
                       <span className="ed-clip-dur">${fmtDur(dur)}</span>
+                      <span className="ed-handle r" title="拖动裁剪出点" onPointerDown=${(e) => beginTrim(e, i, 'right')}></span>
                     </span>
                   `)}
             </div>
             <div className="ed-track audio" style=${{ width: trackWidth + 'px' }}>
               <span className="ed-track-empty">音频轨（F07）</span>
             </div>
-            <div className="ed-playhead" style=${{ left: '0px' }}></div>
+            <div className="ed-playhead" style=${{ left: (playhead * pps) + 'px' }}></div>
           </div>
         </div>
       </section>

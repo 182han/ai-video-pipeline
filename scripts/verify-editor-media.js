@@ -55,7 +55,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/onDragStart/.test(editor) && /onDropClip/.test(editor), '拖拽入轨接线');
   check(/onDrop=\$\{onDropClip\}/.test(editor), '时间线接住 drop');
   check(/function addClip\(/.test(editor), '点击加入时间线');
-  check(/savePatch\(\{ segments:/.test(editor), '入轨写回工程 segments');
+  check(/commitSegments\(\[\.\.\.segmentsRef\.current, seg\]\)/.test(editor), '入轨写回工程 segments');
   check(/segDuration\(/.test(editor), '按真实入出点计算时长');
   check(/left: acc \* pps/.test(editor), '时间线按秒×缩放排版');
   check(/setPps/.test(editor), '时间线缩放可调');

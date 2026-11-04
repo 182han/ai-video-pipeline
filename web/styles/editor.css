@@ -245,9 +245,25 @@
 .ed-card[draggable="true"] { user-select: none; }
 
 /* ---------- 时间线片段（F03/F04） ---------- */
-.ed-clip { display: flex; flex-direction: column; justify-content: space-between; }
-.ed-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-.ed-clip-dur { font-size: 9px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; }
+.ed-clip { display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; }
+.ed-clip.sel { border-color: var(--accent, #D6B36A); box-shadow: 0 0 0 1px rgba(214, 179, 106, .45); }
+.ed-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; padding: 0 4px; }
+.ed-clip-dur { font-size: 9px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; padding: 0 4px; }
+.ed-handle {
+  position: absolute; top: 0; bottom: 0; width: 7px; z-index: 2;
+  cursor: ew-resize; touch-action: none; background: transparent;
+}
+.ed-handle.l { left: 0; }
+.ed-handle.r { right: 0; }
+.ed-clip.sel .ed-handle { background: rgba(214, 179, 106, .38); }
+.ed-tool.ed-act {
+  height: 20px; padding: 0 6px; border-radius: 4px; cursor: pointer;
+  border: 1px solid rgba(244, 247, 245, .10);
+  background: transparent; color: var(--ink2, #A7B3AD); font-size: 11px;
+}
+.ed-tool.ed-act:hover:not(:disabled) { background: rgba(244, 247, 245, .06); color: var(--ink, #F4F7F5); }
+.ed-tool.ed-act:disabled { opacity: .35; cursor: not-allowed; }
+.ed-ruler { cursor: crosshair; }
 .ed-track.over { background: rgba(214, 179, 106, .06); outline: 1px dashed rgba(214, 179, 106, .5); outline-offset: -3px; }
 .ed-tool.ed-zoom {
   width: 20px; height: 20px; border: 1px solid rgba(244, 247, 245, .12);
