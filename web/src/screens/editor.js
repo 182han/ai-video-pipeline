@@ -278,13 +278,11 @@ export function EditorView() {
         fadeOut: Number(seg.fadeOut) || 0
       };
     };
-    const filmDur = (project.segments || []).reduce(
-      (s, x) => s + Math.max(0, (Number(x.outSec) || 0) - (Number(x.inSec) || 0)), 0);
     e.setAudio({
       music: toPlan(((project.audio && project.audio.music) || [])[0]),
       ambient: toPlan(((project.audio && project.audio.ambient) || [])[0])
-    }, filmDur);
-  }, [project, bgm]);
+    }, 0);
+  }, [project && project.audio, bgm]);
 
   useEffect(() => {
     const e = previewRef.current;

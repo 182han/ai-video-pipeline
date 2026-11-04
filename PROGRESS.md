@@ -200,6 +200,12 @@
 - 刷新白屏：`Cannot read properties of null (reading 'adjust')`。工程先于素材库加载时，预览拿到空片段列表走 `same` 分支，`_ensureLut(null)` 崩；补空片段保护，segments 列表过滤 null。
 - 验收：preview **27/0**、shell 22/0。
 
+### 性能修复（2026-11-04）
+
+- 拖调节滑杆卡顿：原来每帧都请求 `/api/adjust/lut`（服务端重算 17³ LUT + 传 20KB + 重建 3D 纹理）。现改为 **140ms 防抖**，只取最后一次；拖动过程沿用旧 LUT，松手后追上。
+- 预览音频 effect 依赖从 `[project, bgm]` 收窄为 `[project.audio, bgm]`，拖滑杆不再反复 seek 音频。
+- 验收：preview 27/0、audio 22/0。
+
 ## 基线快照
 
 | 项 | 值 |

@@ -209,7 +209,7 @@ export class PreviewEngine {
         if (this.opts.onError) this.opts.onError('素材加载失败：' + (v.currentSrc || ''));
       });
       this.host.appendChild(v);
-      return { video: v, src: null, lutKey: null, lutTex: null, ready: false };
+      return { video: v, src: null, lutKey: null, lutTex: null, lutTimer: null, ready: false };
     });
     this.active = 0;
     this.ctxLost = false;
@@ -278,7 +278,7 @@ export class PreviewEngine {
   _audioVolume(item) {
     const base = Math.max(0, Math.min(1, item.volume === undefined ? 1 : Number(item.volume)));
     const g = Math.max(0, this.global || 0);
-    const D = this.filmDuration || this.duration || 0;
+    const D = this.duration || this.filmDuration || 0;
     let f = 1;
     const fi = Math.max(0, Number(item.fadeIn) || 0);
     const fo = Math.max(0, Number(item.fadeOut) || 0);
@@ -445,22 +445,29 @@ export class PreviewEngine {
   _ensureLut(slotIdx, seg) {
     if (!seg) return;
     const slot = this.slots[slotIdx];
-    const key = JSON.stringify(seg.adjust || {});
+    const adjust = seg.adjust || null;
+    const key = JSON.stringify(adjust || {});
     if (slot.lutKey === key) return;
     slot.lutKey = key;
-    if (!hasAdjust(seg.adjust)) {
+    if (slot.lutTimer) { clearTimeout(slot.lutTimer); slot.lutTimer = null; }
+    if (!hasAdjust(adjust)) {
       slot.lutTex = null;
       return;
     }
     if (this.texCache.has(key)) { slot.lutTex = this.texCache.get(key); return; }
-    fetchLut(seg.adjust).then((data) => {
+    // 拖动滑杆时每帧都会换 key：延迟 140ms 只取最后一次，避免每帧一次 HTTP + 重建纹理
+    slot.lutTimer = setTimeout(() => {
+      slot.lutTimer = null;
       if (this.destroyed || slot.lutKey !== key) return;
-      if (!data) return;
-      const tex = this._makeLutTexture(data);
-      this.texCache.set(key, tex);
-      slot.lutTex = tex;
-      if (!this.playing) this._render();
-    });
+      fetchLut(adjust).then((data) => {
+        if (this.destroyed || slot.lutKey !== key) return;
+        if (!data) return;
+        const tex = this._makeLutTexture(data);
+        this.texCache.set(key, tex);
+        slot.lutTex = tex;
+        if (!this.playing) this._render();
+      });
+    }, 140);
   }
 
   _makeLutTexture(data) {
