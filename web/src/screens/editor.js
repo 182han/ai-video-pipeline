@@ -10,6 +10,7 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { PreviewEngine } from '../preview/engine.js';
+import { AudioPanel } from '../components/audioPanel.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -100,6 +101,7 @@ export function EditorView() {
   const [lib, setLib] = useState(null);
   const [libErr, setLibErr] = useState('');
   const [libQuery, setLibQuery] = useState('');
+  const [bgm, setBgm] = useState(null);
   const [pps, setPps] = useState(26);
   const [dragOver, setDragOver] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -115,6 +117,7 @@ export function EditorView() {
   const moveIndexRef = useRef(null);
   const trimRef = useRef(null);
   const segmentsRef = useRef([]);
+  const audioRef = useRef({ music: [], ambient: [], opts: {} });
   const rulerRef = useRef(null);
   const playheadElRef = useRef(null);
   const scrubRef = useRef(0);
@@ -132,6 +135,7 @@ export function EditorView() {
     revisionRef.current = Number(p.revision) || 1;
     nameRef.current = p.name || '';
     segmentsRef.current = Array.isArray(p.segments) ? p.segments : [];
+    audioRef.current = p.audio || { music: [], ambient: [], opts: {} };
     setProject(p);
     setNameDraft(p.name || '');
     setSelectedId(null);
@@ -169,6 +173,7 @@ export function EditorView() {
       if (!p) p = await createProject();
       adopt(p);
       loadLibrary();
+      loadBgm();
     })().catch((e) => setLoadErr(e.message || '工程加载失败'));
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
@@ -244,6 +249,13 @@ export function EditorView() {
     }
   }
 
+  async function loadBgm() {
+    try {
+      const j = await api('/api/bgm');
+      setBgm(j);
+    } catch (e) { /* 音频库失败不影响剪辑 */ }
+  }
+
   function savePatch(patch) {
     const cur = projectRef.current;
     if (!cur) return Promise.resolve(null);
@@ -280,7 +292,7 @@ export function EditorView() {
     futureRef.current = [];
   }
 
-  function scheduleSegSave() {
+  function scheduleSave() {
     if (segTimerRef.current) clearTimeout(segTimerRef.current);
     setSaveState('saving');
     segTimerRef.current = setTimeout(() => {
@@ -289,10 +301,15 @@ export function EditorView() {
       api('/api/projects/' + encodeURIComponent(cur.id), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: revisionRef.current, segments: segmentsRef.current })
+        body: JSON.stringify({
+          revision: revisionRef.current,
+          segments: segmentsRef.current,
+          audio: audioRef.current
+        })
       }).then((j) => {
         revisionRef.current = j.project.revision;
         projectRef.current = j.project;
+        audioRef.current = j.project.audio || audioRef.current;
         setProject(j.project);
         setSaveState('saved');
       }).catch((e) => {
@@ -310,7 +327,17 @@ export function EditorView() {
       projectRef.current = { ...p, segments: next };
       setProject(projectRef.current);
     }
-    scheduleSegSave();
+    scheduleSave();
+  }
+
+  function commitAudio(next) {
+    audioRef.current = next;
+    const p = projectRef.current;
+    if (p) {
+      projectRef.current = { ...p, audio: next };
+      setProject(projectRef.current);
+    }
+    scheduleSave();
   }
 
   function undo() {
@@ -321,7 +348,7 @@ export function EditorView() {
     const p = projectRef.current;
     if (p) { projectRef.current = { ...p, segments: prev }; setProject(projectRef.current); }
     setSelectedId(null);
-    scheduleSegSave();
+    scheduleSave();
   }
 
   function redo() {
@@ -332,7 +359,7 @@ export function EditorView() {
     const p = projectRef.current;
     if (p) { projectRef.current = { ...p, segments: next }; setProject(projectRef.current); }
     setSelectedId(null);
-    scheduleSegSave();
+    scheduleSave();
   }
 
   function addClip(item) {
@@ -394,7 +421,7 @@ export function EditorView() {
     segmentsRef.current = list;
     const p = projectRef.current;
     if (p) { projectRef.current = { ...p, segments: list }; setProject(projectRef.current); }
-    scheduleSegSave();
+    scheduleSave();
   }
 
   function resetAdjust() {
@@ -478,7 +505,7 @@ export function EditorView() {
       trimRef.current = null;
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
-      scheduleSegSave();
+      scheduleSave();
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -690,6 +717,13 @@ export function EditorView() {
   const trackWidth = Math.max(600, Math.ceil(rulerEnd * pps));
   const exporting = !!(exportJob && (exportJob.status === 'queued' || exportJob.status === 'running'));
   const selectedSeg = segments.find((s) => s.id === selectedId) || null;
+  const musicSeg = (project.audio && project.audio.music && project.audio.music[0]) || null;
+  const ambientSeg = (project.audio && project.audio.ambient && project.audio.ambient[0]) || null;
+  const bgmTitle = (id) => {
+    const list = (bgm && bgm.tracks) || [];
+    const hit = list.find((t) => t.id === id);
+    return hit ? hit.title : id;
+  };
 
   return html`
     <div className="ed-root">
@@ -772,10 +806,7 @@ export function EditorView() {
                     </div>
                     ${libItems.length > 120 && html`<p className="ed-sub">只显示前 120 条，用搜索缩小范围</p>`}
                   </div>`
-                : html`<div className="ed-empty">
-                    <p>音频面板将在 F07 接入</p>
-                    <p className="ed-sub">音乐 / 环境音两轨，沿用现有配乐计划</p>
-                  </div>`}
+                : html`<${AudioPanel} project=${project} bgm=${bgm} duration=${duration} onCommit=${commitAudio} />`}
             </div>
           </div>
         </section>
@@ -905,7 +936,17 @@ export function EditorView() {
                   `)}
             </div>
             <div className="ed-track audio" style=${{ width: trackWidth + 'px' }}>
-              <span className="ed-track-empty">音频轨（F07）</span>
+              ${musicSeg && html`
+                <span className="ed-audio-clip music" style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}>
+                  ♪ ${bgmTitle(musicSeg.trackId)}
+                </span>
+              `}
+              ${ambientSeg && html`
+                <span className="ed-audio-clip ambient" style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}>
+                  ♫ ${bgmTitle(ambientSeg.trackId)}
+                </span>
+              `}
+              ${!musicSeg && !ambientSeg && html`<span className="ed-track-empty">音乐 / 环境音（左侧音频面板）</span>`}
             </div>
             <div
               className="ed-playhead"

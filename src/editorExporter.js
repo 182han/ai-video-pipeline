@@ -17,6 +17,7 @@ const config = require('../config');
 const library = require('./library');
 const projectStore = require('./projectStore');
 const taskManager = require('./taskManager');
+const audioMixer = require('./processors/audioMixer');
 const transitionMixer = require('./processors/transitionMixer');
 
 const OUTPUT_DIR = config.STORAGE.outputDir;
@@ -49,6 +50,7 @@ function jobView(job) {
     taskId: job.taskId || null,
     durationSec: job.durationSec || null,
     encoder: job.encoder || null,
+    audio: job.audio || null,
     error: job.error || null,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt || null
@@ -86,7 +88,45 @@ function resolveSegments(project) {
   return clips;
 }
 
+// 工程音频计划 → audioMixer 的 bgmPlan 形状（音乐/环境音两轨）
+function buildAudioPlan(project, duration) {
+  const src = project.audio || {};
+  const toSeg = (seg, kind) => {
+    if (!seg || !seg.trackId) return null;
+    const found = audioMixer.findTrack(seg.trackId);
+    if (!found || !found.filePath) return null;
+    let start = Math.max(0, Math.min(duration, Number(seg.timelineStart) || 0));
+    if (start >= duration - 0.1) return null;
+    // v1：音乐/环境音两轨都铺满全片；时间线变长时自动跟着延到片尾
+    let end = duration;
+    const trackDur = Number(found.track && found.track.durationSec) || 0;
+    const sourceIn = Math.max(0, Number(seg.sourceIn) || 0);
+    const sourceOut = Number(seg.sourceOut) > sourceIn
+      ? Number(seg.sourceOut)
+      : sourceIn + (trackDur > 0 ? trackDur : (end - start));
+    return {
+      trackId: seg.trackId,
+      timelineStart: start,
+      timelineEnd: end,
+      sourceIn,
+      sourceOut,
+      fillMode: 'loop',
+      volume: Math.max(0, Math.min(1.5, seg.volume === undefined
+        ? (kind === 'ambient' ? 0.35 : 0.8)
+        : Number(seg.volume))),
+      fadeIn: Math.max(0, Math.min(10, Number(seg.fadeIn) || 0)),
+      fadeOut: Math.max(0, Math.min(10, Number(seg.fadeOut) || 0))
+    };
+  };
+  return {
+    music: (Array.isArray(src.music) ? src.music : []).map((s) => toSeg(s, 'music')).filter(Boolean),
+    ambient: (Array.isArray(src.ambient) ? src.ambient : []).map((s) => toSeg(s, 'ambient')).filter(Boolean),
+    opts: src.opts || {}
+  };
+}
+
 async function runJob(job, project) {
+  let silentPath = null;
   try {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     const clips = resolveSegments(project);
@@ -95,10 +135,11 @@ async function runJob(job, project) {
     }
     const name = `${project.id}_edit_${Date.now().toString(36)}.mp4`;
     const outputPath = path.join(OUTPUT_DIR, name);
+    silentPath = outputPath.replace(/\.mp4$/i, '.silent.mp4');
 
     job.status = 'running';
     job.progress = 0;
-    const res = await transitionMixer.concatWithTransitions(clips, outputPath, {
+    const res = await transitionMixer.concatWithTransitions(clips, silentPath, {
       duration: project.transition ? project.transition.duration : 0.4,
       type: project.transition ? project.transition.type : 'fade',
       ignoreAudio: true,
@@ -118,11 +159,36 @@ async function runJob(job, project) {
       return;
     }
 
+    // 音频：音乐/环境音两轨；没有计划时直接改名为最终产物
+    const plan = buildAudioPlan(project, res.actualDuration);
+    let audioInfo = { music: 0, ambient: 0, meanVolumeDb: null };
+    if (plan.music.length || plan.ambient.length) {
+      job.progress = 92;
+      const mixed = await audioMixer.mixBgmPlan(silentPath, outputPath, plan, {
+        onProgress: (p) => {
+          const pct = p && typeof p.percent === 'number' ? p.percent : 0;
+          job.progress = Math.min(99, 92 + pct * 0.07);
+        }
+      });
+      if (!mixed.success) throw new Error('配乐混音失败: ' + mixed.error);
+      try { fs.unlinkSync(silentPath); } catch (e) { /* ignore */ }
+      silentPath = null;
+      audioInfo = {
+        music: plan.music.length,
+        ambient: plan.ambient.length,
+        meanVolumeDb: mixed.meanVolumeDb
+      };
+    } else {
+      fs.renameSync(silentPath, outputPath);
+      silentPath = null;
+    }
+
     job.status = 'done';
     job.progress = 100;
     job.outputPath = outputPath;
     job.durationSec = res.actualDuration;
     job.encoder = res.encoder || null;
+    job.audio = audioInfo;
     job.finishedAt = new Date().toISOString();
 
     // 登记成一条「剪辑台导出」任务，让产出/历史页可见（2026-11-04 F08 收尾）
@@ -149,6 +215,7 @@ async function runJob(job, project) {
       encoder: res.encoder || null
     });
   } catch (e) {
+    try { if (silentPath && fs.existsSync(silentPath)) fs.unlinkSync(silentPath); } catch (e2) { /* ignore */ }
     if (job.cancelled) {
       job.status = 'cancelled';
     } else {

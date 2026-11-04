@@ -320,6 +320,38 @@ a.ed-btn.ed-link {
 }
 .ed-tool.ed-zoom:hover { background: rgba(244, 247, 245, .06); }
 
+/* ---------- 音频面板（F07） ---------- */
+.ed-audio { display: flex; flex-direction: column; gap: 10px; }
+.ed-audio-track { border: 1px solid rgba(244, 247, 245, .08); border-radius: 8px; padding: 8px; background: var(--s2, #121815); }
+.ed-audio-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.ed-audio-head b { font-size: 12px; font-weight: 500; }
+.ed-audio-seg { display: flex; flex-direction: column; gap: 6px; }
+.ed-audio-title { font-size: 11.5px; color: var(--ink2, #A7B3AD); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-wave { width: 100%; height: 56px; display: block; background: rgba(0, 0, 0, .28); border-radius: 4px; }
+.ed-audio-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink3, #7B8781); }
+.ed-audio-row .ed-slider-input { flex: 1; }
+.ed-num {
+  width: 48px; height: 22px; padding: 0 4px;
+  background: var(--s1, #0E1411); color: var(--ink, #F4F7F5);
+  border: 1px solid rgba(244, 247, 245, .12); border-radius: 4px;
+  font-size: 11px;
+}
+.ed-audio-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 5px 6px; margin-bottom: 3px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 5px;
+  background: transparent; color: var(--ink2, #A7B3AD); font-size: 11px; text-align: left;
+}
+.ed-audio-option:hover { background: rgba(244, 247, 245, .05); border-color: rgba(214, 179, 106, .4); }
+.ed-audio-clip {
+  position: absolute; left: 0; height: 18px; line-height: 18px; padding: 0 6px;
+  border-radius: 3px; font-size: 9.5px; color: var(--ink2, #A7B3AD);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  background: rgba(120, 170, 140, .2); border: 1px solid rgba(120, 170, 140, .5);
+}
+.ed-audio-clip.music { top: 4px; }
+.ed-audio-clip.ambient { top: 27px; background: rgba(120, 140, 190, .2); border-color: rgba(120, 140, 190, .5); }
+
 /* ---------- 成片预览（页内，Esc 关闭） ---------- */
 .ed-viewer {
   position: fixed; inset: 0; z-index: 70;

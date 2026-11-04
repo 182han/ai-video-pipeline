@@ -35,7 +35,7 @@ const read = (p) => fs.readFileSync(p, 'utf8');
   check(/ADJUST_GROUPS/.test(editor), '右侧调节分组');
   const keys = ['temperature', 'tone', 'saturation', 'brightness', 'contrast', 'highlight', 'shadow', 'white', 'black', 'lightSensation'];
   check(keys.every((k) => editor.includes("'" + k + "'")), '10 个调节键齐全');
-  check(/function setAdjust\(/.test(editor) && /scheduleSegSave\(\)/.test(editor), '调参写入工程并防抖保存');
+  check(/function setAdjust\(/.test(editor) && /scheduleSave\(\)/.test(editor), '调参写入工程并防抖保存');
   check(/selectedSeg/.test(editor) && /ed-slider-input/.test(editor), '滑杆绑定选中片段');
   check(/function resetAdjust\(/.test(editor), '重置本段');
   check(/onPointerDown=\$\{historyPush\}/.test(editor), '拖动滑杆前记撤销点');
