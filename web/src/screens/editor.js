@@ -1044,7 +1044,7 @@ export function EditorView() {
             >
               ${layout.length === 0
                 ? html`<span className="ed-track-empty">从左侧点选或拖入素材</span>`
-                : layout.map(({ seg, i, left, width, dur }) => html`
+                : layout.map(({ seg, i, left, width, dur, start }) => html`
                     <span
                       key=${seg.id || i}
                       className=${'ed-clip' + (selectedId === seg.id ? ' sel' : '')}
@@ -1052,7 +1052,17 @@ export function EditorView() {
                       title=${seg.assetId + ' · ' + dur.toFixed(2) + 's'}
                       draggable=${true}
                       onDragStart=${(e) => onClipDragStart(e, i)}
-                      onClick=${(e) => { e.stopPropagation(); setSelectedId(seg.id); setSelectedAudio(null); }}
+                      onClick=${(e) => {
+                        e.stopPropagation();
+                        setSelectedId(seg.id);
+                        setSelectedAudio(null);
+                        setPlaying(false);
+                        setPlayhead(start);
+                        if (previewRef.current) {
+                          previewRef.current.pause();
+                          previewRef.current.seek(start);
+                        }
+                      }}
                     >
                       <span
                         className="ed-clip-thumb"

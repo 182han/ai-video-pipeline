@@ -71,6 +71,7 @@ async function put(base, id, body) {
   check(/scheduleSave/.test(editor), '编辑后自动保存');
   check(/setPlayhead/.test(editor), '播放头');
   check(/beginScrub/.test(editor), '标尺/播放头拖动定位');
+  check(/setPlayhead\(start\)/.test(editor), '点击片段跳到该段起点');
   check(/ed-handle/.test(editor), '裁剪手柄');
   check(/\.ed-handle/.test(css), 'CSS 裁剪手柄');
   check(/\.ed-clip\.sel/.test(css), 'CSS 选中片段');
