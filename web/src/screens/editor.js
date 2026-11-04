@@ -132,6 +132,19 @@ export function EditorView() {
   const nameRef = useRef('');
   const timerRef = useRef(null);
 
+  // 素材列表（搜索过滤）：必须在引用它的 effect 之前初始化，否则 deps 求值会撞 TDZ
+  const libItems = useMemo(() => {
+    const groups = (lib && lib.groups) || [];
+    const all = [];
+    for (const g of groups) for (const it of (g.items || [])) all.push({ ...it, groupLabel: g.label });
+    const q = libQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((it) =>
+      String(it.prompt || '').toLowerCase().includes(q) ||
+      String(it.resolution || '').toLowerCase().includes(q) ||
+      String(it.model || '').toLowerCase().includes(q));
+  }, [lib, libQuery]);
+
   function adopt(p) {
     projectRef.current = p;
     revisionRef.current = Number(p.revision) || 1;
@@ -220,7 +233,9 @@ export function EditorView() {
     if (!e) return;
     if (!project) { e.setSegments([]); return; }
     const urls = {};
-    for (const it of libItems) urls[it.id] = it.url;
+    for (const g of ((lib && lib.groups) || [])) {
+      for (const it of (g.items || [])) urls[it.id] = it.url;
+    }
     const segs = (project.segments || [])
       .map((s) => ({
         url: urls[s.assetId] || '',
@@ -233,7 +248,7 @@ export function EditorView() {
       ? (Number(project.transition.duration) > 0 ? Number(project.transition.duration) : 0.4)
       : 0;
     e.setSegments(segs, { transition: F });
-  }, [project, libItems]);
+  }, [project, lib]);
 
   useEffect(() => {
     const e = previewRef.current;
@@ -709,18 +724,6 @@ export function EditorView() {
       setOpenList(null);
     } catch (e) { setToast('打开失败：' + e.message); }
   }
-
-  const libItems = useMemo(() => {
-    const groups = (lib && lib.groups) || [];
-    const all = [];
-    for (const g of groups) for (const it of (g.items || [])) all.push({ ...it, groupLabel: g.label });
-    const q = libQuery.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((it) =>
-      String(it.prompt || '').toLowerCase().includes(q) ||
-      String(it.resolution || '').toLowerCase().includes(q) ||
-      String(it.model || '').toLowerCase().includes(q));
-  }, [lib, libQuery]);
 
   if (loadErr && !project) {
     return html`

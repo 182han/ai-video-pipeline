@@ -176,6 +176,11 @@
 - **M2 结论**：F01c/F05/F06/F07/F09/F10/F11 全部落地并有可复跑验收；UI 视觉/性能（24fps、同帧像素差）仍未在真实浏览器验证。
 - **F06 颜色一致性证据（2026-11-04 补）**：8-bit 17³ LUT 三线性插值 vs adjustChain 原函数，四组参数（默认/高亮+50/饱和-50/色温+50）**均值差 0.046%–0.133%**（<1%）；量化上界 0.196%。不含浏览器解码/显示差异。
 
+### 热修（2026-11-04）
+
+- 剪辑台白屏：`Cannot access 'libItems' before initialization`。原因：`libItems` 的 `useMemo` 声明在 effect 之后，而预览 effect 的依赖数组 `[project, libItems]` 在 render 时求值 → TDZ。
+- 修复：`libItems` 上移到所有 effect 之前；预览 effect 不再依赖它（内部从 `lib` 展开），deps 改为 `[project, lib]`。F02/F03/F06 回归 22/21/22 全绿。
+
 ## 基线快照
 
 | 项 | 值 |
