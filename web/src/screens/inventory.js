@@ -44,11 +44,24 @@ function Empty({ children }) {
 }
 
 // ---------------- 视频片段 ----------------
+function costText(cost) {
+  if (!cost) return '';
+  const n = Number(cost.amount);
+  return Number.isFinite(n) ? '¥' + n.toFixed(2) : '';
+}
+
+function qcText(qc) {
+  if (!qc) return '未质检';
+  if (qc.passed) return 'QC 通过';
+  return 'QC ' + (qc.level || '未通过');
+}
+
 export function ClipsView() {
   const [fav, setFav] = useState(false);
   const [q, setQ] = useState('');
   const [res, setRes] = useState('');
   const [err, setErr] = useState('');
+  const [detail, setDetail] = useState(null);
 
   const qs = new URLSearchParams();
   if (fav) qs.set('favorite', '1');
@@ -141,6 +154,9 @@ export function ClipsView() {
                   <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">
                     ${(it.prompt || '').slice(0, 80)}
                   </p>
+                  <p className="text-[10px] text-ink3 font-num">
+                    ${qcText(it.qc)}${costText(it.cost) ? ' · ' + costText(it.cost) : ''}
+                  </p>
                   <div className="mt-1 flex items-center gap-2">
                     <button onClick=${() => toggleFav(it.id, it.favorite)}
                       className=${'h-6 px-1.5 rounded-[4px] text-[12px] hover:bg-white/[.06] ' +
@@ -148,6 +164,8 @@ export function ClipsView() {
                     >${it.favorite ? '★' : '☆'}</button>
                     <span className="text-[10px] text-ink3 font-num">${it.model || ''}</span>
                     <span className="flex-1"></span>
+                    <button onClick=${() => setDetail(it)}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">详情</button>
                     <button onClick=${() => regen(it)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">重新生成</button>
                     <button onClick=${() => remove(it.id)}
@@ -159,6 +177,51 @@ export function ClipsView() {
           </div>
         </div>
       `)}
+      ${detail && html`
+        <div
+          style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.72)', display: 'grid', placeItems: 'center' }}
+          onClick=${(e) => { if (e.target === e.currentTarget) setDetail(null); }}
+        >
+          <div style=${{ width: 'min(760px, 92vw)', maxHeight: '86vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
+            <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
+              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>片段详情</b>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+            </div>
+            <video src=${detail.url} controls playsInline style=${{ width: '100%', maxHeight: '340px', background: '#000', borderRadius: '6px' }}></video>
+            <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
+              <span style=${{ color: 'var(--ink3)' }}>提示词</span>
+              <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${detail.prompt || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>型号</span>
+              <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>规格</span>
+              <span style=${{ color: 'var(--ink2)' }}>${[
+                detail.resolution,
+                detail.width && detail.height ? detail.width + '×' + detail.height : '',
+                detail.fps ? detail.fps + 'fps' : '',
+                detail.durationSec ? Number(detail.durationSec).toFixed(2) + 's' : ''
+              ].filter(Boolean).join(' · ')}</span>
+              <span style=${{ color: 'var(--ink3)' }}>成本</span>
+              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}${detail.cost && detail.cost.attempts ? ' · ' + detail.cost.attempts + ' 次' : ''}</span>
+              <span style=${{ color: 'var(--ink3)' }}>质检</span>
+              <span style=${{ color: 'var(--ink2)' }}>${qcText(detail.qc)}${detail.qc && detail.qc.reason ? ' · ' + detail.qc.reason : ''}${detail.qc && detail.qc.qcVersion ? ' · v' + detail.qc.qcVersion : ''}</span>
+              <span style=${{ color: 'var(--ink3)' }}>来源任务</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.taskId || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>文件</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.fileName || '-'}</span>
+            </div>
+            <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+              <button
+                onClick=${() => { toggleFav(detail.id, detail.favorite); setDetail(null); }}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}
+              >${detail.favorite ? '取消收藏' : '收藏'}</button>
+              <button
+                onClick=${() => { regen(detail); setDetail(null); }}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}
+              >按原提示词重新生成</button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>
   `;
 }
