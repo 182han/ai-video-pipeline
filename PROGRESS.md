@@ -21,6 +21,16 @@
 - 数据卫生：`clips/` 里有 6 个 <1KB 的坏 mock 文件（probe 失败），spike 已跳过。
 - 下一步：把 `transitionMixer` 改成同一路径，并补进度、取消、硬件编码；然后进 F01/F02。
 
+### 导出链重构（2026-11-04）
+
+- `transitionMixer` 已改为：**staging 硬链接短名 + filter 写文件 + `spawn` 参数数组**（不再 `execSync` 拼整条字符串）。
+- 验收脚本 `scripts/verify-transition-scale.js`：
+  - 40 段：**成功 18.3s**（108.4s 输出，5.9× 实时）——旧实现在此规模失败。
+  - 360 段：**成功 367.8s**（1213.4s 输出 / 20.2 分钟片，3.3× 实时）。
+  - 回归：`verify-transitions.js` 36/0、`verify-transition-ui.js` 22/0。
+- 注意：mock 是静态色块，真实素材会明显更慢；1080p 与 30 分钟真实片**还没测**。
+- W1 剩余：进度回调、取消、硬件编码探测；之后进 F01/F02。
+
 ## 基线快照
 
 | 项 | 值 |

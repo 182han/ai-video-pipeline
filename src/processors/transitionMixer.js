@@ -39,7 +39,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const config = require('../../config');
 
 const FFMPEG_PATH = config.FFMPEG_PATH || 'ffmpeg';
@@ -91,6 +91,83 @@ function readTmp(tmp) {
 
 function cleanupTmp(tmp) {
   try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
+}
+
+// ------------------------------------------------------------
+// 大规模拼接执行（2026-11-04）
+// 段数一多，整条命令会超过 Windows 上限（cmd.exe 8191 / CreateProcess 32767），
+// 且 filter 字符串本身就有几万字符。这里改成：
+//   输入硬链接成短名（s0001.mp4）→ filter 写文件 → spawn 参数数组（不经 shell）
+// 启动实测：360 段命令行 11.9k 字符，成功；旧实现 40 段就失败。
+// ------------------------------------------------------------
+function runFFmpegArgs(args, cwd) {
+  return new Promise((resolve) => {
+    const errFile = path.join(cwd, `_ff_${Date.now()}.log`);
+    let fd;
+    try { fd = fs.openSync(errFile, 'w'); } catch (e) { fd = 'ignore'; }
+    const t0 = Date.now();
+    let done = false;
+    const finish = (code) => {
+      if (done) return;
+      done = true;
+      let text = '';
+      try { text = fs.readFileSync(errFile, 'utf8'); } catch (e) { /* ignore */ }
+      try { if (typeof fd === 'number') fs.closeSync(fd); } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(errFile); } catch (e) { /* ignore */ }
+      const lines = String(text || '')
+        .split(/\r?\n/)
+        .filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l))
+        .slice(-4);
+      resolve({
+        ok: code === 0,
+        ms: Date.now() - t0,
+        error: lines.join(' | ') || (code === 0 ? null : 'ffmpeg 执行失败')
+      });
+    };
+    let proc;
+    try {
+      proc = spawn(FFMPEG_PATH, args, { cwd, stdio: ['ignore', 'ignore', fd] });
+    } catch (e) {
+      finish(-1);
+      return;
+    }
+    proc.on('error', () => finish(-1));
+    proc.on('exit', (code) => finish(code));
+  });
+}
+
+// 把输入硬链接（跨盘退化为复制）到 staging，用短文件名压命令行长度
+function stageInputs(prepared, stagingDir) {
+  const staged = [];
+  for (let i = 0; i < prepared.length; i++) {
+    const src = path.resolve(prepared[i]);
+    let ext = path.extname(src).toLowerCase();
+    if (!ext || ext.length > 5) ext = '.mp4';
+    const name = 's' + String(i).padStart(4, '0') + ext;
+    const dst = path.join(stagingDir, name);
+    try {
+      fs.linkSync(src, dst);
+    } catch (e) {
+      fs.copyFileSync(src, dst);
+    }
+    staged.push(name);
+  }
+  return staged;
+}
+
+async function runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir) {
+  fs.mkdirSync(stagingDir, { recursive: true });
+  fs.writeFileSync(path.join(stagingDir, 'graph.txt'), parts.join(';\n') + '\n', 'utf8');
+  const staged = stageInputs(prepared, stagingDir);
+  const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+  for (const name of staged) args.push('-i', name);
+  args.push('-filter_complex_script', 'graph.txt', '-map', '[vout]');
+  if (wantAudio) args.push('-map', '[aout]');
+  args.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p');
+  if (wantAudio) args.push('-c:a', 'aac', '-b:a', '128k');
+  else args.push('-an');
+  args.push('-movflags', '+faststart', path.resolve(outputPath));
+  return runFFmpegArgs(args, stagingDir);
 }
 
 // 需要读 stdout 的命令：重定向到临时文件再读（不依赖管道捕获）
@@ -517,13 +594,20 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       parts.push(`[${aPrev}]anull[aout]`);
     }
 
-    const inputs = prepared.map(p => `-i "${p}"`).join(' ');
-    const maps = wantAudio ? '-map "[vout]" -map "[aout]"' : '-map "[vout]"';
-    const audioOut = wantAudio ? '-c:a aac -b:a 128k' : '-an';
-    const cmd = `"${FFMPEG_PATH}" -y ${inputs} -filter_complex "${parts.join(';')}" `
-      + `${maps} -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p ${audioOut} `
-      + `-movflags +faststart "${outputPath}"`;
-    const run = runFFmpeg(cmd);
+    // 8) 执行：短路径 + filter 文件 + spawn 参数数组，避开命令行长度上限
+    // staging 放在输出同目录：与源片段同盘，硬链接才生效（跨盘会退化成复制大文件）
+    const stagingDir = path.join(
+      path.dirname(path.resolve(outputPath)),
+      `.tr_stage_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    );
+    let run = { ok: false, error: '未执行' };
+    try {
+      run = await runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir);
+    } catch (e) {
+      run = { ok: false, error: (e && e.message) || String(e) };
+    } finally {
+      try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+    }
     if (!run.ok) {
       cleanupTemps();
       return { success: false, error: '转场拼接 ffmpeg 执行失败: ' + run.error };
