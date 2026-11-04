@@ -63,6 +63,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/createElement\('audio'\)/.test(engine) && /setAudio/.test(engine), '预览音频两轨');
   check(/e\.setAudio\(/.test(editor), '编辑器把音频计划传给预览');
   check(/createElement\('video'\)/.test(engine), 'video 解码');
+  check(/ResizeObserver/.test(engine), '画布尺寸变化自动重绘');
   check(/uMix/.test(engine) && /_cue\(1 - this\.active/.test(engine), '双 video 叠化');
   check(/requestAnimationFrame/.test(engine), '逐帧渲染');
   check(/\/api\/adjust\/lut/.test(engine), '预览从后端取同一套 LUT');

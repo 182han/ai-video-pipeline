@@ -65,7 +65,10 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/revision: revisionRef\.current/.test(editor), '保存带 revision');
   check(/SAVE_DEBOUNCE/.test(editor), '工程名自动保存防抖');
   check(/localStorage\.getItem\(LAST_KEY\)/.test(editor), '支持恢复上次工程');
-  check(/ed-frame/.test(editor) && /ed-tracks|ed-ruler/.test(editor), '预览与时间线骨架存在');
+  check(/ed-frame/.test(editor) && /ed-ruler/.test(editor), '预览与时间线骨架存在');
+  check(/toggleFullscreen/.test(editor) && /requestFullscreen/.test(editor), '预览全屏');
+  check(/theater/.test(editor) && /ed-main\.theater/.test(css), '预览放大（隐藏两侧面板）');
+  check(/ed-center:fullscreen/.test(css), '全屏 CSS');
 
   check(/grid-template-rows:\s*46px/.test(css), 'CSS 顶栏 + 主体 + 时间线三行');
   check(/grid-template-columns:\s*300px minmax\(0, 1fr\) 300px/.test(css), 'CSS 左中右三栏');

@@ -114,6 +114,7 @@ export function EditorView() {
   const [playing, setPlaying] = useState(false);
   const [previewErr, setPreviewErr] = useState('');
   const [previewReady, setPreviewReady] = useState(false);
+  const [theater, setTheater] = useState(false);
 
   const pastRef = useRef([]);
   const futureRef = useRef([]);
@@ -126,6 +127,7 @@ export function EditorView() {
   const playheadElRef = useRef(null);
   const scrubRef = useRef(0);
   const canvasRef = useRef(null);
+  const centerRef = useRef(null);
   const previewRef = useRef(null);
   const playheadRef = useRef(0);
 
@@ -687,6 +689,19 @@ export function EditorView() {
     setPlaying(true);
   }
 
+  function toggleTheater() {
+    setTheater((v) => !v);
+  }
+
+  function toggleFullscreen() {
+    const el = centerRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else el.requestFullscreen();
+    } catch (e) { setToast('当前浏览器不支持全屏'); }
+  }
+
   function persistName(next) {    const cur = projectRef.current;
     if (!cur) return;
     if (!next || next === cur.name) return;
@@ -834,7 +849,7 @@ export function EditorView() {
         `}
       </header>
 
-      <div className="ed-main">
+      <div className=${'ed-main' + (theater ? ' theater' : '')}>
         <section className="ed-left">
           <div className="ed-rail">
             <button className=${'ed-rail-btn' + (tab === 'media' ? ' on' : '')} onClick=${() => setTab('media')}>
@@ -895,9 +910,9 @@ export function EditorView() {
           </div>
         </section>
 
-        <section className="ed-center">
+        <section className="ed-center" ref=${centerRef}>
           <div className="ed-stage">
-            <div className="ed-frame">
+            <div className="ed-frame" onDoubleClick=${toggleTheater} title="双击放大/还原">
               <canvas ref=${canvasRef} className="ed-canvas"></canvas>
               ${segments.length === 0 && html`
                 <div className="ed-frame-empty">
@@ -912,6 +927,8 @@ export function EditorView() {
             <span className="ed-time">${fmtTime(playhead)} / ${fmtTime(duration)}</span>
             <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0 || !previewReady} title=${playing ? '暂停' : '播放'}>${playing ? '⏸' : '▶'}</button>
             <span className="ed-spacer"></span>
+            <button className="ed-btn" onClick=${toggleTheater} title="隐藏两侧面板，放大预览">${theater ? '还原' : '放大'}</button>
+            <button className="ed-btn" onClick=${toggleFullscreen} title="全屏预览（Esc 退出）">全屏</button>
             <span className="ed-pill">1080p</span>
             <span className="ed-pill">16:9</span>
           </div>

@@ -114,6 +114,12 @@ export class PreviewEngine {
     this.texCache = new Map(); // LUT key -> WebGLTexture
     this.audioEls = [];
     this.audioPlan = [null, null];
+    this._onResize = () => { if (!this.destroyed) this._render(); };
+    if (typeof ResizeObserver !== 'undefined') {
+      this.ro = new ResizeObserver(this._onResize);
+      this.ro.observe(canvas);
+    }
+    window.addEventListener('resize', this._onResize);
     this._initGl();
     this._initVideos();
     this._initAudio();
@@ -394,6 +400,8 @@ export class PreviewEngine {
     this.destroyed = true;
     this.pause();
     this._pauseAudio();
+    window.removeEventListener('resize', this._onResize);
+    if (this.ro) { try { this.ro.disconnect(); } catch (e) { /* ignore */ } }
     if (this.host && this.host.parentNode) this.host.parentNode.removeChild(this.host);
     try {
       const gl = this.gl;

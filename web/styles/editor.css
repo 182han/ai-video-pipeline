@@ -82,6 +82,17 @@ a.ed-btn.ed-link {
   min-height: 0;
   min-width: 0;
 }
+.ed-main.theater { grid-template-columns: 0 minmax(0, 1fr) 0; }
+.ed-main.theater .ed-left,
+.ed-main.theater .ed-right { display: none; }
+.ed-main.theater .ed-frame { max-width: none; }
+.ed-center:fullscreen { background: #000; }
+.ed-center:fullscreen .ed-stage { padding: 0; }
+.ed-center:fullscreen .ed-frame {
+  width: 100%; height: 100%; max-width: none; aspect-ratio: auto;
+  border: 0; border-radius: 0;
+}
+.ed-center:fullscreen .ed-canvas { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .ed-left { display: flex; min-height: 0; border-right: 1px solid rgba(244, 247, 245, .08); }
 .ed-rail {
   width: 56px; flex: none; display: flex; flex-direction: column; gap: 2px;
