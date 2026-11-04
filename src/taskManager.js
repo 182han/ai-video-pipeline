@@ -406,6 +406,47 @@ class TaskManager {
     return this.getTask(task.taskId);
   }
 
+  // 创建「剪辑台导出」任务：已经出片，只登记结果，让产出/历史可见
+  // 2026-11-04 F08 收尾。不经过流水线，所有步骤标记 skipped（transcoding 记 completed）。
+  createEditorTask(options = {}) {
+    const segmentCount = Math.max(1, Number(options.segmentCount) || 1);
+    const durationSec = Number(options.durationSec) || 0;
+    const task = this.createTask(options.name || '剪辑台导出', {
+      model: 'editor',
+      totalClips: segmentCount,
+      clipDuration: Math.max(1, Math.round(durationSec / segmentCount) || 1),
+      resolution: options.resolution || '1080p',
+      preset: 'custom',
+      stages: ['transcoding'],
+      source: 'editor'
+    });
+    task.status = 'completed';
+    task.outputPath = options.outputPath || null;
+    task.masterPath = options.outputPath || null;
+    task.totalDuration = durationSec;
+    task.completedAt = new Date().toISOString();
+    task.editorProjectId = options.projectId || null;
+    task.currentStep = '完成';
+    task.currentStepKey = 'transcoding';
+    for (const key of Object.keys(task.steps)) {
+      const step = task.steps[key];
+      step.status = 'skipped';
+      step.startedAt = null;
+      step.completedAt = null;
+      step.duration = null;
+      step.error = null;
+      step.qcResult = null;
+      step.qcDetails = null;
+      step.skipReason = '剪辑台导出（不经过生成流水线）';
+    }
+    if (task.steps.transcoding) {
+      task.steps.transcoding.status = 'completed';
+      task.steps.transcoding.completedAt = task.completedAt;
+    }
+    this._saveTask(task.taskId);
+    return this.getTask(task.taskId);
+  }
+
   // 获取任务
   // 历史任务是在配乐改造之前创建的，没有 bgm / bgmPlan / bgmResult / masterPath 字段。
   // 统一补齐默认值，保证调用方拿到的数据形状一致（否则各处都要写 undefined 判断）。

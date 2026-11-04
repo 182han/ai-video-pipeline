@@ -165,7 +165,7 @@ export function HistoryView({ onChanged }) {
                   </b>
                   <span className="block text-[10px] text-ink3 font-num">
                     ${(t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-')}
-                    ${' · ' + (t.model || '-')}
+                    ${' · ' + ({ library: '片段库成片', editor: '剪辑台导出' }[t.model] || t.model || '-')}
                     ${t.cost && t.cost.amount != null ? ' · ¥' + Number(t.cost.amount).toFixed(2) : ''}
                   </span>
                 </button>

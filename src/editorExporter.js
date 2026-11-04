@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const library = require('./library');
 const projectStore = require('./projectStore');
+const taskManager = require('./taskManager');
 const transitionMixer = require('./processors/transitionMixer');
 
 const OUTPUT_DIR = config.STORAGE.outputDir;
@@ -45,6 +46,7 @@ function jobView(job) {
     progress: Math.round((job.progress || 0) * 10) / 10,
     outputPath: job.outputPath,
     outputUrl: job.outputPath ? '/output/' + encodeURIComponent(path.basename(job.outputPath)) : null,
+    taskId: job.taskId || null,
     durationSec: job.durationSec || null,
     encoder: job.encoder || null,
     error: job.error || null,
@@ -123,8 +125,24 @@ async function runJob(job, project) {
     job.encoder = res.encoder || null;
     job.finishedAt = new Date().toISOString();
 
+    // 登记成一条「剪辑台导出」任务，让产出/历史页可见（2026-11-04 F08 收尾）
+    try {
+      const editorTask = taskManager.createEditorTask({
+        projectId: project.id,
+        name: '剪辑台 · ' + (project.name || '未命名工程'),
+        outputPath,
+        durationSec: res.actualDuration,
+        segmentCount: project.segments.length,
+        resolution: res.target && res.target.label ? String(res.target.label).toUpperCase() : undefined
+      });
+      job.taskId = editorTask.taskId;
+    } catch (e) {
+      console.warn('[editor] 登记导出任务失败: ' + (e && e.message));
+    }
+
     projectStore.appendExport(project.id, {
       exportId: job.id,
+      taskId: job.taskId || null,
       at: job.finishedAt,
       outputName: name,
       durationSec: res.actualDuration,
@@ -158,6 +176,7 @@ function startExport(projectId) {
     outputPath: null,
     durationSec: null,
     encoder: null,
+    taskId: null,
     error: null,
     cancelled: false,
     controller: new AbortController()

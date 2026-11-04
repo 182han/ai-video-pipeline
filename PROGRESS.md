@@ -98,6 +98,14 @@
 - **已知缺口（M1 收尾）**：① 导出目前是 job，不是任务——产出/历史页看不到；② F01 的「打开已有成片重建」按计划在 M2 W5；③ 预览/音频未接。
 - 下一项：把导出记录接进任务体系（产出可见），或按计划进 M2 F05。
 
+### F08 收尾：导出登记为任务（2026-11-04）
+
+- 导出完成后调用 `taskManager.createEditorTask()` 登记一条 `source=editor` 的 completed 任务：
+  `model=editor`、`outputPath`、`totalDuration`；步骤标 skipped（transcoding 记 completed）。
+- `job.taskId` 与 `project.exports[].taskId` 关联；`/api/tasks/completed` 可见，历史页 model 显示「剪辑台导出」。
+- 验收：`verify-editor-export.js` **24/0**（新增：导出登记为任务、产出列表可见、状态/来源/时长、导出记录关联任务）。
+- **M1 结论**：G0、G1 均通过（程序化端到端）；UI 视觉/交互仍未人工验证（环境限制已记录）。
+
 ## 基线快照
 
 | 项 | 值 |

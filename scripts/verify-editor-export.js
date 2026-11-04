@@ -157,6 +157,15 @@ function probeDuration(file) {
     check(Math.abs(actual - expected) <= Math.max(0.5, expected * 0.02), '时长 ≈ Σ裁剪后 − (N−1)F',
       `实测 ${Number(actual).toFixed(2)}s，期望 ${expected.toFixed(2)}s`);
     check(job.outputUrl && /^\/output\//.test(job.outputUrl), '产出 URL 正确', job.outputUrl || '');
+    check(job.taskId && /^task_/.test(job.taskId), '导出登记为任务', job.taskId || '');
+
+    const completed = await (await fetch(base + '/api/tasks/completed')).json();
+    const hit = (completed.tasks || []).find((t) => t.taskId === job.taskId);
+    check(!!hit, '产出/历史列表可见');
+    check(hit && hit.status === 'completed' && hit.model === 'editor', '任务状态与来源正确',
+      hit ? hit.status + ' / ' + hit.model : '无');
+    check(hit && Math.abs((hit.totalDuration || 0) - expected) < 1, '任务记录时长正确',
+      hit ? String(hit.totalDuration) : '无');
 
     let untouched = true;
     for (const s of srcStats) {
@@ -168,6 +177,7 @@ function probeDuration(file) {
     const fresh = await (await fetch(base + '/api/projects/' + project.id)).json();
     check(Array.isArray(fresh.project.exports) && fresh.project.exports.length === 1, '工程记录导出');
     check(fresh.project.exports[0].exportId === expId, '导出记录 id 一致');
+    check(fresh.project.exports[0].taskId === job.taskId, '导出记录关联任务');
 
     return finish(tmp);
   } catch (e) {
