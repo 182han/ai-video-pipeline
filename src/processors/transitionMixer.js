@@ -39,7 +39,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync, spawn } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const config = require('../../config');
 
 const FFMPEG_PATH = config.FFMPEG_PATH || 'ffmpeg';
@@ -62,6 +62,58 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const MIN_FADE = 0.1;
+
+// 编码器候选：探测通过才使用。auto 顺序 = 硬件优先，最后回退 libx264。
+const ENCODERS = {
+  libx264: { args: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '23'] },
+  nvenc: { args: ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-b:v', '0', '-cq', '23'] },
+  qsv: { args: ['-c:v', 'h264_qsv', '-global_quality', '23'] },
+  amf: { args: ['-c:v', 'h264_amf', '-quality', 'balanced', '-qp_i', '23', '-qp_p', '23'] }
+};
+
+let _encoderCache = null;
+
+// 用 0.2s 黑帧试编一次，确认编码器在当前机器真的可用（-encoders 列出不等于能跑）
+function probeEncoder(name) {
+  const spec = ENCODERS[name];
+  if (!spec) return false;
+  try {
+    const r = spawnSync(FFMPEG_PATH, [
+      '-hide_banner', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'color=black:s=256x144:d=0.2',
+      ...spec.args, '-frames:v', '1', '-an', '-f', 'null', '-'
+    ], { stdio: 'ignore', timeout: 8000 });
+    return r && r.status === 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+function pickEncoder() {
+  if (_encoderCache) return _encoderCache;
+  const want = String((config.TRANSITIONS && config.TRANSITIONS.encoder) || 'auto').toLowerCase();
+  const order = want === 'auto' ? ['nvenc', 'qsv', 'amf', 'libx264'] : [want];
+  for (const name of order) {
+    if (ENCODERS[name] && probeEncoder(name)) {
+      _encoderCache = name;
+      return _encoderCache;
+    }
+  }
+  _encoderCache = 'libx264';
+  return _encoderCache;
+}
+
+// ffmpeg -progress 输出是 key=value 文本；只取最后一份即可
+function readProgress(file) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return null; }
+  const map = {};
+  for (const line of String(text).split(/\r?\n/)) {
+    const i = line.indexOf('=');
+    if (i > 0) map[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return map;
+}
 
 // 执行只关心成功/失败的 ffmpeg 命令。
 // 直接用 stdio:'ignore'：本环境里「捕获 stdout」才会踩 EPERM（AGENTS.md §2.3），
@@ -100,31 +152,79 @@ function cleanupTmp(tmp) {
 //   输入硬链接成短名（s0001.mp4）→ filter 写文件 → spawn 参数数组（不经 shell）
 // 启动实测：360 段命令行 11.9k 字符，成功；旧实现 40 段就失败。
 // ------------------------------------------------------------
-function runFFmpegArgs(args, cwd) {
+function runFFmpegArgs(args, cwd, opts = {}) {
+  const { onProgress, expectedDuration, signal, encoder } = opts;
   return new Promise((resolve) => {
     const errFile = path.join(cwd, `_ff_${Date.now()}.log`);
+    const progressFile = path.join(cwd, 'progress.txt');
     let fd;
     try { fd = fs.openSync(errFile, 'w'); } catch (e) { fd = 'ignore'; }
     const t0 = Date.now();
     let done = false;
+    let cancelled = false;
+    let timer = null;
+    let proc = null;
+
+    const cleanup = () => {
+      if (timer) { clearInterval(timer); timer = null; }
+      try { if (typeof fd === 'number') fs.closeSync(fd); } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(errFile); } catch (e) { /* ignore */ }
+    };
+
     const finish = (code) => {
       if (done) return;
       done = true;
       let text = '';
       try { text = fs.readFileSync(errFile, 'utf8'); } catch (e) { /* ignore */ }
-      try { if (typeof fd === 'number') fs.closeSync(fd); } catch (e) { /* ignore */ }
-      try { fs.unlinkSync(errFile); } catch (e) { /* ignore */ }
+      if (signal) { try { signal.removeEventListener('abort', onAbort); } catch (e) { /* ignore */ } }
+      cleanup();
       const lines = String(text || '')
         .split(/\r?\n/)
         .filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l))
         .slice(-4);
       resolve({
-        ok: code === 0,
+        ok: code === 0 && !cancelled,
+        cancelled,
+        encoder: encoder || null,
         ms: Date.now() - t0,
-        error: lines.join(' | ') || (code === 0 ? null : 'ffmpeg 执行失败')
+        error: cancelled ? '已取消' : (lines.join(' | ') || (code === 0 ? null : 'ffmpeg 执行失败'))
       });
     };
-    let proc;
+
+    const onAbort = () => {
+      cancelled = true;
+      try { if (proc) proc.kill(); } catch (e) { /* ignore */ }
+      if (!proc) finish(-2);
+    };
+
+    if (signal) {
+      if (signal.aborted) { cancelled = true; finish(-2); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    if (onProgress) {
+      timer = setInterval(() => {
+        const p = readProgress(progressFile);
+        if (!p) return;
+        const us = Number(p.out_time_us) || (Number(p.out_time_ms) * 1000) || 0;
+        const outTimeSec = us / 1e6;
+        const percent = expectedDuration > 0
+          ? Math.max(0, Math.min(100, (outTimeSec / expectedDuration) * 100))
+          : null;
+        try {
+          onProgress({
+            phase: 'encode',
+            outTimeSec: Math.round(outTimeSec * 100) / 100,
+            percent: percent === null ? null : Math.round(percent * 10) / 10,
+            speed: p.speed || null,
+            fps: p.fps || null,
+            frame: p.frame ? Number(p.frame) : null,
+            encoder: encoder || null
+          });
+        } catch (e) { /* 回调异常不影响编码 */ }
+      }, 500);
+    }
+
     try {
       proc = spawn(FFMPEG_PATH, args, { cwd, stdio: ['ignore', 'ignore', fd] });
     } catch (e) {
@@ -132,7 +232,12 @@ function runFFmpegArgs(args, cwd) {
       return;
     }
     proc.on('error', () => finish(-1));
-    proc.on('exit', (code) => finish(code));
+    proc.on('exit', (code) => {
+      if (code === 0 && onProgress) {
+        try { onProgress({ phase: 'done', percent: 100, encoder: encoder || null }); } catch (e) { /* ignore */ }
+      }
+      finish(code);
+    });
   });
 }
 
@@ -155,19 +260,29 @@ function stageInputs(prepared, stagingDir) {
   return staged;
 }
 
-async function runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir) {
+async function runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir, opts = {}) {
   fs.mkdirSync(stagingDir, { recursive: true });
   fs.writeFileSync(path.join(stagingDir, 'graph.txt'), parts.join(';\n') + '\n', 'utf8');
   const staged = stageInputs(prepared, stagingDir);
-  const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+  const encoder = pickEncoder();
+  const args = [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-stats_period', '0.5', '-progress', 'progress.txt'
+  ];
   for (const name of staged) args.push('-i', name);
   args.push('-filter_complex_script', 'graph.txt', '-map', '[vout]');
   if (wantAudio) args.push('-map', '[aout]');
-  args.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p');
+  args.push(...ENCODERS[encoder].args);
+  args.push('-pix_fmt', 'yuv420p');
   if (wantAudio) args.push('-c:a', 'aac', '-b:a', '128k');
   else args.push('-an');
   args.push('-movflags', '+faststart', path.resolve(outputPath));
-  return runFFmpegArgs(args, stagingDir);
+  return runFFmpegArgs(args, stagingDir, {
+    onProgress: opts.onProgress,
+    expectedDuration: opts.expectedDuration,
+    signal: opts.signal,
+    encoder
+  });
 }
 
 // 需要读 stdout 的命令：重定向到临时文件再读（不依赖管道捕获）
@@ -602,7 +717,11 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     );
     let run = { ok: false, error: '未执行' };
     try {
-      run = await runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir);
+      run = await runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir, {
+        onProgress: options.onProgress,
+        expectedDuration,
+        signal: options.signal
+      });
     } catch (e) {
       run = { ok: false, error: (e && e.message) || String(e) };
     } finally {
@@ -610,6 +729,10 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     }
     if (!run.ok) {
       cleanupTemps();
+      if (run.cancelled) {
+        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) { /* ignore */ }
+        return { success: false, cancelled: true, error: '转场拼接已取消' };
+      }
       return { success: false, error: '转场拼接 ffmpeg 执行失败: ' + run.error };
     }
 
@@ -662,6 +785,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       normalized,
       target,
       fps,
+      encoder: run.encoder || null,
       audioMode: allAudio ? 'all' : (noneAudio ? 'none' : 'mixed-padded'),
       hasAudio: wantAudio,
       // 校色实际状态：disabled / applied / failed（skipped 由上层在「转场关闭」时给出）
@@ -677,5 +801,7 @@ module.exports = {
   concatWithTransitions,
   // 供验收脚本/上层复用
   _probeMedia: probeMedia,
+  _pickEncoder: pickEncoder,
+  _ENCODERS: ENCODERS,
   ALLOWED_TYPES
 };

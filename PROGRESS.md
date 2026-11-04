@@ -31,6 +31,15 @@
 - 注意：mock 是静态色块，真实素材会明显更慢；1080p 与 30 分钟真实片**还没测**。
 - W1 剩余：进度回调、取消、硬件编码探测；之后进 F01/F02。
 
+### 导出链运行时能力（2026-11-04）
+
+- **进度**：`-progress` 写文件，500ms 轮询；`options.onProgress({phase,percent,outTimeSec,speed,encoder})`。
+- **取消**：`options.signal`（AbortSignal）；kill 进程、清 staging、删半成品，返回 `{success:false,cancelled:true}`。
+- **编码器**：`TRANSITION_ENCODER`（auto 默认）→ 依次试编 nvenc/qsv/amf，失败回退 libx264；结果带 `encoder`。
+  - 本机实测探测到 **amf**（AMD），`verify-transitions` 36/0 照常通过。
+- 验收：`scripts/verify-transition-runtime.js` **12/0**（进度/取消/预取消/编码器）。
+- 规模：360 段 **1080p** 成功，**508.7s**（20.2 分钟片，2.39× 实时）；30 分钟实测进行中。
+
 ## 基线快照
 
 | 项 | 值 |

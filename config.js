@@ -332,7 +332,10 @@ module.exports = {
     // 快速运动的镜头上留下双重曝光鬼影（见规格文档 §4.4 的影片条证据）。
     duration: transitionDuration(0.4),
     // xfade 转场类型，.env 用 TRANSITION_TYPE 覆盖（默认 fade = 交叉淡化）
-    type: env('TRANSITION_TYPE', 'fade')
+    type: env('TRANSITION_TYPE', 'fade'),
+    // 编码器：auto = 依次探测 nvenc/qsv/amf（可用则用，失败回退 libx264）；
+    // 也可显式指定 libx264 / nvenc / qsv / amf。TRANSITION_ENCODER 覆盖。
+    encoder: env('TRANSITION_ENCODER', 'auto')
   },
 
   // ===== 剪映「调节」复刻（默认关闭）=====
