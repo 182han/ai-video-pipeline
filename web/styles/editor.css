@@ -168,7 +168,7 @@ a.ed-btn.ed-link {
 /* ---------- 右：调节 ---------- */
 .ed-right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid rgba(244, 247, 245, .08); background: var(--s1, #0E1411); }
 .ed-tabs { display: flex; gap: 2px; padding: 8px 10px; border-bottom: 1px solid rgba(244, 247, 245, .06); }
-.ed-tab { padding: 4px 9px; border-radius: 5px; font-size: 11.5px; color: var(--ink3, #7B8781); cursor: default; }
+.ed-tab { padding: 4px 9px; border-radius: 5px; font-size: 11.5px; color: var(--ink3, #7B8781); cursor: pointer; }
 .ed-tab.on { background: rgba(214, 179, 106, .14); color: var(--accent, #D6B36A); }
 .ed-inspector-body { flex: 1; overflow: auto; padding: 12px; }
 .ed-group { margin-bottom: 16px; }
@@ -406,4 +406,55 @@ a.ed-btn.ed-link {
   padding: 8px 12px; border-top: 1px solid rgba(244, 247, 245, .08);
 }
 .ed-link { color: var(--accent, #D6B36A); text-decoration: none; }
+
+/* ---------- 右：高级调节（F12 HSL / 曲线 / 色轮） ---------- */
+.ed-adv { display: flex; flex-direction: column; gap: 10px; }
+.ed-adv-head { display: flex; align-items: baseline; gap: 8px; }
+.ed-adv-head b { font-size: 12px; font-weight: 500; color: var(--ink, #F4F7F5); }
+.ed-adv-head .ed-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-adv-reset {
+  height: 22px; padding: 0 7px; font-size: 10.5px; cursor: pointer;
+  color: var(--ink3, #7B8781); background: transparent;
+  border: 1px solid rgba(244, 247, 245, .12); border-radius: 4px;
+}
+.ed-adv-reset:hover { color: var(--accent, #D6B36A); border-color: rgba(214, 179, 106, .45); }
+.ed-adv-bands { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.ed-adv-band {
+  position: relative; display: flex; align-items: center; gap: 4px; height: 26px;
+  padding: 0 5px; border-radius: 5px; cursor: pointer; font-size: 10.5px;
+  background: transparent; color: var(--ink3, #7B8781);
+  border: 1px solid rgba(244, 247, 245, .10);
+}
+.ed-adv-band:hover { background: rgba(244, 247, 245, .05); color: var(--ink2, #A7B3AD); }
+.ed-adv-band.on { border-color: rgba(214, 179, 106, .55); color: var(--accent, #D6B36A); background: rgba(214, 179, 106, .10); }
+.ed-adv-band.mod::after {
+  content: ''; position: absolute; right: 4px; top: 4px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent, #D6B36A);
+}
+.ed-adv-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35); }
+.ed-adv-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ed-adv-chan { display: flex; gap: 3px; }
+.ed-adv-chan-btn {
+  flex: 1; height: 24px; border-radius: 4px; cursor: pointer; font-size: 10.5px;
+  background: transparent; color: var(--ink3, #7B8781);
+  border: 1px solid rgba(244, 247, 245, .10);
+}
+.ed-adv-chan-btn:hover { background: rgba(244, 247, 245, .05); }
+.ed-adv-chan-btn.on { color: var(--chan-color, #D6B36A); border-color: var(--chan-color, #D6B36A); background: rgba(244, 247, 245, .06); }
+.ed-curve-canvas {
+  width: 100%; height: auto; display: block; border-radius: 6px;
+  border: 1px solid rgba(244, 247, 245, .10); touch-action: none; cursor: crosshair;
+}
+.ed-adv-wheel { border: 1px solid rgba(244, 247, 245, .08); border-radius: 7px; padding: 7px 8px; background: var(--s2, #121815); }
+.ed-adv-wheel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.ed-adv-wheel-head b { font-size: 11px; font-weight: 500; color: var(--ink2, #A7B3AD); }
+.ed-adv-wheel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+.ed-adv-wheel-row { display: flex; align-items: center; gap: 5px; height: 24px; }
+.ed-adv-wheel-row .ed-slider-input { flex: 1; min-width: 0; }
+.ed-adv-ch { width: 10px; flex: none; font-size: 9.5px; font-family: ui-monospace, Consolas, monospace; color: var(--ink3, #7B8781); }
+.ed-adv-ch-r { color: #E4574F; }
+.ed-adv-ch-g { color: #5DBE72; }
+.ed-adv-ch-b { color: #5A8FE0; }
+.ed-adv-ch-y { color: #D6B36A; }
+.ed-adv-val { width: 34px; flex: none; text-align: right; font-size: 10px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; }
 

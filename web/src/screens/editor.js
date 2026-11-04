@@ -11,6 +11,7 @@
 import { navigate } from '../router.js';
 import { PreviewEngine } from '../preview/engine.js';
 import { AudioPanel } from '../components/audioPanel.js';
+import { HslPanel, CurvePanel, WheelPanel } from '../components/advancedAdjust.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -42,6 +43,13 @@ const ADJUST_GROUPS = [
       { key: 'lightSensation', label: '光感' }
     ]
   }
+];
+
+const ADJUST_TABS = [
+  { key: 'basic', label: '基础', title: '基础调节' },
+  { key: 'hsl', label: 'HSL', title: 'HSL 8 个色带' },
+  { key: 'curve', label: '曲线', title: 'RGB 曲线' },
+  { key: 'wheel', label: '色轮', title: 'lift / gamma / gain 色轮' }
 ];
 
 async function api(url, opt) {
@@ -95,6 +103,7 @@ export function EditorView() {
   const [loadErr, setLoadErr] = useState('');
   const [saveState, setSaveState] = useState('');
   const [tab, setTab] = useState('media');
+  const [adjustTab, setAdjustTab] = useState('basic');
   const [nameDraft, setNameDraft] = useState('');
   const [openList, setOpenList] = useState(null);
   const [films, setFilms] = useState(null);
@@ -489,6 +498,26 @@ export function EditorView() {
     const list = segmentsRef.current.map((s) => (s.id === selectedId
       ? { ...s, adjust: { ...(s.adjust || {}), [key]: v } }
       : s));
+    segmentsRef.current = list;
+    const p = projectRef.current;
+    if (p) { projectRef.current = { ...p, segments: list }; setProject(projectRef.current); }
+    scheduleSave();
+  }
+
+  // F12：高级参数（hsl / curve / wheel）整块写入；null = 删除该项
+  function setAdvanced(patch) {
+    if (!selectedId || !patch || typeof patch !== 'object') return;
+    const keys = ['hsl', 'curve', 'wheel'];
+    const list = segmentsRef.current.map((s) => {
+      if (s.id !== selectedId) return s;
+      const adjust = { ...(s.adjust || {}) };
+      for (const k of keys) {
+        if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
+        if (patch[k] === null || patch[k] === undefined) delete adjust[k];
+        else adjust[k] = patch[k];
+      }
+      return { ...s, adjust };
+    });
     segmentsRef.current = list;
     const p = projectRef.current;
     if (p) { projectRef.current = { ...p, segments: list }; setProject(projectRef.current); }
@@ -948,16 +977,17 @@ export function EditorView() {
 
         <section className="ed-right">
           <div className="ed-tabs">
-            ${['基础', 'HSL', '曲线', '色轮'].map((t, i) => html`
+            ${ADJUST_TABS.map((t) => html`
               <span
-                key=${t}
-                className=${'ed-tab' + (i === 0 ? ' on' : '')}
-                title=${i === 0 ? '基础调节' : '后续版本接入'}
-                onClick=${() => { if (i > 0) setToast('「' + t + '」面板将在后续版本接入'); }}
-              >${t}</span>
+                key=${t.key}
+                className=${'ed-tab' + (adjustTab === t.key ? ' on' : '')}
+                title=${t.title}
+                onClick=${() => setAdjustTab(t.key)}
+              >${t.label}</span>
             `)}
           </div>
           <div className="ed-inspector-body">
+            ${adjustTab === 'basic' && html`
             <div className="ed-group ed-transition">
               <h4>转场</h4>
               <label className="ed-check">
@@ -999,10 +1029,11 @@ export function EditorView() {
               </div>
               <p className="ed-hint">关闭后走直拼（不叠化，不缩短时长）；预览与导出同时生效。</p>
             </div>
+            `}
             ${!selectedSeg && html`
               <div className="ed-empty">
                 <p>先在时间线选中一个片段</p>
-                <p className="ed-sub">选中谁，调谁；每段参数独立保存</p>
+                <p className="ed-sub">${adjustTab === 'basic' ? '选中谁，调谁；每段参数独立保存' : '选中片段后调整「' + ADJUST_TABS.find((t) => t.key === adjustTab).label + '」'}</p>
               </div>
             `}
             ${selectedSeg && html`
@@ -1010,28 +1041,33 @@ export function EditorView() {
                 <span>${selectedSeg.assetId}</span>
                 <button className="ed-btn" onClick=${resetAdjust}>重置本段</button>
               </div>
-              ${ADJUST_GROUPS.map((g) => html`
-                <div className="ed-group" key=${g.title}>
-                  <h4>${g.title}</h4>
-                  ${g.items.map((it) => html`
-                    <div className="ed-slider-row" key=${it.key}>
-                      <span className="ed-slider-label">${it.label}</span>
-                      <input
-                        className="ed-slider-input"
-                        type="range"
-                        min="-50"
-                        max="50"
-                        step="1"
-                        value=${adjustValue(selectedSeg, it.key)}
-                        onPointerDown=${historyPush}
-                        onInput=${(e) => setAdjust(it.key, e.target.value)}
-                      />
-                      <span className="ed-slider-val">${adjustValue(selectedSeg, it.key)}</span>
-                    </div>
-                  `)}
-                </div>
-              `)}
-              <p className="ed-hint">参数保存到工程草稿；导出时按段烘成 LUT（与预览同一套颜色数学）。</p>
+              ${adjustTab === 'basic' && html`
+                ${ADJUST_GROUPS.map((g) => html`
+                  <div className="ed-group" key=${g.title}>
+                    <h4>${g.title}</h4>
+                    ${g.items.map((it) => html`
+                      <div className="ed-slider-row" key=${it.key}>
+                        <span className="ed-slider-label">${it.label}</span>
+                        <input
+                          className="ed-slider-input"
+                          type="range"
+                          min="-50"
+                          max="50"
+                          step="1"
+                          value=${adjustValue(selectedSeg, it.key)}
+                          onPointerDown=${historyPush}
+                          onInput=${(e) => setAdjust(it.key, e.target.value)}
+                        />
+                        <span className="ed-slider-val">${adjustValue(selectedSeg, it.key)}</span>
+                      </div>
+                    `)}
+                  </div>
+                `)}
+                <p className="ed-hint">参数保存到工程草稿；导出时按段烘成 LUT（与预览同一套颜色数学）。</p>
+              `}
+              ${adjustTab === 'hsl' && html`<${HslPanel} adjust=${selectedSeg.adjust || {}} onChange=${setAdvanced} onHistory=${historyPush} />`}
+              ${adjustTab === 'curve' && html`<${CurvePanel} adjust=${selectedSeg.adjust || {}} onChange=${setAdvanced} onHistory=${historyPush} />`}
+              ${adjustTab === 'wheel' && html`<${WheelPanel} adjust=${selectedSeg.adjust || {}} onChange=${setAdvanced} onHistory=${historyPush} />`}
             `}
           </div>
         </section>

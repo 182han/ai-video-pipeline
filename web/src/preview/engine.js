@@ -23,8 +23,10 @@ function b64ToBytes(b64) {
   return out;
 }
 
+const ADV_KEYS = ['hsl', 'curve', 'wheel'];
 function hasAdjust(adjust) {
   if (!adjust || typeof adjust !== 'object') return false;
+  if (ADV_KEYS.some((k) => adjust[k] && typeof adjust[k] === 'object')) return true;
   return Object.keys(adjust).some((k) => {
     const v = Number(adjust[k]);
     return Number.isFinite(v) && v !== 0;

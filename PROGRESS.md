@@ -236,6 +236,18 @@
 - 放大后黑屏：`.ed-main.theater` 用 `0 1fr 0` 且左右 `display:none`，中间列被自动放进第 1 个 0 宽列 → 改为单列 `1fr` + `.ed-center { grid-column: 1 }`。
 - 分辨率标签硬编码 1080p：改为按选中片段素材的最大高度计算（当前素材 720p → 显示 720p），宽高比也按素材计算。
 
+### F12 高级调节（2026-11-04）
+
+- 右侧新增 **HSL / 曲线 / 色轮** 三块面板，tab 从占位改为可切换；「蒙版」不做、UI 不出现。
+- HSL：8 个固定色带 × 色相/饱和度/明度，`-100..100`；曲线：R/G/B 三通道，合成通道同时写入三条，默认 5 点可拖；色轮：lift/gamma/gain × r/g/b/y，`-1..1`（0 = 不变）。
+- 新文件 `web/src/components/advancedAdjust.js`；`editor.js` 接 `setAdvanced()` 写回 `segments[].adjust`；`preview/engine.js` 的 `hasAdjust` 增加 `ADV_KEYS`（否则「只有高级参数」的段预览不取 LUT）；`editor.css` 补面板样式。
+- 颜色数学未复制：预览 `POST /api/adjust/lut`、导出 `transitionMixer` 都继续走 `adjustChain.normalizeParams`。
+- 先写 `scripts/verify-adjust-advanced.js` 并确认红：**16 通过 / 12 失败**（失败全是 UI/引擎未实现；LUT/持久化/导出本就通过）。
+- 实现后：advanced **28/0**；指定回归 preview **28/0**、adjust **17/0**、export **24/0**。
+- 追加回归：shell 25/0、transition-controls 16/0、timeline 29/0、ux 18/0、audio 22/0、media 21/0、nav 12/0、rebuild 19/0。
+- **未验证**：浏览器里的拖点/滑杆手感、真实 WebGL 同帧画面；本环境无浏览器。真实 30 分钟长片仍未测。
+- 注意：后端 `normalizeParams` 对 `curve` 只检查长度 3，不做点校验/钳制（hsl/wheel 有 clamp）；UI 已按 0..1 约束，但 API 直传非法曲线仍可能产生异常 LUT，后续可补后端校验（本轮未改后端）。
+
 ## 基线快照
 
 | 项 | 值 |
