@@ -19,6 +19,7 @@ const WEB = path.join(ROOT, 'web');
 const HOST = '127.0.0.1';
 const START_PORT = Number(process.env.EDITOR_PREVIEW_PORT || 3191);
 const { normalizeParams, adjustChain } = require('../src/processors/adjustChain');
+const adjustLut = require('../src/adjustLut');
 
 let pass = 0;
 let fail = 0;
@@ -131,6 +132,54 @@ async function waitReady(base, timeoutMs = 25000) {
       });
       const j2 = await r2.json();
       check(j2.success === true && j2.data === null, '无调节时返回空 LUT（恒等）');
+
+      // 8-bit 3D LUT 三线性插值 vs adjustChain 原函数：
+      // 这是「预览与导出色差 <1%」的颜色数学证据（不含浏览器解码/显示差异）。
+      const N2 = 17;
+      const tri = (buf, r, g, b, c) => {
+        const x = r * (N2 - 1), y = g * (N2 - 1), z = b * (N2 - 1);
+        const x0 = Math.min(N2 - 2, Math.floor(x));
+        const y0 = Math.min(N2 - 2, Math.floor(y));
+        const z0 = Math.min(N2 - 2, Math.floor(z));
+        const fx = x - x0, fy = y - y0, fz = z - z0;
+        let v = 0;
+        for (let dz = 0; dz < 2; dz++) {
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              const w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz);
+              v += w * buf[((((z0 + dz) * N2 + (y0 + dy)) * N2 + (x0 + dx)) * 4) + c];
+            }
+          }
+        }
+        return v;
+      };
+      const cases = [
+        { name: '默认组合', adj: { brightness: 20, saturation: 10, temperature: -8, shadow: 12, contrast: 15, highlight: -10 } },
+        { name: '高亮+50', adj: { brightness: 50 } },
+        { name: '饱和-50', adj: { saturation: -50 } },
+        { name: '色温+50', adj: { temperature: 50 } }
+      ];
+      for (const cse of cases) {
+        const p2 = normalizeParams(cse.adj);
+        const buf2 = adjustLut._build(cse.adj);
+        let sum2 = 0;
+        let cnt2 = 0;
+        const steps = 10;
+        for (let i = 0; i < steps; i++) {
+          for (let j = 0; j < steps; j++) {
+            for (let k = 0; k < steps; k++) {
+              const r = i / (steps - 1), g = j / (steps - 1), b = k / (steps - 1);
+              const e = adjustChain([r, g, b], p2).map((v) => Math.max(0, Math.min(1, v)) * 255);
+              for (let ch = 0; ch < 3; ch++) {
+                sum2 += Math.abs(tri(buf2, r, g, b, ch) - e[ch]);
+                cnt2++;
+              }
+            }
+          }
+        }
+        const meanPct = (sum2 / cnt2) / 255 * 100;
+        check(meanPct < 1, 'LUT 插值均值差 <1%：' + cse.name, meanPct.toFixed(3) + '%');
+      }
 
       const js = await (await fetch(base + '/app/src/preview/engine.js')).text();
       check(/texImage3D/.test(js), '浏览器可取到 preview/engine.js');

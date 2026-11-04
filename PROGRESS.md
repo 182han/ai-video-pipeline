@@ -174,6 +174,7 @@
 - F07 音频面板补「**入点/出点**」（源内区间）；F10 详情补**文件大小**。
 - 全量回归（14 套件）：**295 通过 / 0 失败**（projects 25、shell 22、media 21、timeline 28、adjust 17、preview 18、export 24、audio 21、transition-controls 16、library-detail 18、nav 12、rebuild 19、ux 18、transitions 36）。
 - **M2 结论**：F01c/F05/F06/F07/F09/F10/F11 全部落地并有可复跑验收；UI 视觉/性能（24fps、同帧像素差）仍未在真实浏览器验证。
+- **F06 颜色一致性证据（2026-11-04 补）**：8-bit 17³ LUT 三线性插值 vs adjustChain 原函数，四组参数（默认/高亮+50/饱和-50/色温+50）**均值差 0.046%–0.133%**（<1%）；量化上界 0.196%。不含浏览器解码/显示差异。
 
 ## 基线快照
 
