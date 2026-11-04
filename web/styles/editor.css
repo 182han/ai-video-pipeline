@@ -175,6 +175,17 @@ a.ed-btn.ed-link {
   margin-bottom: 10px; font-size: 11px; color: var(--ink3, #7B8781);
 }
 .ed-sel-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-check {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 6px; font-size: 11.5px; color: var(--ink2, #A7B3AD); cursor: pointer;
+}
+.ed-check input { accent-color: var(--accent, #D6B36A); }
+.ed-select {
+  flex: 1; height: 24px; padding: 0 4px; border-radius: 4px;
+  background: var(--s2, #121815); color: var(--ink, #F4F7F5);
+  border: 1px solid rgba(244, 247, 245, .12); font-size: 11px;
+}
+.ed-select:disabled { opacity: .45; }
 .ed-slider-val { width: 26px; text-align: right; font-size: 11px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; }
 .ed-hint { margin: 6px 0 0; font-size: 11px; line-height: 1.7; color: var(--ink3, #7B8781); }
 

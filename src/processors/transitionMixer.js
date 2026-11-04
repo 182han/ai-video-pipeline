@@ -521,18 +521,24 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     : (details[0].fpsNum || 30);
 
   // 4) 淡化时长：不能超过最短片段的一半（否则 xfade 没有足够内容可融合）
+  //    enabled=false：走 concat 直拼，不做任何叠化（F=0），但每段调节/裁剪照常生效。
+  const transitionEnabled = options.enabled !== false;
   const requestedF = Number(options.duration) > 0 ? Number(options.duration) : 0.5;
   const minDur = Math.min(...durs);
-  const maxF = minDur / 2 - 0.05;
-  if (maxF < MIN_FADE) {
-    return {
-      success: false,
-      error: `片段过短：最短片段 ${minDur.toFixed(2)}s，无法做 ${MIN_FADE}s 以上的交叉淡化`
-        + `（至少需要 ${(2 * MIN_FADE + 0.1).toFixed(1)}s）`
-    };
+  let F = 0;
+  let type = 'none';
+  if (transitionEnabled) {
+    const maxF = minDur / 2 - 0.05;
+    if (maxF < MIN_FADE) {
+      return {
+        success: false,
+        error: `片段过短：最短片段 ${minDur.toFixed(2)}s，无法做 ${MIN_FADE}s 以上的交叉淡化`
+          + `（至少需要 ${(2 * MIN_FADE + 0.1).toFixed(1)}s）`
+      };
+    }
+    F = Math.min(requestedF, maxF);
+    type = ALLOWED_TYPES.has(String(options.type || '')) ? String(options.type) : 'fade';
   }
-  const F = Math.min(requestedF, maxF);
-  const type = ALLOWED_TYPES.has(String(options.type || '')) ? String(options.type) : 'fade';
 
   // 5) 音轨策略（ignoreAudio：剪辑台导出时源片段音轨一律丢弃，BGM 由 audioMixer 单独混）
   const ignoreAudio = options.ignoreAudio === true;
@@ -617,7 +623,8 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       actualDurs.push(d.duration);
     }
 
-    const expectedDuration = actualDurs.reduce((a, b) => a + b, 0) - (list.length - 1) * F;
+    const expectedDuration = actualDurs.reduce((a, b) => a + b, 0)
+      - (transitionEnabled ? (list.length - 1) * F : 0);
     if (!(expectedDuration > 0)) {
       cleanupTemps();
       return { success: false, error: '片段总时长不足以覆盖转场重叠时长' };
@@ -705,22 +712,28 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       const adjPart = adjustLuts.has(i) ? `,lut3d=${adjustLuts.get(i)}` : '';
       parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p${adjPart}${lutPart}[v${i}]`);
     }
-    let vPrev = 'v0';
-    let acc = actualDurs[0];
-    for (let i = 1; i < prepared.length; i++) {
-      const offset = acc - F;
-      if (!(offset > 0)) {
-        cleanupTemps();
-        return { success: false, error: `第 ${i} 个接缝的融合起点 ${offset.toFixed(3)}s 非法（片段过短）` };
+    if (!transitionEnabled) {
+      const labels = [];
+      for (let i = 0; i < prepared.length; i++) labels.push(`[v${i}]`);
+      parts.push(`${labels.join('')}concat=n=${prepared.length}:v=1:a=0[vout]`);
+    } else {
+      let vPrev = 'v0';
+      let acc = actualDurs[0];
+      for (let i = 1; i < prepared.length; i++) {
+        const offset = acc - F;
+        if (!(offset > 0)) {
+          cleanupTemps();
+          return { success: false, error: `第 ${i} 个接缝的融合起点 ${offset.toFixed(3)}s 非法（片段过短）` };
+        }
+        const out = `vx${i}`;
+        parts.push(`[${vPrev}][v${i}]xfade=transition=${type}:duration=${F.toFixed(3)}:offset=${offset.toFixed(3)}[${out}]`);
+        vPrev = out;
+        acc = acc + actualDurs[i] - F;
       }
-      const out = `vx${i}`;
-      parts.push(`[${vPrev}][v${i}]xfade=transition=${type}:duration=${F.toFixed(3)}:offset=${offset.toFixed(3)}[${out}]`);
-      vPrev = out;
-      acc = acc + actualDurs[i] - F;
+      // 统一收口到 vout：滤镜链最后一个标签是按序号生成的，-map 不能写死，
+      // 否则会出现「滤镜图能跑、-map 找不到标签」这种看不出原因的失败。
+      parts.push(`[${vPrev}]null[vout]`);
     }
-    // 统一收口到 vout：滤镜链最后一个标签是按序号生成的，-map 不能写死，
-    // 否则会出现「滤镜图能跑、-map 找不到标签」这种看不出原因的失败。
-    parts.push(`[${vPrev}]null[vout]`);
 
     let aPrev = null;
     if (wantAudio) {
@@ -728,13 +741,18 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
         parts.push(`[${i}:a]atrim=start=0:end=${actualDurs[i].toFixed(3)},asetpts=PTS-STARTPTS,`
           + `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
       }
-      aPrev = 'a0';
-      for (let i = 1; i < prepared.length; i++) {
-        const out = `ax${i}`;
-        parts.push(`[${aPrev}][a${i}]acrossfade=d=${F.toFixed(3)}:c1=tri:c2=tri[${out}]`);
-        aPrev = out;
+      if (!transitionEnabled) {
+        const labels = prepared.map((_, i) => `[a${i}]`);
+        parts.push(`${labels.join('')}concat=n=${prepared.length}:v=0:a=1[aout]`);
+      } else {
+        aPrev = 'a0';
+        for (let i = 1; i < prepared.length; i++) {
+          const out = `ax${i}`;
+          parts.push(`[${aPrev}][a${i}]acrossfade=d=${F.toFixed(3)}:c1=tri:c2=tri[${out}]`);
+          aPrev = out;
+        }
+        parts.push(`[${aPrev}]anull[aout]`);
       }
-      parts.push(`[${aPrev}]anull[aout]`);
     }
 
     // 8) 执行：短路径 + filter 文件 + spawn 参数数组，避开命令行长度上限
@@ -807,9 +825,9 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       outputPath,
       transitionType: type,
       fadeDuration: F,
-      requestedFadeDuration: requestedF,
-      fadeClamped: F < requestedF,
-      transitions: list.length - 1,
+      requestedFadeDuration: transitionEnabled ? requestedF : 0,
+      fadeClamped: transitionEnabled ? F < requestedF : false,
+      transitions: transitionEnabled ? list.length - 1 : 0,
       expectedDuration: Math.round(expectedDuration * 1000) / 1000,
       actualDuration: Math.round(outInfo.duration * 1000) / 1000,
       durationCheck: { ok: true, actual: outInfo.duration, expected: expectedDuration, tolerance: tol },

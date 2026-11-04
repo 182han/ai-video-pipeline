@@ -227,9 +227,9 @@ export function EditorView() {
         adjust: s.adjust || null
       }))
       .filter((s) => s.url && Number(s.outSec) > Number(s.inSec));
-    const F = project.transition && Number(project.transition.duration) > 0
-      ? Number(project.transition.duration)
-      : 0.4;
+    const F = project.transition && project.transition.enabled !== false
+      ? (Number(project.transition.duration) > 0 ? Number(project.transition.duration) : 0.4)
+      : 0;
     e.setSegments(segs, { transition: F });
   }, [project, libItems]);
 
@@ -304,7 +304,8 @@ export function EditorView() {
         body: JSON.stringify({
           revision: revisionRef.current,
           segments: segmentsRef.current,
-          audio: audioRef.current
+          audio: audioRef.current,
+          transition: projectRef.current ? projectRef.current.transition : null
         })
       }).then((j) => {
         revisionRef.current = j.project.revision;
@@ -337,6 +338,16 @@ export function EditorView() {
       projectRef.current = { ...p, audio: next };
       setProject(projectRef.current);
     }
+    scheduleSave();
+  }
+
+  function commitTransition(patch) {
+    const p = projectRef.current;
+    if (!p) return;
+    const cur = p.transition || { enabled: true, duration: 0.4, type: 'fade' };
+    const next = { ...cur, ...patch };
+    projectRef.current = { ...p, transition: next };
+    setProject(projectRef.current);
     scheduleSave();
   }
 
@@ -717,6 +728,7 @@ export function EditorView() {
   const trackWidth = Math.max(600, Math.ceil(rulerEnd * pps));
   const exporting = !!(exportJob && (exportJob.status === 'queued' || exportJob.status === 'running'));
   const selectedSeg = segments.find((s) => s.id === selectedId) || null;
+  const transition = project.transition || { enabled: true, duration: 0.4, type: 'fade' };
   const musicSeg = (project.audio && project.audio.music && project.audio.music[0]) || null;
   const ambientSeg = (project.audio && project.audio.ambient && project.audio.ambient[0]) || null;
   const bgmTitle = (id) => {
@@ -840,6 +852,47 @@ export function EditorView() {
             `)}
           </div>
           <div className="ed-inspector-body">
+            <div className="ed-group ed-transition">
+              <h4>转场</h4>
+              <label className="ed-check">
+                <input
+                  type="checkbox"
+                  checked=${transition.enabled !== false}
+                  onChange=${(e) => commitTransition({ enabled: e.target.checked })}
+                />
+                <span>片段之间淡入淡出</span>
+              </label>
+              <div className="ed-slider-row">
+                <span className="ed-slider-label">时长</span>
+                <select
+                  className="ed-select"
+                  value=${String(transition.duration)}
+                  disabled=${transition.enabled === false}
+                  onChange=${(e) => commitTransition({ duration: Number(e.target.value) })}
+                >
+                  ${['0.2', '0.4', '0.6', '0.8', '1.0'].map((v) => html`<option key=${v} value=${v}>${v}s</option>`)}
+                </select>
+              </div>
+              <div className="ed-slider-row">
+                <span className="ed-slider-label">类型</span>
+                <select
+                  className="ed-select"
+                  value=${transition.type}
+                  disabled=${transition.enabled === false}
+                  onChange=${(e) => commitTransition({ type: e.target.value })}
+                >
+                  <option value="fade">淡化</option>
+                  <option value="dissolve">溶解</option>
+                  <option value="wipeleft">左擦除</option>
+                  <option value="wiperight">右擦除</option>
+                  <option value="slideleft">左滑动</option>
+                  <option value="slideright">右滑动</option>
+                  <option value="circleopen">圆形展开</option>
+                  <option value="pixelize">像素化</option>
+                </select>
+              </div>
+              <p className="ed-hint">关闭后走直拼（不叠化，不缩短时长）；预览与导出同时生效。</p>
+            </div>
             ${!selectedSeg && html`
               <div className="ed-empty">
                 <p>先在时间线选中一个片段</p>

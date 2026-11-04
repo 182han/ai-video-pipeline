@@ -139,9 +139,11 @@ async function runJob(job, project) {
 
     job.status = 'running';
     job.progress = 0;
+    const t = project.transition || {};
     const res = await transitionMixer.concatWithTransitions(clips, silentPath, {
-      duration: project.transition ? project.transition.duration : 0.4,
-      type: project.transition ? project.transition.type : 'fade',
+      enabled: t.enabled !== false,
+      duration: t.duration,
+      type: t.type,
       ignoreAudio: true,
       signal: job.controller.signal,
       onProgress: (p) => { job.progress = typeof p.percent === 'number' ? p.percent : job.progress; }
