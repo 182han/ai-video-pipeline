@@ -376,6 +376,8 @@ module.exports = {
     dataDir: require('path').resolve(__dirname, env('DATA_DIR', './data/tasks')),
     // 剪辑台工程（草稿）目录，与任务存储分开：工程是编辑态，任务是一次渲染作业
     projectsDir: require('path').resolve(__dirname, env('PROJECTS_DIR', './data/projects')),
+    // 素材缩略图缓存（剪辑台素材栏/时间线用；按源文件 mtime 失效）
+    thumbsDir: require('path').resolve(__dirname, env('THUMBS_DIR', './data/thumbnails')),
     // S3 兼容存储配置（可选）
     s3: {
       enabled: env('S3_ENABLED', 'false') === 'true',

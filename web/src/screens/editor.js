@@ -58,6 +58,10 @@ function segDuration(seg) {
   return Math.max(0, outSec - inSec);
 }
 
+function thumbUrl(assetId) {
+  return '/api/library/' + encodeURIComponent(assetId) + '/thumb';
+}
+
 function saveStateText(state) {
   if (state === 'saving') return '保存中…';
   if (state === 'saved') return '已保存';
@@ -82,6 +86,7 @@ export function EditorView() {
   const [selectedId, setSelectedId] = useState(null);
   const [playhead, setPlayhead] = useState(0);
   const [exportJob, setExportJob] = useState(null);
+  const [viewerUrl, setViewerUrl] = useState(null);
 
   const pastRef = useRef([]);
   const futureRef = useRef([]);
@@ -89,6 +94,9 @@ export function EditorView() {
   const moveIndexRef = useRef(null);
   const trimRef = useRef(null);
   const segmentsRef = useRef([]);
+  const rulerRef = useRef(null);
+  const playheadElRef = useRef(null);
+  const scrubRef = useRef(0);
 
   const projectRef = useRef(null);
   const revisionRef = useRef(0);
@@ -140,6 +148,14 @@ export function EditorView() {
     })().catch((e) => setLoadErr(e.message || '工程加载失败'));
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
+
+  // 成片预览：Esc 关闭，留在剪辑台（2026-11-04 用户反馈）
+  useEffect(() => {
+    if (!viewerUrl) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setViewerUrl(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [viewerUrl]);
 
   async function loadLibrary() {
     try {
@@ -287,10 +303,27 @@ export function EditorView() {
     setSelectedId(null);
   }
 
-  function onRulerClick(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const t = Math.max(0, (e.clientX - rect.left) / pps);
-    setPlayhead(Math.round(t * 100) / 100);
+  // 播放头拖动：拖动过程只改 DOM，不触发 React 重渲染（避免卡顿），松手才落 state
+  function beginScrub(e) {
+    e.preventDefault();
+    const ruler = rulerRef.current;
+    if (!ruler) return;
+    const rect = ruler.getBoundingClientRect();
+    const total = segmentsRef.current.reduce((s, x) => s + segDuration(x), 0);
+    const apply = (clientX) => {
+      const t = Math.max(0, Math.min(total, (clientX - rect.left) / pps));
+      scrubRef.current = t;
+      if (playheadElRef.current) playheadElRef.current.style.left = (t * pps) + 'px';
+    };
+    apply(e.clientX);
+    const move = (ev) => apply(ev.clientX);
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      setPlayhead(Math.round(scrubRef.current * 100) / 100);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
 
   function onTrackClick(e) {
@@ -554,7 +587,7 @@ export function EditorView() {
           ${exporting ? '导出中 ' + Math.round(exportJob.progress || 0) + '%' : '导出'}
         </button>
         ${exportJob && exportJob.status === 'done' && exportJob.outputUrl && html`
-          <a className="ed-btn ed-link" href=${exportJob.outputUrl} target="_blank" rel="noreferrer">看成片</a>
+          <button className="ed-btn ed-link" onClick=${() => setViewerUrl(exportJob.outputUrl)}>看成片</button>
         `}
       </header>
 
@@ -597,6 +630,13 @@ export function EditorView() {
                           title=${(it.prompt || it.id) + ' · 点击加入时间线'}
                         >
                           <span className="ed-card-thumb">
+                            <img
+                              className="ed-card-img"
+                              src=${thumbUrl(it.id)}
+                              alt=""
+                              loading="lazy"
+                              onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                            />
                             <span className="ed-card-dur">${fmtDur(it.durationSec)}</span>
                             <span className="ed-card-plus">＋</span>
                           </span>
@@ -678,7 +718,7 @@ export function EditorView() {
             <div className="ed-tl-label">音频</div>
           </div>
           <div className="ed-tl-scroll">
-            <div className="ed-ruler" style=${{ width: trackWidth + 'px' }} onClick=${onRulerClick}>
+            <div className="ed-ruler" ref=${rulerRef} style=${{ width: trackWidth + 'px' }} onPointerDown=${beginScrub}>
               ${rulerTicks.map((s) => html`
                 <span key=${s} className=${'ed-tick' + (s % (rulerStep * 5) === 0 ? ' major' : '')} style=${{ left: (s * pps) + 'px' }}>
                   ${s % (rulerStep * 5) === 0 ? fmtTime(s) : ''}
@@ -705,6 +745,10 @@ export function EditorView() {
                       onDragStart=${(e) => onClipDragStart(e, i)}
                       onClick=${(e) => { e.stopPropagation(); setSelectedId(seg.id); }}
                     >
+                      <span
+                        className="ed-clip-thumb"
+                        style=${{ backgroundImage: 'url(' + thumbUrl(seg.assetId) + ')' }}
+                      ></span>
                       <span className="ed-handle l" title="拖动裁剪入点" onPointerDown=${(e) => beginTrim(e, i, 'left')}></span>
                       <span className="ed-clip-name">${seg.assetId}</span>
                       <span className="ed-clip-dur">${fmtDur(dur)}</span>
@@ -715,7 +759,13 @@ export function EditorView() {
             <div className="ed-track audio" style=${{ width: trackWidth + 'px' }}>
               <span className="ed-track-empty">音频轨（F07）</span>
             </div>
-            <div className="ed-playhead" style=${{ left: (playhead * pps) + 'px' }}></div>
+            <div
+              className="ed-playhead"
+              ref=${playheadElRef}
+              style=${{ left: (playhead * pps) + 'px' }}
+              onPointerDown=${beginScrub}
+              title="拖动定位"
+            ></div>
           </div>
         </div>
       </section>
@@ -735,6 +785,22 @@ export function EditorView() {
                   <span className="ed-sub">${p.segmentCount} 段 · ${fmtTime(0)}</span>
                 </button>
               `)}
+            </div>
+          </div>
+        </div>
+      `}
+
+      ${viewerUrl && html`
+        <div className="ed-viewer" onClick=${(e) => { if (e.target === e.currentTarget) setViewerUrl(null); }}>
+          <div className="ed-viewer-card">
+            <div className="ed-viewer-head">
+              <b>成片预览</b>
+              <button className="ed-btn" onClick=${() => setViewerUrl(null)}>关闭（Esc）</button>
+            </div>
+            <video className="ed-viewer-video" src=${viewerUrl} controls autoplay playsInline></video>
+            <div className="ed-viewer-foot">
+              <span className="ed-sub">成片已保存在 output/，关闭后仍在工程里</span>
+              <a className="ed-sub ed-link" href=${viewerUrl} target="_blank" rel="noreferrer">新标签打开</a>
             </div>
           </div>
         </div>

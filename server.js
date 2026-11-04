@@ -45,6 +45,7 @@ const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
 const projectStore = require('./src/projectStore');
 const editorExporter = require('./src/editorExporter');
+const thumbnails = require('./src/thumbnails');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
@@ -1497,6 +1498,21 @@ app.get('/api/pricing', (req, res) => {
 });
 
 // 库列表：按分辨率分组，支持主题/模型/收藏/关键字筛选
+// 素材缩略图（剪辑台素材栏/时间线用；首次请求抽帧后缓存）
+app.get('/api/library/:id/thumb', async (req, res) => {
+  try {
+    const entry = library.get(req.params.id);
+    if (!entry || !entry.filePath) {
+      return res.status(404).json({ success: false, error: '素材不存在' });
+    }
+    const file = await thumbnails.ensure(entry);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(file);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : '缩略图生成失败' });
+  }
+});
+
 app.get('/api/library', (req, res) => {
   try {
     const { resolution, theme, model, favorite, q } = req.query;

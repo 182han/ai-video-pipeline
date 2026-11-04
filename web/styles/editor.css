@@ -71,6 +71,9 @@ a.ed-btn.ed-link {
   display: inline-flex; align-items: center; text-decoration: none;
   color: var(--accent, #D6B36A); border-color: rgba(214, 179, 106, .45);
 }
+.ed-btn.ed-link {
+  color: var(--accent, #D6B36A); border-color: rgba(214, 179, 106, .45);
+}
 
 /* ---------- 主体三栏 ---------- */
 .ed-main {
@@ -178,7 +181,15 @@ a.ed-btn.ed-link {
   color: var(--ink2, #A7B3AD); font-size: 10.5px; padding: 3px 6px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.ed-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent, #D6B36A); pointer-events: none; }
+.ed-playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px; z-index: 5;
+  background: var(--accent, #D6B36A); cursor: ew-resize;
+  pointer-events: auto; touch-action: none;
+}
+.ed-playhead::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -6px; right: -6px;
+}
+.ed-ruler { touch-action: none; }
 
 /* ---------- 弹层 ---------- */
 .ed-modal {
@@ -226,8 +237,12 @@ a.ed-btn.ed-link {
 }
 .ed-card:hover { border-color: rgba(214, 179, 106, .55); }
 .ed-card-thumb {
-  display: block; height: 52px; position: relative;
+  display: block; height: 52px; position: relative; overflow: hidden;
   background: linear-gradient(135deg, #1b2620, #0d1310);
+}
+.ed-card-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; opacity: .92; display: block;
 }
 .ed-card-dur {
   position: absolute; right: 4px; bottom: 3px; padding: 0 4px;
@@ -251,6 +266,12 @@ a.ed-btn.ed-link {
 /* ---------- 时间线片段（F03/F04） ---------- */
 .ed-clip { display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; }
 .ed-clip.sel { border-color: var(--accent, #D6B36A); box-shadow: 0 0 0 1px rgba(214, 179, 106, .45); }
+.ed-clip-thumb {
+  position: absolute; inset: 0; border-radius: 3px;
+  background-size: cover; background-position: center;
+  opacity: .5; pointer-events: none;
+}
+.ed-clip-name, .ed-clip-dur { position: relative; z-index: 1; }
 .ed-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; padding: 0 4px; }
 .ed-clip-dur { font-size: 9px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; padding: 0 4px; }
 .ed-handle {
@@ -275,4 +296,28 @@ a.ed-btn.ed-link {
   cursor: pointer; font-size: 12px; line-height: 1;
 }
 .ed-tool.ed-zoom:hover { background: rgba(244, 247, 245, .06); }
+
+/* ---------- 成片预览（页内，Esc 关闭） ---------- */
+.ed-viewer {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(4, 7, 5, .78);
+  display: grid; place-items: center;
+}
+.ed-viewer-card {
+  width: min(920px, 92vw); max-height: 90vh;
+  display: flex; flex-direction: column;
+  background: var(--s1, #0E1411);
+  border: 1px solid rgba(244, 247, 245, .12);
+  border-radius: 10px; overflow: hidden;
+}
+.ed-viewer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid rgba(244, 247, 245, .08);
+}
+.ed-viewer-video { width: 100%; max-height: 68vh; background: #000; display: block; }
+.ed-viewer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-top: 1px solid rgba(244, 247, 245, .08);
+}
+.ed-link { color: var(--accent, #D6B36A); text-decoration: none; }
 

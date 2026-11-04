@@ -70,7 +70,7 @@ async function put(base, id, body) {
   check(/function commitSegments\(/.test(editor), '统一提交 segments');
   check(/scheduleSegSave/.test(editor), '编辑后自动保存');
   check(/setPlayhead/.test(editor), '播放头');
-  check(/onRulerClick/.test(editor), '标尺点击定位');
+  check(/beginScrub/.test(editor), '标尺/播放头拖动定位');
   check(/ed-handle/.test(editor), '裁剪手柄');
   check(/\.ed-handle/.test(css), 'CSS 裁剪手柄');
   check(/\.ed-clip\.sel/.test(css), 'CSS 选中片段');
