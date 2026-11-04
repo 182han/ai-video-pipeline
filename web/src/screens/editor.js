@@ -107,6 +107,7 @@ export function EditorView() {
   const [pps, setPps] = useState(26);
   const [dragOver, setDragOver] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedAudio, setSelectedAudio] = useState(null);
   const [playhead, setPlayhead] = useState(0);
   const [exportJob, setExportJob] = useState(null);
   const [viewerUrl, setViewerUrl] = useState(null);
@@ -155,6 +156,7 @@ export function EditorView() {
     setProject(p);
     setNameDraft(p.name || '');
     setSelectedId(null);
+    setSelectedAudio(null);
     setPlayhead(0);
     pastRef.current = [];
     futureRef.current = [];
@@ -439,6 +441,7 @@ export function EditorView() {
   }
 
   function splitSelected() {
+    if (selectedAudio) { setToast('音频轨暂不支持分割（请用左侧入点/出点）'); return; }
     const segs = segmentsRef.current;
     if (!segs.length) return;
     let idx = selectedId ? segs.findIndex((s) => s.id === selectedId) : -1;
@@ -463,6 +466,12 @@ export function EditorView() {
   }
 
   function deleteSelected() {
+    if (selectedAudio) {
+      const cur = audioRef.current || { music: [], ambient: [] };
+      commitAudio({ ...cur, [selectedAudio]: [] });
+      setSelectedAudio(null);
+      return;
+    }
     if (!selectedId) return;
     commitSegments(segmentsRef.current.filter((s) => s.id !== selectedId));
     setSelectedId(null);
@@ -526,6 +535,7 @@ export function EditorView() {
     const rect = e.currentTarget.getBoundingClientRect();
     setPlayhead(Math.max(0, Math.round(((e.clientX - rect.left) / pps) * 100) / 100));
     setSelectedId(null);
+    setSelectedAudio(null);
   }
 
   function beginTrim(e, index, side) {
@@ -1004,7 +1014,7 @@ export function EditorView() {
           <button className="ed-tool ed-act" onClick=${undo} disabled=${pastRef.current.length === 0} title="撤销">撤销</button>
           <button className="ed-tool ed-act" onClick=${redo} disabled=${futureRef.current.length === 0} title="重做">重做</button>
           <button className="ed-tool ed-act" onClick=${splitSelected} disabled=${!selectedId && segments.length === 0} title="在播放头分割">分割</button>
-          <button className="ed-tool ed-act" onClick=${deleteSelected} disabled=${!selectedId} title="删除选中片段">删除</button>
+          <button className="ed-tool ed-act" onClick=${deleteSelected} disabled=${!selectedId && !selectedAudio} title="删除选中片段/音轨">删除</button>
           <span className="ed-spacer"></span>
           <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.max(PPS_MIN, v - 6))}>−</button>
           <span className="ed-tool">缩放</span>
@@ -1043,7 +1053,7 @@ export function EditorView() {
                       title=${seg.assetId + ' · ' + dur.toFixed(2) + 's'}
                       draggable=${true}
                       onDragStart=${(e) => onClipDragStart(e, i)}
-                      onClick=${(e) => { e.stopPropagation(); setSelectedId(seg.id); }}
+                      onClick=${(e) => { e.stopPropagation(); setSelectedId(seg.id); setSelectedAudio(null); }}
                     >
                       <span
                         className="ed-clip-thumb"
@@ -1058,12 +1068,32 @@ export function EditorView() {
             </div>
             <div className="ed-track audio" style=${{ width: trackWidth + 'px' }}>
               ${musicSeg && html`
-                <span className="ed-audio-clip music" style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}>
+                <span
+                  className=${'ed-audio-clip music' + (selectedAudio === 'music' ? ' sel' : '')}
+                  style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}
+                  onClick=${(e) => {
+                    e.stopPropagation();
+                    setSelectedAudio('music');
+                    setSelectedId(null);
+                    setTab('audio');
+                    setToast('已选中音乐轨：' + bgmTitle(musicSeg.trackId));
+                  }}
+                >
                   ♪ ${bgmTitle(musicSeg.trackId)}
                 </span>
               `}
               ${ambientSeg && html`
-                <span className="ed-audio-clip ambient" style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}>
+                <span
+                  className=${'ed-audio-clip ambient' + (selectedAudio === 'ambient' ? ' sel' : '')}
+                  style=${{ width: Math.min(trackWidth, duration * pps) + 'px' }}
+                  onClick=${(e) => {
+                    e.stopPropagation();
+                    setSelectedAudio('ambient');
+                    setSelectedId(null);
+                    setTab('audio');
+                    setToast('已选中环境音轨：' + bgmTitle(ambientSeg.trackId));
+                  }}
+                >
                   ♫ ${bgmTitle(ambientSeg.trackId)}
                 </span>
               `}

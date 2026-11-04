@@ -368,6 +368,8 @@ a.ed-btn.ed-link {
 }
 .ed-audio-clip.music { top: 4px; }
 .ed-audio-clip.ambient { top: 27px; background: rgba(120, 140, 190, .2); border-color: rgba(120, 140, 190, .5); }
+.ed-audio-clip.sel { border-color: var(--accent, #D6B36A); box-shadow: 0 0 0 1px rgba(214, 179, 106, .45); color: var(--ink, #F4F7F5); }
+.ed-audio-clip { cursor: pointer; }
 
 /* ---------- 成片预览（页内，Esc 关闭） ---------- */
 .ed-viewer {

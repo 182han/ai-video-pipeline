@@ -315,6 +315,12 @@ export class PreviewEngine {
       starts.push(acc);
       acc += Math.max(0, Number(s.outSec) - Number(s.inSec));
     }
+    // 只有调节参数/转场变化时，不重置视频（避免 seek 把画面刷黑）
+    const same = this.segments.length === list.length && this.segments.every((s, i) => (
+      s.url === list[i].url
+      && Number(s.inSec) === Number(list[i].inSec)
+      && Number(s.outSec) === Number(list[i].outSec)
+    ));
     this.segments = list;
     this.starts = starts;
     this.duration = acc;
@@ -322,6 +328,11 @@ export class PreviewEngine {
     const keep = Math.min(this.global, Math.max(0, acc - 0.01));
     this.index = this._indexAt(keep);
     this.global = keep;
+    if (same) {
+      this._ensureLut(this.active, this._seg());
+      this._render();
+      return;
+    }
     if (this.playing) this._startAt(keep);
     else this.seek(keep);
   }
@@ -374,6 +385,8 @@ export class PreviewEngine {
     this._syncAllAudio(this.playing);
     this._emitTime(clamped, true);
     this._render();
+    setTimeout(() => { if (!this.destroyed && !this.playing) this._render(); }, 120);
+    setTimeout(() => { if (!this.destroyed && !this.playing) this._render(); }, 400);
   }
 
   destroy() {
@@ -512,6 +525,14 @@ export class PreviewEngine {
   }
 
   _render() {
+    try {
+      this._draw();
+    } catch (e) {
+      if (this.opts.onError) this.opts.onError('预览渲染失败: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  _draw() {
     const gl = this.gl;
     this._updateAudioVolumes();
     const seg = this._seg();
@@ -577,7 +598,7 @@ export class PreviewEngine {
     if (v.readyState < 2) return;
     gl.activeTexture(gl.TEXTURE0 + idx);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[idx]);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     try {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v);
     } catch (e) { /* 视频帧不可用，保留上一帧 */ }

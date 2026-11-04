@@ -56,6 +56,7 @@ async function waitReady(base, timeoutMs = 25000) {
 
   check(/AudioPanel/.test(editor) && /commitAudio/.test(editor), '编辑器接入音频面板');
   check(/musicSeg/.test(editor) && /ambientSeg/.test(editor), '时间线音频两条');
+  check(/selectedAudio/.test(editor) && /ed-audio-clip/.test(editor), '时间线音频可选中/删除');
   check(/KINDS/.test(panel) && /音乐/.test(panel) && /环境音/.test(panel), '面板两轨');
   check(/\/api\/bgm\/waveform\//.test(panel), '波形接口');
   check(/volume/.test(panel) && /fadeIn/.test(panel) && /fadeOut/.test(panel), '音量与淡入淡出');
