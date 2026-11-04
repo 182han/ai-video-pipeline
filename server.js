@@ -44,6 +44,7 @@ const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
 const projectStore = require('./src/projectStore');
+const editorExporter = require('./src/editorExporter');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
@@ -883,6 +884,29 @@ app.delete('/api/projects/:id', (req, res) => {
   } catch (e) {
     res.status(projectErrorStatus(e)).json(projectErrorBody(e));
   }
+});
+
+// 剪辑台导出：异步 job，前端轮询（2026-11-04 F08）
+app.post('/api/projects/:id/export', (req, res) => {
+  try {
+    const job = editorExporter.startExport(req.params.id);
+    res.json({ success: true, export: job });
+  } catch (e) {
+    const status = e && e.code === 'NOT_FOUND' ? 404 : 400;
+    res.status(status).json({ success: false, error: e && e.message ? e.message : '导出启动失败' });
+  }
+});
+
+app.get('/api/projects/:id/export/:exportId', (req, res) => {
+  const job = editorExporter.getJob(req.params.id, req.params.exportId);
+  if (!job) return res.status(404).json({ success: false, error: '导出任务不存在' });
+  res.json({ success: true, export: job });
+});
+
+app.post('/api/projects/:id/export/:exportId/cancel', (req, res) => {
+  const job = editorExporter.cancelExport(req.params.id, req.params.exportId);
+  if (!job) return res.status(404).json({ success: false, error: '导出任务不存在' });
+  res.json({ success: true, export: job });
 });
 
 // 模板列表（2026-10-31 补：此前只有 GET /api/templates/:id，

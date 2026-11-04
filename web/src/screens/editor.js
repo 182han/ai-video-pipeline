@@ -81,6 +81,7 @@ export function EditorView() {
   const [dragOver, setDragOver] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [playhead, setPlayhead] = useState(0);
+  const [exportJob, setExportJob] = useState(null);
 
   const pastRef = useRef([]);
   const futureRef = useRef([]);
@@ -343,8 +344,7 @@ export function EditorView() {
     document.addEventListener('pointerup', up);
   }
 
-  function onClipDragStart(e, index) {
-    moveIndexRef.current = index;
+  function onClipDragStart(e, index) {    moveIndexRef.current = index;
     try {
       e.dataTransfer.setData('text/plain', 'move:' + index);
       e.dataTransfer.effectAllowed = 'move';
@@ -381,6 +381,55 @@ export function EditorView() {
 
     const item = libItems.find((x) => x.id === data);
     if (item) addClip(item);
+  }
+
+  async function onExport() {
+    const cur = projectRef.current;
+    if (!cur || !Array.isArray(cur.segments) || cur.segments.length === 0) {
+      setToast('先加素材再导出');
+      return;
+    }
+    if (exportJob && (exportJob.status === 'queued' || exportJob.status === 'running')) return;
+    setExportJob({ status: 'queued', progress: 0 });
+    try {
+      const j = await api('/api/projects/' + encodeURIComponent(cur.id) + '/export', { method: 'POST' });
+      setExportJob(j.export);
+      pollExport(j.export.id);
+    } catch (e) {
+      setExportJob({ status: 'failed', error: e.message });
+      setToast('导出失败：' + e.message);
+    }
+  }
+
+  function pollExport(exportId) {
+    const pid = projectRef.current && projectRef.current.id;
+    const tick = async () => {
+      if (!pid) return;
+      try {
+        const j = await api('/api/projects/' + encodeURIComponent(pid) + '/export/' + encodeURIComponent(exportId));
+        setExportJob(j.export);
+        if (j.export.status === 'done') {
+          setToast('导出完成：' + (j.export.outputUrl || ''));
+          try {
+            const fresh = await loadProjectById(pid);
+            projectRef.current = fresh;
+            revisionRef.current = fresh.revision;
+            segmentsRef.current = Array.isArray(fresh.segments) ? fresh.segments : [];
+            setProject(fresh);
+          } catch (e) { /* ignore */ }
+          return;
+        }
+        if (j.export.status === 'failed' || j.export.status === 'cancelled') {
+          setToast(j.export.error || '导出失败');
+          return;
+        }
+        setTimeout(tick, 800);
+      } catch (e) {
+        setToast('查询导出状态失败：' + e.message);
+        setExportJob({ status: 'failed', error: e.message });
+      }
+    };
+    setTimeout(tick, 600);
   }
 
   function persistName(next) {
@@ -482,6 +531,7 @@ export function EditorView() {
   const rulerTicks = [];
   for (let s = 0; s <= rulerEnd; s += rulerStep) rulerTicks.push(s);
   const trackWidth = Math.max(600, Math.ceil(rulerEnd * pps));
+  const exporting = !!(exportJob && (exportJob.status === 'queued' || exportJob.status === 'running'));
 
   return html`
     <div className="ed-root">
@@ -500,7 +550,12 @@ export function EditorView() {
         <span className="ed-spacer"></span>
         <button className="ed-btn" onClick=${onOpen}>打开</button>
         <button className="ed-btn" onClick=${onNew}>新建</button>
-        <button className="ed-btn primary" disabled=${true} title="F08 接入">导出</button>
+        <button className="ed-btn primary" onClick=${onExport} disabled=${exporting || segments.length === 0} title="导出为成片">
+          ${exporting ? '导出中 ' + Math.round(exportJob.progress || 0) + '%' : '导出'}
+        </button>
+        ${exportJob && exportJob.status === 'done' && exportJob.outputUrl && html`
+          <a className="ed-btn ed-link" href=${exportJob.outputUrl} target="_blank" rel="noreferrer">看成片</a>
+        `}
       </header>
 
       <div className="ed-main">

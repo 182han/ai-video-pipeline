@@ -67,6 +67,10 @@
   background: var(--accent, #D6B36A); border-color: var(--accent, #D6B36A);
   color: var(--onaccent, #11170F); font-weight: 500;
 }
+a.ed-btn.ed-link {
+  display: inline-flex; align-items: center; text-decoration: none;
+  color: var(--accent, #D6B36A); border-color: rgba(214, 179, 106, .45);
+}
 
 /* ---------- 主体三栏 ---------- */
 .ed-main {

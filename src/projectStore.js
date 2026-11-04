@@ -238,6 +238,19 @@ function remove(id) {
   }
 }
 
+// 追加导出记录：只改 exports，不动 revision（避免正在编辑的窗口被 409）
+function appendExport(id, record) {
+  const current = readProject(id);
+  const list = Array.isArray(current.exports) ? current.exports.slice(-49) : [];
+  list.push(record);
+  const next = { ...current, exports: list };
+  const file = fileOf(current.id);
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+  fs.renameSync(tmp, file);
+  return next;
+}
+
 module.exports = {
   ProjectError,
   list,
@@ -245,6 +258,7 @@ module.exports = {
   create,
   update,
   remove,
+  appendExport,
   // 测试用
   _DIR: DIR,
   _normalizeProject: normalizeProject,
