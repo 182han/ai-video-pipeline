@@ -16,6 +16,8 @@ output/
 data/tasks/
 data/trash/
 data/spike/
+# 剪辑台工程（草稿）：编辑态，运行时数据，不进仓库
+data/projects/
 # 素材库元数据（每个片段一个 json）与波形缓存（音频峰值），均为运行时生成
 data/library/
 data/waveforms/

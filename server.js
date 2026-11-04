@@ -43,6 +43,7 @@ const { getAvailableModels } = require('./src/generators');
 const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
+const projectStore = require('./src/projectStore');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
@@ -822,6 +823,66 @@ app.get('/api/status', (req, res) => {
 // 获取主题列表
 app.get('/api/themes', (req, res) => {
   res.json(promptOptimizer.getThemes());
+});
+
+// ===== 剪辑台工程（草稿，2026-11-04）=====
+// 与任务分开：工程是编辑态，导出时才创建任务。
+const projectErrorStatus = (e) => {
+  if (!e || !e.code) return 500;
+  if (e.code === 'NOT_FOUND') return 404;
+  if (e.code === 'REVISION_CONFLICT') return 409;
+  if (['REVISION_REQUIRED', 'BAD_INPUT', 'BAD_SEGMENT', 'LIMIT'].includes(e.code)) return 400;
+  return 500;
+};
+const projectErrorBody = (e) => ({
+  success: false,
+  code: (e && e.code) || 'ERROR',
+  error: (e && e.message) || '工程操作失败',
+  ...(e && e.currentRevision !== undefined ? { currentRevision: e.currentRevision } : {})
+});
+
+app.get('/api/projects', (req, res) => {
+  try {
+    res.json({ success: true, projects: projectStore.list() });
+  } catch (e) {
+    res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
+});
+
+app.post('/api/projects', (req, res) => {
+  try {
+    res.json({ success: true, project: projectStore.create(req.body || {}) });
+  } catch (e) {
+    res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
+});
+
+app.get('/api/projects/:id', (req, res) => {
+  try {
+    res.json({ success: true, project: projectStore.get(req.params.id) });
+  } catch (e) {
+    res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  try {
+    const body = req.body || {};
+    const expected = body.revision !== undefined
+      ? Number(body.revision)
+      : (req.get('If-Match') !== undefined ? Number(req.get('If-Match')) : null);
+    res.json({ success: true, project: projectStore.update(req.params.id, body, expected) });
+  } catch (e) {
+    res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  try {
+    res.json({ success: true, ...projectStore.remove(req.params.id) });
+  } catch (e) {
+    res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
 });
 
 // 模板列表（2026-10-31 补：此前只有 GET /api/templates/:id，

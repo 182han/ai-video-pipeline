@@ -53,6 +53,14 @@
 - 结论：G0 对「≤360 段 + 视频-only + BGM 单独混」成立；真实素材会比 mock 慢，BGM 混音另计一次 pass。
 - 导出链剩余：把同一路径接进 pipeline 的编辑器导出（F08），并加 360 段上限保护。
 
+### F01 工程与草稿（后端，2026-11-04）
+
+- `src/projectStore.js`：文件存储 `<PROJECTS_DIR>/<id>.json`（默认 `data/projects/`），tmp+rename 原子写。
+- API：`GET/POST /api/projects`、`GET/PUT/DELETE /api/projects/:id`；PUT 带 `revision`（或 `If-Match`），冲突 409。
+- 归一化：segments（assetId/in/out/adjust）、audio（music/ambient/opts）、transition（0.1–5s、类型白名单）、name 截断。
+- 验收：`scripts/verify-projects.js` **25/0**（CRUD/乐观锁/负向/钳制/路径安全/落盘）。
+- 下一项：F02 工作台骨架（全屏三区 + 底部时间线），随后 F03/F04。
+
 ## 基线快照
 
 | 项 | 值 |

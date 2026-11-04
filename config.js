@@ -374,6 +374,8 @@ module.exports = {
     clipsDir: require('path').resolve(__dirname, env('CLIPS_DIR', './clips')),
     outputDir: require('path').resolve(__dirname, env('OUTPUT_DIR', './output')),
     dataDir: require('path').resolve(__dirname, env('DATA_DIR', './data/tasks')),
+    // 剪辑台工程（草稿）目录，与任务存储分开：工程是编辑态，任务是一次渲染作业
+    projectsDir: require('path').resolve(__dirname, env('PROJECTS_DIR', './data/projects')),
     // S3 兼容存储配置（可选）
     s3: {
       enabled: env('S3_ENABLED', 'false') === 'true',
