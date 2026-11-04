@@ -59,6 +59,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/KINDS/.test(panel) && /音乐/.test(panel) && /环境音/.test(panel), '面板两轨');
   check(/\/api\/bgm\/waveform\//.test(panel), '波形接口');
   check(/volume/.test(panel) && /fadeIn/.test(panel) && /fadeOut/.test(panel), '音量与淡入淡出');
+  check(/sourceIn/.test(panel) && /sourceOut/.test(panel), '音频入出点');
   check(/buildAudioPlan/.test(exporter) && /mixBgmPlan/.test(exporter), '导出混音接线');
   check(/\.ed-wave/.test(css) && /\.ed-audio-clip/.test(css), '音频 CSS');
 

@@ -114,6 +114,17 @@ export function AudioPanel({ project, bgm, duration, onCommit }) {
                 <span className="ed-slider-val">${Math.round((Number(seg.volume) || 0) * 100)}%</span>
               </label>
               <div className="ed-audio-row">
+                <span>入点</span>
+                <input className="ed-num" type="number" min="0" step="0.5"
+                  value=${Number(seg.sourceIn) || 0}
+                  onInput=${(e) => update(k.key, { sourceIn: Number(e.target.value) })} />
+                <span>出点</span>
+                <input className="ed-num" type="number" min="0" step="0.5"
+                  value=${Number(seg.sourceOut) || 0}
+                  onInput=${(e) => update(k.key, { sourceOut: Number(e.target.value) })} />
+                <span className="ed-sub">秒</span>
+              </div>
+              <div className="ed-audio-row">
                 <span>淡入</span>
                 <input className="ed-num" type="number" min="0" max="10" step="0.5"
                   value=${Number(seg.fadeIn) || 0}

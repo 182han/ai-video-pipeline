@@ -198,7 +198,8 @@ export function ClipsView() {
                 detail.resolution,
                 detail.width && detail.height ? detail.width + '×' + detail.height : '',
                 detail.fps ? detail.fps + 'fps' : '',
-                detail.durationSec ? Number(detail.durationSec).toFixed(2) + 's' : ''
+                detail.durationSec ? Number(detail.durationSec).toFixed(2) + 's' : '',
+                detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ')}</span>
               <span style=${{ color: 'var(--ink3)' }}>成本</span>
               <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}${detail.cost && detail.cost.attempts ? ' · ' + detail.cost.attempts + ' 次' : ''}</span>

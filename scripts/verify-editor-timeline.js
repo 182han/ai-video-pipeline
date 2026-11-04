@@ -68,7 +68,7 @@ async function put(base, id, body) {
   check(/function onClipDragStart\(/.test(editor), '拖拽排序');
   check(/move:'/.test(editor), '排序拖拽数据');
   check(/function commitSegments\(/.test(editor), '统一提交 segments');
-  check(/scheduleSegSave/.test(editor), '编辑后自动保存');
+  check(/scheduleSave/.test(editor), '编辑后自动保存');
   check(/setPlayhead/.test(editor), '播放头');
   check(/beginScrub/.test(editor), '标尺/播放头拖动定位');
   check(/ed-handle/.test(editor), '裁剪手柄');

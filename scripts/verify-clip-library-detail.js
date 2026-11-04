@@ -55,6 +55,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/成本/.test(inv) && /costText\(detail\.cost\)/.test(inv), '显示成本');
   check(/质检/.test(inv) && /qcText\(detail\.qc\)/.test(inv), '显示 QC 结论');
   check(/型号/.test(inv) && /detail\.model/.test(inv), '显示型号');
+  check(/sizeBytes/.test(inv), '显示文件大小');
   check(/按原提示词重新生成/.test(inv), '详情内重新生成');
   check(/\/api\/library\/:id\/regenerate/.test(server), '重新生成接口存在');
 
@@ -97,6 +98,7 @@ async function waitReady(base, timeoutMs = 25000) {
         check(!!it.qc, '条目含 QC 结论', it.qc ? String(it.qc.passed) : '无');
         check(!!it.cost, '条目含成本', it.cost ? String(it.cost.amount) : '无');
         check(Number(it.durationSec) > 0, '条目含时长', String(it.durationSec));
+        check(Number(it.sizeBytes) > 0, '条目含文件大小', String(it.sizeBytes));
       }
       const js = await (await fetch(base + '/app/src/screens/inventory.js')).text();
       check(/片段详情/.test(js) && /taskId/.test(js), '浏览器取到的 inventory.js 含详情');

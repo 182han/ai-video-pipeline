@@ -97,6 +97,8 @@ export function EditorView() {
   const [tab, setTab] = useState('media');
   const [nameDraft, setNameDraft] = useState('');
   const [openList, setOpenList] = useState(null);
+  const [films, setFilms] = useState(null);
+  const [rebuilding, setRebuilding] = useState(null);
   const [toast, setToast] = useState('');
   const [lib, setLib] = useState(null);
   const [libErr, setLibErr] = useState('');
@@ -672,7 +674,32 @@ export function EditorView() {
     try {
       const j = await api('/api/projects');
       setOpenList(Array.isArray(j.projects) ? j.projects : []);
+      try {
+        const f = await api('/api/tasks/completed');
+        setFilms(Array.isArray(f.tasks) ? f.tasks : []);
+      } catch (e) {
+        setFilms([]);
+      }
     } catch (e) { setToast('读取工程列表失败：' + e.message); }
+  }
+
+  async function rebuildFromTask(taskId) {
+    setRebuilding(taskId);
+    try {
+      const j = await api('/api/projects/from-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId })
+      });
+      adopt(j.project);
+      setOpenList(null);
+      setFilms(null);
+      setToast('已从成片重建工程：' + (j.project.name || ''));
+    } catch (e) {
+      setToast('重建失败：' + e.message);
+    } finally {
+      setRebuilding(null);
+    }
   }
 
   async function pickProject(id) {
@@ -1027,6 +1054,21 @@ export function EditorView() {
                   <span className="ed-sub">${p.segmentCount} 段 · ${fmtTime(0)}</span>
                 </button>
               `)}
+              <div className="ed-modal-sub">已完成成片 · 重建为工程</div>
+              ${!films && html`<p className="ed-sub">读取成片…</p>`}
+              ${films && films.length === 0 && html`<p className="ed-sub">还没有已完成成片</p>`}
+              ${(films || []).slice(0, 20).map((f) => html`
+                <button
+                  key=${f.taskId}
+                  className="ed-project-row"
+                  disabled=${rebuilding === f.taskId}
+                  onClick=${() => rebuildFromTask(f.taskId)}
+                >
+                  <span>${(f.prompt || f.taskId).slice(0, 40)}</span>
+                  <span className="ed-sub">${f.totalClips || 0} 段 · ${fmtTime(f.totalDuration || 0)}${f.status === 'partial' ? ' · 部分' : ''}</span>
+                </button>
+              `)}
+              ${(films || []).length > 20 && html`<p className="ed-sub">只显示最近 20 条</p>`}
             </div>
           </div>
         </div>

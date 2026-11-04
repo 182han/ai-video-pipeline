@@ -44,6 +44,7 @@ const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
 const projectStore = require('./src/projectStore');
+const projectFromTask = require('./src/projectFromTask');
 const editorExporter = require('./src/editorExporter');
 const thumbnails = require('./src/thumbnails');
 const adjustLut = require('./src/adjustLut');
@@ -857,6 +858,22 @@ app.post('/api/projects', (req, res) => {
     res.json({ success: true, project: projectStore.create(req.body || {}) });
   } catch (e) {
     res.status(projectErrorStatus(e)).json(projectErrorBody(e));
+  }
+});
+
+// 从已有成片重建工程（F01 c）：任务片段 → 片段库 assetId + 入出点 + 配乐 + 转场
+app.post('/api/projects/from-task', (req, res) => {
+  try {
+    const taskId = req.body && req.body.taskId;
+    const r = projectFromTask.build(taskId);
+    res.json({ success: true, ...r });
+  } catch (e) {
+    const status = e && e.code === 'NOT_FOUND' ? 404 : 400;
+    res.status(status).json({
+      success: false,
+      code: (e && e.code) || 'ERROR',
+      error: (e && e.message) || '重建失败'
+    });
   }
 });
 

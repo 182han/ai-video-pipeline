@@ -163,6 +163,18 @@
 - **未验证**：导航视觉（浏览器）。
 - 下一项：**F01 从已有成片重建**（M2 最后一项）。
 
+### F01c 从已有成片重建（2026-11-04）
+
+- `POST /api/projects/from-task`（`src/projectFromTask.js`）：任务成功片段 → 片段库 `assetId`（`libraryId` / 文件路径双匹配），保留入出点；带回 `bgmPlan`（音乐/环境音）与 `transition`；原任务/成片不动。
+- 编辑器「打开」弹层新增「**已完成成片 · 重建为工程**」列表，点一条直接生成工程。
+- 验收：`verify-editor-rebuild.js` **19/0**（构造完成任务 → 2 段/配乐/转场/命名；未知任务 404）。
+
+### M2 收尾补丁
+
+- F07 音频面板补「**入点/出点**」（源内区间）；F10 详情补**文件大小**。
+- 全量回归（14 套件）：**295 通过 / 0 失败**（projects 25、shell 22、media 21、timeline 28、adjust 17、preview 18、export 24、audio 21、transition-controls 16、library-detail 18、nav 12、rebuild 19、ux 18、transitions 36）。
+- **M2 结论**：F01c/F05/F06/F07/F09/F10/F11 全部落地并有可复跑验收；UI 视觉/性能（24fps、同帧像素差）仍未在真实浏览器验证。
+
 ## 基线快照
 
 | 项 | 值 |
