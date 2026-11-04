@@ -35,6 +35,7 @@ const N = Math.max(2, parseInt(arg('n', '60'), 10) || 60);
 const RESOLUTION = arg('resolution', '720p');
 const UNIQUE = Math.max(0, parseInt(arg('unique', '0'), 10) || 0);
 const NO_AUDIO = process.argv.slice(2).includes('--no-audio');
+const CLIPS_DIR = arg('dir', '') ? path.resolve(ROOT, arg('dir', '')) : CLIPS;
 
 let pass = 0;
 let fail = 0;
@@ -44,10 +45,11 @@ function ok(cond, label, extra) {
 }
 
 function validMockNames() {
-  const all = fs.readdirSync(CLIPS).filter((f) => /^mock_.*\.mp4$/i.test(f)).sort();
+  const re = CLIPS_DIR === CLIPS ? /^mock_.*\.mp4$/i : /\.mp4$/i;
+  const all = fs.readdirSync(CLIPS_DIR).filter((f) => re.test(f)).sort();
   const good = [];
   for (const f of all) {
-    const p = path.join(CLIPS, f);
+    const p = path.join(CLIPS_DIR, f);
     try { if (fs.statSync(p).size < 1024) continue; } catch (e) { continue; }
     const d = transitionMixer._probeMedia(p);
     if (d.success && d.duration > 0) good.push(f);
@@ -76,7 +78,7 @@ async function main() {
   const durs = [];
   for (let i = 0; i < N; i++) {
     const name = names[i % names.length];
-    const p = path.join(CLIPS, name);
+    const p = path.join(CLIPS_DIR, name);
     const d = detailOf(p);
     names40.push(name);
     durs.push(d.duration);
@@ -84,7 +86,7 @@ async function main() {
   const clipDur = durs[0];
   const sumDur = durs.reduce((s, d) => s + d, 0);
   const segs = names40.map((name) => {
-    const p = path.join(CLIPS, name);
+    const p = path.join(CLIPS_DIR, name);
     return { path: p, inSec: 0, outSec: null, detail: detailOf(p) };
   });
 
