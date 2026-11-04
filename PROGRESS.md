@@ -11,6 +11,16 @@
 - 本轮相关文件（按顺序）：`scripts/spike-editor-export.js` → `src/processors/transitionMixer.js`（导出链重做）→ `FEATURES.md` D 节。
 - 原「审核门」任务**暂缓，不是取消**；见下方「暂缓」一节。
 
+### Spike 结果（2026-11-04，`scripts/spike-editor-export.js`）
+
+- **现有 transitionMixer：40 段就失败**（`execSync` + 整条 filter 字符串 → 命令行过长），18.9s 后报错。
+- **修复路径**（filter 写文件 + `spawn` 参数数组 + cwd 相对短路径）：
+  - 100 段全长（260.4s 输出，720p veryfast）：**成功，15.0s**；filter 24KB；命令行 3.6k 字符。
+  - 360 段（`-t 3`）：**成功，29.3s**；filter 88KB；命令行 11.9k 字符。
+- 注意：mock 是静态色块，耗时偏乐观；360 个输入的启动开销 ≈29s；真实素材要重测。
+- 数据卫生：`clips/` 里有 6 个 <1KB 的坏 mock 文件（probe 失败），spike 已跳过。
+- 下一步：把 `transitionMixer` 改成同一路径，并补进度、取消、硬件编码；然后进 F01/F02。
+
 ## 基线快照
 
 | 项 | 值 |
