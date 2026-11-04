@@ -12,10 +12,12 @@ import { navigate } from '../router.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
-const { useEffect, useRef, useState } = React;
+const { useEffect, useMemo, useRef, useState } = React;
 
 const LAST_KEY = 'dsh.editor.lastProject';
 const SAVE_DEBOUNCE = 700;
+const PPS_MIN = 8;
+const PPS_MAX = 80;
 
 const SLIDER_GROUPS = [
   { title: '色彩', items: ['色温', '色调', '饱和度'] },
@@ -43,6 +45,19 @@ function fmtTime(sec) {
   return mm + ':' + ss;
 }
 
+function fmtDur(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return mm + ':' + ss;
+}
+
+function segDuration(seg) {
+  const inSec = Number(seg && seg.inSec) || 0;
+  const outSec = seg && seg.outSec !== null && seg.outSec !== undefined ? Number(seg.outSec) : inSec;
+  return Math.max(0, outSec - inSec);
+}
+
 function saveStateText(state) {
   if (state === 'saving') return '保存中…';
   if (state === 'saved') return '已保存';
@@ -59,6 +74,11 @@ export function EditorView() {
   const [nameDraft, setNameDraft] = useState('');
   const [openList, setOpenList] = useState(null);
   const [toast, setToast] = useState('');
+  const [lib, setLib] = useState(null);
+  const [libErr, setLibErr] = useState('');
+  const [libQuery, setLibQuery] = useState('');
+  const [pps, setPps] = useState(26);
+  const [dragOver, setDragOver] = useState(false);
 
   const projectRef = useRef(null);
   const revisionRef = useRef(0);
@@ -101,9 +121,66 @@ export function EditorView() {
       }
       if (!p) p = await createProject();
       adopt(p);
+      loadLibrary();
     })().catch((e) => setLoadErr(e.message || '工程加载失败'));
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
+
+  async function loadLibrary() {
+    try {
+      const j = await api('/api/library');
+      setLib(j);
+      setLibErr('');
+    } catch (e) {
+      setLibErr(e.message || '素材加载失败');
+    }
+  }
+
+  function savePatch(patch) {
+    const cur = projectRef.current;
+    if (!cur) return Promise.resolve(null);
+    setSaveState('saving');
+    return api('/api/projects/' + encodeURIComponent(cur.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: revisionRef.current, ...patch })
+    }).then((j) => {
+      revisionRef.current = j.project.revision;
+      projectRef.current = j.project;
+      setProject(j.project);
+      setSaveState('saved');
+      return j.project;
+    }).catch((e) => {
+      setSaveState(e.code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
+      setToast(e.message || '保存失败');
+      throw e;
+    });
+  }
+
+  function addClip(item) {
+    const cur = projectRef.current;
+    if (!cur || !item || !item.id) return;
+    const dur = Number(item.durationSec) || 0;
+    const seg = {
+      id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+      assetId: item.id,
+      inSec: 0,
+      outSec: dur > 0 ? Math.round(dur * 1000) / 1000 : null,
+      adjust: {}
+    };
+    savePatch({ segments: [...(cur.segments || []), seg] })
+      .then(() => setToast('已加入时间线：' + (item.prompt || item.id).slice(0, 24)))
+      .catch(() => {});
+  }
+
+  function onDropClip(e) {
+    e.preventDefault();
+    setDragOver(false);
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id) return;
+    const item = libItems.find((x) => x.id === id);
+    if (item) addClip(item);
+  }
 
   function persistName(next) {
     const cur = projectRef.current;
@@ -161,6 +238,18 @@ export function EditorView() {
     } catch (e) { setToast('打开失败：' + e.message); }
   }
 
+  const libItems = useMemo(() => {
+    const groups = (lib && lib.groups) || [];
+    const all = [];
+    for (const g of groups) for (const it of (g.items || [])) all.push({ ...it, groupLabel: g.label });
+    const q = libQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((it) =>
+      String(it.prompt || '').toLowerCase().includes(q) ||
+      String(it.resolution || '').toLowerCase().includes(q) ||
+      String(it.model || '').toLowerCase().includes(q));
+  }, [lib, libQuery]);
+
   if (loadErr && !project) {
     return html`
       <div className="ed-root ed-fatal">
@@ -178,7 +267,19 @@ export function EditorView() {
   }
 
   const segments = Array.isArray(project.segments) ? project.segments : [];
-  const duration = segments.reduce((s, x) => s + Math.max(0, (x.outSec || 0) - (x.inSec || 0)), 0);
+  const layout = [];
+  let acc = 0;
+  for (const seg of segments) {
+    const d = segDuration(seg);
+    layout.push({ seg, left: acc * pps, width: Math.max(24, d * pps), dur: d });
+    acc += d;
+  }
+  const duration = acc;
+  const rulerStep = duration > 120 ? 10 : (duration > 60 ? 5 : 1);
+  const rulerEnd = Math.max(20, Math.ceil(duration / rulerStep) * rulerStep + rulerStep * 4);
+  const rulerTicks = [];
+  for (let s = 0; s <= rulerEnd; s += rulerStep) rulerTicks.push(s);
+  const trackWidth = Math.max(600, Math.ceil(rulerEnd * pps));
 
   return html`
     <div className="ed-root">
@@ -213,13 +314,41 @@ export function EditorView() {
           <div className="ed-panel">
             <div className="ed-panel-head">
               <b>${tab === 'media' ? '素材' : '音频'}</b>
-              <span className="ed-sub">${tab === 'media' ? '本地生成物' : '音乐 / 环境音'}</span>
+              <span className="ed-sub">${tab === 'media'
+                ? libItems.length + ' / ' + ((lib && lib.totals && lib.totals.count) || 0) + ' 段'
+                : '音乐 / 环境音'}</span>
             </div>
             <div className="ed-panel-body">
               ${tab === 'media'
-                ? html`<div className="ed-empty">
-                    <p>素材面板将在 F03 接入</p>
-                    <p className="ed-sub">来源：片段库（只读库存）+ 已完成成片</p>
+                ? html`<div className="ed-media">
+                    <input
+                      className="ed-search"
+                      placeholder="搜索提示词 / 模型 / 分辨率"
+                      value=${libQuery}
+                      onInput=${(e) => setLibQuery(e.target.value)}
+                    />
+                    ${libErr && html`<p className="ed-sub ed-err">${libErr}</p>`}
+                    ${!lib && !libErr && html`<p className="ed-sub">素材加载中…</p>`}
+                    <div className="ed-grid">
+                      ${libItems.slice(0, 120).map((it) => html`
+                        <button
+                          key=${it.id}
+                          className="ed-card"
+                          draggable=${true}
+                          onDragStart=${(e) => { try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }}
+                          onClick=${() => addClip(it)}
+                          title=${(it.prompt || it.id) + ' · 点击加入时间线'}
+                        >
+                          <span className="ed-card-thumb">
+                            <span className="ed-card-dur">${fmtDur(it.durationSec)}</span>
+                            <span className="ed-card-plus">＋</span>
+                          </span>
+                          <span className="ed-card-prompt">${it.prompt || it.id}</span>
+                          <span className="ed-card-meta">${it.resolution || '-'} · ${it.model || '-'}</span>
+                        </button>
+                      `)}
+                    </div>
+                    ${libItems.length > 120 && html`<p className="ed-sub">只显示前 120 条，用搜索缩小范围</p>`}
                   </div>`
                 : html`<div className="ed-empty">
                     <p>音频面板将在 F07 接入</p>
@@ -280,7 +409,9 @@ export function EditorView() {
           <span className="ed-tool">分割</span>
           <span className="ed-tool">删除</span>
           <span className="ed-spacer"></span>
-          <span className="ed-tool">缩放 − ＋</span>
+          <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.max(PPS_MIN, v - 6))}>−</button>
+          <span className="ed-tool">缩放</span>
+          <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.min(PPS_MAX, v + 6))}>＋</button>
           <span className="ed-tl-count">${segments.length} 段 · ${fmtTime(duration)}</span>
         </div>
         <div className="ed-tl-body">
@@ -290,24 +421,31 @@ export function EditorView() {
             <div className="ed-tl-label">音频</div>
           </div>
           <div className="ed-tl-scroll">
-            <div className="ed-ruler">
-              ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => html`
-                <span key=${s} className=${'ed-tick' + (s % 5 === 0 ? ' major' : '')} style=${{ left: (s * 56) + 'px' }}>
-                  ${s % 5 === 0 ? fmtTime(s) : ''}
+            <div className="ed-ruler" style=${{ width: trackWidth + 'px' }}>
+              ${rulerTicks.map((s) => html`
+                <span key=${s} className=${'ed-tick' + (s % (rulerStep * 5) === 0 ? ' major' : '')} style=${{ left: (s * pps) + 'px' }}>
+                  ${s % (rulerStep * 5) === 0 ? fmtTime(s) : ''}
                 </span>
               `)}
             </div>
-            <div className="ed-track video">
-              ${segments.length === 0
-                ? html`<span className="ed-track-empty">把素材拖到这里</span>`
-                : segments.map((seg, i) => html`
-                    <span key=${seg.id || i} className="ed-clip" style=${{ left: (i * 120) + 'px', width: '112px' }}>
-                      ${seg.assetId}
+            <div
+              className=${'ed-track video' + (dragOver ? ' over' : '')}
+              style=${{ width: trackWidth + 'px' }}
+              onDragOver=${(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave=${() => setDragOver(false)}
+              onDrop=${onDropClip}
+            >
+              ${layout.length === 0
+                ? html`<span className="ed-track-empty">从左侧点选或拖入素材</span>`
+                : layout.map(({ seg, left, width, dur }, i) => html`
+                    <span key=${seg.id || i} className="ed-clip" style=${{ left: left + 'px', width: Math.max(24, width - 2) + 'px' }} title=${seg.assetId + ' · ' + dur.toFixed(2) + 's'}>
+                      <span className="ed-clip-name">${seg.assetId}</span>
+                      <span className="ed-clip-dur">${fmtDur(dur)}</span>
                     </span>
                   `)}
             </div>
-            <div className="ed-track audio">
-              <span className="ed-track-empty">音频轨</span>
+            <div className="ed-track audio" style=${{ width: trackWidth + 'px' }}>
+              <span className="ed-track-empty">音频轨（F07）</span>
             </div>
             <div className="ed-playhead" style=${{ left: '0px' }}></div>
           </div>
