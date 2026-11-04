@@ -82,9 +82,10 @@ a.ed-btn.ed-link {
   min-height: 0;
   min-width: 0;
 }
-.ed-main.theater { grid-template-columns: 0 minmax(0, 1fr) 0; }
+.ed-main.theater { grid-template-columns: minmax(0, 1fr); }
 .ed-main.theater .ed-left,
 .ed-main.theater .ed-right { display: none; }
+.ed-main.theater .ed-center { grid-column: 1; }
 .ed-main.theater .ed-frame { max-width: none; }
 .ed-center:fullscreen { background: #000; }
 .ed-center:fullscreen .ed-stage { padding: 0; }

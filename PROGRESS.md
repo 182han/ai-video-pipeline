@@ -217,6 +217,11 @@
 - 新增「全屏」：对中间预览区 requestFullscreen，Esc 退出；画布用 ResizeObserver 随尺寸重绘。
 - 验收：shell 25/0、preview 28/0。
 
+### 放大模式修复（2026-11-04）
+
+- 放大后黑屏：`.ed-main.theater` 用 `0 1fr 0` 且左右 `display:none`，中间列被自动放进第 1 个 0 宽列 → 改为单列 `1fr` + `.ed-center { grid-column: 1 }`。
+- 分辨率标签硬编码 1080p：改为按选中片段素材的最大高度计算（当前素材 720p → 显示 720p），宽高比也按素材计算。
+
 ## 基线快照
 
 | 项 | 值 |

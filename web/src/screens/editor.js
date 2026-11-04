@@ -816,6 +816,18 @@ export function EditorView() {
   const exporting = !!(exportJob && (exportJob.status === 'queued' || exportJob.status === 'running'));
   const selectedSeg = segments.find((s) => s.id === selectedId) || null;
   const transition = project.transition || { enabled: true, duration: 0.4, type: 'fade' };
+  const sourceItems = segments
+    .map((s) => libItems.find((it) => it.id === s.assetId))
+    .filter(Boolean);
+  let previewRes = '—';
+  let previewRatio = '—';
+  if (sourceItems.length) {
+    const maxH = Math.max(...sourceItems.map((it) => Number(it.height) || 0));
+    previewRes = maxH >= 2100 ? '4K' : maxH >= 1000 ? '1080p' : maxH >= 700 ? '720p' : maxH >= 450 ? '480p' : (maxH ? maxH + 'p' : '—');
+    const first = sourceItems[0];
+    const ratio = Number(first.width) && Number(first.height) ? Number(first.width) / Number(first.height) : 0;
+    previewRatio = ratio > 1.7 ? '16:9' : ratio > 1.2 ? '4:3' : ratio > 0.9 ? '1:1' : ratio > 0 ? '9:16' : '—';
+  }
   const musicSeg = (project.audio && project.audio.music && project.audio.music[0]) || null;
   const ambientSeg = (project.audio && project.audio.ambient && project.audio.ambient[0]) || null;
   const bgmTitle = (id) => {
@@ -929,8 +941,8 @@ export function EditorView() {
             <span className="ed-spacer"></span>
             <button className="ed-btn" onClick=${toggleTheater} title="隐藏两侧面板，放大预览">${theater ? '还原' : '放大'}</button>
             <button className="ed-btn" onClick=${toggleFullscreen} title="全屏预览（Esc 退出）">全屏</button>
-            <span className="ed-pill">1080p</span>
-            <span className="ed-pill">16:9</span>
+            <span className="ed-pill">${previewRes}</span>
+            <span className="ed-pill">${previewRatio}</span>
           </div>
         </section>
 
