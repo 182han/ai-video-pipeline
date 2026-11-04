@@ -33,6 +33,8 @@ function arg(name, fallback) {
 
 const N = Math.max(2, parseInt(arg('n', '60'), 10) || 60);
 const RESOLUTION = arg('resolution', '720p');
+const UNIQUE = Math.max(0, parseInt(arg('unique', '0'), 10) || 0);
+const NO_AUDIO = process.argv.slice(2).includes('--no-audio');
 
 let pass = 0;
 let fail = 0;
@@ -59,29 +61,41 @@ async function main() {
   console.log('================================================================');
 
   fs.mkdirSync(OUT, { recursive: true });
-  const names = validMockNames();
-  ok(names.length > 0, '存在可用 mock 片段', `${names.length} 个`);
+  let names = validMockNames();
+  if (UNIQUE > 0 && UNIQUE < names.length) names = names.slice(0, UNIQUE);
+  ok(names.length > 0, '存在可用 mock 片段', `${names.length} 个${NO_AUDIO ? '（忽略音轨）' : ''}`);
   if (!names.length) return finish();
+
+  const detailCache = new Map();
+  const detailOf = (p) => {
+    if (!detailCache.has(p)) detailCache.set(p, transitionMixer._probeMedia(p));
+    return detailCache.get(p);
+  };
 
   const names40 = [];
   const durs = [];
   for (let i = 0; i < N; i++) {
     const name = names[i % names.length];
-    const d = transitionMixer._probeMedia(path.join(CLIPS, name));
+    const p = path.join(CLIPS, name);
+    const d = detailOf(p);
     names40.push(name);
     durs.push(d.duration);
   }
   const clipDur = durs[0];
   const sumDur = durs.reduce((s, d) => s + d, 0);
-  const segs = names40.map((name) => ({ path: path.join(CLIPS, name), inSec: 0, outSec: null }));
+  const segs = names40.map((name) => {
+    const p = path.join(CLIPS, name);
+    return { path: p, inSec: 0, outSec: null, detail: detailOf(p) };
+  });
 
-  const out = path.join(OUT, `scale_${N}.mp4`);
+  const out = path.join(OUT, `scale_${N}${NO_AUDIO ? '_na' : ''}.mp4`);
   const expected = Math.round((sumDur - (N - 1) * FADE) * 1000) / 1000;
   const t0 = Date.now();
   const res = await transitionMixer.concatWithTransitions(segs, out, {
     duration: FADE,
     type: 'fade',
-    resolution: RESOLUTION
+    resolution: RESOLUTION,
+    ignoreAudio: NO_AUDIO
   });
   const ms = Date.now() - t0;
 

@@ -362,7 +362,9 @@ function normalizeInputs(clips) {
         return {
           path: c.path,
           inSec: Number(c.inSec) > 0 ? Number(c.inSec) : 0,
-          outSec: c.outSec !== undefined && c.outSec !== null ? Number(c.outSec) : null
+          outSec: c.outSec !== undefined && c.outSec !== null ? Number(c.outSec) : null,
+          // 调用方已探测过时直接复用，避免逐段 ffprobe（360 段时能省几分钟）
+          detail: c.detail && c.detail.success ? c.detail : null
         };
       }
       return null;
@@ -487,10 +489,10 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     return { success: false, error: '转场拼接至少需要 2 个片段' };
   }
 
-  // 1) 探测源
+  // 1) 探测源（调用方传了 detail 就复用，省掉逐段 ffprobe）
   const details = [];
   for (let i = 0; i < list.length; i++) {
-    const d = probeMedia(list[i].path);
+    const d = list[i].detail || probeMedia(list[i].path);
     if (!d.success) {
       return { success: false, error: `第 ${i + 1} 段无法探测: ${d.error}` };
     }
@@ -529,12 +531,13 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
   const F = Math.min(requestedF, maxF);
   const type = ALLOWED_TYPES.has(String(options.type || '')) ? String(options.type) : 'fade';
 
-  // 5) 音轨策略
+  // 5) 音轨策略（ignoreAudio：剪辑台导出时源片段音轨一律丢弃，BGM 由 audioMixer 单独混）
+  const ignoreAudio = options.ignoreAudio === true;
   const audioFlags = details.map(d => d.hasAudio);
   const allAudio = audioFlags.every(Boolean);
   const noneAudio = audioFlags.every(f => f === false);
   const mixedAudio = !allAudio && !noneAudio;
-  const wantAudio = allAudio || mixedAudio;
+  const wantAudio = !ignoreAudio && (allAudio || mixedAudio);
 
   const temps = [];
   const cleanupTemps = () => {
@@ -786,7 +789,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       target,
       fps,
       encoder: run.encoder || null,
-      audioMode: allAudio ? 'all' : (noneAudio ? 'none' : 'mixed-padded'),
+      audioMode: wantAudio ? (allAudio ? 'all' : 'mixed-padded') : (ignoreAudio ? 'ignored' : 'none'),
       hasAudio: wantAudio,
       // 校色实际状态：disabled / applied / failed（skipped 由上层在「转场关闭」时给出）
       colorMatch
