@@ -449,25 +449,41 @@ export class PreviewEngine {
     const key = JSON.stringify(adjust || {});
     if (slot.lutKey === key) return;
     slot.lutKey = key;
-    if (slot.lutTimer) { clearTimeout(slot.lutTimer); slot.lutTimer = null; }
+    slot.lutAdjust = adjust;
     if (!hasAdjust(adjust)) {
+      if (slot.lutTimer) { clearTimeout(slot.lutTimer); slot.lutTimer = null; }
       slot.lutTex = null;
+      slot.lutApplied = key;
       return;
     }
-    if (this.texCache.has(key)) { slot.lutTex = this.texCache.get(key); return; }
-    // 拖动滑杆时每帧都会换 key：延迟 140ms 只取最后一次，避免每帧一次 HTTP + 重建纹理
+    if (this.texCache.has(key)) {
+      slot.lutTex = this.texCache.get(key);
+      slot.lutApplied = key;
+      return;
+    }
+    // 拖动滑杆时限流：最多每 120ms 取一次最新参数，既跟手又不会每帧重建 LUT
+    if (slot.lutTimer) return;
     slot.lutTimer = setTimeout(() => {
       slot.lutTimer = null;
-      if (this.destroyed || slot.lutKey !== key) return;
-      fetchLut(adjust).then((data) => {
-        if (this.destroyed || slot.lutKey !== key) return;
+      const k = slot.lutKey;
+      const a = slot.lutAdjust;
+      if (!k || k === slot.lutApplied) return;
+      if (this.texCache.has(k)) {
+        slot.lutTex = this.texCache.get(k);
+        slot.lutApplied = k;
+        if (!this.playing) this._render();
+        return;
+      }
+      fetchLut(a).then((data) => {
+        if (this.destroyed || slot.lutKey !== k) return;
         if (!data) return;
         const tex = this._makeLutTexture(data);
-        this.texCache.set(key, tex);
+        this.texCache.set(k, tex);
         slot.lutTex = tex;
+        slot.lutApplied = k;
         if (!this.playing) this._render();
       });
-    }, 140);
+    }, 120);
   }
 
   _makeLutTexture(data) {
