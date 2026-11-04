@@ -9,6 +9,7 @@
 // 后续：F03 素材面板、F04 时间线、F05 每段调节、F08 导出。
 // ============================================================
 import { navigate } from '../router.js';
+import { PreviewEngine } from '../preview/engine.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -105,6 +106,8 @@ export function EditorView() {
   const [playhead, setPlayhead] = useState(0);
   const [exportJob, setExportJob] = useState(null);
   const [viewerUrl, setViewerUrl] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [previewErr, setPreviewErr] = useState('');
 
   const pastRef = useRef([]);
   const futureRef = useRef([]);
@@ -115,6 +118,9 @@ export function EditorView() {
   const rulerRef = useRef(null);
   const playheadElRef = useRef(null);
   const scrubRef = useRef(0);
+  const canvasRef = useRef(null);
+  const previewRef = useRef(null);
+  const playheadRef = useRef(0);
 
   const projectRef = useRef(null);
   const revisionRef = useRef(0);
@@ -174,6 +180,59 @@ export function EditorView() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [viewerUrl]);
+
+  // 实时预览引擎：等工程加载出画布后创建一次；卸载时销毁
+  useEffect(() => {
+    if (!project || !canvasRef.current || previewRef.current) return;
+    try {
+      previewRef.current = new PreviewEngine(canvasRef.current, {
+        onTime: (t) => {
+          playheadRef.current = t;
+          setPlayhead(t);
+        },
+        onEnd: () => setPlaying(false),
+        onError: (m) => setPreviewErr(m)
+      });
+      setPreviewErr('');
+    } catch (e) {
+      setPreviewErr(e.message || 'WebGL 初始化失败');
+    }
+  }, [project]);
+
+  useEffect(() => () => {
+    if (previewRef.current) previewRef.current.destroy();
+    previewRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
+
+  useEffect(() => {
+    const e = previewRef.current;
+    if (!e) return;
+    if (!project) { e.setSegments([]); return; }
+    const urls = {};
+    for (const it of libItems) urls[it.id] = it.url;
+    const segs = (project.segments || [])
+      .map((s) => ({
+        url: urls[s.assetId] || '',
+        inSec: s.inSec,
+        outSec: s.outSec,
+        adjust: s.adjust || null
+      }))
+      .filter((s) => s.url && Number(s.outSec) > Number(s.inSec));
+    const F = project.transition && Number(project.transition.duration) > 0
+      ? Number(project.transition.duration)
+      : 0.4;
+    e.setSegments(segs, { transition: F });
+  }, [project, libItems]);
+
+  useEffect(() => {
+    const e = previewRef.current;
+    if (!e || playing) return;
+    e.seek(playhead);
+  }, [playhead, playing]);
 
   async function loadLibrary() {
     try {
@@ -346,6 +405,8 @@ export function EditorView() {
   // 播放头拖动：拖动过程只改 DOM，不触发 React 重渲染（避免卡顿），松手才落 state
   function beginScrub(e) {
     e.preventDefault();
+    setPlaying(false);
+    if (previewRef.current) previewRef.current.pause();
     const ruler = rulerRef.current;
     if (!ruler) return;
     const rect = ruler.getBoundingClientRect();
@@ -360,7 +421,13 @@ export function EditorView() {
     const up = () => {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
-      setPlayhead(Math.round(scrubRef.current * 100) / 100);
+      const t = Math.round(scrubRef.current * 100) / 100;
+      setPlayhead(t);
+      setPlaying(false);
+      if (previewRef.current) {
+        previewRef.current.pause();
+        previewRef.current.seek(t);
+      }
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -505,8 +572,25 @@ export function EditorView() {
     setTimeout(tick, 600);
   }
 
-  function persistName(next) {
-    const cur = projectRef.current;
+  function togglePlay() {
+    const e = previewRef.current;
+    if (!e || !e.segments || e.segments.length === 0) return;
+    if (playing) {
+      e.pause();
+      setPlaying(false);
+      return;
+    }
+    if (e.global >= e.duration - 0.05) {
+      e.seek(0);
+      setPlayhead(0);
+    } else {
+      e.seek(playheadRef.current);
+    }
+    e.play();
+    setPlaying(true);
+  }
+
+  function persistName(next) {    const cur = projectRef.current;
     if (!cur) return;
     if (!next || next === cur.name) return;
     setSaveState('saving');
@@ -699,17 +783,19 @@ export function EditorView() {
         <section className="ed-center">
           <div className="ed-stage">
             <div className="ed-frame">
-              ${segments.length === 0
-                ? html`<div className="ed-frame-empty">
-                    <b>时间线为空</b>
-                    <span>左侧选素材 → 加入时间线 → 右侧调节 → 导出</span>
-                  </div>`
-                : html`<div className="ed-frame-empty"><b>${segments.length} 段</b><span>实时预览将在 F06 接入</span></div>`}
+              <canvas ref=${canvasRef} className="ed-canvas"></canvas>
+              ${segments.length === 0 && html`
+                <div className="ed-frame-empty">
+                  <b>时间线为空</b>
+                  <span>左侧选素材 → 加入时间线 → 右侧调节 → 导出</span>
+                </div>
+              `}
+              ${previewErr && html`<div className="ed-preview-err">${previewErr}</div>`}
             </div>
           </div>
           <div className="ed-transport">
-            <span className="ed-time">00:00:00 / ${fmtTime(duration)}</span>
-            <button className="ed-play" disabled=${true} title="F06 接入">▶</button>
+            <span className="ed-time">${fmtTime(playhead)} / ${fmtTime(duration)}</span>
+            <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0} title=${playing ? '暂停' : '播放'}>${playing ? '⏸' : '▶'}</button>
             <span className="ed-spacer"></span>
             <span className="ed-pill">1080p</span>
             <span className="ed-pill">16:9</span>

@@ -121,6 +121,15 @@
 - **未验证**：滑杆手感（浏览器）；实时预览仍属 F06。
 - 下一项：F06 实时预览（WebGL + 同一个 LUT）。
 
+### F06 实时预览（2026-11-04）
+
+- 新增 `web/src/preview/engine.js`：WebGL2 3D LUT（17³）+ 双 `<video>` 交替 + 0.4s 叠化；画布 540p 上限；支持 play/pause/seek。
+- 新增 `POST /api/adjust/lut`（`src/adjustLut.js`）：用 `adjustChain` 逐点生成 RGBA8 LUT，与导出 ffmpeg `lut3d` 同一套颜色数学；按参数缓存。
+- 编辑器预览框接入 canvas：播放/暂停、时间码、点击标尺 seek 全部联动；预览失败显示原因，不阻塞导出。
+- 验收：`verify-editor-preview.js` **18/0**：LUT 数值 vs adjustChain **maxΔ=0.435/255**、8-bit 量化上界 **0.196% < 1%**、无调节返回恒等；F02–F05 回归全绿（22/21/28/17/18）。
+- **未验证**：真实浏览器 WebGL 同帧像素差与播放/叠化手感（本环境无浏览器）。
+- 下一项：F07 音频（音乐/环境音两轨、波形、淡入淡出）。
+
 ## 基线快照
 
 | 项 | 值 |

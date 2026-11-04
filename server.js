@@ -46,6 +46,7 @@ const qualityChecker = require('./src/qualityChecker');
 const projectStore = require('./src/projectStore');
 const editorExporter = require('./src/editorExporter');
 const thumbnails = require('./src/thumbnails');
+const adjustLut = require('./src/adjustLut');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
@@ -1498,6 +1499,16 @@ app.get('/api/pricing', (req, res) => {
 });
 
 // 库列表：按分辨率分组，支持主题/模型/收藏/关键字筛选
+// 调节 LUT（预览用；与 ffmpeg lut3d 同一套 adjustChain）
+app.post('/api/adjust/lut', (req, res) => {
+  try {
+    const r = adjustLut.get(req.body && req.body.adjust);
+    res.json({ success: true, size: r.size, data: r.data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : 'LUT 生成失败' });
+  }
+});
+
 // 素材缩略图（剪辑台素材栏/时间线用；首次请求抽帧后缓存）
 app.get('/api/library/:id/thumb', async (req, res) => {
   try {
