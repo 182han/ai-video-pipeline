@@ -57,6 +57,9 @@ async function waitReady(base, timeoutMs = 25000) {
   const server = read(path.join(ROOT, 'server.js'));
 
   check(/texImage3D/.test(engine) && /sampler3D/.test(engine), 'WebGL2 3D LUT 采样');
+  check(/precision highp sampler3D/.test(engine), 'sampler3D 精度声明（否则着色器编译失败）');
+  check(/createElement\('audio'\)/.test(engine) && /setAudio/.test(engine), '预览音频两轨');
+  check(/e\.setAudio\(/.test(editor), '编辑器把音频计划传给预览');
   check(/createElement\('video'\)/.test(engine), 'video 解码');
   check(/uMix/.test(engine) && /_cue\(1 - this\.active/.test(engine), '双 video 叠化');
   check(/requestAnimationFrame/.test(engine), '逐帧渲染');

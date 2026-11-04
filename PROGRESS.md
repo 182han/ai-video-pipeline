@@ -181,6 +181,13 @@
 - 剪辑台白屏：`Cannot access 'libItems' before initialization`。原因：`libItems` 的 `useMemo` 声明在 effect 之后，而预览 effect 的依赖数组 `[project, libItems]` 在 render 时求值 → TDZ。
 - 修复：`libItems` 上移到所有 effect 之前；预览 effect 不再依赖它（内部从 `lib` 展开），deps 改为 `[project, lib]`。F02/F03/F06 回归 22/21/22 全绿。
 
+### 热修 2（2026-11-04）
+
+- **预览着色器编译失败**：fragment shader 缺 `precision highp sampler3D`（`sampler3D: No precision specified`）→ 补 `sampler2D/sampler3D` 精度声明。
+- **预览无声音**：engine 增加音乐/环境音两轨 `<audio>`，按 `project.audio` 同步 play/pause/seek、循环、音量与淡入淡出；编辑器把音频计划传给预览。
+- WebGL 初始化失败时播放按钮禁用；右侧 HSL/曲线/色轮/蒙版点击提示「后续版本接入」（当前只做基础调节）。
+- 验收：`verify-editor-preview.js` **25/0**（新增着色器精度、音频接线检查）；shell 22/0。
+
 ## 基线快照
 
 | 项 | 值 |

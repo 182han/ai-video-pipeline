@@ -58,6 +58,8 @@ void main() {
 
 const FRAG = `#version 300 es
 precision highp float;
+precision highp sampler2D;
+precision highp sampler3D;
 in vec2 vUv;
 uniform sampler2D uTexA;
 uniform sampler2D uTexB;
@@ -110,8 +112,11 @@ export class PreviewEngine {
     this.lastEmit = 0;
     this.destroyed = false;
     this.texCache = new Map(); // LUT key -> WebGLTexture
+    this.audioEls = [];
+    this.audioPlan = [null, null];
     this._initGl();
     this._initVideos();
+    this._initAudio();
   }
 
   // ---------- 初始化 ----------
@@ -210,6 +215,97 @@ export class PreviewEngine {
     this.ctxLost = false;
   }
 
+  // ---------- 音频（音乐/环境音两轨） ----------
+  _initAudio() {
+    this.audioEls = [0, 1].map(() => {
+      const a = document.createElement('audio');
+      a.preload = 'auto';
+      a.loop = true;
+      a.style.display = 'none';
+      this.host.appendChild(a);
+      return a;
+    });
+  }
+
+  setAudio(plan, filmDuration) {
+    this.filmDuration = Number(filmDuration) > 0 ? Number(filmDuration) : this.duration;
+    const list = [plan && plan.music, plan && plan.ambient];
+    for (let i = 0; i < 2; i++) {
+      const item = list[i] || null;
+      const a = this.audioEls[i];
+      if (!a) continue;
+      if (!item || !item.url) {
+        if (this.audioPlan[i]) { try { a.pause(); } catch (e) { /* ignore */ } }
+        this.audioPlan[i] = null;
+        continue;
+      }
+      if (a.dataset.url !== item.url) {
+        a.dataset.url = item.url;
+        a.src = item.url;
+        try { a.load(); } catch (e) { /* ignore */ }
+      }
+      this.audioPlan[i] = item;
+      a.volume = this._audioVolume(item);
+      this._syncAudio(i, this.playing);
+    }
+  }
+
+  _audioTarget(item) {
+    const inSec = Math.max(0, Number(item.inSec) || 0);
+    const outSec = Number(item.outSec) > inSec ? Number(item.outSec) : 0;
+    const len = outSec > inSec ? outSec - inSec : 0;
+    const g = Math.max(0, this.global || 0);
+    return inSec + (len > 0 ? (g % len) : g);
+  }
+
+  _syncAudio(i, play) {
+    const item = this.audioPlan[i];
+    const a = this.audioEls[i];
+    if (!item || !a) return;
+    try { a.currentTime = this._audioTarget(item); } catch (e) { /* ignore */ }
+    a.volume = this._audioVolume(item);
+    if (play) a.play().catch(() => {});
+  }
+
+  _syncAllAudio(play) {
+    for (let i = 0; i < 2; i++) this._syncAudio(i, play);
+  }
+
+  _pauseAudio() {
+    for (const a of this.audioEls) { try { a.pause(); } catch (e) { /* ignore */ } }
+  }
+
+  _audioVolume(item) {
+    const base = Math.max(0, Math.min(1, item.volume === undefined ? 1 : Number(item.volume)));
+    const g = Math.max(0, this.global || 0);
+    const D = this.filmDuration || this.duration || 0;
+    let f = 1;
+    const fi = Math.max(0, Number(item.fadeIn) || 0);
+    const fo = Math.max(0, Number(item.fadeOut) || 0);
+    if (fi > 0 && g < fi) f = Math.min(f, g / fi);
+    if (fo > 0 && D > 0 && g > D - fo) f = Math.min(f, Math.max(0, (D - g) / fo));
+    return Math.max(0, Math.min(1, base * f));
+  }
+
+  _updateAudioVolumes() {
+    for (let i = 0; i < 2; i++) {
+      const item = this.audioPlan[i];
+      if (item && this.audioEls[i]) this.audioEls[i].volume = this._audioVolume(item);
+    }
+  }
+
+  _checkAudioDrift() {
+    for (let i = 0; i < 2; i++) {
+      const item = this.audioPlan[i];
+      const a = this.audioEls[i];
+      if (!item || !a || a.paused) continue;
+      const target = this._audioTarget(item);
+      if (Math.abs(a.currentTime - target) > 0.35) {
+        try { a.currentTime = target; } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
   // ---------- 片段 ----------
   setSegments(segments, options = {}) {
     const list = (segments || []).filter((s) => s && s.url && Number(s.outSec) > Number(s.inSec));
@@ -252,6 +348,7 @@ export class PreviewEngine {
   play() {
     if (!this.segments.length) return;
     this.playing = true;
+    this._syncAllAudio(true);
     this._startAt(this.global);
   }
 
@@ -259,6 +356,7 @@ export class PreviewEngine {
     this.playing = false;
     cancelAnimationFrame(this.raf);
     for (const s of this.slots) { try { s.video.pause(); } catch (e) { /* ignore */ } }
+    this._pauseAudio();
     this._render();
   }
 
@@ -273,6 +371,7 @@ export class PreviewEngine {
     this._cue(0, this._seg(), local).then(() => {
       if (!this.destroyed) this._render();
     });
+    this._syncAllAudio(this.playing);
     this._emitTime(clamped, true);
     this._render();
   }
@@ -280,6 +379,7 @@ export class PreviewEngine {
   destroy() {
     this.destroyed = true;
     this.pause();
+    this._pauseAudio();
     if (this.host && this.host.parentNode) this.host.parentNode.removeChild(this.host);
     try {
       const gl = this.gl;
@@ -396,6 +496,7 @@ export class PreviewEngine {
       }
       this.global = this.starts[this.index] + local;
       this._emitTime(this.global);
+      this._checkAudioDrift();
       this._render();
       this.raf = requestAnimationFrame(step);
     };
@@ -412,6 +513,7 @@ export class PreviewEngine {
 
   _render() {
     const gl = this.gl;
+    this._updateAudioVolumes();
     const seg = this._seg();
     if (!seg) {
       gl.clearColor(0, 0, 0, 1);

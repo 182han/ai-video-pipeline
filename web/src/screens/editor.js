@@ -112,6 +112,7 @@ export function EditorView() {
   const [viewerUrl, setViewerUrl] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [previewErr, setPreviewErr] = useState('');
+  const [previewReady, setPreviewReady] = useState(false);
 
   const pastRef = useRef([]);
   const futureRef = useRef([]);
@@ -214,14 +215,17 @@ export function EditorView() {
         onError: (m) => setPreviewErr(m)
       });
       setPreviewErr('');
+      setPreviewReady(true);
     } catch (e) {
       setPreviewErr(e.message || 'WebGL 初始化失败');
+      setPreviewReady(false);
     }
   }, [project]);
 
   useEffect(() => () => {
     if (previewRef.current) previewRef.current.destroy();
     previewRef.current = null;
+    setPreviewReady(false);
   }, []);
 
   useEffect(() => {
@@ -249,6 +253,35 @@ export function EditorView() {
       : 0;
     e.setSegments(segs, { transition: F });
   }, [project, lib]);
+
+  // 预览声音：音乐/环境音两轨，与画面同一时间轴（音量为 0 时等同静音）
+  useEffect(() => {
+    const e = previewRef.current;
+    if (!e) return;
+    const byId = {};
+    for (const t of ((bgm && bgm.tracks) || [])) byId[t.id] = t;
+    const toPlan = (seg) => {
+      if (!seg) return null;
+      const t = byId[seg.trackId];
+      if (!t) return null;
+      const url = t.url || (t.file ? '/bgm/' + t.file : '');
+      if (!url) return null;
+      return {
+        url,
+        inSec: Number(seg.sourceIn) || 0,
+        outSec: Number(seg.sourceOut) || 0,
+        volume: seg.volume === undefined ? 1 : Number(seg.volume),
+        fadeIn: Number(seg.fadeIn) || 0,
+        fadeOut: Number(seg.fadeOut) || 0
+      };
+    };
+    const filmDur = (project.segments || []).reduce(
+      (s, x) => s + Math.max(0, (Number(x.outSec) || 0) - (Number(x.inSec) || 0)), 0);
+    e.setAudio({
+      music: toPlan(((project.audio && project.audio.music) || [])[0]),
+      ambient: toPlan(((project.audio && project.audio.ambient) || [])[0])
+    }, filmDur);
+  }, [project, bgm]);
 
   useEffect(() => {
     const e = previewRef.current;
@@ -629,7 +662,7 @@ export function EditorView() {
 
   function togglePlay() {
     const e = previewRef.current;
-    if (!e || !e.segments || e.segments.length === 0) return;
+    if (!e || !previewReady || !e.segments || e.segments.length === 0) return;
     if (playing) {
       e.pause();
       setPlaying(false);
@@ -868,7 +901,7 @@ export function EditorView() {
           </div>
           <div className="ed-transport">
             <span className="ed-time">${fmtTime(playhead)} / ${fmtTime(duration)}</span>
-            <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0} title=${playing ? '暂停' : '播放'}>${playing ? '⏸' : '▶'}</button>
+            <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0 || !previewReady} title=${playing ? '暂停' : '播放'}>${playing ? '⏸' : '▶'}</button>
             <span className="ed-spacer"></span>
             <span className="ed-pill">1080p</span>
             <span className="ed-pill">16:9</span>
@@ -878,7 +911,12 @@ export function EditorView() {
         <section className="ed-right">
           <div className="ed-tabs">
             ${['基础', 'HSL', '曲线', '色轮', '蒙版'].map((t, i) => html`
-              <span key=${t} className=${'ed-tab' + (i === 0 ? ' on' : '')}>${t}</span>
+              <span
+                key=${t}
+                className=${'ed-tab' + (i === 0 ? ' on' : '')}
+                title=${i === 0 ? '基础调节' : '后续版本接入'}
+                onClick=${() => { if (i > 0) setToast('「' + t + '」面板将在后续版本接入'); }}
+              >${t}</span>
             `)}
           </div>
           <div className="ed-inspector-body">
