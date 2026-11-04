@@ -948,7 +948,7 @@ export function EditorView() {
 
         <section className="ed-right">
           <div className="ed-tabs">
-            ${['基础', 'HSL', '曲线', '色轮', '蒙版'].map((t, i) => html`
+            ${['基础', 'HSL', '曲线', '色轮'].map((t, i) => html`
               <span
                 key=${t}
                 className=${'ed-tab' + (i === 0 ? ' on' : '')}

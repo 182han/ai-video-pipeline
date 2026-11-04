@@ -4,18 +4,19 @@
 
 **补建基线已完成。** 仓库内已具备：契约（`AGENTS.md`）、功能清单（`FEATURES.md`）、未知项（`KNOWN_UNKNOWNS.md`）、接手流程（`prompts/resume.md`）。
 
-### 交接状态（2026-11-04 17:55）
+### 交接状态（2026-11-04 18:05）
 
-- **HEAD `f7b9028`**；`git status` 只有 `data/logs/console-3001.log.err` 与 `web/verify/`（他人遗留），**无未提交代码**。
+- **HEAD 见 `git log` 最新提交**；`git status` 仅 `data/logs/console-3001.log.err` 与 `web/verify/`（他人遗留），**无未提交代码**。
 - M1/M2 已收口：F01c/F02–F11 全部落地；M2 收口时 14 套件 **299/0**。之后只做 UI 热修，最近通过：shell 25、preview 28、timeline 29、audio 22。
 - 最近热修（已提交，**待用户浏览器复验**）：
   1. 预览白屏 TDZ `aea621f`
   2. 预览倒置 / 调参黑屏 / 音频轨选中 `813efcf`
   3. 放大布局 + 分辨率标签 `7046116`；放大溢出遮挡 `f7b9028`
-- **当前唯一未决**：用户反馈「放大后又卡住」。假设是预览框溢出盖住播放条，`f7b9028` 已加 `max-height:100%`、`.ed-stage{overflow:hidden}`、canvas `object-fit:contain`；**尚未拿到用户复验**。
+- **2026-11-04 18:05 追加**：用户要求补 **HSL / 曲线 / 色轮**（交给下一窗口），**蒙版明确不做**；已从右侧 tab 删除「蒙版」，`FEATURES.md` 登记 **F12**。HSL/曲线/色轮目前仍是占位 tab，点击提示“后续版本接入”。
+- **当前唯一未决**：用户反馈「放大后又卡住」。`f7b9028` 已加 `max-height:100%`、`.ed-stage{overflow:hidden}`、canvas `object-fit:contain`；**尚未拿到用户复验**。
 - 若仍卡：优先查 `.ed-stage/.ed-frame` 高度、ResizeObserver 是否循环、播放条是否被 canvas 覆盖（pointer 命中）。
 - 运行：`cd app && node server.js` → `http://localhost:3001/app/edit`；当前工程 `proj_mw1umy7m2o3t`（3 段 + Magistar + Pixabay 环境音）。
-- 下一步（等用户确认）：① 复验放大/全屏；② M3 长片实测（真实素材 + 30 分钟 + BGM）。
+- **下一窗口顺序**：① 复验放大/全屏；② 做 F12 高级调节（HSL/曲线/色轮），蒙版不做。
 
 ## 当前任务（2026-11-04 起）：剪辑台改造
 
