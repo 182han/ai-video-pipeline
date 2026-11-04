@@ -243,6 +243,7 @@ export function EditorView() {
       for (const it of (g.items || [])) urls[it.id] = it.url;
     }
     const segs = (project.segments || [])
+      .filter(Boolean)
       .map((s) => ({
         url: urls[s.assetId] || '',
         inSec: s.inSec,
@@ -784,7 +785,7 @@ export function EditorView() {
     return html`<div className="ed-root ed-fatal"><span>正在打开剪辑台…</span></div>`;
   }
 
-  const segments = Array.isArray(project.segments) ? project.segments : [];
+  const segments = (Array.isArray(project.segments) ? project.segments : []).filter(Boolean);
   const layout = [];
   let acc = 0;
   for (let i = 0; i < segments.length; i++) {

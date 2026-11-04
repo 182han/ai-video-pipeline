@@ -329,7 +329,8 @@ export class PreviewEngine {
     this.index = this._indexAt(keep);
     this.global = keep;
     if (same) {
-      this._ensureLut(this.active, this._seg());
+      const seg = this._seg();
+      if (seg) this._ensureLut(this.active, seg);
       this._render();
       return;
     }
@@ -442,6 +443,7 @@ export class PreviewEngine {
   }
 
   _ensureLut(slotIdx, seg) {
+    if (!seg) return;
     const slot = this.slots[slotIdx];
     const key = JSON.stringify(seg.adjust || {});
     if (slot.lutKey === key) return;

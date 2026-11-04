@@ -195,6 +195,11 @@
 - **时间线音频点击无反应**：音频块可点击选中（高亮并切到音频面板）；「删除」可移除选中的音乐/环境音；「分割」提示暂不支持。
 - 验收：preview 26/0、audio 22/0、shell 22/0。
 
+### 热修 4（2026-11-04）
+
+- 刷新白屏：`Cannot read properties of null (reading 'adjust')`。工程先于素材库加载时，预览拿到空片段列表走 `same` 分支，`_ensureLut(null)` 崩；补空片段保护，segments 列表过滤 null。
+- 验收：preview **27/0**、shell 22/0。
+
 ## 基线快照
 
 | 项 | 值 |
