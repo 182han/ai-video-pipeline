@@ -81,7 +81,7 @@ function resolveSegments(project) {
     if (!(outSec > inSec + 0.1)) {
       throw new Error(`第 ${i + 1} 段有效时长过短（${(outSec - inSec).toFixed(2)}s）`);
     }
-    clips.push({ path: entry.filePath, inSec, outSec, detail });
+    clips.push({ path: entry.filePath, inSec, outSec, detail, adjust: seg.adjust || null });
   }
   return clips;
 }

@@ -41,6 +41,7 @@ const path = require('path');
 const os = require('os');
 const { execSync, spawn, spawnSync } = require('child_process');
 const config = require('../../config');
+const { hasAdjust, normalizeParams, buildCubeText } = require('./adjustChain');
 
 const FFMPEG_PATH = config.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE_PATH = config.FFPROBE_PATH || 'ffprobe';
@@ -364,7 +365,9 @@ function normalizeInputs(clips) {
           inSec: Number(c.inSec) > 0 ? Number(c.inSec) : 0,
           outSec: c.outSec !== undefined && c.outSec !== null ? Number(c.outSec) : null,
           // 调用方已探测过时直接复用，避免逐段 ffprobe（360 段时能省几分钟）
-          detail: c.detail && c.detail.success ? c.detail : null
+          detail: c.detail && c.detail.success ? c.detail : null,
+          // 剪辑台每段调节（F05）：导出时逐段烘成 3D LUT
+          adjust: c.adjust && typeof c.adjust === 'object' ? c.adjust : null
         };
       }
       return null;
@@ -620,6 +623,27 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       return { success: false, error: '片段总时长不足以覆盖转场重叠时长' };
     }
 
+    // 6.5) 剪辑台每段调节（F05）：参数 → 17³ LUT，导出时逐段 lut3d 烘焙。
+    // 与预览共用 adjustChain 的同一套颜色数学（F06 会读同一个 LUT）。
+    const adjustCubes = [];
+    const adjustLuts = new Map();
+    const cubeCache = new Map();
+    for (let i = 0; i < list.length; i++) {
+      const raw = list[i].adjust;
+      if (!raw || !hasAdjust(raw)) continue;
+      const params = normalizeParams(raw);
+      if (!params) continue;
+      const name = `adj_${String(i).padStart(4, '0')}.cube`;
+      const key = JSON.stringify(params);
+      let text = cubeCache.get(key);
+      if (!text) {
+        text = buildCubeText(params, 'seg_' + i);
+        cubeCache.set(key, text);
+      }
+      adjustCubes.push({ name, text });
+      adjustLuts.set(i, name);
+    }
+
     // 6.6) 校色（默认关）：只在本次重编码里顺带做，不额外多编一次。
     // 失败绝不阻断拼接，但状态必须如实回传（pipeline 会写进 qcDetails，
     // 终检据此判「校色未执行」，见 AGENTS §4.1）。
@@ -678,7 +702,8 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       // 校色放在 trim/setpts 之后：只对有效区间取帧，避免把裁剪掉的部分统计进来。
       // 显式走 rgb24 → lutrgb → yuv420p，不依赖滤镜自动协商，路径可预测。
       const lutPart = luts[i] ? `,format=rgb24,${luts[i].expr},format=yuv420p` : '';
-      parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p${lutPart}[v${i}]`);
+      const adjPart = adjustLuts.has(i) ? `,lut3d=${adjustLuts.get(i)}` : '';
+      parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p${adjPart}${lutPart}[v${i}]`);
     }
     let vPrev = 'v0';
     let acc = actualDurs[0];
@@ -720,6 +745,10 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     );
     let run = { ok: false, error: '未执行' };
     try {
+      fs.mkdirSync(stagingDir, { recursive: true });
+      for (const c of adjustCubes) {
+        fs.writeFileSync(path.join(stagingDir, c.name), c.text, 'utf8');
+      }
       run = await runTransitionFfmpeg(prepared, parts, outputPath, wantAudio, stagingDir, {
         onProgress: options.onProgress,
         expectedDuration,
@@ -791,6 +820,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       encoder: run.encoder || null,
       audioMode: wantAudio ? (allAudio ? 'all' : 'mixed-padded') : (ignoreAudio ? 'ignored' : 'none'),
       hasAudio: wantAudio,
+      adjust: { applied: adjustCubes.length },
       // 校色实际状态：disabled / applied / failed（skipped 由上层在「转场关闭」时给出）
       colorMatch
     };
@@ -806,5 +836,7 @@ module.exports = {
   _probeMedia: probeMedia,
   _pickEncoder: pickEncoder,
   _ENCODERS: ENCODERS,
+  _sampleRgbStats: sampleRgbStats,
+  _buildCubeText: buildCubeText,
   ALLOWED_TYPES
 };

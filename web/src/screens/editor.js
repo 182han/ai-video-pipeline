@@ -19,9 +19,27 @@ const SAVE_DEBOUNCE = 700;
 const PPS_MIN = 8;
 const PPS_MAX = 80;
 
-const SLIDER_GROUPS = [
-  { title: '色彩', items: ['色温', '色调', '饱和度'] },
-  { title: '明度', items: ['亮度', '对比度', '高光', '阴影', '白色', '黑色', '光感'] }
+const ADJUST_GROUPS = [
+  {
+    title: '色彩',
+    items: [
+      { key: 'temperature', label: '色温' },
+      { key: 'tone', label: '色调' },
+      { key: 'saturation', label: '饱和度' }
+    ]
+  },
+  {
+    title: '明度',
+    items: [
+      { key: 'brightness', label: '亮度' },
+      { key: 'contrast', label: '对比度' },
+      { key: 'highlight', label: '高光' },
+      { key: 'shadow', label: '阴影' },
+      { key: 'white', label: '白色' },
+      { key: 'black', label: '黑色' },
+      { key: 'lightSensation', label: '光感' }
+    ]
+  }
 ];
 
 async function api(url, opt) {
@@ -303,6 +321,28 @@ export function EditorView() {
     setSelectedId(null);
   }
 
+  function adjustValue(seg, key) {
+    const v = seg && seg.adjust ? Number(seg.adjust[key]) : 0;
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function setAdjust(key, value) {
+    if (!selectedId) return;
+    const v = Math.max(-50, Math.min(50, Math.round(Number(value) || 0)));
+    const list = segmentsRef.current.map((s) => (s.id === selectedId
+      ? { ...s, adjust: { ...(s.adjust || {}), [key]: v } }
+      : s));
+    segmentsRef.current = list;
+    const p = projectRef.current;
+    if (p) { projectRef.current = { ...p, segments: list }; setProject(projectRef.current); }
+    scheduleSegSave();
+  }
+
+  function resetAdjust() {
+    if (!selectedId) return;
+    commitSegments(segmentsRef.current.map((s) => (s.id === selectedId ? { ...s, adjust: {} } : s)));
+  }
+
   // 播放头拖动：拖动过程只改 DOM，不触发 React 重渲染（避免卡顿），松手才落 state
   function beginScrub(e) {
     e.preventDefault();
@@ -565,6 +605,7 @@ export function EditorView() {
   for (let s = 0; s <= rulerEnd; s += rulerStep) rulerTicks.push(s);
   const trackWidth = Math.max(600, Math.ceil(rulerEnd * pps));
   const exporting = !!(exportJob && (exportJob.status === 'queued' || exportJob.status === 'running'));
+  const selectedSeg = segments.find((s) => s.id === selectedId) || null;
 
   return html`
     <div className="ed-root">
@@ -682,19 +723,40 @@ export function EditorView() {
             `)}
           </div>
           <div className="ed-inspector-body">
-            ${SLIDER_GROUPS.map((g) => html`
-              <div className="ed-group" key=${g.title}>
-                <h4>${g.title}</h4>
-                ${g.items.map((label) => html`
-                  <div className="ed-slider-row" key=${label}>
-                    <span className="ed-slider-label">${label}</span>
-                    <span className="ed-slider"></span>
-                    <span className="ed-slider-val">0</span>
-                  </div>
-                `)}
+            ${!selectedSeg && html`
+              <div className="ed-empty">
+                <p>先在时间线选中一个片段</p>
+                <p className="ed-sub">选中谁，调谁；每段参数独立保存</p>
               </div>
-            `)}
-            <p className="ed-hint">选中时间线上的片段后可调节；每段独立参数将在 F05 接入。</p>
+            `}
+            ${selectedSeg && html`
+              <div className="ed-sel-meta">
+                <span>${selectedSeg.assetId}</span>
+                <button className="ed-btn" onClick=${resetAdjust}>重置本段</button>
+              </div>
+              ${ADJUST_GROUPS.map((g) => html`
+                <div className="ed-group" key=${g.title}>
+                  <h4>${g.title}</h4>
+                  ${g.items.map((it) => html`
+                    <div className="ed-slider-row" key=${it.key}>
+                      <span className="ed-slider-label">${it.label}</span>
+                      <input
+                        className="ed-slider-input"
+                        type="range"
+                        min="-50"
+                        max="50"
+                        step="1"
+                        value=${adjustValue(selectedSeg, it.key)}
+                        onPointerDown=${historyPush}
+                        onInput=${(e) => setAdjust(it.key, e.target.value)}
+                      />
+                      <span className="ed-slider-val">${adjustValue(selectedSeg, it.key)}</span>
+                    </div>
+                  `)}
+                </div>
+              `)}
+              <p className="ed-hint">参数保存到工程草稿；导出时按段烘成 LUT（与预览同一套颜色数学）。</p>
+            `}
           </div>
         </section>
       </div>

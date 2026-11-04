@@ -152,6 +152,17 @@ a.ed-btn.ed-link {
 .ed-slider-row { display: flex; align-items: center; gap: 8px; height: 26px; }
 .ed-slider-label { width: 44px; color: var(--ink2, #A7B3AD); font-size: 11.5px; }
 .ed-slider { flex: 1; height: 3px; border-radius: 2px; background: rgba(244, 247, 245, .12); }
+.ed-slider-input {
+  flex: 1; height: 16px; cursor: pointer;
+  accent-color: var(--accent, #D6B36A);
+  background: transparent;
+}
+.ed-slider-input:disabled { opacity: .4; cursor: default; }
+.ed-sel-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 10px; font-size: 11px; color: var(--ink3, #7B8781);
+}
+.ed-sel-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ed-slider-val { width: 26px; text-align: right; font-size: 11px; color: var(--ink3, #7B8781); font-family: ui-monospace, Consolas, monospace; }
 .ed-hint { margin: 6px 0 0; font-size: 11px; line-height: 1.7; color: var(--ink3, #7B8781); }
 
