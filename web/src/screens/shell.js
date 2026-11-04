@@ -7,8 +7,8 @@
 //   /clips       库存 · 视频片段
 //   /photos      库存 · 照片
 //   /music       库存 · 配乐
-//   /bgm         配乐编辑器（任务列表）
-//   /bgm/:id     配乐编辑器（直接进入某条已完成成片，刷新可直达）
+//   /bgm         已并入剪辑台：落到 /edit 新建/续用工程（2026-11-04 F11）
+//   /bgm/:id     同上（旧深链兼容，不再有独立配乐编辑器入口）
 //   /history     记录 · 历史 + 垃圾箱
 //   /output      记录 · 产出
 //   /templates   模板库（入口在向导第 1 步的小提示里）
@@ -22,7 +22,6 @@ import { Boundary } from '../components/boundary.js';
 import { CreateWizard } from './create.js';
 import { GenView } from './gen.js';
 import { ClipsView, PhotosView, MusicView } from './inventory.js';
-import { BgmEditorView } from './bgmEditor.js';
 import { HistoryView } from './history.js';
 import { TemplatesView } from './templates.js';
 import { SettingsView } from './settingsPage.js';
@@ -40,7 +39,6 @@ const NAV = [
   { key: 'clips', route: '/clips', label: '视频片段', icon: '▤', sub: true },
   { key: 'photos', route: '/photos', label: '照片', icon: '◫', sub: true },
   { key: 'music', route: '/music', label: '配乐', icon: '♪', sub: true },
-  { key: 'bgm', route: '/bgm', label: '配乐编辑器', icon: '✎', sub: true },
   { section: '记录' },
   { key: 'history', route: '/history', label: '历史记录', icon: '≣' },
   { key: 'output', route: '/output', label: '产出', icon: '▶' }
@@ -51,7 +49,7 @@ function viewOf(route) {
   if (route.startsWith('/clips')) return 'clips';
   if (route.startsWith('/photos')) return 'photos';
   if (route.startsWith('/music')) return 'music';
-  if (route.startsWith('/bgm')) return 'bgm';
+  if (route.startsWith('/bgm')) return 'edit'; // F11：旧配乐入口落剪辑台
   if (route.startsWith('/history')) return 'history';
   if (route.startsWith('/output')) return 'output';
   if (route.startsWith('/templates')) return 'templates';
@@ -82,7 +80,7 @@ function RailItem({ item, active }) {
 function Rail({ view }) {
   const routeOf = {
     create: '/', edit: '/edit', clips: '/clips', photos: '/photos',
-    music: '/music', bgm: '/bgm', history: '/history', output: '/output'
+    music: '/music', history: '/history', output: '/output'
   };
   return html`
     <aside className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
@@ -127,7 +125,6 @@ export function AppShell({ route }) {
           ${view === 'clips' && html`<${Boundary}><${ClipsView} /></${Boundary}>`}
           ${view === 'photos' && html`<${Boundary}><${PhotosView} /></${Boundary}>`}
           ${view === 'music' && html`<${Boundary}><${MusicView} /></${Boundary}>`}
-          ${view === 'bgm' && html`<${Boundary}><${BgmEditorView} route=${route} /></${Boundary}>`}
           ${view === 'history' && html`<${Boundary}><${HistoryView} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
           ${view === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
           ${view === 'templates' && html`<${Boundary}><${TemplatesView} /></${Boundary}>`}
