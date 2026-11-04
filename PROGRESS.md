@@ -4,6 +4,13 @@
 
 **补建基线已完成。** 仓库内已具备：契约（`AGENTS.md`）、功能清单（`FEATURES.md`）、未知项（`KNOWN_UNKNOWNS.md`）、接手流程（`prompts/resume.md`）。
 
+## 当前任务（2026-11-04 起）：剪辑台改造
+
+- 需求、11 项、分期、Gate、风险见 `FEATURES.md` **D 节**。
+- **第一个动作**：`scripts/spike-editor-export.js`（100/360 段导出 + 30 段预览），拿成功/耗时/fps 三个数字；G0 不达标先改方案，不进 F01。
+- 本轮相关文件（按顺序）：`scripts/spike-editor-export.js` → `src/processors/transitionMixer.js`（导出链重做）→ `FEATURES.md` D 节。
+- 原「审核门」任务**暂缓，不是取消**；见下方「暂缓」一节。
+
 ## 基线快照
 
 | 项 | 值 |
@@ -56,7 +63,7 @@
 
 ---
 
-## 下一步：第一个未完成功能 = 人工审核门 `awaiting_review`（P0）
+## 暂缓（原下一步）：人工审核门 `awaiting_review`（P0）
 
 **为什么是它**：
 - 全仓 `awaiting_review` 命中 **0 次**，是唯一「设计已完备但一行未实现」的核心功能；
@@ -70,7 +77,7 @@
 
 **所以第一个可执行动作是前置①，不是直接加状态。**
 
-### 下一步第一步的具体命令
+### 审核门第一步的具体命令（暂缓执行）
 
 ```powershell
 cd "C:\Users\14872\Desktop\测试\app"
@@ -90,7 +97,7 @@ Get-Content ..\docs\spec\review-gate-design.md -Encoding UTF8 |
 
 ---
 
-## 本轮相关文件（下一轮只许改这些）
+## 审核门相关文件（暂缓期间不动）
 
 - `src/pipeline.js`
 - `scripts/verify-pipeline-fixes.js`
