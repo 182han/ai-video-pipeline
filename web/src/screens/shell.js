@@ -27,7 +27,7 @@ import { HistoryView } from './history.js';
 import { TemplatesView } from './templates.js';
 import { SettingsView } from './settingsPage.js';
 import { OutputScreen } from './output.js';
-import { AdjustEditorView } from './adjustEditor.js';
+import { EditorView } from './editor.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -109,6 +109,11 @@ export function AppShell({ route }) {
   // 切视图时回到顶部（长列表否则会保留滚动位置）
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
 
+  // 剪辑台是整屏工作台：不套全局左栏与任务条（2026-11-04）
+  if (view === 'edit') {
+    return html`<${EditorView} />`;
+  }
+
   return html`
     <div className="h-full grid grid-cols-[212px_minmax(0,1fr)] bg-s0 text-ink overflow-hidden">
       <${Rail} view=${view} />
@@ -127,7 +132,6 @@ export function AppShell({ route }) {
           ${view === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
           ${view === 'templates' && html`<${Boundary}><${TemplatesView} /></${Boundary}>`}
           ${view === 'settings' && html`<${Boundary}><${SettingsView} /></${Boundary}>`}
-          ${view === 'edit' && html`<${Boundary}><${AdjustEditorView} /></${Boundary}>`}
         </div>
       </div>
 
