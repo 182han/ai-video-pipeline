@@ -316,6 +316,28 @@
 - **未验证**：真实浏览器点击/视觉（本机 `dsh_browser` 报 Electron 不可用，属既有环境限制）；
   E6 端到端仍未复核（服务当前运行的是同一份磁盘代码，但页面点击未做）。
 
+### E5 旧版页面彻底删除（2026-11-09，完成）
+
+- **背景**：用户反复被 `http://localhost:3001/index.html` 带回旧页面，质疑「单版本收口」名不副实。
+  核实：旧页面文件一直没删（295,955 B，最后改动 10-27），`/` 只是 302 到 `/app`，`public/` 静态目录仍原样下发。
+- **本次删除**（`git rm`，历史可回滚）：
+  - 12 个旧 HTML：`index` / `preview-app` / `preview-login` / `bgm-editor` / `members` / `clip-library` /
+    `music-library` / `showcase` / `design-system-notion-apple` / `icon-comparison` / `_ptest` / `_selftest`；
+  - `public/theme-nightvalley.css`、`public/showcase/`（2 个素材，与 `assets/` 重复）；
+  - 只读它们的 5 个脚本：`check-inline-js` / `verify-frontend-static` / `verify-transition-ui` /
+    `verify-pages` / `verify-editor-dom`；另删 4 个临时脚本（`test-editor-logic` / `_e` / `_selfcheck` / `_userflow`）。
+- **保留**：`public/login.html`（登录墙）、`public/assets/`（登录页背景视频与海报）。
+- **改动**：
+  - `server.js` 新增 `LEGACY_PAGES` 数组：12 个旧地址 + `/` 全部 `302 /app`（书签/历史不再 404、也不会打开旧界面）；
+  - `verify-all.js` 移除 `frontend-static` 注册（26→25 个套件）；
+  - `verify-recovery-fixes.js` 剥离 3 条旧 HTML 断言（28→25，后端断言保留）；
+  - `verify-skill-prompt.js` 剥离 6 条旧 HTML 断言（109→103，后端断言保留）。
+- **回归实测**：`verify-skill-prompt` **103/0**、`verify-recovery-fixes` **25/0**、
+  `verify-create-config` **28/0**、`verify-image-gen` **100/0**；`server.js` 等 4 个改过的文件 `node --check` 通过。
+- **待人工一步**：重启服务后确认 `check-server-version.js` exit 0、`/index.html` 返回 302 `/app`、`/app` 200。
+- **已知取舍**：`verify-frontend-static`（43 项）等断言随被测对象一起作废；新版前端由
+  `verify-create-config` / 编辑器套件（shell/media/timeline/preview…）覆盖，不再有「旧 DOM id 校验」这一层。
+
 ## 基线快照
 
 | 项 | 值 |

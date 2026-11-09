@@ -206,7 +206,8 @@ function compareVer(a, b) {
   // ---------- 9. 提示词助手接入 + 追加而非覆盖 ----------
   section('9. 助手接入 skill + 「添加到提示词框」不覆盖');
   const serverSrc = fs.readFileSync(path.join(APP_DIR, 'server.js'), 'utf-8');
-  const htmlSrc = fs.readFileSync(path.join(APP_DIR, 'public', 'index.html'), 'utf-8');
+  // 2026-11-09：旧版 public/index.html 已删除，原 8 条「旧 DOM/按钮文案」断言随之作废
+  // （被测对象不存在了）；这里只保留后端侧断言。新版前端由 verify-create-config 等覆盖。
 
   ok('助手 system 叠加了 skill 规则',
     /promptSkill\.getSkillRules\(\)/.test(serverSrc) && serverSrc.includes('assistantSystem'));
@@ -216,15 +217,6 @@ function compareVer(a, b) {
   ok('/api/optimize-prompt 接受 llmApiKey', /llmApiKey/.test(serverSrc) && serverSrc.includes('optimizeWithAI(prompt, useTheme'));
   ok('/api/optimize-prompt 解析行尾主题标签',
     serverSrc.includes('parseThemeTag(prompt') && serverSrc.includes('themeResolved'));
-
-  ok('存在 appendToPromptInput', htmlSrc.includes('appendToPromptInput'));
-  ok('useOptimizedPrompt 走追加',
-    /function useOptimizedPrompt[\s\S]{0,240}appendToPromptInput/.test(htmlSrc));
-  ok('助手 usePrompt 走追加',
-    /function usePrompt\(text\)[\s\S]{0,700}cur \+ '\\n' \+ text/.test(htmlSrc));
-  ok('按钮文案为「添加到提示词框」', (htmlSrc.match(/添加到提示词框/g) || []).length >= 2);
-  ok('优化请求带上 LLM 配置', htmlSrc.includes('llmApiKey: cfg.llmKey'));
-  ok('不再用旧写法整段覆盖提示词框', !htmlSrc.includes("getElementById('promptInput').value = text;"));
 
   // ---------- 汇总 ----------
   console.log(`\n=== 结果：${pass} 通过 / ${fail} 失败 ===`);

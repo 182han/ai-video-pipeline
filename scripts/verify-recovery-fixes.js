@@ -223,7 +223,6 @@ const config = require('../config');
   const read = p => fs.readFileSync(path.join(APP, p), 'utf8');
   const pipelineSrc = read('src/pipeline.js');
   const serverSrc = read('server.js');
-  const htmlSrc = read('public/index.html');
   const genSrc = read('src/generators/index.js');
 
   check('pipeline 在补跑/重检两处都会补入库', () => {
@@ -257,13 +256,8 @@ const config = require('../config');
     assert.ok(/pipeline\.regenerateClip\(req\.params\.id, clipIndex, prompt, runtimeConfig\)/.test(serverSrc)));
   check('server continue 路由透传 runtimeConfig', () =>
     assert.ok(/runtimeConfig: body\.runtimeConfig \|\| null/.test(serverSrc)));
-  check('前端提供 collectTaskRuntimeConfig 且读取 localStorage', () =>
-    assert.ok(/function collectTaskRuntimeConfig\(model\)/.test(htmlSrc)
-      && /localStorage\.getItem\('vs_config'\)/.test(htmlSrc)));
-  check('重新生成请求带 runtimeConfig', () =>
-    assert.ok(/body: JSON\.stringify\(\{ prompt, runtimeConfig: collectTaskRuntimeConfig\(model\) \}\)/.test(htmlSrc)));
-  check('补跑请求带 runtimeConfig', () =>
-    assert.ok(/runtimeConfig: collectTaskRuntimeConfig\(full\.model \|\| 'mock'\)/.test(htmlSrc)));
+  // 2026-11-09：旧版 public/index.html 已删除，原 3 条「前端接线」断言随被测对象一起作废；
+  // 新版前端对应能力由 verify-create-config.js / 编辑器套件覆盖。后端断言（上面几条）保留。
   check('NSFW 调用传 errorOut 并使用本地错误槽', () =>
     assert.ok(/errorOut: upstreamError/.test(read('src/qualityChecker.js'))
       && /upstreamError\.value \|\| this\._nsfwLastError/.test(read('src/qualityChecker.js'))));

@@ -25,7 +25,7 @@
 | 端口 | **3001**（`config.SERVER.port` ← 环境变量 `PORT` > `.env` > 默认） | `config.js` SERVER 段；`.env` 实测 `PORT=3001` |
 | 包管理器 | **`npm` 不存在**；`pnpm` 在 `C:\Users\14872\bin\pnpm.cmd` 但**已损坏**（`pnpm --version` → `Cannot find module …pnpm.mjs`，exit 1） | 本机实测 |
 | 依赖 | 已安装（`node_modules` 91 个顶层包，含 express/ws/pg/@aws-sdk） | 本机实测 |
-| 前端 | **单版本**：`/app` → `web/`（React 18 UMD + htm，16 个原生 ESM 模块，唯一维护）；`/` → 302 `/app`；`public/index.html` 仅归档（验收脚本读取，不要再改） | `server.js` 登录墙 + `/` 重定向；`web/src/router.js` |
+| 前端 | **单版本**：`/app` → `web/`（React 18 UMD + htm，16 个原生 ESM 模块，唯一维护）；`/` → 302 `/app`；**旧版页面已于 2026-11-09 全部删除**（`public/` 只剩 `login.html` 与 `assets/`，12 个旧 HTML 地址统一 302 到 `/app`） | `server.js` LOGIN→`/app`、`LEGACY_PAGES` 302、`web/src/router.js` |
 | CSS | Tailwind 为**可选**离线步骤，二进制在 `.gitignore` 里（`tools/tailwind/*.exe`），需自备 | `.gitignore:52-59` |
 | 运行时自检 | 启动会打印 ffmpeg 可用性与路径；`auth.bootstrap()` 建首账号；`reconcileInterruptedTasks()` 回收僵尸任务 | `server.js` 尾部 |
 
@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **39**（38 个套件 + `verify-all.js`） |
-| 门禁注册 | **23**（`verify-all.js:22-151`；运行时首行打印「共 23 个脚本」） |
-| 未注册 | **15**（38 个套件 − 23 注册；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
+| `scripts/verify-*.js` 实有 | **55**（2026-11-09 实测；删旧页面时一并删了 `verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `verify-editor-dom`） |
+| 门禁注册 | **25**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **30**（55 − 25；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
 
 ### 2.4 本机限制（重要）
 
@@ -109,7 +109,7 @@ Error: spawn EPERM
 6. **要读 stdout 的 ffmpeg 调用**走已封装的降级路径（`qualityChecker._exec()` / `videoProcessor._execText()`），不要裸 `execSync(cmd,{encoding:'utf8'})`。
 7. **提交一次只做一件事**；混合提交必须在提交信息里逐条列出实际内容。
 8. 改动前先 `git status --porcelain`；**有输出 = 有人的改动没落盘，不要覆盖**。
-9. **唯一前端是 `app/web/`（`/app`）**：`/` 已 302 到 `/app`；`public/index.html` 仅归档，5 个验收脚本与 `_selftest.html` 还会读它——**不要删、不要改**；旧页面（members/bgm-editor 等）也不再作为入口维护。
+9. **唯一前端是 `app/web/`（`/app`）**：`/` 与 12 个旧页面地址一律 302 到 `/app`；**旧版页面 2026-11-09 已删除**（`public/` 只剩 `login.html` + `assets/`），只读它们的 5 个静态脚本已一并删除（`verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `check-inline-js` / `verify-editor-dom`），`verify-recovery-fixes` 与 `verify-skill-prompt` 里的旧 HTML 断言已剥离。**不要再往 `public/` 加页面**。
 
 ---
 
@@ -128,7 +128,7 @@ Error: spawn EPERM
 | 7 | `.err` 漏出 gitignore | `.gitignore:27` 只有 `*.log`；`data/logs/console-3001.log.err` 已被提交（0 字节） | 新增日志后缀时要同步规则 |
 | 8 | 双锁文件 | `package-lock.json` 与 `pnpm-lock.yaml` 都在库 | 改依赖前先确认用哪个，别两个都改 |
 | 9 | 根文档在 git 外 | 根 `AGENTS.md`/`PROJECT_STATE.md`/`docs/` 不受版本控制 | 重要结论写进 `app/` |
-| 10 | 「public 冻结」不准确 | 根契约说 `public/**` 自 10-30 冻结，但 `public/login.html` 在 11-01/11-02 有 6 次提交 | 只有 `public/index.html` 真冻结（最后改动 10-27） |
+| 10 | 旧页面地址仍会被书签/历史命中 | 2026-11-09 前 `public/` 有 12 个旧 HTML，删文件后旧链接会 404 | `server.js` 的 `LEGACY_PAGES` 把 12 个旧地址统一 302 到 `/app`；`public/login.html` 保留（登录页），其余页面不要再加 |
 | 11 | 工作区可能被并发修改 | 2026-11-02 13:51–14:01 期间观察到另一会话实时改 `adjustChain.js` 并提交 `b17bbdd`/`1d3c693` | 动手前与提交前各查一次 `git status`；提交前确认没有别人的文件混入 |
 | 12 | `.env` 含真实 Key | 26 个变量名含各厂商 Key / 数据库连接串 | 不要 `cat .env`、不要把值贴进对话或日志 |
 | 13 | PowerShell 引号 | `node -e '...'` 里的单引号会被 PS 吃掉，导致语法错误 | 外层双引号、JS 内层单引号；复杂逻辑写成 `.js` 文件 |
@@ -185,4 +185,4 @@ Error: spawn EPERM
 - 持久化：库连得上（`users` 1 行、`tasks` 201 行），但**没有测试断言验证「任务真的写进 Postgres」**，现有断言只覆盖内存/JSON 侧。
 - 30 分钟级长片、真实接缝、长时转码。
 - 视觉与交互（无人工浏览器验收记录）。
-- 10 个未注册套件的当前状态。
+- 30 个未注册套件的当前状态（2026-11-09 删除 4 个只测旧页面的套件后重新计数）。

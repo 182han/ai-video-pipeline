@@ -250,9 +250,17 @@ app.put('/api/users/:id/password', async (req, res) => {
   }
 });
 
-// ===== 旧版前端：已归档，/ 统一跳到新版 /app =====
-// 为什么保留 public/index.html：5 个验收脚本与 public/_selftest.html 直接读它，
-// 现在删会破门禁。它不再是入口，也不应再修改。
+// ===== 旧版前端：已删除（2026-11-09，E5），/ 与所有旧页面地址统一回新版 /app =====
+// 旧页面（public/index.html、bgm-editor、members、clip-library、music-library 等）连同
+// 只读它们的 5 个静态验收脚本一起删除了；新版唯一入口是 /app。
+// 保留这组 302：书签/历史/别人给的旧链接不至于 404，也不会再打开一个「看着像能用」的旧界面。
+const LEGACY_PAGES = [
+  'index.html', 'preview-app.html', 'preview-login.html', 'bgm-editor.html',
+  'members.html', 'clip-library.html', 'music-library.html', 'showcase.html',
+  'design-system-notion-apple.html', 'icon-comparison.html', '_ptest.html', '_selftest.html'
+];
+app.get(new RegExp('^/(' + LEGACY_PAGES.map((p) => p.replace(/\./g, '\\.')).join('|') + ')$'),
+  (req, res) => res.redirect(302, '/app'));
 app.get('/', (req, res) => res.redirect(302, '/app'));
 
 // 静态资源（登录页在 public/login.html，由这里下发）

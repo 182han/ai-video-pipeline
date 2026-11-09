@@ -108,8 +108,8 @@
   - 证据：`src/auth.js`(355)、`server.js:73-107,112-233`；commit `497c4d3`（首建号竞态修复）
 - [x] 成员管理（增删 / 改密）
   - 证据：`server.js:170-233`、`web/src/screens/settingsPage.js:62-155`；commit `368f096`
-- [x] 旧版前端（单文件 `public/index.html`，295,955 B / 8085 行）
-  - 最后提交 `8283549`（10-27）；**已冻结加功能**
+- [x] ~~旧版前端（单文件 `public/index.html`，295,955 B / 8085 行）~~ **已于 2026-11-09 删除**
+  - 最后提交 `8283549`（10-27）；连同 `preview-app` / `bgm-editor` / `members` / `clip-library` / `music-library` / `showcase` / `design-system` / `icon-comparison` / `preview-login` / `_ptest` / `_selftest` 共 12 个旧 HTML 一起删；`public/` 只剩 `login.html` + `assets/`；12 个旧地址由 `server.js` 的 `LEGACY_PAGES` 统一 302 到 `/app`
 - [x] 新版前端外壳（深绿黑+香槟金、左侧导航）
   - 证据：`web/src/screens/shell.js`；commit `f11b34b`
 - [x] 六步创作向导
@@ -155,7 +155,7 @@
 |---|---|---|
 | **P0** | 门禁入口不可执行（`spawn EPERM`） | `verify-all.js:162`；本机实测 |
 | **P0** | 2 个注册套件是红的 | `verify-auth` 11/15（数据污染）、`verify-loop` 28/1（断言过期） |
-| **P1** | 19 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 37 实有 vs 17 注册 |
+| **P1** | 30 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 55 实有 vs 25 注册（2026-11-09 实测） |
 | **P1** | Postgres 不可达，持久化未验证 | `.env` + 测试日志 `timeout exceeded` |
 | **P2** | `data/logs/console-3001.log.err` 已入库 | `git ls-files data/logs`；`.gitignore:27` 只有 `*.log` |
 | **P2** | 双锁文件并存 | `package-lock.json` + `pnpm-lock.yaml` |
@@ -255,10 +255,16 @@
   验收：余额 1 元、预计 3 元 → 提交被拦截；余额空 → 不拦截；费用表与旧版一致。
 - [ ] **E4 自定义执行环节 + 质检严格度**：旧版可勾选 8 步与质检项；新版只有预设档位。
   验收：custom + 只勾 4 步 → 任务 `stages` 只含 4 步；严格度勾选透传到 API。
-- [ ] **E5 旧版归档**：`public/index.html` → `legacy/index.html`；改
-  `check-inline-js` / `verify-frontend-static` / `verify-recovery-fixes` / `verify-transition-ui` /
-  `verify-skill-prompt` 的路径；`_selftest.html` 去掉旧首页 §4；删除 `public/index.html`；
-  `/` 与 `/index.html` 都 302 `/app`。`public/login.html`、`public/assets` 保留。
+- [x] **E5 旧版归档（2026-11-09 已完成，按「彻底删除」执行，未走 legacy 中间态）**：12 个旧 HTML
+  （`index` / `preview-app` / `preview-login` / `bgm-editor` / `members` / `clip-library` / `music-library` /
+  `showcase` / `design-system-notion-apple` / `icon-comparison` / `_ptest` / `_selftest`）+ `theme-nightvalley.css`
+  + `public/showcase/` 素材全部删除；`public/` 只剩 `login.html` + `assets/`。
+  连带删除只读它们的 5 个脚本（`check-inline-js` / `verify-frontend-static` / `verify-transition-ui` /
+  `verify-pages` / `verify-editor-dom`）与 4 个临时脚本（`test-editor-logic` / `_e` / `_selfcheck` / `_userflow`）；
+  `verify-recovery-fixes`（28→25 项）与 `verify-skill-prompt`（109→103 项）里的旧 HTML 断言已剥离，后端断言保留。
+  `verify-all.js` 移除 `frontend-static` 注册（26→25）。`server.js` 新增 `LEGACY_PAGES`：12 个旧地址 + `/` 全部 302 `/app`。
+  `public/login.html`、`public/assets` 保留。实测：改完 `verify-skill-prompt` 103/0、`verify-recovery-fixes` 25/0、
+  `verify-create-config` 28/0、`verify-image-gen` 100/0；`/index.html` 等旧地址 302 需重启后复验。
 - [ ] **E6 启动与验证**：双击 `重启服务.bat`；`node scripts/check-server-version.js` exit 0；
   `GET /` 302 `/app`；`GET /app` 200；`verify-image-gen` 100/0。
 - [ ] **E7 真实出图**：需要 WhaleTV 的 Base URL/接口协议（用户提供，不要猜）。

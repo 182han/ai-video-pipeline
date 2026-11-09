@@ -33,12 +33,6 @@ const SUITES = [
     desc: '档位/依赖/补跑计算（纯函数）'
   },
   {
-    name: 'frontend-static',
-    script: 'verify-frontend-static.js',
-    group: 'fast',
-    desc: '前端静态一致性（元素/请求体/既有功能未破坏）'
-  },
-  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
