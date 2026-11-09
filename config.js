@@ -167,22 +167,34 @@ module.exports = {
   DASHSCOPE_MODEL_ID: env('DASHSCOPE_MODEL_ID', 'wan3.0-video'),
 
   // ===== 图片生成 / 图生视频（「先图后视频」工作流）=====
-  // 状态：**仅预留配置位，尚未接入任何厂商**。真正的调用实现见
-  //   src/generators/imageGen.js（当前被调用会抛明确错误，不会伪造成功，
-  //   遵守 AGENTS.md §4.2「禁止用随机数冒充检测结论」/ §4.8「不许谎报状态」）。
+  // 状态（2026-11-08）：**已接入阿里云百炼 wan2.7-image**（文生图）。
+  //   适配器：src/generators/imageProviders/dashscope.js
+  //   调用链：提交异步任务 → 轮询 /tasks/{id} → 下载 PNG 落盘 → 返回本地路径。
   //
-  // 需要填两组（可用的组合方式见下）：
-  //   ① 文生图：IMAGE_GEN_*  —— 产出分镜静帧，供人工确认
-  //   ② 图生视频：I2V_*      —— 拿确认过的静帧做首帧生成视频
+  // 「加 API Key 就能用」的只有下面这一项：
+  //   IMAGE_GEN_API_KEY（留空会复用 DASHSCOPE_API_KEY —— 同一家百炼同一个 Key）
+  // 其余都有默认值，可在 .env 里按需覆盖。
   //
-  // 若同一家厂商一个 Key 同时提供文生图与图生视频（如阿里百炼），
-  // I2V_* 留空即可自动回退到 IMAGE_GEN_* 的 key/baseUrl，只填两个模型名。
-  IMAGE_GEN_PROVIDER: env('IMAGE_GEN_PROVIDER', 'openai'),
-  IMAGE_GEN_API_KEY: env('IMAGE_GEN_API_KEY'),
-  IMAGE_GEN_BASE_URL: env('IMAGE_GEN_BASE_URL'),
-  IMAGE_GEN_MODEL: env('IMAGE_GEN_MODEL'),
-  IMAGE_GEN_SIZE: env('IMAGE_GEN_SIZE', '1024x1024'),
-  IMAGE_GEN_TIMEOUT_MS: parseInt(env('IMAGE_GEN_TIMEOUT_MS', '180000'), 10),
+  // 图生视频：I2V_* 仍为配置预留；厂商是否支持首帧图需另行核实
+  //   （IMAGE_INPUT_CAPABILITY.dashscope 仍是 null，不得当成 true）。
+  IMAGE_GEN_PROVIDER: env('IMAGE_GEN_PROVIDER', 'dashscope'),
+  // 留空 → 回退到 DASHSCOPE_API_KEY（同一厂商同一 Key 的常见情形）
+  // 页面「设置 → 图片生成」填的运行时 Key/地址/模型会覆盖本次请求（不落盘）。
+  IMAGE_GEN_API_KEY: env('IMAGE_GEN_API_KEY', env('DASHSCOPE_API_KEY')),
+  // 完整 API 根地址。默认用百炼旧通用入口；建议改成带 WorkspaceId 的专属接入点：
+  //   https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1
+  // 留空 → 回退到 DASHSCOPE_BASE_URL（若它也空，则用上面的旧通用入口）
+  IMAGE_GEN_BASE_URL: env('IMAGE_GEN_BASE_URL', env('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1')),
+  IMAGE_GEN_MODEL: env('IMAGE_GEN_MODEL', 'wan2.7-image'),
+  // 16:9 / 1K。wan2.7-image 支持 1K、2K；2K 16:9 写 2688*1536。
+  // 也接受 1K / 2K 预设（预设的实际宽高由厂商决定，建议显式写宽*高）。
+  IMAGE_GEN_SIZE: env('IMAGE_GEN_SIZE', '1696*960'),
+  // 单张图的「提交 + 轮询 + 下载」总超时（毫秒）。2K 图通常比 1K 慢，留足余量。
+  IMAGE_GEN_TIMEOUT_MS: parseInt(env('IMAGE_GEN_TIMEOUT_MS', '300000'), 10),
+  // 轮询间隔（毫秒）。太小会打爆接口限流，太大拖慢出图。
+  IMAGE_GEN_POLL_MS: parseInt(env('IMAGE_GEN_POLL_MS', '2000'), 10),
+  // 是否让厂商在图上加水印（默认 false；本项目成片不应带第三方水印）
+  IMAGE_GEN_WATERMARK: env('IMAGE_GEN_WATERMARK', 'false'),
 
   I2V_PROVIDER: env('I2V_PROVIDER'),
   I2V_API_KEY: env('I2V_API_KEY'),

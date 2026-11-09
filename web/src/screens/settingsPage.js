@@ -26,9 +26,19 @@ function writeJson(k, patch) {
 }
 
 const GROUPS = [
-  { id: 'seedance', title: 'Seedance 2.5（字节）', fields: [['seedanceKey', 'API Key', 'password'], ['seedanceBaseUrl', 'Base URL', 'text'], ['seedanceModel', '模型', 'text']] },
-  { id: 'kling', title: '可灵 Kling 3.0', fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
+  { id: 'seedance', title: 'Seedance 2.5（字节）', collapsible: true, fields: [['seedanceKey', 'API Key', 'password'], ['seedanceBaseUrl', 'Base URL', 'text'], ['seedanceModel', '模型', 'text']] },
+  { id: 'kling', title: '可灵 Kling 3.0', collapsible: true, fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
   { id: 'dashscope', title: '万相 3.0（DashScope）', fields: [['dashScopeKey', 'API Key', 'password'], ['dashScopeRegion', '区域', 'text'], ['dashScopeWorkspaceId', 'WorkspaceId', 'text']] },
+  {
+    id: 'imagegen',
+    title: '图片生成 · wan2.7-image',
+    fields: [
+      ['imageKey', 'API Key', 'password'],
+      ['imageBaseUrl', 'Base URL', 'text'],
+      ['imageModel', '模型', 'text'],
+      ['imageSize', '尺寸', 'text']
+    ]
+  },
   { id: 'llm', title: 'LLM · 提示词助手', fields: [['llmKey', 'API Key', 'password'], ['llmUrl', 'Base URL', 'text'], ['llmModel', '模型', 'text']] },
   { id: 'multimodal', title: '多模态 · 视觉质检', fields: [['multimodalKey', 'API Key', 'password'], ['multimodalUrl', 'Base URL', 'text'], ['multimodalModel', '模型', 'text']] }
 ];
@@ -57,6 +67,9 @@ export function SettingsView() {
   const [selfId, setSelfId] = useState('');
   const [nu, setNu] = useState('');
   const [np, setNp] = useState('');
+  const [imgStatus, setImgStatus] = useState(null);
+  const [openGroups, setOpenGroups] = useState({});
+  const [showKeys, setShowKeys] = useState({});
 
   useEffect(() => {
     fetchJson('/api/users')
@@ -64,23 +77,35 @@ export function SettingsView() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetchJson('/api/image-gen/status')
+      .then(setImgStatus)
+      .catch(() => {});
+  }, []);
+
   const saveKey = (patch) => setKeys(writeJson(KEY_STORE, patch));
   const saveWeb = (patch) => setWeb(writeJson(WEB_STORE, patch));
 
   async function test(g) {
+    if (g.noTest) return;
     setTesting(g.id);
     setTestRes((r) => ({ ...r, [g.id]: null }));
     const body = { type: g.id };
     if (g.id === 'seedance') { body.apiKey = keys.seedanceKey || ''; body.baseUrl = keys.seedanceBaseUrl || ''; body.model = keys.seedanceModel || ''; }
     if (g.id === 'kling') { body.accessKey = keys.klingAk || ''; body.secretKey = keys.klingSk || ''; }
     if (g.id === 'dashscope') { body.apiKey = keys.dashScopeKey || ''; }
+    if (g.id === 'imagegen') { body.apiKey = keys.imageKey || ''; body.baseUrl = keys.imageBaseUrl || ''; }
     if (g.id === 'llm') { body.apiKey = keys.llmKey || ''; body.baseUrl = keys.llmUrl || ''; body.model = keys.llmModel || ''; }
     if (g.id === 'multimodal') { body.apiKey = keys.multimodalKey || ''; body.baseUrl = keys.multimodalUrl || ''; body.model = keys.multimodalModel || ''; }
     try {
       const j = await fetchJson('/api/test-api-key', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
-      setTestRes((r) => ({ ...r, [g.id]: j.success ? { ok: true, text: j.message || '连接正常' } : { ok: false, text: j.error || '测试失败' } }));
+      let text = j.success ? (j.message || '连接正常') : (j.error || '测试失败');
+      if (!j.success && /未知的测试类型/.test(text)) {
+        text += '（服务端仍是旧进程，请重启 node server.js）';
+      }
+      setTestRes((r) => ({ ...r, [g.id]: { ok: !!j.success, text } }));
     } catch (e) {
       setTestRes((r) => ({ ...r, [g.id]: { ok: false, text: e.message } }));
     } finally { setTesting(''); }
@@ -215,34 +240,77 @@ export function SettingsView() {
         <div className="flex items-center gap-2 mb-1">
           <b className="text-[12.5px] font-medium text-ink">API Key</b>
           <span className="flex-1"></span>
-          <span className="text-[10px] text-ink3">只存本机浏览器，不上传服务器</span>
+          <span className="text-[10px] text-ink3">只存本机浏览器；生成时随请求发送，不落服务端</span>
         </div>
-        ${GROUPS.map((g) => html`
-          <div key=${g.id} className="py-2 border-b border-white/[.05] last:border-0">
-            <div className="flex items-center gap-2">
-              <b className="text-[12px] text-ink">${g.title}</b>
-              <span className="flex-1"></span>
-              <button onClick=${() => test(g)} disabled=${testing === g.id}
-                className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
-                           hover:bg-white/[.05] disabled:opacity-40"
-              >${testing === g.id ? '测试中…' : '测试连接'}</button>
-            </div>
-            ${testRes[g.id] && html`
-              <p className=${'mt-1 text-[11px] ' + (testRes[g.id].ok ? 'text-accent' : 'text-danger')}>
-                ${testRes[g.id].ok ? '✓ ' : '✗ '}${testRes[g.id].text}
-              </p>
-            `}
-            ${g.fields.map((f) => html`
-              <div key=${f[0]} className="mt-1.5 flex items-center gap-2">
-                <span className="w-[84px] shrink-0 text-[11px] text-ink3">${f[1]}</span>
-                <input type=${f[2]} value=${keys[f[0]] || ''}
-                  onInput=${(e) => saveKey({ [f[0]]: e.target.value.trim() })}
-                  autoComplete="off" spellCheck="false"
-                  className=${inputCls} />
+        ${GROUPS.map((g) => {
+          const open = !g.collapsible || !!openGroups[g.id];
+          return html`
+            <div key=${g.id} className="py-2 border-b border-white/[.05] last:border-0">
+              <div className="flex items-center gap-2">
+                <b className="text-[12px] text-ink">${g.title}</b>
+                <span className="flex-1"></span>
+                ${g.collapsible && html`
+                  <button onClick=${() => setOpenGroups((s) => ({ ...s, [g.id]: !open }))}
+                    className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">
+                    ${open ? '收起' : '展开'}
+                  </button>
+                `}
+                ${open && !g.noTest && html`
+                  <button onClick=${() => test(g)} disabled=${testing === g.id}
+                    className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
+                               hover:bg-white/[.05] disabled:opacity-40"
+                  >${testing === g.id ? '测试中…' : '测试连接'}</button>
+                `}
               </div>
-            `)}
-          </div>
-        `)}
+              ${open ? html`
+                ${testRes[g.id] && html`
+                  <p className=${'mt-1 text-[11px] ' + (testRes[g.id].ok ? 'text-accent' : 'text-danger')}>
+                    ${testRes[g.id].ok ? '✓ ' : '✗ '}${testRes[g.id].text}
+                  </p>
+                `}
+                ${g.fields.map((f) => html`
+                  <div key=${f[0]} className="mt-1.5 flex items-center gap-2">
+                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">${f[1]}</span>
+                    <div className="relative flex-1">
+                      <input type=${f[2] === 'password' && !showKeys[f[0]] ? 'password' : 'text'}
+                        value=${keys[f[0]] || ''}
+                        onInput=${(e) => saveKey({ [f[0]]: e.target.value.trim() })}
+                        autoComplete="off" spellCheck="false"
+                        className=${inputCls + ' pr-9'} />
+                      ${f[2] === 'password' && html`
+                        <button type="button"
+                          onClick=${() => setShowKeys((s) => ({ ...s, [f[0]]: !s[f[0]] }))}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center
+                                     rounded-[4px] text-[12px] text-ink3 hover:bg-white/[.08]"
+                          title=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
+                          aria-label=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
+                        >${showKeys[f[0]] ? '🙈' : '👁'}</button>
+                      `}
+                    </div>
+                  </div>
+                `)}
+                ${g.id === 'imagegen' && html`
+                  <p className="mt-1.5 text-[11px] text-ink3">
+                    服务端：${imgStatus
+                      ? (imgStatus.usable ? '已就绪' : (imgStatus.providerImplemented ? '未配置 Key' : '适配器未注册'))
+                      : '读取中…'}
+                    · 本机：${String(keys.imageKey || '').trim() ? '已填写' : '未填写'}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-[1.7] text-ink3">
+                    模型 / 尺寸留空即用默认 wan2.7-image / 1696*960。填在这里的 Key 会随出图请求发送，不落服务端；
+                    也可写 app/.env 的 IMAGE_GEN_API_KEY 作为服务端全局配置。
+                  </p>
+                  <p className="mt-1 text-[11px] leading-[1.7] text-warn">
+                    第三方 / 中转 Key 必须填它给的 Base URL；官方百炼 Key 填
+                    <code className="font-num"> https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1</code>。
+                  </p>
+                `}
+              ` : html`
+                <p className="mt-1 text-[11px] text-ink3">已折叠（点「展开」填写）</p>
+              `}
+            </div>
+          `;
+        })}
       </div>
 
       <div className=${sec}>

@@ -233,11 +233,10 @@ export function PhotosView() {
     <div className="px-6 py-5">
       <${Head} title="照片" sub="0 张" />
       <div className="rounded-[8px] border border-warn/30 bg-warn/[.06] px-4 py-3">
-        <p className="text-[12px] text-warn">照片库存依赖出图环节，目前出图厂商未接入。</p>
+        <p className="text-[12px] text-warn">出图后端已接入 wan2.7-image，但照片库的存储/审核接口还没做。</p>
         <p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
-          <code className="font-num">src/generators/imageGen.js</code> 只有
-          <code className="font-num">registerImageProvider()</code>，还没有任何适配器；
-          后端也没有照片库的存储接口。等厂商接入后，这里会显示静帧网格（画面 + 审核状态 + 花费）。
+          <code className="font-num">src/generators/imageProviders/dashscope.js</code> 已注册并可出单张图；
+          后端还没有照片库的存储与审核接口。等照片库落地后，这里会显示静帧网格（画面 + 审核状态 + 花费）。
         </p>
       </div>
     </div>

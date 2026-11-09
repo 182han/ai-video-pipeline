@@ -138,8 +138,8 @@
 
 | 优先级 | 功能 | 现状 | 阻塞点 |
 |---|---|---|---|
-| **P0** | 人工审核门 `awaiting_review` | 全仓 0 命中；设计已完成（`docs/spec/review-gate-design.md` 747 行，含 ≥20 条验收用例） | **需产品先定 D1–D8**（整组/逐张、驳回回退点、超时、哪些档位、旧任务升级、图是否公网可读、图片厂商、是否留痕）；且必须先做前置① |
-| **P0** | 图片生成真实现 | `src/generators/imageGen.js` 零引用，自述「配置预留层，未接入厂商」，调用即抛错 | 需定厂商（D7）；`IMAGE_GEN_*` 配置位已在 `.env.example` |
+| **P0** | 人工审核门 `awaiting_review` | 全仓 0 命中；设计已完成（`docs/spec/review-gate-design.md` 747 行，含 ≥20 条验收用例） | **需产品先定 D1–D6、D8**（整组/逐张、驳回回退点、超时、哪些档位、旧任务升级、图是否公网可读、是否留痕）；D7 图片厂商已定 wan2.7-image；且必须先做前置① |
+| **P0** | 图片生成（厂商已接入，流水线待接） | ✅ 适配器/接口/CLI/验收已完成：`src/generators/imageProviders/dashscope.js`（wan2.7-image）、`GET /api/image-gen/status`、`POST /api/images/generate`、`scripts/test-image-gen.js`、`scripts/verify-image-gen.js`（100/0）；设置页已有「图片生成 · wan2.7-image」入口（本机 Key 运行时生效 + 测试连接 + 眼睛显示切换；Seedance/可灵默认折叠）；`scripts/check-server-version.js` 可检测运行中的后端是否过期。向导第二步可「单张测试出图」。前端已单版本收口：`/` → 302 `/app`，`public/index.html` 仅归档。**尚未接进 pipeline**：没有 `image_generation` 阶段、任务字段、审核门 | 阶段与审核门按 `docs/spec/review-gate-design.md` §15 ③–⑦ 做；需产品定 D1–D6/D8 |
 | **P1** | 配乐文件上传 | `POST /api/bgm` 只收 JSON 元信息；无 multipart、无 multer | 无设计文档；需定存储落点 |
 | **P1** | 审核门前置①：状态机缺陷修复 | `paused` 重启永久卡死、暂停超时静默丢弃、多个历史状态不在回收白名单 | 设计文档 §4/§15 要求先做（否则新增状态必踩同坑） |
 | **P2** | 剪映「调节」UI 面板 | 后端与 LUT 已完成，`.env` 默认关 | `app/web/**` 属 UI 写权限，**需用户授权** |
@@ -233,3 +233,27 @@
 1. `scripts/spike-editor-export.js`：100/360 段导出 + 30 段预览，拿三个数字；G0 不达标先改方案。
 2. 导出链重做。
 3. F01/F02。
+
+---
+
+## E. 前端单版本收口（2026-11-09，进行中）
+
+> 用户已拍板：旧版 4 组能力全部补到新版；旧版 `public/index.html` 移到 `legacy/`，改 5 个测试后删除。
+> 新窗口按本清单顺序做，一项一 commit，先写断言再改代码。
+
+- [ ] **E1 模型/分辨率/档位接线（最高优先）**：新版创作页当前写死 `seedance/1080p/final`，
+  设置页保存的 `vs_web_config` 没被读取。验收：设置选万相 3.0 + 720p + quick 后，创作页确认页显示同样值，
+  `POST /api/tasks` 请求体 `model/resolution/preset` 与设置一致。
+- [ ] **E2 多提示词批量**：旧版一行一个场景；新版只有单条。验收：两行提示词 → `prompts` 长度 2 /
+  片段数 2；单行行为不变。
+- [ ] **E3 余额 + 费用预估**：旧版设置填余额，生成前估算并拦截；新版只有实际花费。
+  验收：余额 1 元、预计 3 元 → 提交被拦截；余额空 → 不拦截；费用表与旧版一致。
+- [ ] **E4 自定义执行环节 + 质检严格度**：旧版可勾选 8 步与质检项；新版只有预设档位。
+  验收：custom + 只勾 4 步 → 任务 `stages` 只含 4 步；严格度勾选透传到 API。
+- [ ] **E5 旧版归档**：`public/index.html` → `legacy/index.html`；改
+  `check-inline-js` / `verify-frontend-static` / `verify-recovery-fixes` / `verify-transition-ui` /
+  `verify-skill-prompt` 的路径；`_selftest.html` 去掉旧首页 §4；删除 `public/index.html`；
+  `/` 与 `/index.html` 都 302 `/app`。`public/login.html`、`public/assets` 保留。
+- [ ] **E6 启动与验证**：双击 `重启服务.bat`；`node scripts/check-server-version.js` exit 0；
+  `GET /` 302 `/app`；`GET /app` 200；`verify-image-gen` 100/0。
+- [ ] **E7 真实出图**：需要 WhaleTV 的 Base URL/接口协议（用户提供，不要猜）。

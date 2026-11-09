@@ -6,9 +6,12 @@
 按顺序读：AGENTS.md → PROGRESS.md → FEATURES.md
 
 ## 第 1 步：核对现状（用命令验证，不要相信文档）
-- git status            应当干净；不干净就报警，不要自作主张提交
+- git status            不干净时先读 PROGRESS.md 的「交接断点」；**不要自行提交别人的改动**
 - git log --oneline -5  对照 PROGRESS.md 里记的 commit hash
 - 跑测试命令            记录真实结果，不要假设是绿的
+
+> 2026-11-09 交接提示：工作区有另一个会话的 `web/src/components/assistant.js` / `assistantOrb.js` /
+> `web/verify/`，不属于本轮任务。只处理 FEATURES.md「E. 前端单版本收口」里的文件，禁止 `git add -A`。
 
 ## 第 2 步：复述（回答完就停，等人类确认）
 Q1 项目目标，一句话

@@ -1,11 +1,11 @@
 // ============================================================
 // 创作：六步向导（2026-10-31）
 // ------------------------------------------------------------
-// ①提示词与出图 → ②审核 → ③视频 → ④参数Ⅰ → ⑤参数Ⅱ → ⑥确认
+// ①提示词 → ②图片生成 → ③图片审核 → ④运镜 → ⑤时长与配乐 → ⑥确认
 // 现状约束（不装样子，界面直说）：
-//   · 出图厂商未接入（src/generators/imageGen.js 无 provider）→ 第②步只给说明
-//   · 审核门后端未实现（全仓库 awaiting_review 0 命中）→ 第③步只给说明
-//   · 因此这两步可跳过；提交走既有 POST /api/tasks（文生视频链路，能真跑）
+//   · 出图后端已接入 wan2.7-image（2026-11-08）→ 第②步可做「单张测试出图」
+//   · 但图片还没有接进任务/审核门（全仓库 awaiting_review 0 命中）→ 第③步只给说明
+//   · 因此审核门可跳过；提交走既有 POST /api/tasks（文生视频链路，能真跑）
 // ============================================================
 import { navigate } from '../router.js';
 import { promptBus } from '../store.js';
@@ -14,7 +14,7 @@ const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
 
-const STEPS = ['提示词与出图', '图片审核', '视频', '参数Ⅰ', '参数Ⅱ', '确认'];
+const STEPS = ['提示词', '图片生成', '图片审核', '运镜', '时长与配乐', '确认'];
 
 // 从 localStorage.vs_config 取运行时配置（与旧版同键，共用一份 Key）
 function collectRuntime(model) {
@@ -69,8 +69,19 @@ export function CreateWizard({ onChanged }) {
   const [optimizing, setOptimizing] = useState(false);
   const [optErr, setOptErr] = useState('');
   const [tracks, setTracks] = useState([]);
+  const [imgStatus, setImgStatus] = useState(null);
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgResult, setImgResult] = useState(null);
+  const [imgErr, setImgErr] = useState('');
 
   useEffect(() => promptBus.on((text) => setPrompt(text)), []);
+
+  useEffect(() => {
+    fetch('/api/image-gen/status', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j) setImgStatus(j); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/bgm', { credentials: 'same-origin' })
@@ -105,6 +116,38 @@ export function CreateWizard({ onChanged }) {
       setOptErr('优化失败：' + e.message + '（需在设置里配 LLM Key）');
     } finally {
       setOptimizing(false);
+    }
+  }
+
+  async function genTestImage() {
+    setImgErr('');
+    setImgResult(null);
+    if (!prompt.trim()) { setImgErr('先在第一步写提示词'); return; }
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { cfg = {}; }
+    setImgBusy(true);
+    try {
+      const r = await fetch('/api/images/generate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          apiKey: cfg.imageKey || '',
+          baseUrl: cfg.imageBaseUrl || '',
+          model: cfg.imageModel || '',
+          size: cfg.imageSize || (imgStatus && imgStatus.imageGen ? imgStatus.imageGen.size : undefined),
+          taskId: 'ui_img_' + Date.now(),
+          index: 0
+        })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setImgResult(j);
+    } catch (e) {
+      setImgErr(e.message || '出图失败');
+    } finally {
+      setImgBusy(false);
     }
   }
 
@@ -193,18 +236,63 @@ export function CreateWizard({ onChanged }) {
     }
 
     if (step === 1) {
+      const st = imgStatus;
+      let localImg = {};
+      try { localImg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { localImg = {}; }
+      const hasLocalImgKey = !!String(localImg.imageKey || '').trim();
+      const providerOk = !!(st && st.providerImplemented);
+      const ready = providerOk && ((st && st.usable) || hasLocalImgKey);
+      const keyLabel = st && st.usable
+        ? '服务端 Key 已配置'
+        : (hasLocalImgKey ? '本机 Key 已填写' : 'Key 未配置');
       return html`
-        <${Section} title="图片生成（待接入厂商）">
-          <div className="rounded-[6px] border border-warn/30 bg-warn/[.06] px-3 py-2.5">
-            <p className="text-[12px] text-warn">出图适配器还没注册，这一步暂时发不出去。</p>
-            <p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
-              <code className="font-num">src/generators/imageGen.js</code> 里只有
-              <code className="font-num">registerImageProvider()</code> 函数，没有任何一家厂商被注册。
-              选定厂商并配置 Key 后，这里会出现模型、尺寸、张数与报价。
-            </p>
-          </div>
+        <${Section} title="图片生成（wan2.7-image）">
+          ${!st && html`
+            <div className="rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5">
+              <p className="text-[12px] text-ink2">正在读取出图配置…</p>
+            </div>
+          `}
+          ${st && html`
+            <div className=${'rounded-[6px] border px-3 py-2.5 ' +
+              (ready ? 'border-accent/30 bg-accent/[.05]' : 'border-warn/30 bg-warn/[.06]')}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-num text-[12px] text-ink">${st.imageGen.provider} / ${st.imageGen.model}</span>
+                <span className=${'text-[11px] ' + (ready ? 'text-accent' : 'text-warn')}>
+                  ${ready ? '已就绪' : '未就绪'}
+                </span>
+                <span className="text-[11px] text-ink3">尺寸 ${st.imageGen.size}</span>
+                <span className="text-[11px] text-ink3">${keyLabel}</span>
+              </div>
+              ${!ready && html`<p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
+                ${providerOk
+                  ? (hasLocalImgKey ? '服务端未启用图片生成；请检查服务端适配器。' : (st.hint || '出图配置未就绪。'))
+                  : '服务端出图适配器未注册。'}
+              </p>`}
+              ${ready && html`<p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
+                后端已接入。这里只做「单张测试出图」，用来确认 Key 与画质；图片不会自动并入任务。
+              </p>`}
+            </div>
+          `}
+          ${ready && html`
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <button onClick=${genTestImage} disabled=${imgBusy}
+                className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px] disabled:opacity-40"
+              >${imgBusy ? '生成中…' : '生成 1 张测试图'}</button>
+              <span className="text-[11px] text-ink3">会真实调用厂商并计费（1 张）</span>
+            </div>
+          `}
+          ${imgErr && html`<p className="mt-2 text-[11px] text-danger">${imgErr}</p>`}
+          ${imgResult && html`
+            <div className="mt-3 rounded-[6px] border border-white/[.09] bg-s2 p-2.5">
+              <img src=${imgResult.url} alt="生成结果"
+                className="max-h-[260px] rounded-[4px] border border-white/[.08]" />
+              <p className="mt-1.5 text-[11px] text-ink3 font-num">
+                ${imgResult.width} × ${imgResult.height} · ${imgResult.model} · ${imgResult.url}
+              </p>
+            </div>
+          `}
           <div className="mt-3">
-            <${Info}>现在可以跳过这一步，直接走文生视频链路（提交时会按提示词直接生成片段）。</${Info}>
+            <${Info}>审核门（通过后才继续生成视频）仍未实现；现在可以跳过这一步，直接走文生视频链路。</${Info}>
           </div>
         </${Section}>
       `;

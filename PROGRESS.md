@@ -248,6 +248,53 @@
 - **未验证**：浏览器里的拖点/滑杆手感、真实 WebGL 同帧画面；本环境无浏览器。真实 30 分钟长片仍未测。
 - 注意：后端 `normalizeParams` 对 `curve` 只检查长度 3，不做点校验/钳制（hsl/wheel 有 clamp）；UI 已按 0..1 约束，但 API 直传非法曲线仍可能产生异常 LUT，后续可补后端校验（本轮未改后端）。
 
+### 图片生成接入 wan2.7-image（2026-11-08/09，准备阶段）
+
+- 需求：图片大模型定为阿里云百炼 `wan2.7-image`；用户稍后自己添加 Key。
+- 已完成（不需要 Key 的部分）：
+  - `src/generators/imageProviders/dashscope.js`：异步提交 → 轮询 `/tasks/{id}` → 下载 PNG → 落盘；校验 PNG/JPEG/WebP 文件头与宽高；失败显式抛错，不返回占位图；同名文件用 `_v2` 不覆盖。
+  - **2026-11-09 加固**：提交阶段对 429/5xx 重试（最多 3 次、指数退避、受总超时约束）；401/403/400 不重试；落盘改为「唯一临时文件 + `COPYFILE_EXCL` 抢占最终名」，并发同名出图不会互相覆盖。
+  - `src/generators/imageProviders/index.js` + `server.js` 启动注册 `dashscope`。
+  - `config.js` / `.env.example`：`IMAGE_GEN_PROVIDER=dashscope`、`IMAGE_GEN_MODEL=wan2.7-image`、16:9 1K 默认 `1696*960`；`IMAGE_GEN_API_KEY` 留空自动复用 `DASHSCOPE_API_KEY`。
+  - `GET /api/image-gen/status`：返回配置就绪度 + 是否可出图，不回传 Key。
+  - `POST /api/images/generate`：单张出图（真实计费，只有带 Key 且显式调用时才花钱）。
+  - `web/src/screens/create.js`：第二步从占位改为显示就绪度，并在就绪时提供「生成 1 张测试图」；`inventory.js` 照片页文案同步更新。
+  - `web/src/screens/settingsPage.js`：新增「设置 → 图片生成 · wan2.7-image」组（API Key / Base URL / 模型 / 尺寸）；填本机 Key 后创作页可直接测试，不用改 `.env`、不用重启。图片组有「测试连接」；Seedance 与可灵默认折叠；**所有密码字段（含图片 Key）都有 👁 显示/隐藏切换**。
+  - `GET /api/image-gen/status` 支持运行时覆盖；`POST /api/images/generate` 接受 `apiKey/baseUrl/model/size`，只用于本次请求，不落盘。
+  - `POST /api/test-api-key` 新增 `type=imagegen`：用不存在的 task 探测鉴权，不消耗生成额度；401/403 判 Key 无效，其他错误判鉴权通过。
+  - `GET /api/status` 增加 `serverInfo`（startedAt / serverMtime / pid）与 `imageGen` 版本探针（不含 Key）。
+  - `scripts/check-server-version.js`：比对「运行中 server.js 的 mtime」与磁盘文件；0=当前代码，1=旧代码/过期，2=未运行。实测旧 3001 返回 1、临时新服务 3819 返回 0。
+  - `web/src/app.js`：检测 `/api/status` 缺少 `imageGen` 时，在页面底部显示「服务端代码是旧版本，请重启」警告；设置页测试连接遇到「未知的测试类型」也会追加重启提示。
+  - `scripts/test-image-gen.js`：`--payload` 打印请求体；`--live` 真实出图；默认只看配置。
+  - `scripts/verify-image-gen.js`：本地 stub，100 条断言（成功链路、同步返回、同名/并发不覆盖、提交与下载 5xx 重试、401 不重试、200+code、FAILED、无 URL、HTML、超时、参数负向、运行时 Key、设置页接线、折叠与眼睛、版本探针、根路径重定向）。
+- 实测：
+  - `node scripts/verify-image-gen.js` → **100 通过 / 0 失败**。
+  - `node scripts/check-server-version.js`：旧 3001 → 退出 1（缺 serverInfo/imageGen）；临时新服务 3819 → 退出 0。
+  - 临时服务（`AUTH_ENABLED=false`）请求 `GET /api/image-gen/status` → `ready:false, missing:["IMAGE_GEN_API_KEY"], providerImplemented:true`。
+  - 同一临时服务 + 本地 stub（`IMAGE_GEN_BASE_URL` 指向 stub）POST `/api/images/generate` → 真实落盘 384×216 PNG（106,820 字节，magic `89504e47`）。
+  - **服务端无 Key、仅请求体带运行时 Key**：POST 返回 200，落盘 512×288 PNG（91,812 字节，magic `89504e47`）——对应「设置里填 Key」的路径。
+  - **设置「测试连接」**：注入 401 stub → `success:false` 且提示地域/业务空间；注入 404 stub（鉴权已通过）→ `success:true`，提示「只验证鉴权，是否开通 wan2.7-image 以实际出图为准」。
+- **待确认（2026-11-09）**：
+  - 3001 上可能还跑着旧进程（旧代码没有 `type=imagegen` 分支），会显示「未知的类型」；需完全退出旧服务再 `node server.js`，并用 `GET /api/status` 是否含 `imageGen` 字段确认新代码已加载。
+  - 用户的 Key 来自 WhaleTV（同一 Key 支持 wan2.7-image / wan3.0 / deepseek4.1flash），不是阿里官方 DashScope Key；需要 WhaleTV 给的 **Base URL** 和出图接口示例，才能判断是百炼业务空间（现有原生适配器可用）还是 OpenAI 兼容中转（需新增适配路径）。
+- **尚未做**（不要当成已完成）：
+  - `image_generation` 阶段尚未进 `pipelineStages` / `taskManager` / `pipeline`；向导第 2 步可单张测试出图，但审核门（第 3 步）仍是占位。
+  - 审核门 `awaiting_review`、任务级图片字段、审核 API 均未实现（设计见 `docs/spec/review-gate-design.md`）。
+  - 图生视频 `I2V_*` 仍为预留；`IMAGE_INPUT_CAPABILITY.dashscope` 仍为 `null`（未核实）。
+  - 前端「生成 1 张测试图」只做了 ESM 语法检查与静态接线断言；**未在真实浏览器验证**（本机 `dsh_browser` 报 Electron 不可用）。
+  - **真实厂商调用未验证**（本机无 Key）。用户加 Key 后先跑 `node scripts/test-image-gen.js`，再跑 `--live`。
+- 添加 Key 的两种方式：① 页面「设置 → 图片生成」填 Key（只存本机浏览器，随请求发送，不用重启）；② `app/.env` 写 `IMAGE_GEN_API_KEY=sk-...`（或 `DASHSCOPE_API_KEY=sk-...` 复用）后重启服务。页面填的优先。
+- **以后改后端（server.js / src/**）的固定动作**：重启 → 跑 `node scripts/check-server-version.js`（必须退出 0）→ 再刷新页面。前端 `web/**` 可热更新，后端不会。
+
+### 前端单版本收口（2026-11-09）
+
+- **唯一维护的前端**：`app/web/**`，挂在 `/app`。`/` 现在 302 到 `/app`；登录页默认也回 `/app`。
+- **旧版 `public/index.html` 仅归档**（295,955 字节，最后改动 10-27）：5 个验收脚本（frontend-static / skill-prompt / transition-ui / recovery-fixes / check-inline-js）与 `public/_selftest.html` 仍直接读它，**删了会破门禁**，所以本轮不删、也不再改。
+- 旧页面 `members.html` / `bgm-editor.html` / `clip-library.html` / `music-library.html` 等不再是入口；新 UI 对应 设置（含成员）/ 剪辑台 / 库存。
+- 桌面 `打开新版前端.bat` 只是启动器（不是前端副本），指向 `http://localhost:3001/app`；它读不到 `app\.env`，换端口会失效。**建议改成指向 `测试\打开新版前端.bat` 的快捷方式，只保留一份。**
+- `重启服务.bat` 已改为打开 `/app`，并在启动后自动跑 `node app\scripts\check-server-version.js`；它自提权，能结束上次由管理员启动的旧进程（这就是 DSH 杀不掉 PID 100696 的原因）。
+- 实测：临时新服务 `GET /` → `302 Location: /app`；`GET /app` → `200`；`check-server-version.js` → 退出 0。
+
 ## 基线快照
 
 | 项 | 值 |
@@ -477,3 +524,52 @@ docs/spec/re-jianying/adjust-api-contract.md。
    `adjust-api-contract.md` 已更新，但不会随 `app/` 提交，需另行备份。
 5. 4 项空间近似（锐化/清晰/颗粒/暗角）隐藏，未做对照；`fade` 也不在面板（未验证）。
 6. `web/verify/` 是另一会话留下的未跟踪截图目录，本任务未动、未提交。
+
+---
+
+## 交接断点（2026-11-09 18:20，窗口切换前）
+
+### 当前事实
+
+- **3001 当前未运行**：本会话启动的 `node server.js` 子进程在工具调用结束后被 DSH 回收。请人工双击
+  `C:\Users\14872\Desktop\测试\重启服务.bat`（UAC 同意），它会结束旧进程、启动新服务、打开 `/app`
+  并自动跑 `check-server-version.js`。
+- **代码未提交**；本轮改动尚未 commit。
+- **工作区有另一个会话的改动**：`web/src/components/assistant.js`（已修改）、`assistantOrb.js`（未跟踪）、
+  `web/verify/`（未跟踪截图）。**不要 `git add -A`**，不要覆盖/提交它们。
+- 刚跑过的证据：`node scripts/verify-image-gen.js` → **100 通过 / 0 失败**；
+  `node scripts/check-server-version.js` → **exit 2（服务未运行）**，符合当前事实。
+
+### 本轮已完成（代码已落盘，未提交）
+
+- `wan2.7-image` 适配器、运行时 Key/Base URL/模型/尺寸、设置页「测试连接」、眼睛显示、Seedance/可灵折叠。
+- `GET /api/status` 增加 `serverInfo` 与 `imageGen` 探针；`scripts/check-server-version.js`。
+- `GET /` → 302 `/app`；`web/src/app.js` 旧服务端底部警告；设置页「未知的类型」追加重启提示。
+- 文档：`AGENTS.md` 第 14 条（前后端版本错位）、单一前端规则；`PROGRESS/FEATURES/changelog` 已更新。
+
+### 断点五要素
+
+1. **任务目标 + 验收**：把旧版 4 组能力搬到新版，然后只保留一个可维护前端：
+   - 新版创作页读取 `vs_web_config` 的模型/分辨率/档位，并可在页面上选择；
+   - 多提示词批量（旧版「一行一个场景」）；
+   - 余额 + 生成前费用预估/超额拦截；
+   - 自定义执行环节 + 质检严格度；
+   - `public/index.html` 移到 `legacy/`，更新 5 个脚本 + `_selftest.html`，删除 `public/index.html`，
+     `/` 与 `/index.html` 都 302 到 `/app`。
+2. **已改文件**：本轮图片/单版本相关文件见 `git status`；**不要提交** `assistant.js` / `assistantOrb.js` / `web/verify/` / `data/logs/console-3001.log.err`。
+3. **测试状态**：`verify-image-gen.js` 100/0；`check-server-version.js` exit 2（服务未运行）；`verify-all.js` 本机 EPERM，不可用。
+4. **下一步第一个动作**：打开 `web/src/screens/create.js`，把 `useState` 里的
+   `model:'seedance' / resolution:'1080p' / preset:'final'` 改为从 `localStorage.vs_web_config` 初始化，
+   并在「确认」前增加模型/分辨率/档位三个控件；先补一条静态断言再改代码。
+5. **需要拍板**：无（用户已选「全部补 + 旧文件移 legacy」）；WhaleTV 的 Base URL/协议仍需用户提供，
+   不阻塞前面 5 项。
+
+### 建议顺序
+
+1. 修 `create.js` 的模型/分辨率/档位（最高优先，直接决定万相 Key 是否被用上）。
+2. 多提示词批量。
+3. 余额/费用预估。
+4. 自定义环节 + 质检严格度。
+5. 旧版 `index.html` 移 `legacy/`、改 5 个测试与 `_selftest.html`、删除 `public/index.html`。
+6. 启动服务，验证 `/` 302、`/app` 200、`check-server-version.js` exit 0。
+7. 需要 WhaleTV 的 Base URL 后再做真实出图。

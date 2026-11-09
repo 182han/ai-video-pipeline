@@ -40,6 +40,10 @@ const promptOptimizer = require('./src/promptOptimizer');
 const promptSkill = require('./src/promptSkill');
 const { resolveResume } = require('./src/pipelineStages');
 const { getAvailableModels } = require('./src/generators');
+// 注册出图厂商适配器（当前：dashscope / wan2.7-image）。
+// 必须在任何 getImageGenStatus()/generateImage 之前执行一次。
+require('./src/generators/imageProviders');
+const { getImageGenStatus, listImageProviders, ImageGenerator } = require('./src/generators/imageGen');
 const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
@@ -55,6 +59,14 @@ const library = require('./src/library');
 const app = express();
 const server = http.createServer(app);
 const PORT = config.SERVER.port || 3000;
+
+// 版本探针：记录本进程启动时 server.js 的 mtime 与启动时间。
+// 前端静态文件是「每次请求读磁盘」，后端模块是「启动时加载」——
+// 改完后端不重启就会出现「界面是新的、接口是旧的」。这两个值用于检测这种错位。
+const SERVER_STARTED_AT = new Date().toISOString();
+const SERVER_FILE_MTIME = (() => {
+  try { return fs.statSync(__filename).mtimeMs; } catch (e) { return null; }
+})();
 
 // 初始化 WebSocket
 // 第二个参数是「握手鉴权」：没有有效会话 cookie 就直接拒绝握手。
@@ -238,6 +250,11 @@ app.put('/api/users/:id/password', async (req, res) => {
   }
 });
 
+// ===== 旧版前端：已归档，/ 统一跳到新版 /app =====
+// 为什么保留 public/index.html：5 个验收脚本与 public/_selftest.html 直接读它，
+// 现在删会破门禁。它不再是入口，也不应再修改。
+app.get('/', (req, res) => res.redirect(302, '/app'));
+
 // 静态资源（登录页在 public/login.html，由这里下发）
 // 本项目没有构建步骤，改完 public/ 靠刷新生效。若浏览器缓存了旧 HTML/JS，
 // 会出现「服务端已是新代码、页面还是旧行为」的假象（实测踩过：按钮还是旧文案）。
@@ -251,7 +268,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 // ===== React 版（app/web），挂在 /app 下 =====
-// 迁移期两套并存：旧版仍在 /（public/index.html），新版在 /app，互不影响。
+// 唯一在维护的前端；旧版 public/index.html 仅归档（/ 已 302 到 /app，不在 / 提供）。
 // 没有构建步骤：vendor/ 是预先下载好的 React UMD 与 htm；样式由 tools/tailwind 的独立 CLI 生成。
 // 注意：/app 的 SPA 路由已在登录墙里按「页面」处理（不靠 .html 后缀判断）。
 app.use('/app', express.static(path.join(__dirname, 'web'), {
@@ -523,6 +540,83 @@ app.get('/api/models', (req, res) => {
   res.json(getAvailableModels());
 });
 
+// ==========================================
+// 图片生成（文生图，wan2.7-image）
+// ==========================================
+
+// 配置就绪度：只回传「有没有配 Key / 厂商是否已注册」，绝不回传 Key 本身。
+// 前端可在用户点「生成」之前用它提示，而不是等失败才告知。
+app.get('/api/image-gen/status', (req, res) => {
+  const status = getImageGenStatus();
+  res.json({
+    ...status,
+    providers: listImageProviders(),
+    hint: status.usable
+      ? `图片生成已就绪：${status.imageGen.provider} / ${status.imageGen.model}`
+      : (!status.imageGen.hasApiKey
+        ? '还没有图片生成 Key：在 app/.env 填 IMAGE_GEN_API_KEY（或复用 DASHSCOPE_API_KEY），重启服务后生效。'
+        : `图片生成配置不完整：${status.missing.join(', ') || '所选厂商的适配器未注册'}`)
+  });
+});
+
+// 生成一张静帧（分镜图）。一次一张，由调用方按片段循环。
+// 注意：这是真实计费接口，只有带 Key 且被显式调用时才会花钱。
+app.post('/api/images/generate', async (req, res) => {
+  const body = req.body || {};
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+  if (!prompt) return res.status(400).json({ error: 'prompt 不能为空' });
+  if (prompt.length > 8000) {
+    return res.status(400).json({ error: `prompt 过长（${prompt.length} 字，上限 8000）` });
+  }
+
+  // 运行时配置：页面「设置」里填的 Key/地址/模型只用于本次请求，不落盘。
+  const runtime = {};
+  if (typeof body.apiKey === 'string' && body.apiKey.trim()) runtime.IMAGE_GEN_API_KEY = body.apiKey.trim();
+  if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) runtime.IMAGE_GEN_BASE_URL = body.baseUrl.trim();
+  if (typeof body.model === 'string' && body.model.trim()) runtime.IMAGE_GEN_MODEL = body.model.trim();
+  if (typeof body.size === 'string' && body.size.trim()) runtime.IMAGE_GEN_SIZE = body.size.trim();
+
+  const status = getImageGenStatus(runtime);
+  if (!status.usable) {
+    return res.status(503).json({
+      error: '图片生成尚未就绪',
+      missing: status.missing,
+      providerImplemented: status.providerImplemented,
+      hint: status.imageGen.hasApiKey
+        ? `缺少: ${status.missing.join(', ') || '所选厂商的适配器未注册'}`
+        : '在「设置 → 图片生成」填 API Key（只存本机浏览器），或写 app/.env 的 IMAGE_GEN_API_KEY，然后重启服务。'
+    });
+  }
+
+  try {
+    const generator = new ImageGenerator({
+      provider: status.imageGen.provider,
+      model: status.imageGen.model,
+      ...runtime
+    });
+    const out = await generator.generateImage(prompt, {
+      taskId: body.taskId,
+      index: body.index,
+      size: body.size || status.imageGen.size,
+      negativePrompt: body.negativePrompt,
+      promptExtend: body.promptExtend,
+      watermark: body.watermark,
+      outDir: config.STORAGE.clipsDir
+    });
+    res.json({
+      ok: true,
+      ...out,
+      url: '/clips/' + path.basename(out.imagePath)
+    });
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    // 参数类错误返回 400；厂商/网络类错误返回 502（让调用方能区分「重试可能有用」）
+    const isValidation = /提示词|尺寸|n=1|taskId|index|为空/i.test(msg);
+    console.error('[image-gen] 生成失败:', msg);
+    res.status(isValidation ? 400 : 502).json({ error: '图片生成失败: ' + msg });
+  }
+});
+
 // 测试 API Key 是否有效
 app.post('/api/test-api-key', async (req, res) => {
   const { type, apiKey, baseUrl, model, accessKey, secretKey } = req.body;
@@ -755,6 +849,13 @@ app.post('/api/test-api-key', async (req, res) => {
       url = dsBaseUrl + '/tasks/invalid-task-check';
       method = 'GET';
       delete headers['Content-Type'];
+    } else if (type === 'imagegen') {
+      // 图片生成与 DashScope 视频同一个鉴权体系：查一个不存在的 task，
+      // 401/403 = Key/地址无效；其他错误（InvalidTask）说明鉴权已通过，不消耗额度。
+      const dsBaseUrl = (baseUrl || config.IMAGE_GEN_BASE_URL || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/+$/, '');
+      url = dsBaseUrl + '/tasks/invalid-task-check';
+      method = 'GET';
+      delete headers['Content-Type'];
     } else if (type === 'llm') {
       // LLM 用 models 列表测试，不消耗 token
       url = (baseUrl || 'https://api.openai.com/v1') + '/models';
@@ -773,6 +874,9 @@ app.post('/api/test-api-key', async (req, res) => {
     try { data = JSON.parse(text); } catch (e) {}
 
     if (response.ok) {
+      if (type === 'imagegen') {
+        return res.json({ success: true, message: 'Key / 地址可用（只验证鉴权，不消耗生成额度）' });
+      }
       res.json({ success: true, message: '连接成功，API Key 有效' });
     } else {
       // 非 401 错误说明 Key 是对的，只是参数或额度问题
@@ -782,6 +886,15 @@ app.post('/api/test-api-key', async (req, res) => {
       if (errorMsg.length > 200) errorMsg = errorMsg.substring(0, 200) + '...';
 
       if (status === 401 || status === 403) {
+        if (type === 'imagegen') {
+          return res.json({
+            success: false,
+            error: errorMsg
+              + '｜提示：Key 与地址必须同属一个地域 / 业务空间。'
+              + '业务空间专属 Key 的 Base URL 应填 https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1'
+              + '（华北2 北京与新加坡的 Key/地址不通用）。'
+          });
+        }
         // 401/403 是鉴权失败，Key 无效
         // LLM 场景最常见的原因是「Key 与地址不匹配」：地址留空会回落到 .env 的 OpenAI，
         // 于是 DeepSeek 的 Key 被发到 api.openai.com，必然 401。把实际请求地址带出来。
@@ -800,6 +913,13 @@ app.post('/api/test-api-key', async (req, res) => {
         // 业务空间 ID / Region 配错：请求没走到鉴权，配置本身就是错的
         res.json({ success: false, error: '接入点无效，请检查 WorkspaceId 与 Region：' + errorMsg });
       } else {
+        if (type === 'imagegen') {
+          return res.json({
+            success: true,
+            message: 'Key / 地址可用（只验证鉴权；是否已开通 wan2.7-image 以实际出图为准）',
+            warning: errorMsg
+          });
+        }
         // 其他错误说明 Key 有效（可能是额度不足、参数错误等）
         res.json({ 
           success: true, 
@@ -820,7 +940,20 @@ app.get('/api/status', (req, res) => {
     ffmpegAvailable: videoProcessor.hasFFmpeg,
     websocketEnabled: config.SERVER.websocket,
     models: getAvailableModels(),
-    llmConfigured: !!config.OPENAI_API_KEY
+    llmConfigured: !!config.OPENAI_API_KEY,
+    // 版本探针：用来区分「运行中的旧进程」与「磁盘上的新代码」。
+    serverInfo: {
+      startedAt: SERVER_STARTED_AT,
+      serverMtime: SERVER_FILE_MTIME,
+      pid: process.pid
+    },
+    // 版本/配置探针：用来确认「运行中的服务是否已加载图片生成新代码」。
+    // 只暴露布尔与模型名，不含 Key。
+    imageGen: {
+      provider: config.IMAGE_GEN_PROVIDER,
+      model: config.IMAGE_GEN_MODEL,
+      configured: !!config.IMAGE_GEN_API_KEY
+    }
   });
 });
 
@@ -1999,6 +2132,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log(`  服务已启动: http://localhost:${PORT}`);
   console.log(`  WebSocket: ws://localhost:${PORT}/ws`);
+  console.log(`  代码版本: server.js mtime=${SERVER_FILE_MTIME ? new Date(SERVER_FILE_MTIME).toISOString() : 'unknown'}`
+    + `，启动=${SERVER_STARTED_AT}，pid=${process.pid}`);
   console.log(`  登录墙:   ${config.AUTH.enabled ? '已启用（会话级 cookie，关浏览器需重登）' : '已关闭（AUTH_ENABLED=false）'}`);
   console.log('');
 

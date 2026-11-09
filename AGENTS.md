@@ -25,7 +25,7 @@
 | 端口 | **3001**（`config.SERVER.port` ← 环境变量 `PORT` > `.env` > 默认） | `config.js` SERVER 段；`.env` 实测 `PORT=3001` |
 | 包管理器 | **`npm` 不存在**；`pnpm` 在 `C:\Users\14872\bin\pnpm.cmd` 但**已损坏**（`pnpm --version` → `Cannot find module …pnpm.mjs`，exit 1） | 本机实测 |
 | 依赖 | 已安装（`node_modules` 91 个顶层包，含 express/ws/pg/@aws-sdk） | 本机实测 |
-| 前端 | **两套并存**：`/` → `public/index.html`；`/app` → `web/`（React 18 UMD + htm，16 个原生 ESM 模块） | `server.js:233,245,258` |
+| 前端 | **单版本**：`/app` → `web/`（React 18 UMD + htm，16 个原生 ESM 模块，唯一维护）；`/` → 302 `/app`；`public/index.html` 仅归档（验收脚本读取，不要再改） | `server.js` 登录墙 + `/` 重定向；`web/src/router.js` |
 | CSS | Tailwind 为**可选**离线步骤，二进制在 `.gitignore` 里（`tools/tailwind/*.exe`），需自备 | `.gitignore:52-59` |
 | 运行时自检 | 启动会打印 ffmpeg 可用性与路径；`auth.bootstrap()` 建首账号；`reconcileInterruptedTasks()` 回收僵尸任务 | `server.js` 尾部 |
 
@@ -109,6 +109,7 @@ Error: spawn EPERM
 6. **要读 stdout 的 ffmpeg 调用**走已封装的降级路径（`qualityChecker._exec()` / `videoProcessor._execText()`），不要裸 `execSync(cmd,{encoding:'utf8'})`。
 7. **提交一次只做一件事**；混合提交必须在提交信息里逐条列出实际内容。
 8. 改动前先 `git status --porcelain`；**有输出 = 有人的改动没落盘，不要覆盖**。
+9. **唯一前端是 `app/web/`（`/app`）**：`/` 已 302 到 `/app`；`public/index.html` 仅归档，5 个验收脚本与 `_selftest.html` 还会读它——**不要删、不要改**；旧页面（members/bgm-editor 等）也不再作为入口维护。
 
 ---
 
@@ -131,16 +132,17 @@ Error: spawn EPERM
 | 11 | 工作区可能被并发修改 | 2026-11-02 13:51–14:01 期间观察到另一会话实时改 `adjustChain.js` 并提交 `b17bbdd`/`1d3c693` | 动手前与提交前各查一次 `git status`；提交前确认没有别人的文件混入 |
 | 12 | `.env` 含真实 Key | 26 个变量名含各厂商 Key / 数据库连接串 | 不要 `cat .env`、不要把值贴进对话或日志 |
 | 13 | PowerShell 引号 | `node -e '...'` 里的单引号会被 PS 吃掉，导致语法错误 | 外层双引号、JS 内层单引号；复杂逻辑写成 `.js` 文件 |
+| 14 | **前后端版本错位** | 前端 `web/**` 是 Express 静态文件，刷新即生效；后端 `server.js` / `src/**` 是启动时加载，不重启仍是旧代码。症状：设置页已有图片生成入口，接口却报「未知的类型」 | 改完后端必须重启；跑 `node scripts/check-server-version.js`（0=当前，1=旧代码/过期，2=未运行）；`GET /api/status` 的 `serverInfo` / `imageGen` 是探针，前端检测到缺失会显示底部警告 |
 
 ### 4.2 文档记录、本次未独立复验（引用时请先复核）
 
 | # | 坑 | 来源 |
 |---|---|---|
-| 14 | `ffmpeg -c copy` 拼接遇损坏输入会静默只拼前几段、退出码仍为 0；判成功必须校验时长 | `src/videoProcessor.js` `_validateConcatDuration()` 存在；`docs/spec/changelog.md` |
-| 15 | 混合音轨（部分片段无音轨）时 `-c copy` 会只剩 video 流，音频被静默丢弃 | `docs/spec/changelog.md`「拼接对音轨差异的兼容」 |
-| 16 | `stageSet` 未列入的步骤是 `undefined`，判断必须 `=== true`（写成 `!== false` 会让 quick 跑满 8 步） | `docs/spec/changelog.md`；`src/pipeline.js` |
-| 17 | `audio_mix` 依赖 `transcoding`，不是 `concatenation` | `src/pipelineStages.js:43-52` 的 `STAGE_DEPS`（**已读码确认**） |
-| 18 | `lut3d` 接绝对路径会报 `Undefined constant`，只能 cwd + 相对文件名 | `PROGRESS.md` 试错记录；`b17bbdd` 实现 |
+| 15 | `ffmpeg -c copy` 拼接遇损坏输入会静默只拼前几段、退出码仍为 0；判成功必须校验时长 | `src/videoProcessor.js` `_validateConcatDuration()` 存在；`docs/spec/changelog.md` |
+| 16 | 混合音轨（部分片段无音轨）时 `-c copy` 会只剩 video 流，音频被静默丢弃 | `docs/spec/changelog.md`「拼接对音轨差异的兼容」 |
+| 17 | `stageSet` 未列入的步骤是 `undefined`，判断必须 `=== true`（写成 `!== false` 会让 quick 跑满 8 步） | `docs/spec/changelog.md`；`src/pipeline.js` |
+| 18 | `audio_mix` 依赖 `transcoding`，不是 `concatenation` | `src/pipelineStages.js:43-52` 的 `STAGE_DEPS`（**已读码确认**） |
+| 19 | `lut3d` 接绝对路径会报 `Undefined constant`，只能 cwd + 相对文件名 | `PROGRESS.md` 试错记录；`b17bbdd` 实现 |
 
 ---
 

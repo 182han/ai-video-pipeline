@@ -105,6 +105,12 @@ const SUITES = [
     desc: 'Mock 模式视觉质检语义'
   },
   {
+    name: 'image-gen',
+    script: 'verify-image-gen.js',
+    group: 'fast',
+    desc: '图片生成适配器（wan2.7-image：请求结构/轮询/落盘/负向，本地 stub 不花钱）'
+  },
+  {
     name: 'library',
     script: 'verify-library.js',
     group: 'real',
