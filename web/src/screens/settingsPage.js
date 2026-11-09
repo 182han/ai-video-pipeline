@@ -320,7 +320,7 @@ export function SettingsView() {
                     · 本机：${String(keys.imageKey || '').trim() ? '已填写' : '未填写'}
                   </p>
                   <p className="mt-1 text-[11px] leading-[1.7] text-ink3">
-                    模型 / 尺寸留空即用默认 wan2.7-image / 1696*960。填在这里的 Key 会随出图请求发送，不落服务端；
+                    模型 / 尺寸留空即用默认 wan2.7-image / 1696x960（16:9）。填在这里的 Key 会随出图请求发送，不落服务端；
                     也可写 app/.env 的 IMAGE_GEN_API_KEY 作为服务端全局配置。
                   </p>
                   <p className="mt-1 text-[11px] leading-[1.7] text-warn">

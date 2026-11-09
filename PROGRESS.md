@@ -391,6 +391,18 @@
   （现有 LLM 组即 OpenAI 兼容，填 `https://agglm.whaletv.com/v1` + 模型名即可，未实测）；
   质检所需**视觉模型** Whaletv 目前不提供（三个模型都不能看图）。
 
+### 默认出图尺寸改为 16:9（2026-11-09）
+
+- 原因：`1024x1024` 是方形，而产品成片是 **16:9 电视屏保**；方图当素材/首帧会黑边或裁切。
+  实测（用户 Key，WhaleTV 中转）：`1696x960` **可出图**，产物 `1696x960`、2,769,524 字节。
+- 改动：`config.js` 的 `IMAGE_GEN_SIZE` 默认 `1696*960` → **`1696x960`**（`.env.example` 同步）；
+  百炼原生适配器会自动归一化为 `宽*高`，OpenAI 兼容适配器直接吃 `x`，两套都能用；
+  设置页提示文案同步。
+- 断言：`verify-image-gen-compat.js` 新增 3 条（config 默认 = 1696x960 / 适配器解析 = 1696x960 / 不再回落到方形）→ **25/0**；
+  回归 `verify-image-gen` 100/0、`verify-create-config` 28/0。
+- **注意**：`scripts/check-server-version.js` 只比对 `server.js` 的 mtime，**改 `config.js` / `src/**` 它不会报旧**；
+  这类改动同样必须重启（本次因 `server.js` 也有改动，所以重启检测仍有效）。
+
 ## 基线快照
 
 | 项 | 值 |

@@ -177,6 +177,13 @@ function startStub() {
     const st2 = getImageGenStatus({ IMAGE_GEN_PROVIDER: 'no-such', IMAGE_GEN_API_KEY: 'k', IMAGE_GEN_BASE_URL: BASE, IMAGE_GEN_MODEL: 'm' });
     check(st2.usable === false && st2.providerImplemented === false, '未注册厂商 → usable=false');
 
+    // ---------- 默认尺寸：16:9，不能是方形 ----------
+    const cfgDefault = require(path.join(ROOT, 'config.js')).IMAGE_GEN_SIZE;
+    check(cfgDefault === '1696x960', 'config 默认 IMAGE_GEN_SIZE = 1696x960（16:9）', cfgDefault);
+    const def = adapter.__test__.resolveSettings({ IMAGE_GEN_API_KEY: 'k', IMAGE_GEN_BASE_URL: BASE });
+    check(def.size === '1696x960', '不传尺寸时适配器解析为 1696x960', def.size);
+    check(!/^1024x1024$/.test(def.size), '默认不再回落到方形 1024x1024');
+
     // ---------- 静态：服务端探针按协议区分 + HTML 200 不再判成功 ----------
     const serverSrc = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
     check(/probeProvider === 'openai-images' \? '\/models'/.test(serverSrc), '测试连接：openai-images 探 /models');

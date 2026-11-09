@@ -186,9 +186,10 @@ module.exports = {
   // 留空 → 回退到 DASHSCOPE_BASE_URL（若它也空，则用上面的旧通用入口）
   IMAGE_GEN_BASE_URL: env('IMAGE_GEN_BASE_URL', env('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1')),
   IMAGE_GEN_MODEL: env('IMAGE_GEN_MODEL', 'wan2.7-image'),
-  // 16:9 / 1K。wan2.7-image 支持 1K、2K；2K 16:9 写 2688*1536。
-  // 也接受 1K / 2K 预设（预设的实际宽高由厂商决定，建议显式写宽*高）。
-  IMAGE_GEN_SIZE: env('IMAGE_GEN_SIZE', '1696*960'),
+  // 16:9 / 1K（产品成片是 16:9 电视屏保，别用方形）。默认写 x 分隔：
+  //   百炼原生适配器会自动归一化为「宽*高」；OpenAI 兼容适配器直接用 x。
+  // 2K 16:9 写 2688x1536。也接受 1K / 2K 预设（预设的实际宽高由厂商决定，建议显式写宽高）。
+  IMAGE_GEN_SIZE: env('IMAGE_GEN_SIZE', '1696x960'),
   // 单张图的「提交 + 轮询 + 下载」总超时（毫秒）。2K 图通常比 1K 慢，留足余量。
   IMAGE_GEN_TIMEOUT_MS: parseInt(env('IMAGE_GEN_TIMEOUT_MS', '300000'), 10),
   // 轮询间隔（毫秒）。太小会打爆接口限流，太大拖慢出图。
