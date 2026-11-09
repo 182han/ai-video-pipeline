@@ -34,6 +34,10 @@ function collectRuntime(model) {
   if (model === 'kling') {
     return { ...base, klingAccessKey: cfg.klingAk || '', klingSecretKey: cfg.klingSk || '' };
   }
+  if (model === 'openai-video') {
+    // OpenAI 兼容视频中转（WhaleTV / New API）：POST /videos → GET /videos/{id}/content
+    return { ...base, apiKey: cfg.whaletvKey || '', baseUrl: cfg.whaletvBaseUrl || '', modelId: cfg.whaletvVideoModel || 'wan3.0-video' };
+  }
   return base;
 }
 
@@ -462,6 +466,7 @@ export function CreateWizard({ onChanged }) {
                 <option value="seedance">Seedance 2.5</option>
                 <option value="kling">可灵 Kling 3.0</option>
                 <option value="dashscope">万相 3.0（DashScope）</option>
+                <option value="openai-video">OpenAI 兼容视频（WhaleTV / 中转）</option>
               </select>
               <span className="text-[12px] text-ink2 w-[54px]">分辨率</span>
               <select value=${p.resolution} onChange=${(e) => set('resolution', e.target.value)}

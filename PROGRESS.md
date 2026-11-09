@@ -403,6 +403,33 @@
 - **注意**：`scripts/check-server-version.js` 只比对 `server.js` 的 mtime，**改 `config.js` / `src/**` 它不会报旧**；
   这类改动同样必须重启（本次因 `server.js` 也有改动，所以重启检测仍有效）。
 
+### OpenAI 兼容视频适配器（2026-11-09，协议已实测；真机下载验证中）
+
+- **协议实测**（WhaleTV 中转，model=`wan3.0-video`，Key 仅授权该模型）：
+  - `POST {base}/videos {model,prompt,seconds}` → `200 {"id":"task_…","object":"video","status":"queued","progress":0}`
+  - `GET {base}/videos/{id}` → `{"status":"queued|in_progress|completed","progress":N}`；
+    **completed 也**不给视频 URL**。
+  - `GET {base}/videos/{id}/content`（**要 Bearer**）→ `200 video/mp4`，实测 19,611,822 字节
+    （`ftypisom`），支持 `Range`。**结论：内容必须由适配器自己带着 Key 下载**，pipeline 原来的裸 `fetch(url)` 会 401。
+  - 其它路径：`/v1/videos`（GET）404、`/v1/video/generations` 404、`/v1/videos/generations` 404（POST），
+    所以 **正确入口是 `/v1/videos`**。
+  - 下载很慢：1MB 分块单次 25–40s，19.6MB 约 8–10 分钟 → 适配器改为**流式写盘**、不设短超时。
+- **新增**：`src/generators/openaiVideo.js`（id `openai-video`）：
+  `generate()`（POST /videos，只发实测被接受的 model/prompt/seconds，分辨率/画幅未验证故不传）、
+  `getStatus()`（兼容 completed 给 URL 与不给 URL 两种实现）、`downloadVideo()`（Bearer + 流式 + MP4 头校验，
+  下到 HTML/JSON 一律拒收并删除半成品）。
+- **接线**：`src/generators/index.js` 注册 `openai-video` + `getAvailableModels()` 条目；
+  `src/pipeline.js` 的下载分支改为「适配器有 `downloadVideo` 就优先用它，否则才裸 fetch URL」；
+  `server.js` 的 `/api/test-api-key` 新增 `type=openai-video`（`GET {base}/models` 验鉴权，免费）；
+  前端：设置页新增「OpenAI 兼容视频（WhaleTV / 中转）」组（Key / Base URL / 模型），
+  创作页模型下拉新增该选项，提交时带 `apiKey/baseUrl/modelId`。
+- **验收**：`scripts/verify-openai-video.js`（20 项，本地 stub + 静态接线）→ **20/0**，已注册 fast 组。
+- **事故记录（我的责任）**：探测视频接口时本想用「空请求体」拿 400 校验错误（免费），但中转对
+  `model+prompt` 立即接受，**误创建 4 个视频任务**（`task_zoM9…`/`task_dIqr…`/`task_MBxa…`/`task_HJnp…`，
+  均已完成，会计费）；无取消接口（`DELETE /v1/videos/{id}` → 404）。已停止此类探测，后续只用 GET。
+- **未验证**：视频分辨率/画幅参数是否被中转接受（未发送）；真实下载+ffprobe 正在后台跑（见下）；
+  `wan3.0-video` 的实际时长/分辨率是否符合预期。
+
 ## 基线快照
 
 | 项 | 值 |

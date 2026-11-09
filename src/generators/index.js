@@ -9,6 +9,7 @@ const KlingGenerator = require('./kling');
 const AgnesGenerator = require('./agnes');
 const SiliconFlowGenerator = require('./siliconflow');
 const DashScopeGenerator = require('./dashscope');
+const OpenAICompatibleVideoGenerator = require('./openaiVideo');
 
 const generators = {
   mock: (cfg) => new MockGenerator(cfg),
@@ -41,6 +42,13 @@ const generators = {
     baseUrl: config.DASHSCOPE_BASE_URL,
     modelId: config.DASHSCOPE_MODEL_ID,
     ...cfg
+  }),
+  // OpenAI 兼容视频中转（WhaleTV / New API 等）：POST /videos → GET /videos/{id} → GET /videos/{id}/content
+  'openai-video': (cfg) => new OpenAICompatibleVideoGenerator({
+    apiKey: config.OPENAI_VIDEO_API_KEY,
+    baseUrl: config.OPENAI_VIDEO_BASE_URL,
+    modelId: config.OPENAI_VIDEO_MODEL_ID,
+    ...cfg
   })
 };
 
@@ -56,7 +64,8 @@ function getAvailableModels() {
     { id: 'agnes', name: 'Agnes (Pavo) 2.5', maxDuration: 12, resolutions: ['720P', '1080P', '2K'], available: !!config.AGNES_API_KEY, supportsImageInput: null },
     { id: 'seedance', name: 'Seedance 2.5 (字节跳动)', maxDuration: 30, resolutions: ['480p', '720p'], available: !!config.SEEDANCE_API_KEY, supportsImageInput: null },
     { id: 'kling', name: '可灵 Kling 3.0 (快手)', maxDuration: 15, resolutions: ['720p', '1080p', '4K'], available: !!(config.KLING_ACCESS_KEY && config.KLING_SECRET_KEY), supportsImageInput: null },
-    { id: 'dashscope', name: 'Wan 3.0 (阿里 DashScope)', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: !!config.DASHSCOPE_API_KEY, supportsImageInput: null }
+    { id: 'dashscope', name: 'Wan 3.0 (阿里 DashScope)', maxDuration: 30, resolutions: ['480p', '720p', '1080p'], available: !!config.DASHSCOPE_API_KEY, supportsImageInput: null },
+    { id: 'openai-video', name: 'OpenAI 兼容视频（WhaleTV / 中转）', maxDuration: 30, resolutions: ['720p', '1080p'], available: !!config.OPENAI_VIDEO_API_KEY, supportsImageInput: null }
   ];
 }
 

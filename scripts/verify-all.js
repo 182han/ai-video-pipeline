@@ -51,6 +51,12 @@ const SUITES = [
     desc: 'OpenAI 兼容出图适配器（openai-images：url/b64/包装 + 4 类负向，本地 stub）'
   },
   {
+    name: 'openai-video',
+    script: 'verify-openai-video.js',
+    group: 'fast',
+    desc: 'OpenAI 兼容视频适配器（openai-video：提交/轮询//content 下载 + 负向，本地 stub）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',

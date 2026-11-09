@@ -895,6 +895,18 @@ app.post('/api/test-api-key', async (req, res) => {
       url = dsBaseUrlUsed + (probeProvider === 'openai-images' ? '/models' : '/tasks/invalid-task-check');
       method = 'GET';
       delete headers['Content-Type'];
+    } else if (type === 'openai-video') {
+      // OpenAI 兼容视频中转（WhaleTV / New API）：用 GET {base}/models 验鉴权（免费、不生成视频）
+      const fromRequest = String(baseUrl || '').trim();
+      dsBaseUrlUsed = (fromRequest || config.OPENAI_VIDEO_BASE_URL || '').replace(/\/+$/, '');
+      if (!dsBaseUrlUsed) {
+        return res.json({ success: false, error: '请先填写 Base URL（例如 https://agglm.whaletv.com/v1）' });
+      }
+      baseUrlSource = fromRequest ? 'request（页面 Base URL）' : 'env（OPENAI_VIDEO_BASE_URL）';
+      probeProvider = 'openai-video';
+      url = dsBaseUrlUsed + '/models';
+      method = 'GET';
+      delete headers['Content-Type'];
     } else if (type === 'llm') {
       // LLM 用 models 列表测试，不消耗 token
       url = (baseUrl || 'https://api.openai.com/v1') + '/models';
@@ -914,7 +926,7 @@ app.post('/api/test-api-key', async (req, res) => {
 
     // 200 但不是 JSON：多半把「网页地址」填成了 Base URL（单页应用对任何路径都回 HTML 200）。
     // 以前这里会直接判 success，等于告诉用户「地址可用」——必须显式失败。
-    if (response.ok && type === 'imagegen' && (!data || Object.keys(data).length === 0)) {
+    if (response.ok && (type === 'imagegen' || type === 'openai-video') && (!data || Object.keys(data).length === 0)) {
       const head = String(text || '').slice(0, 80).replace(/\s+/g, ' ');
       return res.json({
         success: false,
@@ -926,7 +938,7 @@ app.post('/api/test-api-key', async (req, res) => {
     }
 
     if (response.ok) {
-      if (type === 'imagegen') {
+      if (type === 'imagegen' || type === 'openai-video') {
         const models = Array.isArray(data && data.data) ? data.data.map((m) => m && m.id).filter(Boolean) : [];
         return res.json({
           success: true,

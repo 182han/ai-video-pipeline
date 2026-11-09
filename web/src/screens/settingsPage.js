@@ -30,6 +30,15 @@ const GROUPS = [
   { id: 'kling', title: '可灵 Kling 3.0', collapsible: true, fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
   { id: 'dashscope', title: '万相 3.0（DashScope）', fields: [['dashScopeKey', 'API Key', 'password'], ['dashScopeRegion', '区域', 'text'], ['dashScopeWorkspaceId', 'WorkspaceId', 'text']] },
   {
+    id: 'whaletv',
+    title: 'OpenAI 兼容视频（WhaleTV / 中转）',
+    fields: [
+      ['whaletvKey', 'API Key', 'password'],
+      ['whaletvBaseUrl', 'Base URL', 'text'],
+      ['whaletvVideoModel', '模型', 'text']
+    ]
+  },
+  {
     id: 'imagegen',
     title: '图片生成 · wan2.7-image',
     fields: [
@@ -94,6 +103,7 @@ export function SettingsView() {
     if (g.id === 'seedance') { body.apiKey = keys.seedanceKey || ''; body.baseUrl = keys.seedanceBaseUrl || ''; body.model = keys.seedanceModel || ''; }
     if (g.id === 'kling') { body.accessKey = keys.klingAk || ''; body.secretKey = keys.klingSk || ''; }
     if (g.id === 'dashscope') { body.apiKey = keys.dashScopeKey || ''; }
+    if (g.id === 'whaletv') { body.type = 'openai-video'; body.apiKey = keys.whaletvKey || ''; body.baseUrl = keys.whaletvBaseUrl || ''; }
     if (g.id === 'imagegen') { body.apiKey = keys.imageKey || ''; body.baseUrl = keys.imageBaseUrl || ''; body.provider = keys.imageProvider || 'dashscope'; }
     if (g.id === 'llm') { body.apiKey = keys.llmKey || ''; body.baseUrl = keys.llmUrl || ''; body.model = keys.llmModel || ''; }
     if (g.id === 'multimodal') { body.apiKey = keys.multimodalKey || ''; body.baseUrl = keys.multimodalUrl || ''; body.model = keys.multimodalModel || ''; }

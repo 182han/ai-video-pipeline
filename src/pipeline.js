@@ -2068,12 +2068,19 @@ class Pipeline {
 
         let videoPath = result.videoUrl;
 
-        if (videoPath && (videoPath.startsWith('http://') || videoPath.startsWith('https://'))) {
+        // 两种取片方式：
+        //   1) 适配器给了可直接下载的 URL（百炼/可灵等）→ 裸 fetch 下载
+        //   2) 适配器自带 downloadVideo（WhaleTV 等中转：completed 不给 URL，内容要带 Bearer 拉 /videos/{id}/content）
+        const hasUrlFn = videoPath && (videoPath.startsWith('http://') || videoPath.startsWith('https://'));
+        const hasOwnDownload = typeof generator.downloadVideo === 'function';
+        if (hasUrlFn || hasOwnDownload) {
           // 每次下载用不覆盖的新文件名：旧名会让第 2 次尝试覆盖第 1 次的付费产物。
           const localPath = this._nextClipPath(taskId, index);
           console.log(`[${taskId}] 片段 ${index + 1} 下载中...`);
           try {
-            const downloadResult = await this._downloadVideo(videoPath, localPath);
+            const downloadResult = hasOwnDownload
+              ? await generator.downloadVideo(genTaskId, localPath)
+              : await this._downloadVideo(videoPath, localPath);
             if (downloadResult) {
               videoPath = localPath;
             } else {
@@ -2082,6 +2089,9 @@ class Pipeline {
           } catch (e) {
             throw new Error('下载失败: ' + e.message);
           }
+        }
+        if (!videoPath) {
+          throw new Error('生成完成但既没有视频地址，也没有可用的下载方法');
         }
 
         taskManager.updateClip(taskId, index, { videoPath });

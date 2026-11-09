@@ -166,6 +166,13 @@ module.exports = {
   DASHSCOPE_BASE_URL: env('DASHSCOPE_BASE_URL'),
   DASHSCOPE_MODEL_ID: env('DASHSCOPE_MODEL_ID', 'wan3.0-video'),
 
+  // ===== OpenAI 兼容视频（WhaleTV / New API 等中转、Sora 风格接口）=====
+  // 实测（2026-11-09）：POST {baseUrl}/videos → GET /videos/{id} → GET /videos/{id}/content（要 Bearer，video/mp4）
+  // baseUrl 形如 https://agglm.whaletv.com/v1
+  OPENAI_VIDEO_API_KEY: env('OPENAI_VIDEO_API_KEY', env('WHALETV_API_KEY')),
+  OPENAI_VIDEO_BASE_URL: env('OPENAI_VIDEO_BASE_URL'),
+  OPENAI_VIDEO_MODEL_ID: env('OPENAI_VIDEO_MODEL_ID', 'wan3.0-video'),
+
   // ===== 图片生成 / 图生视频（「先图后视频」工作流）=====
   // 状态（2026-11-08）：**已接入阿里云百炼 wan2.7-image**（文生图）。
   //   适配器：src/generators/imageProviders/dashscope.js
