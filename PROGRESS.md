@@ -338,6 +338,28 @@
 - **已知取舍**：`verify-frontend-static`（43 项）等断言随被测对象一起作废；新版前端由
   `verify-create-config` / 编辑器套件（shell/media/timeline/preview…）覆盖，不再有「旧 DOM id 校验」这一层。
 
+### Key 粘贴污染防护 + 显示/隐藏按钮修复（2026-11-09）
+
+- **事故**：把页面上的提示文案「✗ Invalid API-key provided.｜提示…」整行粘进「设置 → 图片生成 → API Key」，
+  Node 的 fetch 在构造 `Authorization: Bearer …` 头时抛
+  `Cannot convert argument to a ByteString because the character at index 7 has a value of 10007`
+  （10007 = 0x2717 = `✗`；`Bearer ` 正好 7 个字符，所以 index 7 = Key 第一个字符）。
+  服务端原来把这个异常包成「网络错误」，用户看不出是“键里混进了文字”。
+- **后端**（`server.js`，`/api/test-api-key`）：
+  1. 在第一次 `fetch` 之前校验 `API Key / Base URL / 模型名` 是否含非 ASCII 字符，命中直接返回
+     「XX 里含非 ASCII 字符「✗」（U+2717）……请只填纯英文数字」+ `nonAscii: true`；
+  2. imagegen 的 401/403 响应回显 `urlUsed` 与 `baseUrlSource`
+     （`request（页面 Base URL）` / `default（旧通用入口，业务空间 Key 在这里必 401）` / `env（…）`），
+     并把「本次实际请求：…」并进错误文案——以后一眼能看出是不是“地址留空回落到通用入口”。
+- **前端**（`web/src/screens/settingsPage.js`）：
+  1. 显示/隐藏按钮改为**内联样式定位 + 文字「显示/隐藏」**，不再依赖 `👁/🙈` emoji，
+     也不依赖编译后 CSS 里缺失的 `right-1 / w-6 / pr-9 / top-1/2 / -translate-y-1/2`（这次踩到的坑）；
+  2. Key 输入框用内联 `paddingRight` 给按钮留位；字段里出现非 ASCII 时**即时红字提示**「多半是粘贴了提示文案」。
+- **新验收**：`scripts/verify-key-guard.js`（18 项静态，先红 12/6 → 改完 18/0），注册进 `verify-all.js` fast 组。
+- **回归**：`verify-image-gen` 100/0、`verify-create-config` 28/0 未变。
+- **待人工一步**：重启服务（`server.js` 改了）→ `check-server-version.js` exit 0 →
+  设置页重新粘 Key → 「测试连接」；若仍 401，界面现在会直接显示**实际请求地址与来源**。
+
 ## 基线快照
 
 | 项 | 值 |

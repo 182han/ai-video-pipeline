@@ -633,6 +633,24 @@ app.post('/api/test-api-key', async (req, res) => {
     return res.json({ success: false, error: '请输入 API Key' });
   }
 
+  // HTTP 头只能是 ASCII：把页面上的提示文案（如「✗ Invalid API-key…」）粘进 Key 时，
+  // Node 的 fetch 会抛「Cannot convert argument to a ByteString … index 7 … 10007」，
+  // 原来又被包成「网络错误」，用户完全看不懂。这里提前给出人话原因。
+  const nonAscii = (v) => typeof v === 'string' && /[^\x20-\x7E]/.test(v);
+  for (const [label, value] of [['API Key', apiKey], ['Base URL', baseUrl], ['模型名', model]]) {
+    if (nonAscii(value)) {
+      const bad = [...value].find((ch) => /[^\x20-\x7E]/.test(ch));
+      const cp = bad.codePointAt(0).toString(16).toUpperCase();
+      return res.json({
+        success: false,
+        error: `${label} 里含非 ASCII 字符「${bad}」（U+${cp}），`
+          + '多半是粘贴了页面上的提示文案或报错信息。请只填纯英文数字（Key 一般以 sk- 开头），'
+          + '不要把「✗ …」「网络错误…」这类文字粘进来。',
+        nonAscii: true
+      });
+    }
+  }
+
   try {
     // ===== 多模态（NSFW 检测 / 视觉质检）专用测试 =====
     // 需要两步验证：① /models 确认 key 有效 ② 真发一张图确认「能看图」。
@@ -791,6 +809,8 @@ app.post('/api/test-api-key', async (req, res) => {
     let url = '';
     let method = 'POST';
     let body = null;
+    let dsBaseUrlUsed = '';
+    let baseUrlSource = '';
     let headers = {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
@@ -860,8 +880,15 @@ app.post('/api/test-api-key', async (req, res) => {
     } else if (type === 'imagegen') {
       // 图片生成与 DashScope 视频同一个鉴权体系：查一个不存在的 task，
       // 401/403 = Key/地址无效；其他错误（InvalidTask）说明鉴权已通过，不消耗额度。
-      const dsBaseUrl = (baseUrl || config.IMAGE_GEN_BASE_URL || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/+$/, '');
-      url = dsBaseUrl + '/tasks/invalid-task-check';
+      // 同时记下实际用的地址与来源：401 时回给前端，才能区分「地址留空回落通用入口」与「填了别的地址」。
+      const fromRequest = String(baseUrl || '').trim();
+      dsBaseUrlUsed = (fromRequest || config.IMAGE_GEN_BASE_URL || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/+$/, '');
+      baseUrlSource = fromRequest
+        ? 'request（页面 Base URL）'
+        : (/dashscope\.aliyuncs\.com\/api\/v1\/?$/.test(dsBaseUrlUsed)
+          ? 'default（旧通用入口，业务空间 Key 在这里必 401）'
+          : 'env（IMAGE_GEN_BASE_URL / DASHSCOPE_BASE_URL）');
+      url = dsBaseUrlUsed + '/tasks/invalid-task-check';
       method = 'GET';
       delete headers['Content-Type'];
     } else if (type === 'llm') {
@@ -901,6 +928,9 @@ app.post('/api/test-api-key', async (req, res) => {
               + '｜提示：Key 与地址必须同属一个地域 / 业务空间。'
               + '业务空间专属 Key 的 Base URL 应填 https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1'
               + '（华北2 北京与新加坡的 Key/地址不通用）。'
+              + '本次实际请求：' + dsBaseUrlUsed + '（来源：' + baseUrlSource + '）',
+            urlUsed: dsBaseUrlUsed,
+            baseUrlSource
           });
         }
         // 401/403 是鉴权失败，Key 无效

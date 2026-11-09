@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **55**（2026-11-09 实测；删旧页面时一并删了 `verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `verify-editor-dom`） |
-| 门禁注册 | **25**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
-| 未注册 | **30**（55 − 25；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
+| `scripts/verify-*.js` 实有 | **56**（2026-11-09 实测；删旧页面时一并删了 `verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `verify-editor-dom`，并新增 `verify-create-config` / `verify-key-guard`） |
+| 门禁注册 | **26**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **30**（56 − 26；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
 
 ### 2.4 本机限制（重要）
 

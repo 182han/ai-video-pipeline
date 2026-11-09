@@ -39,6 +39,12 @@ const SUITES = [
     desc: 'E1 创作页生成参数接线（读 vs_web_config：模型/分辨率/档位 + 请求体语义）'
   },
   {
+    name: 'key-guard',
+    script: 'verify-key-guard.js',
+    group: 'fast',
+    desc: 'Key 粘贴污染防护（非 ASCII 校验/回显实际请求地址/显示隐藏按钮不依赖 emoji）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',

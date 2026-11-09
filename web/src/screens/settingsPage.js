@@ -276,15 +276,29 @@ export function SettingsView() {
                         value=${keys[f[0]] || ''}
                         onInput=${(e) => saveKey({ [f[0]]: e.target.value.trim() })}
                         autoComplete="off" spellCheck="false"
-                        className=${inputCls + ' pr-9'} />
+                        style=${{ paddingRight: f[2] === 'password' ? '56px' : undefined }}
+                        className=${inputCls} />
                       ${f[2] === 'password' && html`
                         <button type="button"
                           onClick=${() => setShowKeys((s) => ({ ...s, [f[0]]: !s[f[0]] }))}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center
-                                     rounded-[4px] text-[12px] text-ink3 hover:bg-white/[.08]"
+                          style=${{
+                            position: 'absolute', right: '4px', top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: '48px', height: '22px', padding: 0,
+                            display: 'grid', placeItems: 'center',
+                            borderRadius: '4px', fontSize: '11px', lineHeight: '1',
+                            color: 'var(--ink3)', background: 'transparent',
+                            border: '1px solid rgba(255,255,255,.10)', cursor: 'pointer'
+                          }}
                           title=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
                           aria-label=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
-                        >${showKeys[f[0]] ? '🙈' : '👁'}</button>
+                        >${showKeys[f[0]] ? '隐藏' : '显示'}</button>
+                      `}
+                      ${f[2] === 'password' && /[^\x20-\x7E]/.test(String(keys[f[0]] || '')) && html`
+                        <p style=${{ margin: '6px 0 0', fontSize: '11px', lineHeight: '1.6', color: 'var(--danger, #ff6b6b)' }}>
+                          这个字段里有中文/符号（含非 ASCII 字符）——多半是粘贴了页面上的提示文案。
+                          请只填纯英文数字的 Key（一般以 sk- 开头）或纯英文地址。
+                        </p>
                       `}
                     </div>
                   </div>
