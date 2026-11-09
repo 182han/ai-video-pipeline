@@ -37,6 +37,13 @@ function collectRuntime(model) {
   return base;
 }
 
+// 读取设置页写入的生成参数（localStorage.vs_web_config）
+// 键名与 settingsPage.js 的「生成参数」组一致：videoModel / resolution / preset
+function readWebConfig() {
+  try { return JSON.parse(localStorage.getItem('vs_web_config') || '{}') || {}; }
+  catch { return {}; }
+}
+
 function Section({ title, extra, children }) {
   return html`
     <div className="border-t border-white/[.08] pt-4">
@@ -54,11 +61,12 @@ function Info({ children }) {
 }
 
 export function CreateWizard({ onChanged }) {
+  const web = readWebConfig();
   const [step, setStep] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [vprompt, setVprompt] = useState('');
   const [p, setP] = useState({
-    model: 'seedance', resolution: '1080p', preset: 'final',
+    model: web.videoModel || 'seedance', resolution: web.resolution || '1080p', preset: web.preset || 'final',
     clipCount: 4, clipDuration: 5,
     transition: true, transitionDuration: 0.4, transitionType: 'fade', colorMatch: false,
     bgm: true, bgmMode: 'auto', wantMusic: true, wantAmb: false, startTrack: '', ambTrack: ''
@@ -444,12 +452,41 @@ export function CreateWizard({ onChanged }) {
         </${Section}>
 
         <div className="mt-4">
+          <${Section} title="生成参数"
+            extra=${html`<${Info}>默认取自「设置 → 生成参数」；这里改只影响本次任务</${Info}>`}>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-[12px] text-ink2 w-[70px]">模型</span>
+              <select value=${p.model} onChange=${(e) => set('model', e.target.value)}
+                className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+                <option value="seedance">Seedance 2.5</option>
+                <option value="kling">可灵 Kling 3.0</option>
+                <option value="dashscope">万相 3.0（DashScope）</option>
+              </select>
+              <span className="text-[12px] text-ink2 w-[54px]">分辨率</span>
+              <select value=${p.resolution} onChange=${(e) => set('resolution', e.target.value)}
+                className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+                ${['720p', '1080p', '4K'].map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
+              </select>
+              <span className="text-[12px] text-ink2 w-[40px]">档位</span>
+              <select value=${p.preset} onChange=${(e) => set('preset', e.target.value)}
+                className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+                ${['final', 'daily', 'quick', 'clips_only'].map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
+              </select>
+            </div>
+            <p className="mt-2 text-[11px] leading-[1.7] text-ink3">
+              模型决定生成器与 Key 来源；请求体里的 model 仍是 generator 名（如 dashscope），modelId 由后端按厂商补全。
+            </p>
+          </${Section}>
+        </div>
+
+        <div className="mt-4">
           <${Section} title="确认">
             <dl className="grid grid-cols-[92px_1fr] gap-y-1.5 text-[12px]">
               <dt className="text-ink3">提示词</dt><dd className="text-ink break-words">${prompt || '（未填写）'}</dd>
               <dt className="text-ink3">运镜</dt><dd className="text-ink break-words">${vprompt || '（未填写）'}</dd>
               <dt className="text-ink3">模型</dt><dd className="text-ink">${p.model}</dd>
               <dt className="text-ink3">分辨率</dt><dd className="text-ink">${p.resolution}</dd>
+              <dt className="text-ink3">档位</dt><dd className="text-ink">${p.preset}</dd>
               <dt className="text-ink3">片段</dt><dd className="text-ink">${p.clipCount} 段 × ${p.clipDuration}s</dd>
               <dt className="text-ink3">成片</dt><dd className="text-ink">${totalSec.toFixed(1)} 秒</dd>
               <dt className="text-ink3">配乐</dt>

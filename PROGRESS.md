@@ -295,6 +295,27 @@
 - `重启服务.bat` 已改为打开 `/app`，并在启动后自动跑 `node app\scripts\check-server-version.js`；它自提权，能结束上次由管理员启动的旧进程（这就是 DSH 杀不掉 PID 100696 的原因）。
 - 实测：临时新服务 `GET /` → `302 Location: /app`；`GET /app` → `200`；`check-server-version.js` → 退出 0。
 
+### E1 创作页生成参数接线（2026-11-09，完成）
+
+- **改了什么**：`web/src/screens/create.js`
+  - 新增 `readWebConfig()`：`JSON.parse(localStorage.getItem('vs_web_config') || '{}')`，解析失败返回 `{}`。
+  - `p` 的三个初值改为 `web.videoModel || 'seedance'` / `web.resolution || '1080p'` / `web.preset || 'final'`（其余字段未动）。
+  - 确认页（`step === 5`）在「衔接」与「确认」之间新增「生成参数」块：模型 `seedance/kling/dashscope`、
+    分辨率 `720p/1080p/4K`、档位 `final/daily/quick/clips_only`，改的是 `p`。
+  - 确认清单在「分辨率」后补只读行「档位：${p.preset}」；「模型 / 分辨率」原有行保留。
+  - **没动**：`collectRuntime()`（Key 仍读 `vs_config`，dashscope `modelId` 仍 `wan3.0-video`）、step 2、请求体结构。
+- **新验收**：`scripts/verify-create-config.js`（28 项，纯静态，不联网/不起服务），已注册进
+  `scripts/verify-all.js` fast 组（`--only create-config`）。**先红 13 通过 / 15 失败**（红在未读
+  `vs_web_config`、无生成参数块、无档位行），实现后 **28 通过 / 0 失败**。
+- **回归**：`node scripts/verify-image-gen.js` → **100 通过 / 0 失败**（未改该脚本）。
+- **请求体实测**（离线复刻真实渲染路径：仓库自带 `htm` + 极小 hooks 运行时加载真实 `create.js`，
+  写入 `vs_web_config={videoModel:'dashscope',resolution:'720p',preset:'quick'}`，点 5 次「下一步」，
+  拦截 `fetch('/api/tasks')` 记录 body 后立即 reject——不建任务、不计费）：
+  `model='dashscope'`、`modelId='wan3.0-video'`、`resolution='720p'`、`preset='quick'`、
+  确认页「档位」行显示 `quick`、确认页 select 值 `['dashscope','720p','quick']`。
+- **未验证**：真实浏览器点击/视觉（本机 `dsh_browser` 报 Electron 不可用，属既有环境限制）；
+  E6 端到端仍未复核（服务当前运行的是同一份磁盘代码，但页面点击未做）。
+
 ## 基线快照
 
 | 项 | 值 |

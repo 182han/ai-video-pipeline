@@ -39,6 +39,12 @@ const SUITES = [
     desc: '前端静态一致性（元素/请求体/既有功能未破坏）'
   },
   {
+    name: 'create-config',
+    script: 'verify-create-config.js',
+    group: 'fast',
+    desc: 'E1 创作页生成参数接线（读 vs_web_config：模型/分辨率/档位 + 请求体语义）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',

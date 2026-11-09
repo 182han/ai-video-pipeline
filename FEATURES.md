@@ -241,9 +241,14 @@
 > 用户已拍板：旧版 4 组能力全部补到新版；旧版 `public/index.html` 移到 `legacy/`，改 5 个测试后删除。
 > 新窗口按本清单顺序做，一项一 commit，先写断言再改代码。
 
-- [ ] **E1 模型/分辨率/档位接线（最高优先）**：新版创作页当前写死 `seedance/1080p/final`，
+- [x] **E1 模型/分辨率/档位接线（最高优先）**：新版创作页当前写死 `seedance/1080p/final`，
   设置页保存的 `vs_web_config` 没被读取。验收：设置选万相 3.0 + 720p + quick 后，创作页确认页显示同样值，
   `POST /api/tasks` 请求体 `model/resolution/preset` 与设置一致。
+  - **已完成（2026-11-09）**：`create.js` 新增 `readWebConfig()`；`p.model/resolution/preset` 初值取
+    `vs_web_config` 的 `videoModel/resolution/preset`；确认页（step 5）新增「生成参数」块 + 只读「档位」行。
+    断言 `scripts/verify-create-config.js` **28/0**（先红 13/15），已注册 `verify-all.js` fast 组。
+    请求体实测：`model='dashscope' / modelId='wan3.0-video' / resolution='720p' / preset='quick'`。
+    `verify-image-gen.js` 回归 100/0。**真实浏览器点击/视觉未验证**（本机 `dsh_browser` 报 Electron 不可用）。
 - [ ] **E2 多提示词批量**：旧版一行一个场景；新版只有单条。验收：两行提示词 → `prompts` 长度 2 /
   片段数 2；单行行为不变。
 - [ ] **E3 余额 + 费用预估**：旧版设置填余额，生成前估算并拦截；新版只有实际花费。
