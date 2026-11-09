@@ -38,6 +38,8 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
     this.baseUrl = String(config.baseUrl || process.env.OPENAI_VIDEO_BASE_URL || '').replace(/\/+$/, '');
     this.modelId = String(config.modelId || process.env.OPENAI_VIDEO_MODEL_ID || DEFAULT_MODEL).trim();
     this.timeoutMs = Number(config.timeoutMs || 300000);
+    this.chunkTimeoutMs = Number(config.chunkTimeoutMs || process.env.OPENAI_VIDEO_CHUNK_TIMEOUT_MS || 90000);
+    this.probeTimeoutMs = Number(config.probeTimeoutMs || 15000);
     this.supportedOptions = {
       maxDuration: 30,
       // 中转是否支持分辨率/画幅参数**未验证**（实测只发 model+prompt 也能出片）
@@ -134,24 +136,47 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
   async downloadVideo(taskId, outputPath) {
     if (!this.apiKey || !this.baseUrl) { console.error('下载失败: 凭据/地址未配置'); return false; }
     const CHUNK = 1024 * 1024;
+    const CHUNK_TIMEOUT = Number(process.env.OPENAI_VIDEO_CHUNK_TIMEOUT_MS || this.chunkTimeoutMs || 90000);
     const url = `${this.baseUrl}/videos/${encodeURIComponent(taskId)}/content`;
     const cleanup = () => { try { fs.unlinkSync(outputPath); } catch (e) {} };
 
     try {
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fs.writeFileSync(outputPath, Buffer.alloc(0));
 
-      let start = 0;
+      // 断点续传：已有半成品就接着下（中转容易超时/卡块，重跑不应从 0 开始）
+      let start = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+      if (!start) fs.writeFileSync(outputPath, Buffer.alloc(0));
+
+      // 先探总大小：Range 0-0 返回 206 + content-range。
+      // 实测坑：**end 超过总长会退化成 200 整包**（中途卡死），所以每块都必须用 total-1 封顶。
       let total = null;
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), this.probeTimeoutMs);
+        try {
+          const r = await fetch(url, { headers: { Authorization: `Bearer ${this.apiKey}`, Range: 'bytes=0-0' }, signal: ac.signal });
+          const cr = r.headers.get('content-range') || '';
+          const m = cr.match(/\/\s*(\d+)\s*$/);
+          if (r.status === 206 && m) total = Number(m[1]);
+          try { if (r.body) await r.body.cancel(); } catch (e) {}
+        } finally { clearTimeout(timer); }
+      } catch (e) {
+        // 探不到总大小就退回不封顶（可能慢，但至少能试）
+      }
+
       while (true) {
-        const end = start + CHUNK - 1;
+        const end = total != null ? Math.min(start + CHUNK - 1, total - 1) : start + CHUNK - 1;
+        if (total != null && start >= total) break;
         let written = -1;
         let lastErr = null;
 
-        for (let attempt = 1; attempt <= 3 && written < 0; attempt++) {
+        for (let attempt = 1; attempt <= 4 && written < 0; attempt++) {
+          const ac = new AbortController();
+          const timer = setTimeout(() => ac.abort(), CHUNK_TIMEOUT);
           try {
             const r = await fetch(url, {
-              headers: { Authorization: `Bearer ${this.apiKey}`, Range: `bytes=${start}-${end}` }
+              headers: { Authorization: `Bearer ${this.apiKey}`, Range: `bytes=${start}-${end}` },
+              signal: ac.signal
             });
             if (r.status !== 200 && r.status !== 206) throw new Error(`HTTP ${r.status}`);
             const cr = r.headers.get('content-range') || '';
@@ -171,14 +196,16 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
             try { await fh.write(buf, 0, buf.length, start); } finally { await fh.close(); }
             written = buf.length;
           } catch (e) {
-            lastErr = e;
-            if (attempt < 3) await new Promise((res) => setTimeout(res, 1000 * attempt));
+            lastErr = e.name === 'AbortError' ? new Error(`分块超时（${CHUNK_TIMEOUT}ms）`) : e;
+            if (attempt < 4) await new Promise((res) => setTimeout(res, 1000 * attempt));
+          } finally {
+            clearTimeout(timer);
           }
         }
 
         if (written < 0) {
-          console.error(`下载失败（第 ${start} 字节起）: ${lastErr ? lastErr.message : '未知'}`);
-          cleanup();
+          // 保留半成品，便于下次续传（不要 unlink）
+          console.error(`下载失败（第 ${start} 字节起）: ${lastErr ? lastErr.message : '未知'}；已保留半成品可续传`);
           return false;
         }
         start += written;
@@ -189,7 +216,9 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
       const size = fs.statSync(outputPath).size;
       if (size < MIN_BYTES) { console.error(`下载文件太小: ${size} bytes`); cleanup(); return false; }
       if (total != null && size !== total) {
-        console.error(`下载不完整: ${size}/${total} 字节`); cleanup(); return false;
+        // 不完整：保留半成品，下次调用会从 size 处续传
+        console.error(`下载不完整: ${size}/${total} 字节（已保留半成品，可续传）`);
+        return false;
       }
       // MP4 的 ftyp 在偏移 4..8；下到 HTML/JSON 错误页时必须拒收（AGENTS §4.8）
       const head = Buffer.alloc(12);

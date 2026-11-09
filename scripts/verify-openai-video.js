@@ -32,6 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let lastPost = null;
 let statusCalls = 0;
+let lastRangeStart = -1;
 
 function startStub() {
   return new Promise((resolve) => {
@@ -67,6 +68,7 @@ function startStub() {
           const m = range.match(/bytes=(\d+)-(\d+)/);
           if (m) {
             const s = Number(m[1]);
+            lastRangeStart = s;
             const e = Math.min(Number(m[2]), MP4.length - 1);
             const slice = MP4.subarray(s, e + 1);
             res.writeHead(206, {
@@ -78,6 +80,11 @@ function startStub() {
           }
           res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(MP4.length) });
           return res.end(MP4);
+        }
+        if (req.method === 'GET' && req.url === '/slow/videos/task_slow/content') {
+          // 故意慢：验证客户端分块超时不会卡死
+          setTimeout(() => { try { if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'video/mp4' }); res.end(MP4); } } catch (e) {} }, 5000);
+          return;
         }
         if (req.method === 'GET' && req.url === '/html/videos/task_stub1/content') {
           res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -136,6 +143,21 @@ function startStub() {
     const st = fs.statSync(outPath);
     check(st.size === MP4.length && st.size > 1024, '文件大小正确', String(st.size));
     check(fs.readFileSync(outPath).subarray(4, 8).toString('ascii') === 'ftyp', '文件头是 MP4（ftyp）');
+
+    // ---- 3b. 断点续传 ----
+    const resumePath = path.join(outDir, 'resume.mp4');
+    fs.writeFileSync(resumePath, MP4.subarray(0, 1024));
+    const okResume = await g.downloadVideo('task_stub1', resumePath);
+    check(okResume === true && fs.statSync(resumePath).size === MP4.length, '断点续传：已有 1024 字节 → 补到 4096');
+    check(lastRangeStart === 1024, '续传请求的 Range 从 1024 开始', String(lastRangeStart));
+    check(fs.readFileSync(resumePath).subarray(4, 8).toString('ascii') === 'ftyp', '续传后文件头仍是 MP4');
+
+    // ---- 3c. 分块超时不会卡死 ----
+    const slowGen = mk({ baseUrl: BASE + '/slow', chunkTimeoutMs: 300, probeTimeoutMs: 300 });
+    const t0 = Date.now();
+    const okSlow = await slowGen.downloadVideo('task_slow', path.join(outDir, 'slow.mp4'));
+    const elapsed = Date.now() - t0;
+    check(okSlow === false && elapsed < 12000, '分块超时 → 返回 false（不无限卡住）', elapsed + 'ms');
 
     // ---- 4. 负向：401 ----
     let e401 = null;
