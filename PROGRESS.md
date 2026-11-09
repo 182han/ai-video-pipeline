@@ -413,7 +413,12 @@
     （`ftypisom`），支持 `Range`。**结论：内容必须由适配器自己带着 Key 下载**，pipeline 原来的裸 `fetch(url)` 会 401。
   - 其它路径：`/v1/videos`（GET）404、`/v1/video/generations` 404、`/v1/videos/generations` 404（POST），
     所以 **正确入口是 `/v1/videos`**。
-  - 下载很慢：1MB 分块单次 25–40s，19.6MB 约 8–10 分钟 → 适配器改为**流式写盘**、不设短超时。
+- **下载很慢且有坑（实测）**：整段 GET `/content` 会**卡住**（130 KB 后停滞 3 分钟）；
+  **Range 分块稳定**：1 MB/次、每次 25–40 s（约 35 KB/s），19.6 MB 约 10 分钟。
+  → `downloadVideo` 实现为 **1 MB 分块 + 每块 3 次重试 + 断点续写**，写完校验总大小与 MP4 头；
+  无直链（`?include=url` 等参数被忽略，`/url` `/download` 均 404）。
+  **产品含义**：WhaleTV 适合少量测试；30 分钟长片（180–360 段）用它光下载就要几十小时，
+  长片仍应走百炼官方直连，或让中转提供 OSS 直链。
 - **新增**：`src/generators/openaiVideo.js`（id `openai-video`）：
   `generate()`（POST /videos，只发实测被接受的 model/prompt/seconds，分辨率/画幅未验证故不传）、
   `getStatus()`（兼容 completed 给 URL 与不给 URL 两种实现）、`downloadVideo()`（Bearer + 流式 + MP4 头校验，

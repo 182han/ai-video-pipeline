@@ -63,7 +63,20 @@ function startStub() {
           return res.end(JSON.stringify({ id: 'task_bad', status: 'failed', error: { message: 'boom' } }));
         }
         if (req.method === 'GET' && req.url === '/v1/videos/task_stub1/content') {
-          res.writeHead(200, { 'Content-Type': 'video/mp4' });
+          const range = req.headers.range || '';
+          const m = range.match(/bytes=(\d+)-(\d+)/);
+          if (m) {
+            const s = Number(m[1]);
+            const e = Math.min(Number(m[2]), MP4.length - 1);
+            const slice = MP4.subarray(s, e + 1);
+            res.writeHead(206, {
+              'Content-Type': 'video/mp4',
+              'Content-Range': `bytes ${s}-${e}/${MP4.length}`,
+              'Content-Length': String(slice.length)
+            });
+            return res.end(slice);
+          }
+          res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(MP4.length) });
           return res.end(MP4);
         }
         if (req.method === 'GET' && req.url === '/html/videos/task_stub1/content') {

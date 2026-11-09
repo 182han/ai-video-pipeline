@@ -123,46 +123,87 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
 
   /**
    * 下载成片。pipeline 看到适配器有这个方法时优先用它（中转要 Bearer）。
-   * 实测：WhaleTV 的 /content 很慢（1MB 分块 25–40s，19.6MB 约 8–10 分钟），
-   * 因此这里**流式写盘**（不在内存里攒 20MB），且不设过短的超时。
+   *
+   * 实测（2026-11-09，WhaleTV）：
+   *   - `completed` 不返回 URL，内容只能拉 `/videos/{id}/content`（要 Bearer）；
+   *   - 该端点**整段 GET 会卡住**（实测 130 KB 后停滞 3 分钟），
+   *     但 **Range 分块稳定**（1 MB/次，每次 25–40 s，约 35 KB/s）；
+   *   - 因此这里用 **1 MB 分块 + 每块 3 次重试 + 断点续写**，写完再校验大小与 MP4 头。
    * @returns {Promise<boolean>} 成功写盘返回 true
    */
   async downloadVideo(taskId, outputPath) {
     if (!this.apiKey || !this.baseUrl) { console.error('下载失败: 凭据/地址未配置'); return false; }
-    const { Readable } = require('stream');
-    let fileStream = null;
+    const CHUNK = 1024 * 1024;
+    const url = `${this.baseUrl}/videos/${encodeURIComponent(taskId)}/content`;
+    const cleanup = () => { try { fs.unlinkSync(outputPath); } catch (e) {} };
+
     try {
-      const r = await fetch(`${this.baseUrl}/videos/${encodeURIComponent(taskId)}/content`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` }
-      });
-      if (!r.ok) { console.error(`下载失败: HTTP ${r.status}`); return false; }
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fileStream = fs.createWriteStream(outputPath);
-      await new Promise((resolve, reject) => {
-        const body = Readable.fromWeb(r.body);
-        body.on('error', reject);
-        fileStream.on('error', reject);
-        fileStream.on('finish', resolve);
-        body.pipe(fileStream);
-      });
-      fileStream = null;
+      fs.writeFileSync(outputPath, Buffer.alloc(0));
+
+      let start = 0;
+      let total = null;
+      while (true) {
+        const end = start + CHUNK - 1;
+        let written = -1;
+        let lastErr = null;
+
+        for (let attempt = 1; attempt <= 3 && written < 0; attempt++) {
+          try {
+            const r = await fetch(url, {
+              headers: { Authorization: `Bearer ${this.apiKey}`, Range: `bytes=${start}-${end}` }
+            });
+            if (r.status !== 200 && r.status !== 206) throw new Error(`HTTP ${r.status}`);
+            const cr = r.headers.get('content-range') || '';
+            const m = cr.match(/\/\s*(\d+)\s*$/);
+            if (m) total = Number(m[1]);
+
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (!buf.length) throw new Error('空响应');
+            if (r.status === 200 && start > 0) {
+              // 服务端忽略了 Range：只能整段重下
+              fs.writeFileSync(outputPath, buf);
+              written = buf.length;
+              total = buf.length;
+              break;
+            }
+            const fh = await fs.promises.open(outputPath, 'r+');
+            try { await fh.write(buf, 0, buf.length, start); } finally { await fh.close(); }
+            written = buf.length;
+          } catch (e) {
+            lastErr = e;
+            if (attempt < 3) await new Promise((res) => setTimeout(res, 1000 * attempt));
+          }
+        }
+
+        if (written < 0) {
+          console.error(`下载失败（第 ${start} 字节起）: ${lastErr ? lastErr.message : '未知'}`);
+          cleanup();
+          return false;
+        }
+        start += written;
+        if (written < CHUNK) break;                 // 最后一块
+        if (total != null && start >= total) break; // 已取全
+      }
 
       const size = fs.statSync(outputPath).size;
-      if (size < MIN_BYTES) { console.error(`下载文件太小: ${size} bytes`); fs.unlinkSync(outputPath); return false; }
+      if (size < MIN_BYTES) { console.error(`下载文件太小: ${size} bytes`); cleanup(); return false; }
+      if (total != null && size !== total) {
+        console.error(`下载不完整: ${size}/${total} 字节`); cleanup(); return false;
+      }
       // MP4 的 ftyp 在偏移 4..8；下到 HTML/JSON 错误页时必须拒收（AGENTS §4.8）
       const head = Buffer.alloc(12);
       const fd = fs.openSync(outputPath, 'r');
       try { fs.readSync(fd, head, 0, 12, 0); } finally { fs.closeSync(fd); }
       if (head.subarray(4, 8).toString('ascii') !== 'ftyp') {
         console.error('下载内容不是 MP4（前 12 字节: ' + head.toString('hex') + '）');
-        fs.unlinkSync(outputPath);
+        cleanup();
         return false;
       }
       return true;
     } catch (e) {
       console.error('下载视频异常:', e.message);
-      try { if (fileStream) fileStream.destroy(); } catch (x) {}
-      try { fs.unlinkSync(outputPath); } catch (x) {}
+      cleanup();
       return false;
     }
   }
