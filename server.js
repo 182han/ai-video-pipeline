@@ -583,6 +583,8 @@ app.post('/api/images/generate', async (req, res) => {
   if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) runtime.IMAGE_GEN_BASE_URL = body.baseUrl.trim();
   if (typeof body.model === 'string' && body.model.trim()) runtime.IMAGE_GEN_MODEL = body.model.trim();
   if (typeof body.size === 'string' && body.size.trim()) runtime.IMAGE_GEN_SIZE = body.size.trim();
+  // 接口类型（dashscope=百炼原生异步 / openai-images=OpenAI 兼容同步）。页面切换用谁的 Key。
+  if (typeof body.provider === 'string' && body.provider.trim()) runtime.IMAGE_GEN_PROVIDER = body.provider.trim();
 
   const status = getImageGenStatus(runtime);
   if (!status.usable) {
@@ -627,7 +629,7 @@ app.post('/api/images/generate', async (req, res) => {
 
 // 测试 API Key 是否有效
 app.post('/api/test-api-key', async (req, res) => {
-  const { type, apiKey, baseUrl, model, accessKey, secretKey } = req.body;
+  const { type, apiKey, baseUrl, model, accessKey, secretKey, provider } = req.body;
 
   if (!apiKey && !(type === 'kling' && accessKey && secretKey)) {
     return res.json({ success: false, error: '请输入 API Key' });
@@ -811,6 +813,7 @@ app.post('/api/test-api-key', async (req, res) => {
     let body = null;
     let dsBaseUrlUsed = '';
     let baseUrlSource = '';
+    let probeProvider = '';
     let headers = {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
@@ -878,9 +881,9 @@ app.post('/api/test-api-key', async (req, res) => {
       method = 'GET';
       delete headers['Content-Type'];
     } else if (type === 'imagegen') {
-      // 图片生成与 DashScope 视频同一个鉴权体系：查一个不存在的 task，
-      // 401/403 = Key/地址无效；其他错误（InvalidTask）说明鉴权已通过，不消耗额度。
-      // 同时记下实际用的地址与来源：401 时回给前端，才能区分「地址留空回落通用入口」与「填了别的地址」。
+      // 图片生成两套协议，探针不同：
+      //   openai-images（WhaleTV / New API 等中转、OpenAI 官方）→ GET {base}/models（免费、有 JSON）
+      //   dashscope（百炼原生）→ GET {base}/tasks/{不存在的id}（鉴权通过会报任务不存在，不消耗额度）
       const fromRequest = String(baseUrl || '').trim();
       dsBaseUrlUsed = (fromRequest || config.IMAGE_GEN_BASE_URL || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/+$/, '');
       baseUrlSource = fromRequest
@@ -888,7 +891,8 @@ app.post('/api/test-api-key', async (req, res) => {
         : (/dashscope\.aliyuncs\.com\/api\/v1\/?$/.test(dsBaseUrlUsed)
           ? 'default（旧通用入口，业务空间 Key 在这里必 401）'
           : 'env（IMAGE_GEN_BASE_URL / DASHSCOPE_BASE_URL）');
-      url = dsBaseUrlUsed + '/tasks/invalid-task-check';
+      probeProvider = String(provider || config.IMAGE_GEN_PROVIDER || 'dashscope').trim();
+      url = dsBaseUrlUsed + (probeProvider === 'openai-images' ? '/models' : '/tasks/invalid-task-check');
       method = 'GET';
       delete headers['Content-Type'];
     } else if (type === 'llm') {
@@ -908,9 +912,31 @@ app.post('/api/test-api-key', async (req, res) => {
     let data = {};
     try { data = JSON.parse(text); } catch (e) {}
 
+    // 200 但不是 JSON：多半把「网页地址」填成了 Base URL（单页应用对任何路径都回 HTML 200）。
+    // 以前这里会直接判 success，等于告诉用户「地址可用」——必须显式失败。
+    if (response.ok && type === 'imagegen' && (!data || Object.keys(data).length === 0)) {
+      const head = String(text || '').slice(0, 80).replace(/\s+/g, ' ');
+      return res.json({
+        success: false,
+        error: `地址返回的不是 JSON（content-type: ${response.headers.get('content-type') || '未知'}），`
+          + 'Base URL 可能填成了网页地址。响应开头: ' + head,
+        urlUsed: dsBaseUrlUsed,
+        baseUrlSource
+      });
+    }
+
     if (response.ok) {
       if (type === 'imagegen') {
-        return res.json({ success: true, message: 'Key / 地址可用（只验证鉴权，不消耗生成额度）' });
+        const models = Array.isArray(data && data.data) ? data.data.map((m) => m && m.id).filter(Boolean) : [];
+        return res.json({
+          success: true,
+          message: 'Key / 地址可用（只验证鉴权，不消耗生成额度）'
+            + (models.length ? `｜可用模型: ${models.join(', ')}` : ''),
+          urlUsed: dsBaseUrlUsed,
+          baseUrlSource,
+          provider: probeProvider,
+          models
+        });
       }
       res.json({ success: true, message: '连接成功，API Key 有效' });
     } else {

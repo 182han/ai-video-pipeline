@@ -11,6 +11,7 @@
 
 const { registerImageProvider, listImageProviders } = require('../imageGen');
 const dashscope = require('./dashscope');
+const openaiCompatible = require('./openaiCompatible');
 
 const REGISTERED = [];
 
@@ -23,5 +24,7 @@ function ensure(name, adapter) {
 
 // 阿里云百炼 wan2.7-image（异步提交 → 轮询 → 下载落盘）
 ensure('dashscope', dashscope);
+// OpenAI 兼容出图（New API / WhaleTV 等中转、OpenAI 官方；一次返回 url/b64）
+ensure('openai-images', openaiCompatible);
 
 module.exports = { registered: REGISTERED, providers: listImageProviders() };

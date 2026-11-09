@@ -155,7 +155,7 @@
 |---|---|---|
 | **P0** | 门禁入口不可执行（`spawn EPERM`） | `verify-all.js:162`；本机实测 |
 | **P0** | 2 个注册套件是红的 | `verify-auth` 11/15（数据污染）、`verify-loop` 28/1（断言过期） |
-| **P1** | 30 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 56 实有 vs 26 注册（2026-11-09 实测） |
+| **P1** | 30 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 57 实有 vs 27 注册（2026-11-09 实测） |
 | **P1** | Postgres 不可达，持久化未验证 | `.env` + 测试日志 `timeout exceeded` |
 | **P2** | `data/logs/console-3001.log.err` 已入库 | `git ls-files data/logs`；`.gitignore:27` 只有 `*.log` |
 | **P2** | 双锁文件并存 | `package-lock.json` + `pnpm-lock.yaml` |

@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **56**（2026-11-09 实测；删旧页面时一并删了 `verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `verify-editor-dom`，并新增 `verify-create-config` / `verify-key-guard`） |
-| 门禁注册 | **26**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
-| 未注册 | **30**（56 − 26；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
+| `scripts/verify-*.js` 实有 | **57**（2026-11-09 实测；删旧页面时一并删了 `verify-frontend-static` / `verify-transition-ui` / `verify-pages` / `verify-editor-dom`，并新增 `verify-create-config` / `verify-key-guard` / `verify-image-gen-compat`） |
+| 门禁注册 | **27**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **30**（57 − 27；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
 
 ### 2.4 本机限制（重要）
 
@@ -95,7 +95,7 @@ Error: spawn EPERM
 
 - 通过：退出码 0 **且** 输出末行 `M 失败` 为 0。
 - 脚本自报的「跳过」**不等于**通过（见 §5 质检语义）。
-- 有 10 个未注册套件本次未跑（seam/transitions/color-*/pages/port3001 等），**它们的状态是「未验证」，不是「通过」**。
+- 有 30 个未注册套件本次未跑（seam/transitions/color-*/recovery/adjust 等），**它们的状态是「未验证」，不是「通过」**。
 
 ---
 
@@ -133,16 +133,17 @@ Error: spawn EPERM
 | 12 | `.env` 含真实 Key | 26 个变量名含各厂商 Key / 数据库连接串 | 不要 `cat .env`、不要把值贴进对话或日志 |
 | 13 | PowerShell 引号 | `node -e '...'` 里的单引号会被 PS 吃掉，导致语法错误 | 外层双引号、JS 内层单引号；复杂逻辑写成 `.js` 文件 |
 | 14 | **前后端版本错位** | 前端 `web/**` 是 Express 静态文件，刷新即生效；后端 `server.js` / `src/**` 是启动时加载，不重启仍是旧代码。症状：设置页已有图片生成入口，接口却报「未知的类型」 | 改完后端必须重启；跑 `node scripts/check-server-version.js`（0=当前，1=旧代码/过期，2=未运行）；`GET /api/status` 的 `serverInfo` / `imageGen` 是探针，前端检测到缺失会显示底部警告 |
+| 15 | **新加的 Tailwind 类可能不生效** | `web/styles/app.css` 是离线生成的（18.5 KB），实测缺 `right-1 / w-6 / pr-9 / top-1/2 / -translate-y-1/2` 等；新控件用了这些类会「看不见/位置错」（2026-11-09 图片 Key 的显示/隐藏按钮踩过） | 新控件优先用已有类或内联样式；要加新类必须用 Tailwind CLI 重新生成 CSS（二进制需自备） |
 
 ### 4.2 文档记录、本次未独立复验（引用时请先复核）
 
 | # | 坑 | 来源 |
 |---|---|---|
-| 15 | `ffmpeg -c copy` 拼接遇损坏输入会静默只拼前几段、退出码仍为 0；判成功必须校验时长 | `src/videoProcessor.js` `_validateConcatDuration()` 存在；`docs/spec/changelog.md` |
-| 16 | 混合音轨（部分片段无音轨）时 `-c copy` 会只剩 video 流，音频被静默丢弃 | `docs/spec/changelog.md`「拼接对音轨差异的兼容」 |
-| 17 | `stageSet` 未列入的步骤是 `undefined`，判断必须 `=== true`（写成 `!== false` 会让 quick 跑满 8 步） | `docs/spec/changelog.md`；`src/pipeline.js` |
-| 18 | `audio_mix` 依赖 `transcoding`，不是 `concatenation` | `src/pipelineStages.js:43-52` 的 `STAGE_DEPS`（**已读码确认**） |
-| 19 | `lut3d` 接绝对路径会报 `Undefined constant`，只能 cwd + 相对文件名 | `PROGRESS.md` 试错记录；`b17bbdd` 实现 |
+| 16 | `ffmpeg -c copy` 拼接遇损坏输入会静默只拼前几段、退出码仍为 0；判成功必须校验时长 | `src/videoProcessor.js` `_validateConcatDuration()` 存在；`docs/spec/changelog.md` |
+| 17 | 混合音轨（部分片段无音轨）时 `-c copy` 会只剩 video 流，音频被静默丢弃 | `docs/spec/changelog.md`「拼接对音轨差异的兼容」 |
+| 18 | `stageSet` 未列入的步骤是 `undefined`，判断必须 `=== true`（写成 `!== false` 会让 quick 跑满 8 步） | `docs/spec/changelog.md`；`src/pipeline.js` |
+| 19 | `audio_mix` 依赖 `transcoding`，不是 `concatenation` | `src/pipelineStages.js:43-52` 的 `STAGE_DEPS`（**已读码确认**） |
+| 20 | `lut3d` 接绝对路径会报 `Undefined constant`，只能 cwd + 相对文件名 | `PROGRESS.md` 试错记录；`b17bbdd` 实现 |
 
 ---
 

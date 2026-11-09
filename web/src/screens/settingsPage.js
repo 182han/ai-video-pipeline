@@ -94,7 +94,7 @@ export function SettingsView() {
     if (g.id === 'seedance') { body.apiKey = keys.seedanceKey || ''; body.baseUrl = keys.seedanceBaseUrl || ''; body.model = keys.seedanceModel || ''; }
     if (g.id === 'kling') { body.accessKey = keys.klingAk || ''; body.secretKey = keys.klingSk || ''; }
     if (g.id === 'dashscope') { body.apiKey = keys.dashScopeKey || ''; }
-    if (g.id === 'imagegen') { body.apiKey = keys.imageKey || ''; body.baseUrl = keys.imageBaseUrl || ''; }
+    if (g.id === 'imagegen') { body.apiKey = keys.imageKey || ''; body.baseUrl = keys.imageBaseUrl || ''; body.provider = keys.imageProvider || 'dashscope'; }
     if (g.id === 'llm') { body.apiKey = keys.llmKey || ''; body.baseUrl = keys.llmUrl || ''; body.model = keys.llmModel || ''; }
     if (g.id === 'multimodal') { body.apiKey = keys.multimodalKey || ''; body.baseUrl = keys.multimodalUrl || ''; body.model = keys.multimodalModel || ''; }
     try {
@@ -304,7 +304,16 @@ export function SettingsView() {
                   </div>
                 `)}
                 ${g.id === 'imagegen' && html`
-                  <p className="mt-1.5 text-[11px] text-ink3">
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">接口类型</span>
+                    <select value=${keys.imageProvider || 'dashscope'}
+                      onChange=${(e) => saveKey({ imageProvider: e.target.value })}
+                      className="h-8 flex-1 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+                      <option value="dashscope">百炼原生（异步任务轮询）</option>
+                      <option value="openai-images">OpenAI 兼容（WhaleTV / 中转 / OpenAI）</option>
+                    </select>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
                     服务端：${imgStatus
                       ? (imgStatus.usable ? '已就绪' : (imgStatus.providerImplemented ? '未配置 Key' : '适配器未注册'))
                       : '读取中…'}

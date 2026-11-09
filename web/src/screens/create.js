@@ -145,6 +145,7 @@ export function CreateWizard({ onChanged }) {
           baseUrl: cfg.imageBaseUrl || '',
           model: cfg.imageModel || '',
           size: cfg.imageSize || (imgStatus && imgStatus.imageGen ? imgStatus.imageGen.size : undefined),
+          provider: cfg.imageProvider || '',
           taskId: 'ui_img_' + Date.now(),
           index: 0
         })

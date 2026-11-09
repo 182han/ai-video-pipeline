@@ -360,6 +360,37 @@
 - **待人工一步**：重启服务（`server.js` 改了）→ `check-server-version.js` exit 0 →
   设置页重新粘 Key → 「测试连接」；若仍 401，界面现在会直接显示**实际请求地址与来源**。
 
+### OpenAI 兼容出图适配器（2026-11-09，WhaleTV 中转可直接出图）
+
+- **背景**：用户的 Key 来自 WhaleTV 中转（`https://agglm.whaletv.com`），它是 **OpenAI 兼容协议**：
+  `POST /v1/images/generations` 一次返回 `data[0].url`；而原适配器是百炼原生「提交任务 → 轮询 /tasks」，
+  填对地址也会 404。
+- **实测（2026-11-09，用户 Key）**：`GET /v1/models` → `200`，仅 `wan2.7-image`
+  （`supported_endpoint_types:["image-generation","openai"]`）；`GET /v1/videos/generations` → `403
+  This token has no access to model`（接口存在、该 Key 未开视频权限）；`GET /v1/tasks/probe` → `404 Task not found`；
+  `POST /v1/images/generations {model:'wan2.7-image',prompt,n:1,size:'1024x1024'}` → `200 {"data":[{"url":…}]}`。
+- **新增适配器** `src/generators/imageProviders/openaiCompatible.js`（provider id `openai-images`）：
+  - 同步出图；支持 `data[0].url` / `data[0].b64_json` / 中转 `metadata.output.choices[].message.content[].image` 三种形态；
+  - 尺寸 `1696*960` 自动转 `1696x960`（OpenAI 风格）；
+  - 宽高以**下载到的字节**为准（`readImageMeta`），不是接口自报；下载 3 次重试、40MB 上限；
+  - 落盘沿用「唯一临时文件 + `COPYFILE_EXCL` 抢占」，并发/重复点击不覆盖；
+  - 负向明确 throw：401/403 → 鉴权失败；**200 但非 JSON（HTML）→ 判失败**；200 无 image → 判失败；下载到非图片 → 判失败。
+- `src/generators/imageProviders/index.js` 注册 `openai-images`；`server.js`：
+  `/api/images/generate` 接受运行时 `provider`；`/api/test-api-key` 的 `type=imagegen` **按协议选探针**
+  （`openai-images` → `GET {base}/models`；`dashscope` → `GET {base}/tasks/invalid-task-check`），
+  并新增「200 但响应不是 JSON → 判失败」（防止把网页地址填成 Base URL 还显示 ✓）。
+- 前端：设置页「图片生成」新增「接口类型」（百炼原生 / OpenAI 兼容），随测试与出图请求发送；
+  创作页「生成 1 张测试图」带 `provider`。
+- **验收**：新增 `scripts/verify-image-gen-compat.js`（22 项，本地 stub，已注册 fast 组）→ **22/0**；
+  回归 `verify-image-gen` **100/0**、`verify-key-guard` **18/0**。
+- **真实出图（走我们自己的适配器，1 张）**：`1024x1024` PNG，**1,820,253 字节**，
+  `provider=openai-images`、`model=wan2.7-image`、`baseUrl=https://agglm.whaletv.com/v1`。
+- **WhaleTV 填法**：设置 → 图片生成：接口类型 `OpenAI 兼容`、Base URL `https://agglm.whaletv.com/v1`、
+  模型 `wan2.7-image`、尺寸先填 `1024x1024`（`1696x960` 是否被中转接受**未验证**）。
+- **未验证**：视频 `wan3.0-video`（该 Key 无权限，且视频协议未知）；文字 `deepseek-v4-flash-0731`
+  （现有 LLM 组即 OpenAI 兼容，填 `https://agglm.whaletv.com/v1` + 模型名即可，未实测）；
+  质检所需**视觉模型** Whaletv 目前不提供（三个模型都不能看图）。
+
 ## 基线快照
 
 | 项 | 值 |

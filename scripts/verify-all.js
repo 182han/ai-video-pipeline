@@ -45,6 +45,12 @@ const SUITES = [
     desc: 'Key 粘贴污染防护（非 ASCII 校验/回显实际请求地址/显示隐藏按钮不依赖 emoji）'
   },
   {
+    name: 'image-gen-compat',
+    script: 'verify-image-gen-compat.js',
+    group: 'fast',
+    desc: 'OpenAI 兼容出图适配器（openai-images：url/b64/包装 + 4 类负向，本地 stub）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',
