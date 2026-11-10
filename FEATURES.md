@@ -262,8 +262,11 @@
   - **已完成（2026-11-10）**：`POST /api/estimate`（复用 `src/pricing.js`，与 `/api/pricing` 同源）；
     设置页「账户余额」写 `vs_web_config.balance`；确认页显示「预计花费」；超额红字拦截且不发 `/api/tasks`。
     `scripts/verify-cost-guard.js` **24/0**（含 3 条离线跑真实 create.js 的行为断言：拦截/留空放行/余额足够放行）。
-- [ ] **E4 自定义执行环节 + 质检严格度**：旧版可勾选 8 步与质检项；新版只有预设档位。
+- [x] **E4 自定义执行环节 + 质检严格度**：旧版可勾选 8 步与质检项；新版只有预设档位。
   验收：custom + 只勾 4 步 → 任务 `stages` 只含 4 步；严格度勾选透传到 API。
+  - **已完成（2026-11-10）**：确认页新增 custom 档 + 8 环节勾选（核心 3 步锁定）+ 13 项质检严格度
+    （NSFW 锁定）；提交体 `stages`（仅 custom）/`strictQcItems`；后端 `resolveStages`/`strictItems` 原本就支持。
+    `scripts/verify-custom-stages.js` **32/0**（含离线跑真实 create.js 的取消环节/取消质检/非 custom 不发 stages）。
 - [x] **E5 旧版归档（2026-11-09 已完成，按「彻底删除」执行，未走 legacy 中间态）**：12 个旧 HTML
   （`index` / `preview-app` / `preview-login` / `bgm-editor` / `members` / `clip-library` / `music-library` /
   `showcase` / `design-system-notion-apple` / `icon-comparison` / `_ptest` / `_selftest`）+ `theme-nightvalley.css`
@@ -274,6 +277,13 @@
   `verify-all.js` 移除 `frontend-static` 注册（26→25）。`server.js` 新增 `LEGACY_PAGES`：12 个旧地址 + `/` 全部 302 `/app`。
   `public/login.html`、`public/assets` 保留。实测：改完 `verify-skill-prompt` 103/0、`verify-recovery-fixes` 25/0、
   `verify-create-config` 28/0、`verify-image-gen` 100/0；`/index.html` 等旧地址 302 需重启后复验。
-- [ ] **E6 启动与验证**：双击 `重启服务.bat`；`node scripts/check-server-version.js` exit 0；
+- [x] **E6 启动与验证**：双击 `重启服务.bat`；`node scripts/check-server-version.js` exit 0；
   `GET /` 302 `/app`；`GET /app` 200；`verify-image-gen` 100/0。
-- [ ] **E7 真实出图**：需要 WhaleTV 的 Base URL/接口协议（用户提供，不要猜）。
+  - **已完成（2026-11-09/10）**：重启后 `check-server-version` **exit 0**（PID 62388 / 130776 两次实测）；
+    `GET /`、`/index.html` 等 12 个旧地址 **302 → /app**（隔离实例实测，登录态下同样）；`/app` 200；
+    `verify-image-gen` **100/0**。
+- [x] **E7 真实出图**：需要 WhaleTV 的 Base URL/接口协议（用户提供，不要猜）。
+  - **已完成（2026-11-09）**：用户提供 Key + 实测出图。协议为 OpenAI 兼容（`/v1/images/generations`），
+    已写 `openai-images` 适配器；真机产物 `1696x960` / `1024x1024` PNG（后者 1,820,253 字节）。
+    视频同源中转已写 `openai-video` 适配器并真机拉到 `1920x1080 30fps 5s` MP4（19,611,822 字节，ffprobe 实测）。
+    **LLM（deepseek-v4-flash-0731）未实测**（OpenAI 兼容配置项，无需改代码）。

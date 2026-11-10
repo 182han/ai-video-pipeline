@@ -69,6 +69,12 @@ const SUITES = [
     desc: 'E2 多提示词批量（每行一个场景，行数覆盖段数；离线跑真实 create.js）'
   },
   {
+    name: 'custom-stages',
+    script: 'verify-custom-stages.js',
+    group: 'fast',
+    desc: 'E4 自定义环节 + 质检严格度（stages/strictQcItems 提交体；离线跑真实 create.js）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',

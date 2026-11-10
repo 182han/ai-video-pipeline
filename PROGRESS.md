@@ -497,6 +497,24 @@
 - 回归：`cost-guard` 24/0、`create-config` 28/0、`key-guard` 18/0、`openai-video` 24/0。
 - **未验证**：真实浏览器交互（本机无浏览器）；【主题】标签在真实任务里的最终提示词（依赖 promptOptimizer，未实测）。
 
+### E4 自定义执行环节 + 质检严格度（2026-11-10，完成）
+
+- **后端本来就有**（本次未改）：`POST /api/tasks` 的 `preset='custom'` + `stages[]` → `pipelineStages.resolveStages`
+  （核心链 3 步强制、依赖自动补齐、未知步骤拒绝）；`strictQcItems[]` → `qualityChecker` 的 `strictItems`
+  （不传 = 全部项都要紧；`nsfw` 在 `ALWAYS_STRICT` 里，永远要紧）。`verify-stages` 45/0 覆盖纯函数层。
+- **前端**（`web/src/screens/create.js`，确认页「生成参数」块）：
+  - 档位下拉新增 `custom（自定义环节）`；
+  - 选 custom 时出现 **8 个环节勾选框**（`STAGE_OPTS`，键与 `ALL_STAGES` 一致；核心 3 步 disabled + 恒勾选）；
+  - 新增 **「质检严格度」13 个勾选框**（`QC_OPTS`，键与 `QC_ITEMS` 一致；NSFW disabled + 恒勾选）；
+  - 提交体：custom 才发 `stages`（过滤非法键），始终发 `strictQcItems`；`nsfw` 无法被取消（toggle 里强制保留）。
+- **验收**：新增 `scripts/verify-custom-stages.js`（32 项，已注册 fast 组）→ **32/0**：
+  - 静态：8 个环节键 + 11 个质检键 + custom/stages/strictQcItems 接线；
+  - **离线跑真实 create.js**：切 custom → 取消「无缝循环」「配乐混音」→ `stages` 不含 `loop_processing`/`audio_mix`
+    且核心 3 步仍在；取消「循环质检」→ `strictQcItems` 不含 `loop` 且 `nsfw` 仍在；非 custom 档**不发** `stages`。
+- 回归：`multi-prompt` 17/0、`cost-guard` 24/0、`create-config` 28/0、`key-guard` 18/0、`stages` 45/0、
+  `openai-video` 24/0、`image-gen` 100/0、`image-gen-compat` 25/0。
+- **未验证**：真实浏览器交互（本机无浏览器）；custom 档 + 真实任务端到端（`verify-stage-pipeline` 未跑，需真机 Mock 任务）。
+
 ## 基线快照
 
 | 项 | 值 |

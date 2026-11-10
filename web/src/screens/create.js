@@ -16,6 +16,38 @@ const { useEffect, useState } = React;
 
 const STEPS = ['提示词', '图片生成', '图片审核', '运镜', '时长与配乐', '确认'];
 
+// 8 个执行环节（与 src/pipelineStages.js 的 ALL_STAGES 一致；核心链 3 步锁定必选）
+const STAGE_OPTS = [
+  { key: 'prompt_optimize', name: '提示词优化', core: true },
+  { key: 'storyboard', name: '分镜拆解', core: true },
+  { key: 'clip_generation', name: '片段生成', core: true },
+  { key: 'concatenation', name: '拼接' },
+  { key: 'loop_processing', name: '无缝循环' },
+  { key: 'audio_mix', name: '配乐混音' },
+  { key: 'transcoding', name: '转码导出' },
+  { key: 'final_qc', name: '最终质检' }
+];
+
+// 13 个质检项（与 src/qualityChecker.js 的 QC_ITEMS 一致；nsfw 永远要紧，不可关闭）
+const QC_OPTS = [
+  { key: 'prompt', name: '提示词质检' },
+  { key: 'storyboard', name: '分镜头质检' },
+  { key: 'blackFrame', name: '黑帧检测' },
+  { key: 'blur', name: '模糊检测' },
+  { key: 'duplicate', name: '重复帧检测' },
+  { key: 'duration', name: '时长校验' },
+  { key: 'nsfw', name: 'NSFW 合规检测' },
+  { key: 'concat', name: '拼接质检' },
+  { key: 'seam', name: '接缝质量检测' },
+  { key: 'colorContinuity', name: '镜头色彩连续性' },
+  { key: 'loop', name: '循环质检' },
+  { key: 'transcode', name: '转码质检' },
+  { key: 'final', name: '最终综合质检' }
+];
+
+const ALL_STAGE_KEYS = STAGE_OPTS.map((s) => s.key);
+const ALL_QC_KEYS = QC_OPTS.map((q) => q.key);
+
 // 从 localStorage.vs_config 取运行时配置（与旧版同键，共用一份 Key）
 function collectRuntime(model) {
   let cfg = {};
@@ -99,11 +131,22 @@ export function CreateWizard({ onChanged }) {
   const [imgResult, setImgResult] = useState(null);
   const [imgErr, setImgErr] = useState('');
   const [est, setEst] = useState(null); // 费用预估（/api/estimate，与 /api/pricing 同源）
+  const [customStages, setCustomStages] = useState(ALL_STAGE_KEYS.slice());
+  const [strictQc, setStrictQc] = useState(ALL_QC_KEYS.slice());
 
   // 多行模式：行数即片段数（覆盖段数设置）
   const promptLines = splitPromptLines(prompt);
   const isMultiPrompt = promptLines.length > 1;
   const effectiveClips = isMultiPrompt ? promptLines.length : p.clipCount;
+
+  // 自定义环节 / 质检严格度（nsfw 永远要紧，取消不生效）
+  const toggleStage = (key, on) => setCustomStages((list) => (on
+    ? Array.from(new Set([...list, key]))
+    : list.filter((k) => k !== key)));
+  const toggleQc = (key, on) => setStrictQc((list) => {
+    if (key === 'nsfw') return list.includes('nsfw') ? list : [...list, 'nsfw'];
+    return on ? Array.from(new Set([...list, key])) : list.filter((k) => k !== key);
+  });
 
   useEffect(() => promptBus.on((text) => setPrompt(text)), []);
 
@@ -229,6 +272,9 @@ export function CreateWizard({ onChanged }) {
         model: p.model,
         resolution: p.resolution,
         preset: p.preset,
+        // 自定义档才发送 stages；其它档位沿用预设（后端 resolveStages 负责补依赖/强制核心）
+        ...(p.preset === 'custom' ? { stages: customStages.filter((k) => ALL_STAGE_KEYS.includes(k)) } : {}),
+        strictQcItems: strictQc.filter((k) => ALL_QC_KEYS.includes(k)),
         clipCount: effectiveClips,
         totalClips: effectiveClips,
         clipDuration: p.clipDuration,
@@ -536,7 +582,40 @@ export function CreateWizard({ onChanged }) {
               <select value=${p.preset} onChange=${(e) => set('preset', e.target.value)}
                 className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
                 ${['final', 'daily', 'quick', 'clips_only'].map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
+                <option value="custom">custom（自定义环节）</option>
               </select>
+            </div>
+            ${p.preset === 'custom' && html`
+              <div className="mt-2">
+                <div className="text-[11px] text-ink3 mb-1">自定义环节（核心链 3 步始终执行；依赖由后端自动补齐）</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  ${STAGE_OPTS.map((s) => html`
+                    <label key=${s.key} className="flex items-center gap-1.5 text-[11px] text-ink2">
+                      <input type="checkbox"
+                        checked=${s.core || customStages.includes(s.key)}
+                        disabled=${s.core}
+                        onChange=${(e) => toggleStage(s.key, e.target.checked)}
+                        className="w-[13px] h-[13px] accent-accent" />
+                      ${s.name}
+                    </label>
+                  `)}
+                </div>
+              </div>
+            `}
+            <div className="mt-2">
+              <div className="text-[11px] text-ink3 mb-1">质检严格度（勾选项失败会阻塞任务；NSFW 永远阻塞，不可关闭）</div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                ${QC_OPTS.map((q) => html`
+                  <label key=${q.key} className="flex items-center gap-1.5 text-[11px] text-ink2">
+                    <input type="checkbox"
+                      checked=${q.key === 'nsfw' || strictQc.includes(q.key)}
+                      disabled=${q.key === 'nsfw'}
+                      onChange=${(e) => toggleQc(q.key, e.target.checked)}
+                      className="w-[13px] h-[13px] accent-accent" />
+                    ${q.name}
+                  </label>
+                `)}
+              </div>
             </div>
             <p className="mt-2 text-[11px] leading-[1.7] text-ink3">
               模型决定生成器与 Key 来源；请求体里的 model 仍是 generator 名（如 dashscope），modelId 由后端按厂商补全。
