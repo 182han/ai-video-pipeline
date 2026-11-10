@@ -156,12 +156,13 @@
 
 | 优先级 | 事项 | 证据 |
 |---|---|---|
-| **P0** | 门禁入口不可执行（`spawn EPERM`） | `verify-all.js:162`；本机实测 |
-| **P0** | 2 个注册套件是红的 | `verify-auth` 11/15（数据污染）、`verify-loop` 28/1（断言过期） |
-| **P1** | 30 个套件不在门禁（含 seam/transitions/color-*/recovery/adjust） | 58 实有 vs 28 注册（2026-11-09 实测） |
-| **P1** | Postgres 不可达，持久化未验证 | `.env` + 测试日志 `timeout exceeded` |
-| **P2** | `data/logs/console-3001.log.err` 已入库 | `git ls-files data/logs`；`.gitignore:27` 只有 `*.log` |
-| **P2** | 双锁文件并存 | `package-lock.json` + `pnpm-lock.yaml` |
+| **P0** | 门禁入口不可执行（`spawn EPERM`） | `verify-all.js:162`；本机实测。**环境限制，本机无法修**，只能逐个跑（AGENTS §2.4） |
+| ~~P0~~ | ~~2 个注册套件是红的~~ **已修（2026-11-10，`0194fa2`）** | `verify-auth` 40/0（根因是测试直接读写真实 `data/users.json`，残留账号让 bootstrap 跳过建号 → 给 jsonfile 驱动加 `USERS_FILE` 覆盖，测试用临时目录）；`verify-loop` 29/0（`qcVersion===2` 过期断言 → 改为从 `QC_VERSION` 同源取） |
+| ~~P1~~ | ~~30 个套件不在门禁~~ **已收口（2026-11-10）** | 逐个跑完 29 个未注册套件：**24 个绿** + `verify-adjust-pipeline`（修完 timing bug 后绿）→ **新注册 25 个**，现 **56 注册 / 61 实有 / 5 未注册**。剩余 5 个：`verify-all.js`（是门禁 runner 本身不是套件）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件（`verify-bgm-api` / `bgm-e2e2` / `bgm-negative` / `port3001`），不适合进自动门禁 |
+| **P1** | **片段最终失败会崩进程（真 bug，2026-11-10 修）** | `pipeline._processSingleClip` 的 `timing` 声明在 `try` 内，`catch` 里 `_finishClipFailure(...timing)` → `ReferenceError: timing is not defined`，整个 Node 进程退出、任务永远停在 generating。`verify-adjust-pipeline` 抓到；已把 `timing` 移到 `try` 外，该套件 12/0 |
+| **P1** | Postgres 持久化未验证 | 库连得上（`users` 1 行、`tasks` 201 行），但**没有断言验证任务真的写进 Postgres**，现有断言只覆盖内存/JSON 侧 |
+| ~~P2~~ | ~~`data/logs/console-3001.log.err` 已入库~~ **已修（2026-11-10）** | `.gitignore` 补 `*.log.err`，`git rm --cached` 取消跟踪（文件留着，服务还在写） |
+| **P2** | 双锁文件并存 | `package-lock.json` + `pnpm-lock.yaml`。**未处理**：本机 `npm` 不存在、`pnpm` 已损坏，无法判断哪个可信；删错会让以后装依赖更难。待你决定保留哪个 |
 
 ---
 

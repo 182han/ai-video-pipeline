@@ -515,6 +515,30 @@
   `openai-video` 24/0、`image-gen` 100/0、`image-gen-compat` 25/0。
 - **未验证**：真实浏览器交互（本机无浏览器）；custom 档 + 真实任务端到端（`verify-stage-pipeline` 未跑，需真机 Mock 任务）。
 
+### 工程债清理（2026-11-10，第一步）
+
+- **两个长期红套件已修**（`0194fa2`）：
+  - `verify-auth` **11/15 → 40/0**：根因不是登录坏了，而是脚本直接读写真实 `data/users.json`，
+    历史残留 `verify_` 账号让 `auth.bootstrap()` 跳过建号 → 登录全 401。给 jsonfile 驱动加
+    `USERS_FILE` 环境覆盖（与既有 `DATA_DIR` 覆盖同一套测试隔离思路，默认行为不变），
+    `verify-auth` 把用户文件指向临时目录、跑完删临时目录。另修一条过期断言：E5 单版本收口后
+    `/` 已变成 302 `/app`，原先「关掉登录墙后 / 返回 200」不再成立 → 改为断言 302 + `Location=/app`。
+  - `verify-loop` **28/1 → 29/0**：`qcVersion === 2` 写死，代码已是 3 → 改为从 `qualityChecker.QC_VERSION`
+    同源取，以后升版不会再假红。
+- **未注册套件收口**：把原 29 个未注册套件逐个跑了一遍（脚本把 stdout/stderr 重定向到文件描述符，
+  避开本机管道 EPERM）：**24 个绿**，另有 `verify-adjust-pipeline` 抓到真 bug、修完也绿 → **新注册 25 个**。
+  现 **56 注册 / 61 实有 / 5 未注册**（`verify-all.js` 是 runner 本身 + 4 个依赖运行中 3001 服务/登录态的
+  手动套件：`verify-bgm-api` / `bgm-e2e2` / `bgm-negative` / `port3001`）。
+- **真 bug（修）**：`pipeline._processSingleClip` 把 `timing` 声明在 `try` 里，`catch` 调
+  `_finishClipFailure(..., timing)` → `ReferenceError: timing is not defined`，**整个 Node 进程退出**，
+  任务永远停在 `generating`。触发条件：片段重试次数用尽（如持续 429）。已把 `timing` 移到 `try` 外，
+  `verify-adjust-pipeline` 12/0（负向用例：请求了调节但滤镜生成失败 → 任务判 failed 且原因可读）。
+  **注意：`src/pipeline.js` 改了，运行中的服务需重启才对真实任务生效。**
+- **小脏点**：`.gitignore` 补 `*.log.err` 并 `git rm --cached data/logs/console-3001.log.err`（文件保留，服务仍在写）。
+- **未处理**：双锁文件（`package-lock.json` + `pnpm-lock.yaml`）。本机 `npm` 不存在、`pnpm` 已损坏，
+  无法判断哪个可信，删除有风险 → 留给用户决定。
+- **盘点日志**：`output/_verify_inventory/*.log`（每个套件的原始输出，未删除，便于复核）。
+
 ## 基线快照
 
 | 项 | 值 |

@@ -2029,15 +2029,16 @@ class Pipeline {
 
     // 总尝试次数 = 1 + maxRetries（maxRetries=1 表示首次失败后还可重试 1 次）
     for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
+      // timing 必须在 try 外声明：catch 里的 _finishClipFailure 要用它记录耗时。
+      // 历史 bug：声明在 try 内 → 片段最终失败时 catch 抛 ReferenceError: timing is not defined，
+      // 整个进程崩掉，任务永远停在 generating（verify-adjust-pipeline 抓到的）。
+      const genStartedMs = Date.now();
+      const timing = { genStartedAt: new Date(genStartedMs).toISOString() };
       try {
         taskManager.updateClip(taskId, index, {
           status: 'generating',
           attempts: attempt
         });
-        // 计时：生成/下载 与 质检 分段记录。历史片段没有这两个字段，
-        // 片段库会如实标成「只有总时长」，不拿总时长冒充生成耗时。
-        const genStartedMs = Date.now();
-        const timing = { genStartedAt: new Date(genStartedMs).toISOString() };
 
         console.log(`[${taskId}] 片段 ${index + 1}/${task.totalClips} 第${attempt}次生成`);
 

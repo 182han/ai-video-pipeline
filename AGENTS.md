@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **61**（2026-11-10 实测；删旧页面时删了 4 个只测旧页面的套件，新增 `verify-create-config` / `verify-key-guard` / `verify-image-gen-compat` / `verify-openai-video` / `verify-cost-guard` / `verify-multi-prompt` / `verify-custom-stages`） |
-| 门禁注册 | **31**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
-| 未注册 | **30**（61 − 31；含 `verify-seam-qc`、`verify-transitions`、`verify-color-match`、`verify-color-continuity`、`verify-recovery-fixes`、`verify-adjust-*`×2 等） |
+| `scripts/verify-*.js` 实有 | **61**（2026-11-10 实测；含门禁 runner `verify-all.js` 本身） |
+| 门禁注册 | **56**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **5**（61 − 56）：`verify-all.js`（runner 本身）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件 `verify-bgm-api` / `verify-bgm-e2e2` / `verify-bgm-negative` / `verify-port3001`（未登录即失败，故不入门禁） |
 
 ### 2.4 本机限制（重要）
 
@@ -80,22 +80,21 @@ Error: spawn EPERM
 
 **结论：本机永远无法从门禁拿到「整体通过」；只能逐个套件跑。** 这是环境限制，不是代码缺陷。
 
-### 2.5 当前基线（2026-11-02 13:28–13:47 实测，17 个注册套件逐个跑）
+### 2.5 当前基线（2026-11-10 实测）
 
-**660 条断言：644 通过 / 16 失败；15 绿 / 2 红。**
-
-| 红灯 | 数量 | 根因（已定位） |
-|---|---|---|
-| `verify-auth.js` | 11 通过 / **15 失败** | `data/users.json` 残留账号 `tmp_negative_probe`；`auth.js:265` `if (count > 0) return` 导致跳过创建测试账号 → 登录全 401。**是测试数据污染，不是登录功能失效。** 该脚本**故意**用 `DATABASE_TYPE=json` 起临时服务（`verify-auth.js:57`）；线上走 postgres，账号是 `admin`，两者互不影响。 |
-| `verify-loop.js` | 28 通过 / **1 失败** | 断言过期：`verify-loop.js:211` 要求 `qcVersion === 2`，代码已是 `qualityChecker.js:42` `QC_VERSION = 3`。 |
-
-> 另一会话 13:45 记录的「11 个套件全绿」也成立——但它没跑 auth 与 loop。
+- **曾长期红的 2 个套件已修好**：`verify-auth` **40/0**（隔离 `USERS_FILE` 到临时目录）、
+  `verify-loop` **29/0**（`qcVersion` 改为从 `QC_VERSION` 同源取）→ 提交 `0194fa2`。
+- **未注册套件已收口**：2026-11-10 逐个跑完原 29 个未注册套件，**24 个绿 + `verify-adjust-pipeline`（修 bug 后绿）
+  → 新注册 25 个**，现 **56 注册 / 61 实有 / 5 未注册**（runner + 4 个依赖运行中服务的手动套件）。
+- ⚠️ 本机仍**无法**用 `verify-all.js` 一次性拿总结果（`spawn EPERM`，见 2.4），只能逐个跑；
+  逐个跑不代表整体已全绿，本轮只实跑了「新注册的 25 个 + 改动相关的若干套件」。
 
 ### 2.6 判定口径
 
-- 通过：退出码 0 **且** 输出末行 `M 失败` 为 0。
+- 通过：退出码 0 **且** 输出末行 `M 失败` 为 0（或同义总结行，如 `55 通过 / 0 失败`、`N passed, M failed`）。
 - 脚本自报的「跳过」**不等于**通过（见 §5 质检语义）。
-- 有 30 个未注册套件本次未跑（seam/transitions/color-*/recovery/adjust 等），**它们的状态是「未验证」，不是「通过」**。
+- 5 个未注册项中，4 个是**依赖运行中 3001 服务/登录态**的手动套件（`verify-bgm-api` / `bgm-e2e2` /
+  `bgm-negative` / `port3001`）——它们的失败只说明「没登录」，**不能当成功能坏了**，也不能当成通过。
 
 ---
 
@@ -121,11 +120,11 @@ Error: spawn EPERM
 |---|---|---|---|
 | 1 | 门禁跑不起来 | `node scripts/verify-all.js` → `spawn EPERM` | 逐个 `node scripts/verify-X.js` |
 | 2 | 包管理器坏了 | `npm` 不存在；`pnpm --version` exit 1 | 不要写依赖 npm 的流程；已有 `node_modules` 就够用 |
-| 3 | `verify-loop` 必红 | `qcVersion=3` 但断言 `===2` | 这是既有过期断言，**不要为了让测试变绿去改代码语义**；要么修断言（需按「测试也不许为了让代码通过而改」的规矩先确认），要么先记录 |
-| 4 | `verify-auth` 必红 | `data/users.json` 里 `tmp_negative_probe` 让 bootstrap 跳过建号 | 修测试隔离（改用独立 DATA_DIR / 临时账号），**不要删用户数据凑绿** |
+| 3 | ~~`verify-loop` 必红~~ **已修（2026-11-10）** | 旧断言写死 `qcVersion === 2`，代码已是 3 | 已改为从 `qualityChecker.QC_VERSION` 同源取；以后升版不会再假红 |
+| 4 | ~~`verify-auth` 必红~~ **已修（2026-11-10）** | 测试直接读写真实 `data/users.json`，历史残留 `verify_` 账号让 bootstrap 跳过建号 → 登录全 401 | 已给 jsonfile 驱动加 `USERS_FILE` 环境覆盖，测试用临时目录；**仍然不要删真实用户数据凑绿** |
 | 5 | 数据库**可达，但会间歇超时** | 2026-11-02 15:06 实测：`users` 表 1 行（`admin`）、`tasks` 表 **201** 行 → 库是通的；但批量跑测试时大量打印 `timeout exceeded when trying to connect` | **不要把测试里的超时噪声当成"库坏了"**；持久化断言仍只覆盖内存/JSON 侧 |
 | 6 | sqlite 驱动不可用 | `better-sqlite3` 不在 `package.json` 也不在 `node_modules` | 不要用 `DATABASE_TYPE=sqlite` |
-| 7 | `.err` 漏出 gitignore | `.gitignore:27` 只有 `*.log`；`data/logs/console-3001.log.err` 已被提交（0 字节） | 新增日志后缀时要同步规则 |
+| 7 | ~~`.err` 漏出 gitignore~~ **已修（2026-11-10）** | `.gitignore` 只有 `*.log`；`data/logs/console-3001.log.err` 曾被提交 | 已补 `*.log.err` 并 `git rm --cached` 取消跟踪（文件还在，服务继续写） |
 | 8 | 双锁文件 | `package-lock.json` 与 `pnpm-lock.yaml` 都在库 | 改依赖前先确认用哪个，别两个都改 |
 | 9 | 根文档在 git 外 | 根 `AGENTS.md`/`PROJECT_STATE.md`/`docs/` 不受版本控制 | 重要结论写进 `app/` |
 | 10 | 旧页面地址仍会被书签/历史命中 | 2026-11-09 前 `public/` 有 12 个旧 HTML，删文件后旧链接会 404 | `server.js` 的 `LEGACY_PAGES` 把 12 个旧地址统一 302 到 `/app`；`public/login.html` 保留（登录页），其余页面不要再加 |
@@ -191,4 +190,4 @@ Error: spawn EPERM
 - 持久化：库连得上（`users` 1 行、`tasks` 201 行），但**没有测试断言验证「任务真的写进 Postgres」**，现有断言只覆盖内存/JSON 侧。
 - 30 分钟级长片、真实接缝、长时转码。
 - 视觉与交互（无人工浏览器验收记录）。
-- 30 个未注册套件的当前状态（2026-11-09 删除 4 个只测旧页面的套件后重新计数）。
+- 4 个依赖运行中服务/登录态的手动套件，本轮未在「已登录」环境下复跑。

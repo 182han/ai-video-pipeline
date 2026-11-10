@@ -30,6 +30,8 @@ data/reports/
 *.mp4
 *.mp4.txt
 *.log
+# 服务端把 stderr 也落盘成 *.log.err（2026-11-10 补），早前漏掉导致一个 0 字节文件被提交
+*.log.err
 
 # ===== 大体积素材（BGM 音乐库，47MB，不进仓库）=====
 # 用 assets/bgm/** 是为了连子目录（calm/ epic/ nature/ 等）一起匹配，
