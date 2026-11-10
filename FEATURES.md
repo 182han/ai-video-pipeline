@@ -76,8 +76,14 @@
   - 证据：`src/processors/waveform.js`、`GET /api/bgm/waveform/:id`（`server.js:325`）
 - [x] BGM 库存 CRUD + 偏好
   - 证据：`server.js:303-365`
-- [~] 配乐文件上传
-  - **未实现**（见 B3）
+- [x] 配乐文件上传（2026-11-10）
+  - 入口：配乐页「＋ 上传音频」→ FileReader 读成 dataURL → `POST /api/bgm`（base64，
+    `audioMixer.addTrack` 写入 `assets/bgm/custom/` 并自动登记 manifest），顺带用 `<audio>` 读时长
+  - 防护：单文件 ≤20MB（超出 413）；后缀白名单 mp3/wav/m4a/ogg（非法后缀 400）；
+    base64 空/乱码 400；文件头校验（RIFF/ID3/0xFF/ftyp/OggS）挡住非音频内容
+  - 证据：`web/src/screens/inventory.js`、`src/processors/audioMixer.js`、`server.js`；
+    `scripts/verify-bgm-upload.js` **23/0**（临时服务 + 隔离 `BGM_DIR`，含 4 类负向）
+  - **未验证**：真实浏览器里选文件/上传进度/大文件耗时（本机无浏览器）
 
 ### A6. 任务与资产
 
@@ -152,7 +158,7 @@
 |---|---|---|---|
 | ~~**P0**~~ | ~~人工审核门 `awaiting_review`~~ **已被用户改口径（2026-11-10）** | 用户明确：**不要后端审核门状态机**（不新增待审状态、不做批次/超时/留痕），只要「出图后下一步能看见图、能打回重做这一张」。已按此实现为**向导内人工确认**（第③步看图 → 通过/打回），改动仅前端；`docs/spec/review-gate-design.md` 的整套方案**暂不实施** | — |
 | **P0** | 图片生成（厂商已接入，流水线待接） | ✅ 适配器/接口/CLI/验收已完成：`src/generators/imageProviders/dashscope.js`（wan2.7-image）、`GET /api/image-gen/status`、`POST /api/images/generate`、`scripts/test-image-gen.js`、`scripts/verify-image-gen.js`（100/0）；设置页已有「图片生成 · wan2.7-image」入口（本机 Key 运行时生效 + 测试连接 + 眼睛显示切换；Seedance/可灵默认折叠）；`scripts/check-server-version.js` 可检测运行中的后端是否过期。向导第二步可「单张测试出图」。前端已单版本收口：`/` → 302 `/app`，`public/index.html` 仅归档。**尚未接进 pipeline**：没有 `image_generation` 阶段、任务字段、审核门 | 阶段与审核门按 `docs/spec/review-gate-design.md` §15 ③–⑦ 做；需产品定 D1–D6/D8 |
-| **P1** | 配乐文件上传 | `POST /api/bgm` 只收 JSON 元信息；无 multipart、无 multer | 无设计文档；需定存储落点 |
+| ~~**P1**~~ | ~~配乐文件上传~~ **已完成（2026-11-10）** | 配乐页可直接上传（≤20MB，mp3/wav/m4a/ogg，头校验），自动登记；`verify-bgm-upload` 23/0 | — |
 | **P1** | 审核门前置①：状态机缺陷修复 | `paused` 重启永久卡死、暂停超时静默丢弃、多个历史状态不在回收白名单 | 设计文档 §4/§15 要求先做（否则新增状态必踩同坑） |
 | **P2** | 剪映「调节」UI 面板 | 后端与 LUT 已完成，`.env` 默认关 | `app/web/**` 属 UI 写权限，**需用户授权** |
 | **P2** | 对象存储接入服务链 | `src/storage/objectStore.js` 只被 `scripts/upload-videos.js` 引用 | 服务运行时从不上传 |

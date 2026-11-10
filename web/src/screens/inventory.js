@@ -261,6 +261,8 @@ export function MusicView() {
   const [err, setErr] = useState('');
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({});
+  const [uploading, setUploading] = useState(false);
+  const MAX_AUDIO_MB = 20;
 
   const tracks = (s.data && s.data.tracks) || [];
   const prefs = s.data || {};
@@ -290,6 +292,56 @@ export function MusicView() {
     } catch (e) { setErr('删除失败：' + e.message); }
   }
 
+  // 上传音频：FileReader 读成 dataURL（后端只收 base64，零新依赖），
+  // 顺便用 <audio> 读时长（拿不到就 0，不阻塞上传；后端不跑 ffprobe 读 stdout，避开本机 EPERM）。
+  async function uploadFile(file) {
+    setErr('');
+    if (!file) return;
+    if (file.size > MAX_AUDIO_MB * 1024 * 1024) {
+      setErr(`文件 ${(file.size / 1048576).toFixed(1)}MB，超过 ${MAX_AUDIO_MB}MB 上限`);
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result || ''));
+        fr.onerror = () => rej(new Error('读取文件失败'));
+        fr.readAsDataURL(file);
+      });
+      const durationSec = await new Promise((res) => {
+        try {
+          const a = new window.Audio();
+          a.preload = 'metadata';
+          a.onloadedmetadata = () => {
+            const d = a.duration;
+            res(Number.isFinite(d) ? Math.round(d * 10) / 10 : 0);
+          };
+          a.onerror = () => res(0);
+          a.src = dataUrl;
+        } catch (e) { res(0); }
+      });
+      const r = await fetch('/api/bgm', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileData: dataUrl,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          category: 'music',
+          durationSec
+        })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      reload();
+    } catch (e) {
+      setErr('上传失败：' + e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function submitAdd() {
     setErr('');
     if (!(form.title || '').trim()) { setErr('曲名必填'); return; }
@@ -308,6 +360,12 @@ export function MusicView() {
   return html`
     <div className="px-6 py-5">
       <${Head} title="配乐" sub=${tracks.length + ' 首'}>
+        <label className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px] inline-flex items-center cursor-pointer">
+          ${uploading ? '上传中…' : '＋ 上传音频'}
+          <input type="file" accept=".mp3,.wav,.m4a,.ogg,audio/*" className="hidden"
+            disabled=${uploading}
+            onChange=${(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) uploadFile(f); }} />
+        </label>
         <button onClick=${() => navigate('/bgm')}
           className="h-8 px-3 rounded-[6px] border border-accent/40 text-accent text-[12px] hover:bg-accent/[.08]"
           title="打开配乐编辑器：给已完成成片排时间轴"
@@ -334,9 +392,8 @@ export function MusicView() {
             `)}
           </div>
           <p className="mt-2 text-[11px] leading-[1.7] text-ink3">
-            注意：后端 <code className="font-num">POST /api/bgm</code> 只收元信息，
-            <b className="text-warn">没有音频文件上传通道</b>——mp3 需手工放到
-            <code className="font-num">app/assets/bgm/</code> 后在这里补登记。
+            可以直接「＋ 上传音频」（mp3/wav/m4a/ogg，单文件 ≤${MAX_AUDIO_MB}MB，会自动登记）；
+            也可以手工放到 <code className="font-num">app/assets/bgm/</code> 后在这里补元信息。
           </p>
           <div className="mt-2 flex gap-2">
             <button onClick=${submitAdd} className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">保存</button>

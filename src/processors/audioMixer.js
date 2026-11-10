@@ -11,7 +11,13 @@ const path = require('path');
 const { execFile, execSync } = require('child_process');
 const config = require('../../config');
 
-const BGM_DIR = path.join(__dirname, '..', '..', 'assets', 'bgm');
+// 配乐目录：支持环境变量覆盖（测试隔离用；默认仍是 assets/bgm）。
+// 与 jsonfile 驱动的 DATA_DIR / USERS_FILE 覆盖同一套思路——测试不许往真实素材目录写文件。
+const BGM_DIR = process.env.BGM_DIR
+  ? path.resolve(process.env.BGM_DIR)
+  : path.join(__dirname, '..', '..', 'assets', 'bgm');
+// 上传音频上限（20MB）：mp3 一般 3–10MB，够用；再大就是误传或不是配乐
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const MANIFEST_PATH = path.join(BGM_DIR, 'manifest.json');
 
 // mood 标签仍然保留（用于库存筛选展示），但**不再作为自动选曲依据**。
@@ -648,13 +654,33 @@ function addTrack(data = {}) {
   const body = m ? m[1] : raw;
   const name = String(data.fileName || '');
   const nameExt = name ? path.extname(name).toLowerCase() : '';
-  const ext = (nameExt && ALLOWED_EXT.includes(nameExt)) ? nameExt : '.mp3';
-  if (!ALLOWED_EXT.includes(ext)) return { success: false, error: '仅支持 mp3/wav/m4a/ogg 格式' };
+  // 有后缀就必须是白名单内的：早前「非法后缀回退成 .mp3」会把 .exe 内容写成 mp3 落盘
+  if (nameExt && !ALLOWED_EXT.includes(nameExt)) return { success: false, code: 'BAD_EXT', error: '仅支持 mp3/wav/m4a/ogg 格式' };
+  const ext = nameExt || '.mp3';
+
+  const buf = Buffer.from(body, 'base64');
+  if (!buf.length) return { success: false, code: 'INVALID_AUDIO', error: '音频内容为空或不是合法 base64' };
+  if (buf.length > MAX_AUDIO_BYTES) {
+    return {
+      success: false,
+      code: 'TOO_LARGE',
+      error: `音频文件过大（${(buf.length / 1048576).toFixed(1)}MB，上限 20MB）`
+    };
+  }
+  // 头校验：把文本/可执行文件当音频传时直接拒收，不落盘坏文件
+  const head = buf.subarray(0, 12);
+  const isWav = head.subarray(0, 4).toString('ascii') === 'RIFF';
+  const isMp3 = head.subarray(0, 3).toString('ascii') === 'ID3' || head[0] === 0xff;
+  const isM4a = head.subarray(4, 8).toString('ascii') === 'ftyp';
+  const isOgg = head.subarray(0, 4).toString('ascii') === 'OggS';
+  if (!(isWav || isMp3 || isM4a || isOgg)) {
+    return { success: false, code: 'INVALID_AUDIO', error: '文件内容不是音频（仅支持 mp3/wav/m4a/ogg）' };
+  }
 
   if (!fs.existsSync(CUSTOM_DIR)) fs.mkdirSync(CUSTOM_DIR, { recursive: true });
   const id = _genId();
   const rel = 'custom/' + id + ext;
-  fs.writeFileSync(path.join(BGM_DIR, rel), Buffer.from(body, 'base64'));
+  fs.writeFileSync(path.join(BGM_DIR, rel), buf);
 
   const track = {
     id,

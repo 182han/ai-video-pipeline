@@ -387,7 +387,11 @@ app.put('/api/bgm/prefs', (req, res) => {
 // 上传配乐入库（base64）
 app.post('/api/bgm', (req, res) => {
   const result = audioMixer.addTrack(req.body || {});
-  if (!result.success) return res.status(400).json({ error: result.error });
+  if (!result.success) {
+    // 超大文件用 413，其余参数问题 400（前端据此提示「换小一点的文件」）
+    const status = result.code === 'TOO_LARGE' ? 413 : 400;
+    return res.status(status).json({ error: result.error, code: result.code });
+  }
   res.json(result);
 });
 

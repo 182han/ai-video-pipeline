@@ -558,6 +558,27 @@
   返回 `url: '/clips/<文件名>'`；`/clips` 是不拦登录的静态目录，所以页面 `<img>` 直接可见。
   想要「带时效的签名地址」是另一件事，未做。
 
+### 配乐上传（2026-11-10）
+
+- **改前事实**：`audioMixer.addTrack` 其实已支持 `fileData`(base64) 落盘到 `assets/bgm/custom/` 并登记 manifest，
+  但**前端没有入口**（配乐页只能填元信息、提示手工放 mp3），后端也**没有任何大小/内容校验**
+  （非法后缀会被回退成 `.mp3` 落盘，乱填 base64 会写出 0 字节文件）。
+- **后端**（`src/processors/audioMixer.js` + `server.js`）：
+  - `BGM_DIR` 支持环境覆盖（测试隔离；默认仍 `assets/bgm`）；
+  - 白名单后缀（有后缀但不在 mp3/wav/m4a/ogg → 400）；
+  - base64 解码为空 → 400；>20MB → `TOO_LARGE` → **HTTP 413**；文件头校验（RIFF/ID3/0xFF/ftyp/OggS）拒收非音频。
+- **前端**（`web/src/screens/inventory.js`）：配乐页新增「＋ 上传音频」（`accept=.mp3,.wav,.m4a,.ogg,audio/*`），
+  `FileReader.readAsDataURL` + `<audio>` 读时长（拿不到就 0，不阻塞），上传后自动刷新列表；
+  超过 20MB 在前端先拦。
+- **验收**：新增 `scripts/verify-bgm-upload.js`（23 项，已注册 real 组）→ **23/0**：
+  真传 1s wav（ffmpeg 生成）→ 文件字节数一致、manifest 写入、API 可查；同名再传新 id；
+  非法后缀/非法 base64/缺文件/20MB+ 四类负向。
+- **污染事故（已处理）**：第一次跑测试时 `BGM_DIR` 覆盖还没实现，测试把 5 个文件写进了**真实**
+  `assets/bgm/custom/` 并改了真实 manifest（其中一个是 20MB 大文件）。已逐个删除并把
+  `assets/bgm/manifest.json` 用 `git checkout` 还原（现为 12 首，`git status` 干净），随后才加 `BGM_DIR` 覆盖；
+  重跑测试 `assets/bgm/custom` 文件数 = 0，零污染。
+- **注意**：`server.js` / `src/processors/audioMixer.js` 改了，**运行中的服务需重启**才对上传生效。
+
 ## 基线快照
 
 | 项 | 值 |
