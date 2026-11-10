@@ -48,6 +48,11 @@ function readWebConfig() {
   catch { return {}; }
 }
 
+// 多提示词批量（旧版口径）：非空行 = 一个场景 = 一个片段；行尾【主题】由服务端解析
+function splitPromptLines(text) {
+  return String(text || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
 // 账户余额（元）：留空/非法 = 不拦截（旧版口径）
 function readBalance() {
   try {
@@ -95,6 +100,11 @@ export function CreateWizard({ onChanged }) {
   const [imgErr, setImgErr] = useState('');
   const [est, setEst] = useState(null); // 费用预估（/api/estimate，与 /api/pricing 同源）
 
+  // 多行模式：行数即片段数（覆盖段数设置）
+  const promptLines = splitPromptLines(prompt);
+  const isMultiPrompt = promptLines.length > 1;
+  const effectiveClips = isMultiPrompt ? promptLines.length : p.clipCount;
+
   useEffect(() => promptBus.on((text) => setPrompt(text)), []);
 
   useEffect(() => {
@@ -122,14 +132,14 @@ export function CreateWizard({ onChanged }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: p.model, resolution: p.resolution,
-        clipDuration: p.clipDuration, clipCount: p.clipCount, modelId
+        clipDuration: p.clipDuration, clipCount: effectiveClips, modelId
       })
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (alive && j) setEst(j); })
       .catch(() => {});
     return () => { alive = false; };
-  }, [step, p.model, p.resolution, p.clipDuration, p.clipCount]);
+  }, [step, p.model, p.resolution, p.clipDuration, effectiveClips]);
 
   async function optimize() {
     setOptErr('');
@@ -193,8 +203,8 @@ export function CreateWizard({ onChanged }) {
     }
   }
 
-  const totalSec = (p.clipCount * p.clipDuration -
-    (p.transition ? p.transitionDuration * (p.clipCount - 1) : 0));
+  const totalSec = (effectiveClips * p.clipDuration -
+    (p.transition ? p.transitionDuration * (effectiveClips - 1) : 0));
 
   function set(k, v) { setP((s) => ({ ...s, [k]: v })); }
 
@@ -214,12 +224,13 @@ export function CreateWizard({ onChanged }) {
     try {
       const rt = collectRuntime(p.model);
       const body = {
-        prompt: prompt.trim(),
+        // 多行模式：prompts 数组（每行一个场景，行数即片段数）；单行保持 prompt
+        ...(isMultiPrompt ? { prompts: promptLines } : { prompt: prompt.trim() }),
         model: p.model,
         resolution: p.resolution,
         preset: p.preset,
-        clipCount: p.clipCount,
-        totalClips: p.clipCount,
+        clipCount: effectiveClips,
+        totalClips: effectiveClips,
         clipDuration: p.clipDuration,
         transition: p.transition
           ? { enabled: true, duration: p.transitionDuration, type: p.transitionType }
@@ -266,6 +277,11 @@ export function CreateWizard({ onChanged }) {
                        text-[14px] leading-[1.75] text-ink outline-none placeholder:text-ink3
                        focus:border-accent/40"
           ></textarea>
+          <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
+            单行 = 单场景 × 段数；<b className="text-ink2">多行 = 每行一个场景（行数覆盖段数设置）</b>；
+            行尾可加【主题】标签（如「雪山日出【雪山】」）。
+            ${isMultiPrompt ? html`<span className="text-accent"> / 当前 ${promptLines.length} 行 → 将生成 ${promptLines.length} 段</span>` : null}
+          </p>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <button onClick=${optimize} disabled=${optimizing}
               className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
@@ -408,6 +424,11 @@ export function CreateWizard({ onChanged }) {
                   (p.clipCount === n ? 'border-accent/50 text-accent' : 'border-white/[.09] text-ink2 hover:bg-white/[.05]')}
               >${n} 段</button>`)}
           </div>
+          ${isMultiPrompt && html`
+            <p className="mt-2 text-[11px] leading-[1.7] text-warn">
+              已输入 ${promptLines.length} 行提示词 → 片段数量按行数生成（${promptLines.length} 段），上面的「片段数量」被覆盖。
+            </p>
+          `}
           <p className="mt-2 text-[12px] text-ink2 font-num">成片预计 ${totalSec.toFixed(1)} 秒</p>
         </${Section}>
 
@@ -531,7 +552,7 @@ export function CreateWizard({ onChanged }) {
               <dt className="text-ink3">模型</dt><dd className="text-ink">${p.model}</dd>
               <dt className="text-ink3">分辨率</dt><dd className="text-ink">${p.resolution}</dd>
               <dt className="text-ink3">档位</dt><dd className="text-ink">${p.preset}</dd>
-              <dt className="text-ink3">片段</dt><dd className="text-ink">${p.clipCount} 段 × ${p.clipDuration}s</dd>
+              <dt className="text-ink3">片段</dt><dd className="text-ink">${effectiveClips} 段 × ${p.clipDuration}s${isMultiPrompt ? `（${promptLines.length} 个场景，按行生成）` : ''}</dd>
               <dt className="text-ink3">成片</dt><dd className="text-ink">${totalSec.toFixed(1)} 秒</dd>
               <dt className="text-ink3">预计花费</dt>
               <dd className="text-ink font-num">

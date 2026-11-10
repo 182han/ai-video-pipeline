@@ -252,8 +252,11 @@
     断言 `scripts/verify-create-config.js` **28/0**（先红 13/15），已注册 `verify-all.js` fast 组。
     请求体实测：`model='dashscope' / modelId='wan3.0-video' / resolution='720p' / preset='quick'`。
     `verify-image-gen.js` 回归 100/0。**真实浏览器点击/视觉未验证**（本机 `dsh_browser` 报 Electron 不可用）。
-- [ ] **E2 多提示词批量**：旧版一行一个场景；新版只有单条。验收：两行提示词 → `prompts` 长度 2 /
+- [x] **E2 多提示词批量**：旧版一行一个场景；新版只有单条。验收：两行提示词 → `prompts` 长度 2 /
   片段数 2；单行行为不变。
+  - **已完成（2026-11-10）**：前端拆行 → `prompts`（行数覆盖段数，空行忽略，支持行尾【主题】）；
+    服务端原本就支持、本次未改。`scripts/verify-multi-prompt.js` **17/0**（含离线跑真实 create.js 的
+    三行/单行/空行断言 + 服务端 400 负向，未建任务）。
 - [x] **E3 余额 + 费用预估**：旧版设置填余额，生成前估算并拦截；新版只有实际花费。
   验收：余额 1 元、预计 3 元 → 提交被拦截；余额空 → 不拦截；费用表与旧版一致。
   - **已完成（2026-11-10）**：`POST /api/estimate`（复用 `src/pricing.js`，与 `/api/pricing` 同源）；

@@ -475,6 +475,28 @@
 - 回归：`verify-create-config` 28/0、`key-guard` 18/0、`image-gen-compat` 25/0、`openai-video` 24/0、`stages` 45/0。
 - **未验证**：真实浏览器里的交互手感（本机无浏览器）；`/api/estimate` 是否被登录墙正确保护（沿用全局中间件，未单独测）。
 
+### E2 多提示词批量（2026-11-10，完成）
+
+- **旧版口径**（git 历史 `7db210e~1:public/index.html`）：多行模式「每行一个场景提示词，行数即片段数
+  （覆盖段数设置）」，行尾可加【主题】标签。
+- **服务端本来就支持**（`server.js:1469-1521` + `taskManager.js:122-143`）：接受 `prompts` 数组
+  （字符串或 `{text,theme}`），字符串行由 `promptOptimizer.parseThemeTag()` 解析【主题】；
+  片段数以行数为准；>200 行报错。**本次没有改后端**。
+- **前端**（`web/src/screens/create.js`）：
+  - `splitPromptLines()` 按 `\r?\n` 拆行、trim、丢空行；`promptLines.length > 1` 进入多行模式；
+  - `effectiveClips = 多行 ? 行数 : p.clipCount`，用于「片段」行、成片时长、费用预估、提交体；
+  - 提交体：多行发 `prompts: [...行]`（不发单条 `prompt`），单行照旧发 `prompt`；
+  - 提示：第一步提示「单行 = 单场景 × 段数；多行 = 每行一个场景（覆盖段数）」并实时显示「当前 N 行 → 将生成 N 段」；
+    第四步警告「片段数量被行数覆盖」；确认页显示「N 段（N 个场景，按行生成）」。
+- **验收**：新增 `scripts/verify-multi-prompt.js`（17 项，已注册 fast 组）→ **17/0**：
+  - 静态接线；
+  - **离线跑真实 `create.js`**（htm + 极小 hooks，fetch 打桩）：三行 → `prompts` 长度 3、`clipCount=3`、
+    不发 `prompt`、预估也按 3、确认页显示 3；单行 → 不带 prompts、沿用 4 段；含空行 → 只算 2 个有效场景；
+  - 临时服务负向：`prompts: []` → 400；201 行 → 400（含「当前输入了 201 行提示词」）；2 行 + 未知模型 → 400
+    （证明 prompts 已被解析并通过校验；**未创建任何任务**）。
+- 回归：`cost-guard` 24/0、`create-config` 28/0、`key-guard` 18/0、`openai-video` 24/0。
+- **未验证**：真实浏览器交互（本机无浏览器）；【主题】标签在真实任务里的最终提示词（依赖 promptOptimizer，未实测）。
+
 ## 基线快照
 
 | 项 | 值 |

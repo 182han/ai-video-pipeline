@@ -63,6 +63,12 @@ const SUITES = [
     desc: 'E3 余额 + 费用预估/超额拦截（/api/estimate 与 pricing 同源，起临时服务）'
   },
   {
+    name: 'multi-prompt',
+    script: 'verify-multi-prompt.js',
+    group: 'fast',
+    desc: 'E2 多提示词批量（每行一个场景，行数覆盖段数；离线跑真实 create.js）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',
