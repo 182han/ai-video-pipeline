@@ -48,6 +48,14 @@ function readWebConfig() {
   catch { return {}; }
 }
 
+// 账户余额（元）：留空/非法 = 不拦截（旧版口径）
+function readBalance() {
+  try {
+    const v = parseFloat(readWebConfig().balance);
+    return Number.isFinite(v) ? v : NaN;
+  } catch { return NaN; }
+}
+
 function Section({ title, extra, children }) {
   return html`
     <div className="border-t border-white/[.08] pt-4">
@@ -85,6 +93,7 @@ export function CreateWizard({ onChanged }) {
   const [imgBusy, setImgBusy] = useState(false);
   const [imgResult, setImgResult] = useState(null);
   const [imgErr, setImgErr] = useState('');
+  const [est, setEst] = useState(null); // 费用预估（/api/estimate，与 /api/pricing 同源）
 
   useEffect(() => promptBus.on((text) => setPrompt(text)), []);
 
@@ -101,6 +110,26 @@ export function CreateWizard({ onChanged }) {
       .then((j) => { if (j && Array.isArray(j.tracks)) setTracks(j.tracks); })
       .catch(() => {});
   }, []);
+
+  // 费用预估：进入确认页或参数变化时重算（服务端同一份价目表）
+  useEffect(() => {
+    if (step !== 5) return;
+    let alive = true;
+    let modelId = '';
+    try { modelId = JSON.parse(localStorage.getItem('vs_config') || '{}').seedanceModel || ''; } catch (e) {}
+    fetch('/api/estimate', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: p.model, resolution: p.resolution,
+        clipDuration: p.clipDuration, clipCount: p.clipCount, modelId
+      })
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j) setEst(j); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [step, p.model, p.resolution, p.clipDuration, p.clipCount]);
 
   async function optimize() {
     setOptErr('');
@@ -172,6 +201,15 @@ export function CreateWizard({ onChanged }) {
   async function submit() {
     setErr('');
     if (!prompt.trim()) { setErr('提示词不能为空'); setStep(0); return; }
+
+    // 余额守门（旧版口径）：预计花费 > 余额 → 直接拦截，不发请求；余额留空 = 不拦截
+    const balance = readBalance();
+    if (est && est.estimate > 0 && Number.isFinite(balance) && balance > 0 && est.estimate > balance) {
+      setErr(`已拦截：预计花费 ¥${est.estimate.toFixed(2)} 超过账户余额 ¥${balance.toFixed(2)}。`
+        + '请减少片段数或单段时长、降低分辨率，或先到「设置」更新余额。');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const rt = collectRuntime(p.model);
@@ -495,6 +533,15 @@ export function CreateWizard({ onChanged }) {
               <dt className="text-ink3">档位</dt><dd className="text-ink">${p.preset}</dd>
               <dt className="text-ink3">片段</dt><dd className="text-ink">${p.clipCount} 段 × ${p.clipDuration}s</dd>
               <dt className="text-ink3">成片</dt><dd className="text-ink">${totalSec.toFixed(1)} 秒</dd>
+              <dt className="text-ink3">预计花费</dt>
+              <dd className="text-ink font-num">
+                ${est
+                  ? (est.estimate > 0 ? '约 ¥' + Number(est.estimate).toFixed(2) : '免费（mock，不产生费用）')
+                  : '计算中…'}
+                ${Number.isFinite(readBalance()) && readBalance() > 0
+                  ? '｜余额 ¥' + readBalance().toFixed(2)
+                  : ''}
+              </dd>
               <dt className="text-ink3">配乐</dt>
               <dd className="text-ink">
                 ${p.bgmMode === 'none' ? '不添加（无声）'
@@ -509,6 +556,11 @@ export function CreateWizard({ onChanged }) {
                 ${p.colorMatch ? ' · 校色开' : ''}
               </dd>
             </dl>
+            ${Number.isFinite(readBalance()) && readBalance() > 0 && est && est.estimate > readBalance() && html`
+              <p className="mt-2 text-[12px] text-danger">
+                预计花费 ¥${Number(est.estimate).toFixed(2)} 超过余额 ¥${readBalance().toFixed(2)}，提交会被拦截。
+              </p>
+            `}
             ${err && html`<p className="mt-2 text-[12px] text-danger">${err}</p>`}
           </${Section}>
         </div>

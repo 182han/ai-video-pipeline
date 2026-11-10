@@ -221,6 +221,14 @@ export function SettingsView() {
             ${['final', 'daily', 'quick', 'clips_only'].map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
           </select>
         </div>
+        <div className="mt-2 flex items-center gap-3 flex-wrap">
+          <span className="text-[12px] text-ink2 w-[64px]">账户余额</span>
+          <input type="number" step="0.01" min="0" value=${web.balance !== undefined ? web.balance : ''}
+            onInput=${(e) => saveWeb({ balance: e.target.value })}
+            placeholder="元（留空 = 不拦截）"
+            className="h-8 w-[140px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink font-num outline-none" />
+          <span className="text-[11px] text-ink3">生成前用预计花费与余额比对；超出直接拦截，避免误点超支。需手动维护。</span>
+        </div>
         <div className="mt-2 flex items-center gap-4">
           <label className="flex items-center gap-2 text-[12px] text-ink">
             <input type="checkbox" checked=${web.transition !== false}

@@ -452,6 +452,29 @@
 - 探测手段白名单：只读 `GET`（模型列表/任务状态/Range 读头）、本地 stub（`verify-*.js`）、缺必填字段的非法请求。
 - 本轮视频产物按新规则保留在 `app/output/_video_probe/`（一个任务一个文件，不删）。
 
+### E3 余额 + 生成前费用预估/超额拦截（2026-11-10，完成）
+
+- **旧版口径**（从 git 历史 `7db210e~1:public/index.html` 取，旧页面已删）：
+  设置里填「账户余额（元）」；留空 = 不拦截；非 mock 在提交前弹「费用预估确认」；
+  预计花费 > 余额 → 直接拦截、不发请求；dashscope 按秒计价 720P ¥0.6/s · 1080P ¥1.2/s · 480P ¥0.3/s。
+- **服务端**：新增 `POST /api/estimate`（`server.js`），复用 `src/pricing.js` 的 `computeUnitPrice`，
+  与 `GET /api/pricing` **同一份价目表**（返回 `estimate / perClip / basis / priceVersion / clips`），
+  `clipCount` 夹到 1–500；未知模型返回 0 + `basis:'unknown'`。
+- **前端**：
+  - 设置页「生成参数」新增「账户余额（元）」，写 `localStorage.vs_web_config.balance`（留空 = 不拦截）；
+  - 创作页确认页新增「预计花费」行（含余额），进入确认页或参数变化时调 `/api/estimate` 重算；
+  - 提交前比对：`est.estimate > balance` → 红字「已拦截：预计花费 ¥X 超过账户余额 ¥Y…」并 **return（不发请求）**；
+    确认页同时提前显示「提交会被拦截」提示。
+- **验收**：新增 `scripts/verify-cost-guard.js`（24 项，已注册 fast 组）→ **24/0**，其中 3 条是
+  **离线跑真实 `create.js`** 的行为断言（仓库自带 htm + 极小 hooks 运行时，fetch 打桩）：
+  - 余额 ¥1 / 预计 ¥3 → **拦截，且 `/api/tasks` 确实没被调用**；
+  - 余额留空 → 不拦截，`/api/tasks` 被调用；
+  - 余额 ¥100 / 预计 ¥3 → 放行。
+  服务端口径实测：mock 0；dashscope 1080p 5s×10 = ¥60、720p 5s×4 = ¥12；siliconflow ¥2×3 = ¥6；
+  seedance-2.5 ¥3×2 = ¥6；`priceVersion` 与 `/api/pricing` 一致。
+- 回归：`verify-create-config` 28/0、`key-guard` 18/0、`image-gen-compat` 25/0、`openai-video` 24/0、`stages` 45/0。
+- **未验证**：真实浏览器里的交互手感（本机无浏览器）；`/api/estimate` 是否被登录墙正确保护（沿用全局中间件，未单独测）。
+
 ## 基线快照
 
 | 项 | 值 |

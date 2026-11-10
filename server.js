@@ -1724,6 +1724,29 @@ app.get('/api/pricing', (req, res) => {
   res.json({ ...pricing.PRICE_TABLE, version: pricing.PRICE_VERSION });
 });
 
+// 生成前费用预估：与 /api/pricing 用同一份 src/pricing.js，前端不再自己抄价目表。
+// 旧版口径（public/index.html，已删）：非 mock 才提示；余额留空 = 不拦截；预计 > 余额 → 拦截。
+app.post('/api/estimate', (req, res) => {
+  const b = req.body || {};
+  const clipCount = Math.max(1, Math.min(500, parseInt(b.clipCount, 10) || 1));
+  const unit = pricing.computeUnitPrice({
+    model: typeof b.model === 'string' ? b.model : '',
+    resolution: typeof b.resolution === 'string' ? b.resolution : '',
+    clipDurationSec: Number(b.clipDuration) || 0,
+    modelId: typeof b.modelId === 'string' ? b.modelId : ''
+  });
+  res.json({
+    ok: true,
+    clips: clipCount,
+    basis: unit.basis,
+    unit,
+    perClip: unit.amountPerAttempt || 0,
+    estimate: pricing.round2((unit.amountPerAttempt || 0) * clipCount),
+    currency: 'CNY',
+    priceVersion: pricing.PRICE_VERSION
+  });
+});
+
 // 库列表：按分辨率分组，支持主题/模型/收藏/关键字筛选
 // 调节 LUT（预览用；与 ffmpeg lut3d 同一套 adjustChain）
 app.post('/api/adjust/lut', (req, res) => {

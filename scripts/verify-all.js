@@ -57,6 +57,12 @@ const SUITES = [
     desc: 'OpenAI 兼容视频适配器（openai-video：提交/轮询//content 下载 + 负向，本地 stub）'
   },
   {
+    name: 'cost-guard',
+    script: 'verify-cost-guard.js',
+    group: 'fast',
+    desc: 'E3 余额 + 费用预估/超额拦截（/api/estimate 与 pricing 同源，起临时服务）'
+  },
+  {
     name: 'stats',
     script: 'verify-stats.js',
     group: 'fast',
