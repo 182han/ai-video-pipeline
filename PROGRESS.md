@@ -1,5 +1,65 @@
 # PROGRESS — 补建基线完成（2026-11-02）
 
+## 🔴 交接断点（2026-11-10 17:15，换窗口前）
+
+> 下面这段是**给下一个窗口**看的，读完再往下读历史。历史部分保留未删（都是证据）。
+
+### 1. 本轮任务目标 + 验收标准（用户原话口径，不要改写）
+
+- **E2 多行批量**：每行一个场景 → `prompts` 长度 = 行数、片段数 = 行数；单行行为不变。
+- **E3 余额 + 费用预估**：余额 1 元 / 预计 3 元 → 提交被拦截且**不发 `POST /api/tasks`**；余额空 → 不拦。
+- **E4 自定义环节 + 质检严格度**：custom + 只勾 4 步 → `stages` 只含这 4 步（核心 3 步后端强制）；严格度透传。
+- **图片查看（用户改口径）**：**不要后端审核门状态机**；只要第②步出图后第③步能看见这张图，
+  不满意「打回重做」只重做**这一张**（1 张 = 计费 1 次）。
+- **配乐上传**：配乐页能直接传音频（≤20MB，mp3/wav/m4a/ogg），自动登记；非法内容拒收。
+- **反需求（用户明确否决，不要再提）**：不做审核门状态机；不接图生视频 i2v；生成产物不放 GitHub。
+
+### 2. 已改文件（全部已提交，工作区无我的未提交改动）
+
+| commit | 内容 | 关键文件 |
+|---|---|---|
+| `11591f0` | E2 多行批量 | `web/src/screens/create.js`、`scripts/verify-multi-prompt.js` |
+| `d7b3273` | E3 余额/预估/拦截 | `server.js`（`POST /api/estimate`）、`create.js`、`settingsPage.js`、`scripts/verify-cost-guard.js` |
+| `5c003f2` | E4 custom + 严格度 | `create.js`、`scripts/verify-custom-stages.js` |
+| `0194fa2` | 修两个长期红套件 | `src/storage/drivers/jsonfile.js`（`USERS_FILE` 覆盖）、`scripts/verify-auth.js`、`verify-loop.js` |
+| `1491f72` | 工程债：pipeline timing 真 bug + 注册 25 套件 | `src/pipeline.js`（`timing` 移到 try 外）、`scripts/verify-all.js` |
+| `eb754de` | 第③步图片审核（人工看图/打回） | `create.js`、`scripts/verify-image-review.js` |
+| `443331d` | 记录「不接 i2v」决定 | `FEATURES.md` |
+| `fd2ced8` | 配乐上传 + 后端校验 | `src/processors/audioMixer.js`（`BGM_DIR` 覆盖/20MB/头校验）、`server.js`（413）、`web/src/screens/inventory.js`、`scripts/verify-bgm-upload.js` |
+
+### 3. 测试状态（2026-11-10 17:12 实跑）
+
+- `verify-stages` **45/0**、`verify-create-config` **28/0**、`verify-image-review` **17/0**、
+  `verify-bgm-upload` **23/0**、`verify-cost-guard` **24/0**。
+- 门禁规模：**58 注册 / 63 实有 / 5 未注册**（runner + 4 个依赖运行中 3001 且未登录的手动套件）。
+- 本机**跑不了** `verify-all.js`（`spawn EPERM`，见 `AGENTS.md` §2.4）→ 只能逐个跑。
+- **没有已知红套件**（两个长期红的已修）。
+
+### 4. 下一步第一个动作（具体到能直接执行）
+
+1. **重启服务**（`server.js` + `audioMixer.js` 改了，**当前进程是旧代码**：
+   `check-server-version` 显示 running=07:31:16 / disk=08:55:30 → 必须重启）。
+2. 重启后跑 `node scripts/check-server-version.js` 应 **exit 0**。
+3. 让用户手动复验：配乐页「＋ 上传音频」传一首 5MB mp3 → 列表出现、能试听/设为默认。
+4. （可选，不花钱）把 4 个手动套件改成自起临时服务（`AUTH_ENABLED=false` + 临时 `BGM_DIR`），
+   预计注册数 58 → 62。
+
+### 5. 需要人拍板、下个窗口不要自己决定
+
+- **剪辑台顺序**：先跑 `spike-editor-export.js` 拿 100/360 段导出数字，还是先接对象存储？
+- **对象存储**：用 Cloudflare R2 还是阿里云 OSS？要用户给凭据（endpoint/bucket/AK/SK）。
+- **30 分钟长片真跑**：会花几百到上千元，**必须用户明确同意**才能发。
+- **双锁文件**（`package-lock.json` + `pnpm-lock.yaml`）删哪个——本机 npm 没有、pnpm 坏了，判断不了。
+
+### 6. ⚠️ 工作区里不是我的改动，**一个都不要碰**
+
+```
+ M web/src/components/assistant.js
+?? web/src/components/assistantOrb.js
+?? web/verify/
+```
+这些是另一个会话/用户未提交的（assistant 悬浮球相关）。按 `AGENTS.md` §5-4，**不许覆盖、不许提交**。
+
 ## 当前状态
 
 **补建基线已完成。** 仓库内已具备：契约（`AGENTS.md`）、功能清单（`FEATURES.md`）、未知项（`KNOWN_UNKNOWNS.md`）、接手流程（`prompts/resume.md`）。
