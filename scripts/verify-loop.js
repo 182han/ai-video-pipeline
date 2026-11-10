@@ -24,6 +24,9 @@ const { execSync } = require('child_process');
 const config = require('../config');
 const videoProcessor = require('../src/videoProcessor');
 const qualityChecker = require('../src/qualityChecker');
+// 旧断言把版本号写死成 2，代码升到 3 后一直红。版本号应跟代码同源：
+// 从 qualityChecker 导出的 QC_VERSION 取，避免下次升版又变成假红。
+const { QC_VERSION } = qualityChecker;
 
 const FFMPEG = config.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = config.FFPROBE_PATH || 'ffprobe';
@@ -208,7 +211,7 @@ async function main() {
       threshold
     });
     assert(qc.passed === true, '循环质检通过', `wrap SSIM=${qc.wrapSsim}, 基线=${qc.baseSsim}`);
-    assert(qc.qcVersion === 2, '结论带 qcVersion=2（可信）', `qcVersion=${qc.qcVersion}`);
+    assert(qc.qcVersion === QC_VERSION, `结论带 qcVersion=${QC_VERSION}（与代码同源）`, `qcVersion=${qc.qcVersion}`);
     assert(!('mock' in qc) && !qc.mock, '结论不再是 mock/写死通过', `mock 字段: ${JSON.stringify(qc.mock)}`);
     assert(qc.durationCheck === 'ok', '时长核验通过', `duration=${qc.duration}s, expected=${qc.expectedDuration}s`);
     if (Number.isFinite(qc.wrapSsim) && Number.isFinite(qc.baseSsim)) {

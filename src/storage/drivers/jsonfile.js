@@ -20,7 +20,9 @@ const PROMPTS_FILE = path.join(DATA_DIR, 'prompts.json');
 const ASSETS_FILE = path.join(DATA_DIR, 'video-assets.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
 const RULES_FILE = path.join(DATA_DIR, 'optimization_rules.txt');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const USERS_FILE = process.env.USERS_FILE
+  ? path.resolve(process.env.USERS_FILE)
+  : path.join(DATA_DIR, 'users.json');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

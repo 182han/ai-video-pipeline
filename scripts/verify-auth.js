@@ -8,16 +8,20 @@
 //
 // 用法：cd app && node scripts/verify-auth.js
 //
-// 环境隔离：用 DATABASE_TYPE=json 起临时服务，账号写进 data/users.json；
-// 测试账号统一用 verify_ 前缀，跑完把带前缀的账号从文件里删掉，不动真实账号。
+// 环境隔离：用 DATABASE_TYPE=json 起临时服务，并把用户文件指到临时目录
+// （USERS_FILE 覆盖），这样既不会读 data/users.json 里的历史残留账号
+// （旧版曾因残留 verify_ 账号导致 bootstrap 跳过建号、登录全 401），
+// 也不会往真实用户文件里写测试账号。
 // ==========================================
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const APP_DIR = path.join(__dirname, '..');
-const USERS_FILE = path.join(APP_DIR, 'data', 'users.json');
+const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'verify_auth_'));
+const USERS_FILE = path.join(TMP_DIR, 'users.json');
 const PORT_A = 3199;
 const PORT_B = 3198;
 const BASE_A = `http://127.0.0.1:${PORT_A}`;
@@ -55,6 +59,7 @@ function startServer(port, extraEnv) {
       ...process.env,
       PORT: String(port),
       DATABASE_TYPE: 'json',        // 隔离：不看 .env 的 postgres
+      USERS_FILE,                   // 隔离：用户文件放临时目录，不碰 data/users.json
       AUTH_ENABLED: 'true',
       AUTH_USER: ADMIN.username,
       AUTH_PASSWORD: ADMIN.password,
@@ -339,7 +344,12 @@ async function main() {
       const openApi = await request(BASE_B, '/api/tasks');
       ok('关掉登录墙后 /api/tasks 无需 cookie → 200', openApi.status === 200, `status=${openApi.status}`);
       const openPage = await request(BASE_B, '/');
-      ok('关掉登录墙后 / 直接返回页面 → 200', openPage.status === 200, `status=${openPage.status}`);
+      const openLoc = openPage.headers.get('location') || '';
+      // E5 单版本收口后：/ 不再返回旧页面，而是 302 到唯一前端 /app（关不关登录墙都一样）。
+      // 旧断言「/ → 200」是前端单版本化之前的期望，已过期。
+      ok('关掉登录墙后 / 302 到 /app（单版本收口，不返回旧页面）',
+        openPage.status === 302 && /\/app$/.test(openLoc),
+        `status=${openPage.status} location=${openLoc}`);
     }
   } catch (e) {
     console.error('\n验收过程抛错：', e && e.stack || e);
@@ -384,4 +394,6 @@ function cleanupTestUsers(usersExistedBefore) {
   }
 }
 
-main();
+main().finally(() => {
+  try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+});
