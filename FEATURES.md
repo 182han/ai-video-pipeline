@@ -134,6 +134,14 @@
   - [~] 视觉未人眼验证；兜底海报仍是白天雾山（2560×1440）
 - [x] 日志落盘（终端 + `data/logs/server-YYYY-MM-DD.log` 双写）
   - 证据：`server.js:15-32`
+- [x] **向导图片审核（人工确认，2026-11-10）**：第②步出图 → 第③步能看见同一张图 → 「通过」进第④步 /
+  「打回重做（只重做这一张）」再调 1 次出图；**不引入后端审核门状态机、不把图并入任务**。
+  - 证据：`web/src/screens/create.js`；`scripts/verify-image-review.js` **17/0**（离线跑真实 create.js：
+    只调 1 次 / 能看到同一张 / 打回替换旧图 / 通过进运镜）
+- [ ] **审核门（P0，已按用户口径暂缓）**：整套状态机不做；若以后要「生成完停下来等审、驳回回退阶段」，
+  再按 `docs/spec/review-gate-design.md` 走，并先修状态机前置①
+- [ ] **图生视频（i2v）接线**：审核通过的那张图目前**只有人工确认作用**，没有传给视频模型；
+  中转是否支持首帧图**未验证**（生成器 `supportsImageInput` 均为 `null`）
 
 ---
 
@@ -141,7 +149,7 @@
 
 | 优先级 | 功能 | 现状 | 阻塞点 |
 |---|---|---|---|
-| **P0** | 人工审核门 `awaiting_review` | 全仓 0 命中；设计已完成（`docs/spec/review-gate-design.md` 747 行，含 ≥20 条验收用例） | **需产品先定 D1–D6、D8**（整组/逐张、驳回回退点、超时、哪些档位、旧任务升级、图是否公网可读、是否留痕）；D7 图片厂商已定 wan2.7-image；且必须先做前置① |
+| ~~**P0**~~ | ~~人工审核门 `awaiting_review`~~ **已被用户改口径（2026-11-10）** | 用户明确：**不要后端审核门状态机**（不新增待审状态、不做批次/超时/留痕），只要「出图后下一步能看见图、能打回重做这一张」。已按此实现为**向导内人工确认**（第③步看图 → 通过/打回），改动仅前端；`docs/spec/review-gate-design.md` 的整套方案**暂不实施** | — |
 | **P0** | 图片生成（厂商已接入，流水线待接） | ✅ 适配器/接口/CLI/验收已完成：`src/generators/imageProviders/dashscope.js`（wan2.7-image）、`GET /api/image-gen/status`、`POST /api/images/generate`、`scripts/test-image-gen.js`、`scripts/verify-image-gen.js`（100/0）；设置页已有「图片生成 · wan2.7-image」入口（本机 Key 运行时生效 + 测试连接 + 眼睛显示切换；Seedance/可灵默认折叠）；`scripts/check-server-version.js` 可检测运行中的后端是否过期。向导第二步可「单张测试出图」。前端已单版本收口：`/` → 302 `/app`，`public/index.html` 仅归档。**尚未接进 pipeline**：没有 `image_generation` 阶段、任务字段、审核门 | 阶段与审核门按 `docs/spec/review-gate-design.md` §15 ③–⑦ 做；需产品定 D1–D6/D8 |
 | **P1** | 配乐文件上传 | `POST /api/bgm` 只收 JSON 元信息；无 multipart、无 multer | 无设计文档；需定存储落点 |
 | **P1** | 审核门前置①：状态机缺陷修复 | `paused` 重启永久卡死、暂停超时静默丢弃、多个历史状态不在回收白名单 | 设计文档 §4/§15 要求先做（否则新增状态必踩同坑） |

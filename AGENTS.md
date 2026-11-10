@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **61**（2026-11-10 实测；含门禁 runner `verify-all.js` 本身） |
-| 门禁注册 | **56**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
-| 未注册 | **5**（61 − 56）：`verify-all.js`（runner 本身）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件 `verify-bgm-api` / `verify-bgm-e2e2` / `verify-bgm-negative` / `verify-port3001`（未登录即失败，故不入门禁） |
+| `scripts/verify-*.js` 实有 | **62**（2026-11-10 实测；含门禁 runner `verify-all.js` 本身） |
+| 门禁注册 | **57**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **5**（62 − 57）：`verify-all.js`（runner 本身）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件 `verify-bgm-api` / `verify-bgm-e2e2` / `verify-bgm-negative` / `verify-port3001`（未登录即失败，故不入门禁） |
 
 ### 2.4 本机限制（重要）
 

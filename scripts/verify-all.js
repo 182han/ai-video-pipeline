@@ -74,6 +74,12 @@ const SUITES = [
     group: 'fast',
     desc: 'E4 自定义环节 + 质检严格度（stages/strictQcItems 提交体；离线跑真实 create.js）'
   },
+  {
+    name: 'image-review',
+    script: 'verify-image-review.js',
+    group: 'fast',
+    desc: '出图后第③步能看见图 + 打回只重做这一张（不引入后端审核门；离线跑真实 create.js）'
+  },
   // ===== 2026-11-10 盘点后新纳入门禁的 24 个套件 =====
   // 原 30 个未注册里剔除 5 个真红/坏的（verify-adjust-pipeline / bgm-api / bgm-e2e2 / bgm-negative / port3001），
   // 剔除原因见 FEATURES.md「C. 工程债」。以下 24 个都是当日逐个跑过且 exit 0 的。

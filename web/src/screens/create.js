@@ -4,8 +4,10 @@
 // ①提示词 → ②图片生成 → ③图片审核 → ④运镜 → ⑤时长与配乐 → ⑥确认
 // 现状约束（不装样子，界面直说）：
 //   · 出图后端已接入 wan2.7-image（2026-11-08）→ 第②步可做「单张测试出图」
-//   · 但图片还没有接进任务/审核门（全仓库 awaiting_review 0 命中）→ 第③步只给说明
-//   · 因此审核门可跳过；提交走既有 POST /api/tasks（文生视频链路，能真跑）
+//   · 用户 2026-11-10 拍板：**不要后端审核门状态机**（不新增待审状态、不做批次/超时/留痕），
+//     只要「第②步出完图，第③步能看见这张图，不满意就打回重做这一张」。
+//     因此第③步 = 纯前端人工确认（看图 → 通过 / 打回重做），不改任务状态机。
+//   · 图片仍不并入任务；提交走既有 POST /api/tasks（文生视频链路，能真跑）
 // ============================================================
 import { navigate } from '../router.js';
 import { promptBus } from '../store.js';
@@ -405,7 +407,7 @@ export function CreateWizard({ onChanged }) {
             </div>
           `}
           <div className="mt-3">
-            <${Info}>审核门（通过后才继续生成视频）仍未实现；现在可以跳过这一步，直接走文生视频链路。</${Info}>
+            <${Info}>生成后点「下一步」，第③步可以放大看这张图，决定通过（进入运镜）或打回重做。</${Info}>
           </div>
         </${Section}>
       `;
@@ -413,14 +415,35 @@ export function CreateWizard({ onChanged }) {
 
     if (step === 2) {
       return html`
-        <${Section} title="图片审核（后端未实现）">
-          <div className="rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5">
-            <p className="text-[12px] text-ink2">「审核通过才继续生成视频」需要后端提供一个待审状态。</p>
-            <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
-              全仓库搜索 <code className="font-num">awaiting_review</code> 命中 0 次，
-              说明这条状态机还没落地。等后端补上后，这里会显示静帧网格与「通过 / 重新生成」。
-            </p>
-          </div>
+        <${Section} title="图片审核">
+          ${!imgResult && !imgBusy && html`
+            <div className="rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5">
+              <p className="text-[12px] text-ink2">还没有图。可以回上一步生成，或直接在这里生成一张。</p>
+              <button onClick=${genTestImage}
+                className="mt-2 h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
+              >生成 1 张</button>
+            </div>
+          `}
+          ${imgBusy && html`<p className="text-[12px] text-ink2">出图中…（会真实调用厂商，计费 1 张）</p>`}
+          ${imgErr && html`<p className="mt-2 text-[11px] text-danger">${imgErr}</p>`}
+          ${!imgBusy && imgResult && imgResult.url && html`
+            <div className="rounded-[6px] border border-white/[.09] bg-s2 p-2.5">
+              <img src=${imgResult.url} alt="待审核图片"
+                className="max-h-[380px] rounded-[4px] border border-white/[.08]" />
+              <p className="mt-1.5 text-[11px] text-ink3 font-num">
+                ${imgResult.width} × ${imgResult.height} · ${imgResult.model}${imgResult.size ? ' · ' + imgResult.size : ''}
+              </p>
+            </div>
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <button onClick=${() => setStep(3)}
+                className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
+              >通过，进入运镜</button>
+              <button onClick=${genTestImage}
+                className="h-8 px-3 rounded-[6px] border border-white/[.12] text-ink text-[12px]"
+              >打回重做（只重做这一张）</button>
+              <span className="text-[11px] text-ink3">打回会再调用 1 次出图（计费 1 张），不会重做整批</span>
+            </div>
+          `}
         </${Section}>
       `;
     }
