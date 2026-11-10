@@ -11,6 +11,10 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { promptBus } from '../store.js';
+import {
+  loadDraft, saveDraft, clearDraft,
+  getImageState, onImageState, startImage
+} from '../createDraft.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -111,17 +115,30 @@ function Info({ children }) {
   return html`<span className="text-[11px] leading-[1.7] text-ink3">${children}</span>`;
 }
 
-export function CreateWizard({ onChanged }) {
-  const web = readWebConfig();
-  const [step, setStep] = useState(0);
-  const [prompt, setPrompt] = useState('');
-  const [vprompt, setVprompt] = useState('');
-  const [p, setP] = useState({
+// 生成参数默认值：设置页的 vs_web_config 优先，其余取旧默认
+function defaultParams(web) {
+  return {
     model: web.videoModel || 'seedance', resolution: web.resolution || '1080p', preset: web.preset || 'final',
     clipCount: 4, clipDuration: 5,
     transition: true, transitionDuration: 0.4, transitionType: 'fade', colorMatch: false,
     bgm: true, bgmMode: 'auto', wantMusic: true, wantAmb: false, startTrack: '', ambTrack: ''
+  };
+}
+
+export function CreateWizard({ onChanged }) {
+  const web = readWebConfig();
+  // 草稿：上次没做完的向导状态（切页 / 刷新后恢复；见 ../createDraft.js）
+  const [restored, setRestored] = useState(() => loadDraft());
+  const [step, setStep] = useState(() => {
+    const n = Number(restored && restored.step);
+    return Number.isFinite(n) ? Math.max(0, Math.min(STEPS.length - 1, n)) : 0;
   });
+  const [prompt, setPrompt] = useState(() => (restored && typeof restored.prompt === 'string' ? restored.prompt : ''));
+  const [vprompt, setVprompt] = useState(() => (restored && typeof restored.vprompt === 'string' ? restored.vprompt : ''));
+  const [p, setP] = useState(() => ({
+    ...defaultParams(web),
+    ...(restored && restored.params && typeof restored.params === 'object' ? restored.params : {})
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
   const [big, setBig] = useState(false);
@@ -129,12 +146,27 @@ export function CreateWizard({ onChanged }) {
   const [optErr, setOptErr] = useState('');
   const [tracks, setTracks] = useState([]);
   const [imgStatus, setImgStatus] = useState(null);
-  const [imgBusy, setImgBusy] = useState(false);
-  const [imgResult, setImgResult] = useState(null);
-  const [imgErr, setImgErr] = useState('');
+  // 出图状态放在模块里（见 ../createDraft.js）：生成中切走再回来，结果不丢
+  const [imgState, setImgState] = useState(() => getImageState());
+  const [imgErrLocal, setImgErrLocal] = useState(''); // 只是本地校验错误（没调接口）
+  const imgResult = imgState.result;
+  const imgBusy = imgState.busy;
+  const imgErr = imgErrLocal || imgState.error;
   const [est, setEst] = useState(null); // 费用预估（/api/estimate，与 /api/pricing 同源）
-  const [customStages, setCustomStages] = useState(ALL_STAGE_KEYS.slice());
-  const [strictQc, setStrictQc] = useState(ALL_QC_KEYS.slice());
+  const [customStages, setCustomStages] = useState(() => (restored && Array.isArray(restored.customStages)
+    ? restored.customStages : ALL_STAGE_KEYS.slice()));
+  const [strictQc, setStrictQc] = useState(() => (restored && Array.isArray(restored.strictQc)
+    ? restored.strictQc : ALL_QC_KEYS.slice()));
+
+  // 有实质内容才提示「已恢复」：只改过参数不算（参数本来就来自设置页）
+  const restoredHint = !!(restored && (restored.prompt || restored.vprompt || (restored.image && restored.image.url)));
+
+  // 任何改动都落草稿：切到别的页面 / F5 回来还在（Key 不进草稿）
+  useEffect(() => {
+    saveDraft({ step, prompt, vprompt, params: p, customStages, strictQc });
+  }, [step, prompt, vprompt, p, customStages, strictQc]);
+
+  useEffect(() => onImageState(setImgState), []);
 
   // 多行模式：行数即片段数（覆盖段数设置）
   const promptLines = splitPromptLines(prompt);
@@ -215,37 +247,43 @@ export function CreateWizard({ onChanged }) {
     }
   }
 
+  const restoredAt = restored && restored.savedAt ? new Date(restored.savedAt) : null;
+  const restoredAtText = restoredAt && !Number.isNaN(restoredAt.getTime())
+    ? String(restoredAt.getHours()).padStart(2, '0') + ':' + String(restoredAt.getMinutes()).padStart(2, '0')
+    : '';
+
+  // 清空草稿：回到全新的向导（不删已生成的图片文件，只清界面状态）
+  function resetAll() {
+    clearDraft();
+    setRestored(null);
+    setStep(0);
+    setPrompt('');
+    setVprompt('');
+    setP(defaultParams(web));
+    setCustomStages(ALL_STAGE_KEYS.slice());
+    setStrictQc(ALL_QC_KEYS.slice());
+    setImgErrLocal('');
+    setOptErr('');
+    setErr('');
+  }
+
   async function genTestImage() {
-    setImgErr('');
-    setImgResult(null);
-    if (!prompt.trim()) { setImgErr('先在第一步写提示词'); return; }
+    setImgErrLocal('');
+    if (!prompt.trim()) { setImgErrLocal('先在第一步写提示词'); return; }
     let cfg = {};
     try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { cfg = {}; }
-    setImgBusy(true);
-    try {
-      const r = await fetch('/api/images/generate', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          apiKey: cfg.imageKey || '',
-          baseUrl: cfg.imageBaseUrl || '',
-          model: cfg.imageModel || '',
-          size: cfg.imageSize || (imgStatus && imgStatus.imageGen ? imgStatus.imageGen.size : undefined),
-          provider: cfg.imageProvider || '',
-          taskId: 'ui_img_' + Date.now(),
-          index: 0
-        })
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      setImgResult(j);
-    } catch (e) {
-      setImgErr(e.message || '出图失败');
-    } finally {
-      setImgBusy(false);
-    }
+    const st = imgStatus;
+    // 出图任务跑在模块里：这里 await 只是为了按钮状态，切页也不影响结果落草稿
+    await startImage({
+      prompt: prompt.trim(),
+      size: cfg.imageSize || (st && st.imageGen ? st.imageGen.size : undefined),
+      cfg: {
+        apiKey: cfg.imageKey || '',
+        baseUrl: cfg.imageBaseUrl || '',
+        model: cfg.imageModel || '',
+        provider: cfg.imageProvider || ''
+      }
+    });
   }
 
   const totalSec = (effectiveClips * p.clipDuration -
@@ -302,6 +340,8 @@ export function CreateWizard({ onChanged }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       if (onChanged) onChanged();
+      // 提交成功后草稿回到第①步：回「创作」不会停在第⑥步被误当新任务再提交一次
+      saveDraft({ step: 0 });
       navigate('/gen');
     } catch (e) {
       setErr(e.message || '提交失败');
@@ -404,6 +444,11 @@ export function CreateWizard({ onChanged }) {
               <p className="mt-1.5 text-[11px] text-ink3 font-num">
                 ${imgResult.width} × ${imgResult.height} · ${imgResult.model} · ${imgResult.url}
               </p>
+              ${imgResult.prompt && imgResult.prompt !== prompt.trim() && html`
+                <p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
+                  这张图是按旧提示词出的（当前提示词已改），建议点「打回重做」重新出。
+                </p>
+              `}
             </div>
           `}
           <div className="mt-3">
@@ -433,6 +478,11 @@ export function CreateWizard({ onChanged }) {
               <p className="mt-1.5 text-[11px] text-ink3 font-num">
                 ${imgResult.width} × ${imgResult.height} · ${imgResult.model}${imgResult.size ? ' · ' + imgResult.size : ''}
               </p>
+              ${imgResult.prompt && imgResult.prompt !== prompt.trim() && html`
+                <p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
+                  这张图是按旧提示词出的（当前提示词已改），建议点「打回重做」重新出。
+                </p>
+              `}
             </div>
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button onClick=${() => setStep(3)}
@@ -707,6 +757,18 @@ export function CreateWizard({ onChanged }) {
           </div>
         `)}
       </div>
+
+      ${restoredHint && html`
+        <div className="mb-2 flex items-center gap-2 flex-wrap rounded-[6px] border border-accent/25 bg-accent/[.06] px-3 py-2">
+          <span className="text-[11px] text-accent">
+            ↺ 已恢复上次未做完的草稿${restoredAtText ? '（保存于 ' + restoredAtText + '）' : ''}
+          </span>
+          <span className="flex-1"></span>
+          <button onClick=${resetAll}
+            className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2 hover:bg-white/[.06]"
+          >清空草稿</button>
+        </div>
+      `}
 
       ${body}
 

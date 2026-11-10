@@ -81,6 +81,12 @@ const SUITES = [
     desc: '出图后第③步能看见图 + 打回只重做这一张（不引入后端审核门；离线跑真实 create.js）'
   },
   {
+    name: 'create-draft',
+    script: 'verify-create-draft.js',
+    group: 'fast',
+    desc: '创作向导切页/刷新不丢（草稿 sessionStorage + 出图任务不随组件卸载；离线跑真实 create.js）'
+  },
+  {
     name: 'bgm-upload',
     script: 'verify-bgm-upload.js',
     group: 'real',

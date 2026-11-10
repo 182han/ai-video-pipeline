@@ -263,6 +263,8 @@ const stubs = [];
     const cfgSrc = fs.readFileSync(path.join(APP_DIR, 'config.js'), 'utf8');
     const envSrc = fs.readFileSync(path.join(APP_DIR, '.env.example'), 'utf8');
     const createSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'create.js'), 'utf8');
+    // 2026-11-10：出图请求挪进 createDraft.js（切页不中断、结果不丢），这里跟着查新位置
+    const draftSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'createDraft.js'), 'utf8');
     const invSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'inventory.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'settingsPage.js'), 'utf8');
 
@@ -272,7 +274,8 @@ const stubs = [];
     ok('config.js 默认模型是 wan2.7-image', cfgSrc.includes("'wan2.7-image'"));
     ok('.env.example 写明 wan2.7-image', envSrc.includes('IMAGE_GEN_MODEL=wan2.7-image'));
     ok('create.js 读取出图状态', createSrc.includes('/api/image-gen/status'));
-    ok('create.js 调用单张出图接口', createSrc.includes('/api/images/generate'));
+    ok('create.js 调用单张出图接口（经 createDraft.js 发起）',
+      draftSrc.includes('/api/images/generate') && createSrc.includes('startImage'));
     ok('create.js 发送本机图片 Key', createSrc.includes('apiKey: cfg.imageKey'));
     ok('settingsPage 有图片模型入口', settingsSrc.includes("id: 'imagegen'"));
     ok('settingsPage 保存图片 Key 字段', settingsSrc.includes("['imageKey'"));
