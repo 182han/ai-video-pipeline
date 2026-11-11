@@ -133,6 +133,8 @@ export function CreateWizard({ onChanged }) {
   // 从照片库带进来的图（照片页点「用它生成视频」后写入，进入这里取走一次）
   const [seedPhoto] = useState(() => takeSeedPhoto());
   const [seedNotice, setSeedNotice] = useState('');
+  // 带入时提示词框已有别的内容：不覆盖，给一个「用图片原提示词填入」按钮
+  const [seedPrompt, setSeedPrompt] = useState('');
   const [step, setStep] = useState(() => {
     const n = Number(restored && restored.step);
     return Number.isFinite(n) ? Math.max(0, Math.min(STEPS.length - 1, n)) : 0;
@@ -183,7 +185,10 @@ export function CreateWizard({ onChanged }) {
     try {
       const adopted = adoptPhoto(seedPhoto);
       setImgState(getImageState());
-      if (!prompt.trim() && seedPhoto.prompt) setPrompt(seedPhoto.prompt);
+      if (seedPhoto.prompt) {
+        if (!prompt.trim()) setPrompt(seedPhoto.prompt);
+        else if (prompt.trim() !== seedPhoto.prompt) setSeedPrompt(seedPhoto.prompt);
+      }
       setStep(2);
       setSeedNotice(adopted.photoId || seedPhoto.id || '');
     } catch (e) {
@@ -857,6 +862,10 @@ export function CreateWizard({ onChanged }) {
           <span className="text-[11px] text-accent">
             🖼 已从照片库带入这张图（${seedNotice}）——先在第③步确认，再继续下一步
           </span>
+          ${seedPrompt && html`
+            <button onClick=${() => { setPrompt(seedPrompt); setSeedPrompt(''); }}
+              className="text-[11px] text-accent underline underline-offset-2">用图片原提示词填入</button>
+          `}
         </div>
       `}
 

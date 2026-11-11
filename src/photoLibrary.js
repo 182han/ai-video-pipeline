@@ -130,6 +130,7 @@ function ingest(data = {}) {
       }
     }
     filled.sizeBytes = st.size;
+    if (!filled.generationPrompt) filled.generationPrompt = filled.prompt || '';
     return saveEntry(filled);
   }
 
@@ -142,6 +143,8 @@ function ingest(data = {}) {
     index: Number.isInteger(data.index) ? data.index : 0,
     // 用户明确要求保留提示词：原样存全文，不截断
     prompt: typeof data.prompt === 'string' ? data.prompt.trim() : '',
+    // 出图时的原始提示词（之后用这张图生成视频时，prompt 可能被视频提示词覆盖，原值留在这里）
+    generationPrompt: typeof data.prompt === 'string' ? data.prompt.trim() : '',
     negativePrompt: typeof data.negativePrompt === 'string' ? data.negativePrompt.trim() : '',
     provider: data.provider || null,
     model: data.model || null,

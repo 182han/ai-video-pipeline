@@ -213,6 +213,7 @@ async function runWizard() {
   check(/setSeedPhoto/.test(draftSrc) && /takeSeedPhoto/.test(draftSrc), '草稿模块支持照片库 seed（setSeedPhoto / takeSeedPhoto）');
   check(/adoptPhoto/.test(createSrc), '向导支持 adoptPhoto（把照片库的图变成当前图）');
   check(/setSeedPhoto/.test(invSrc) && /navigate\('\/'\)/.test(invSrc), '照片页「用它生成视频」写 seed 并跳回创作');
+  check(/seedPrompt/.test(createSrc), '提示词已有内容时不覆盖，提供「用图片原提示词填入」按钮');
 
   // ---------- 2. 离线跑真实 create.js ----------
   try {
@@ -325,6 +326,15 @@ async function runWizard() {
     check(!cleared || (!cleared.prompt && !(cleared.image && cleared.image.url)),
       '点「清空草稿」后提示词与图片都清空', JSON.stringify(cleared && { p: cleared.prompt, img: cleared.image }));
     check(!/已恢复上次未做完的草稿/.test(w.pageText()), '清空后不再显示「已恢复」提示');
+
+    // 提示词为空时：照片库带入会自动回填图片提示词
+    w.session.set('vs_create_seed_photo', JSON.stringify({
+      id: 'imported_2', url: '/clips/imported2.png', width: 1696, height: 960,
+      prompt: '图片自带的提示词', createdAt: new Date().toISOString()
+    }));
+    await w.remount();
+    await w.settle();
+    check(w.draft() && w.draft().prompt === '图片自带的提示词', '提示词为空时自动回填图片提示词', String(w.draft() && w.draft().prompt));
   } catch (e) {
     check(false, '离线 create.js 探针异常: ' + (e && e.message ? e.message : e));
   }

@@ -238,6 +238,12 @@ export function PhotosView() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState(null);
+  const [editPrompt, setEditPrompt] = useState('');
+
+  function openDetail(p) {
+    setDetail(p);
+    setEditPrompt(p.prompt || '');
+  }
 
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
@@ -272,6 +278,22 @@ export function PhotosView() {
       setDetail(null);
       reload();
     } catch (e) { setErr('删除失败：' + e.message); }
+  }
+
+  // 手动修改/补录提示词：历史图（生成时没记录）也能补一条，之后带入创作会自动回填
+  async function savePrompt(id) {
+    setErr('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(id), {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: editPrompt })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setDetail(j.photo);
+      reload();
+    } catch (e) { setErr('保存提示词失败：' + e.message); }
   }
 
   // 把这张图带回创作流程：未审核的先标记通过，再写 seed 并跳回 /（向导会取走并跳到第③步）
@@ -333,7 +355,7 @@ export function PhotosView() {
         ${photos.map((p) => html`
           <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
             <img src=${p.url} alt="生成的图片"
-              onClick=${() => setDetail(p)}
+              onClick=${() => openDetail(p)}
               className="w-full aspect-video bg-black object-cover cursor-pointer" />
             <div className="px-2 py-1.5">
               <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${promptText(p)}</p>
@@ -375,7 +397,18 @@ export function PhotosView() {
             <img src=${detail.url} alt="生成的图片" style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px' }} />
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
               <span style=${{ color: 'var(--ink3)' }}>提示词</span>
-              <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${promptText(detail)}</span>
+              <div>
+                <textarea value=${editPrompt} onInput=${(e) => setEditPrompt(e.target.value)}
+                  rows="3" placeholder="这张图的提示词（历史图可以手动补录）"
+                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
+                <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                  <button onClick=${() => savePrompt(detail.id)}
+                    style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>保存提示词</button>
+                  <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
+                    出图时原提示词：${detail.generationPrompt || '未记录'}${detail.promptUpdatedAt ? ' · 已更新 ' + String(detail.promptUpdatedAt).slice(0, 19).replace('T', ' ') : ''}
+                  </span>
+                </div>
+              </div>
               <span style=${{ color: 'var(--ink3)' }}>模型</span>
               <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}${detail.provider ? ' · ' + detail.provider : ''}</span>
               <span style=${{ color: 'var(--ink3)' }}>规格</span>

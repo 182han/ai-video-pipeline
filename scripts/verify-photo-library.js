@@ -86,7 +86,13 @@ photoLibrary.ingest({ id: missing[0].id, taskId: 'task_demo2', index: 0, filePat
 check(photoLibrary.get('task_demo2_img_0').promptAvailable === false, '回填图无提示词时 promptAvailable=false（不伪造）');
 check(photoLibrary.listUnregisteredImages().length === 0, '登记后再扫描为空');
 
-// ---- 6. 删除（记录 + 源文件） ----
+// ---- 6. 提示词可编辑/覆盖，但保留出图原值 ----
+photoLibrary.update(rec.id, { prompt: '改后的视频提示词', promptAvailable: true, promptSource: 'video-task' });
+check(photoLibrary.get(rec.id).prompt === '改后的视频提示词', '提示词可手动编辑/被视频提示词覆盖');
+check(photoLibrary.get(rec.id).generationPrompt === PROMPT, '出图原提示词保留在 generationPrompt（可追溯）');
+check(photoLibrary.query({ q: '改后的视频提示词' }).length === 1, '搜索能命中改后的提示词');
+
+// ---- 7. 删除（记录 + 源文件） ----
 const r = photoLibrary.remove(rec.id);
 check(r.success === true && r.fileDeleted === true, 'remove 同时删除库记录与源文件');
 check(!fs.existsSync(imgPath), '源文件确实被删掉');
@@ -112,6 +118,8 @@ check(serverSrc.includes("app.delete('/api/photos/:id'"), 'server.js 注册 DELE
 check(serverSrc.includes('photoLibrary.ingest({'), '出图接口成功后自动入库');
 check(serverSrc.includes('i2vModels: listI2VModels()'), '/api/image-gen/status 暴露 i2vModels');
 check(serverSrc.includes('sourcePhotoId'), '/api/tasks 接受 sourcePhotoId');
+check(serverSrc.includes('需要提供 status 或 prompt'), 'PUT /api/photos 支持只改提示词');
+check(serverSrc.includes("promptSource: 'video-task'"), '提交图生视频时用视频提示词覆盖图片提示词');
 check(pipelineSrc.includes('_i2vPayload(task)'), 'pipeline 有图生视频取图逻辑');
 check(pipelineSrc.includes('image: i2vImage'), 'pipeline 把源图传给视频适配器');
 check(createSrc.includes('sourcePhotoId: imgResult.photoId'), '创作向导提交 sourcePhotoId');

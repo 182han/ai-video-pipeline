@@ -1,4 +1,4 @@
-﻿// ==========================================
+// ==========================================
 // AI 长视频自动生成流水线 - 服务端入口
 // ==========================================
 
@@ -683,10 +683,24 @@ app.get('/api/photos/:id', (req, res) => {
 app.put('/api/photos/:id', (req, res) => {
   const body = req.body || {};
   const status = String(body.status || '').trim();
-  if (!photoLibrary.STATUSES.includes(status)) {
+  const hasPrompt = typeof body.prompt === 'string';
+  if (!status && !hasPrompt) {
+    return res.status(400).json({ error: '需要提供 status 或 prompt' });
+  }
+  if (status && !photoLibrary.STATUSES.includes(status)) {
     return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
   }
-  const photo = photoLibrary.markReviewed(req.params.id, status, body.note);
+  let photo = null;
+  if (status) photo = photoLibrary.markReviewed(req.params.id, status, body.note);
+  if (hasPrompt) {
+    const prompt = body.prompt.trim().slice(0, 8000);
+    photo = photoLibrary.update(req.params.id, {
+      prompt,
+      promptAvailable: prompt.length > 0,
+      promptUpdatedAt: new Date().toISOString(),
+      promptSource: 'manual'
+    });
+  }
   if (!photo) return res.status(404).json({ error: '图片不存在' });
   res.json({ ok: true, photo });
 });
@@ -1637,7 +1651,7 @@ app.post('/api/assistant/chat', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust, sourcePhotoId } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1719,6 +1733,18 @@ app.post('/api/tasks', (req, res) => {
 
   // 创建任务（多提示词模式下 prompt 取第一行文本，各片段提示词/主题由 prompts 逐一分配）
   const firstPrompt = prompt || (multiPrompts ? multiPrompts[0].text : '') || '';
+
+  // 用户口径（2026-11-11）：「改过提示词再用这张图生成视频」→ 用提交的提示词覆盖图片库里的提示词。
+  // 出图时的原始提示词仍保留在 generationPrompt 字段（可追溯）。
+  if (sourcePhoto && firstPrompt.trim()) {
+    photoLibrary.update(sourcePhoto.id, {
+      prompt: firstPrompt.trim(),
+      promptAvailable: true,
+      promptUpdatedAt: new Date().toISOString(),
+      promptSource: 'video-task'
+    });
+  }
+
   const task = taskManager.createTask(firstPrompt.trim(), {
     model: modelId,
     theme: theme ?? null,
