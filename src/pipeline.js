@@ -1967,6 +1967,8 @@ class Pipeline {
       dataUrl: `data:${mime};base64,${base64}`,
       mime,
       sizeBytes: buf.length,
+      width: photo.width || null,
+      height: photo.height || null,
       prompt: photo.prompt || ''
     };
   }

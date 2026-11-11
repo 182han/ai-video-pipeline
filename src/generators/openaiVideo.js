@@ -56,10 +56,12 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
   async generate(prompt, options = {}) {
     this._ensureReady();
     if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('视频生成提示词为空');
+    // 图生视频（2026-11-11 用户要求走 WhaleTV 中转）：
+    // new-api / WhaleTV 的 Sora 格式用 multipart/form-data + input_reference 文件字段。
+    // 文档：https://github.com/QuantumNous/new-api-docs/blob/main/docs/api/openai-video.md
+    // 该字段在具体中转上是否实现**未实测**；失败会把厂商原文抛出来，不会伪装成功。
     if (options.image) {
-      // 中转是否支持 input_reference / 图片字段：未核实（没有官方文档，也没有实测）。
-      // 宁可明确拒绝，也不假装支持后静默丢掉图片（用户会以为图生效了）。
-      throw new Error('OpenAI 兼容视频中转的图生视频能力未核实，暂不支持传首帧');
+      return await this._generateWithImage(prompt, options);
     }
 
     // 只发经实测被接受的字段：model / prompt / seconds。
@@ -82,6 +84,60 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
       });
     } catch (e) {
       throw new Error(`提交视频任务失败（${this.baseUrl}）: ${e.name === 'AbortError' ? '超时' : e.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`OpenAI 兼容视频 API 错误 (${response.status}): ${msgOf(data, '')}`);
+    }
+    const taskId = data.id || data.task_id;
+    if (!taskId) throw new Error('视频接口未返回任务 id: ' + JSON.stringify(data).slice(0, 200));
+    return { taskId, status: 'queued' };
+  }
+
+  // 按图片宽高比挑一个 Sora 支持的尺寸；new-api 文档要求「输入图像必须符合 size 的宽高」。
+  _pickSize(image, resolution) {
+    const w = Number(image && image.width) || 0;
+    const h = Number(image && image.height) || 0;
+    if (w && h) {
+      if (w >= h * 1.15) return '1280x720';
+      if (h >= w * 1.15) return '720x1280';
+      return '1280x720';
+    }
+    const map = { '480p': '854x480', '1080p': '1920x1080', '720p': '1280x720' };
+    return map[resolution] || '1280x720';
+  }
+
+  async _generateWithImage(prompt, options) {
+    const image = options.image;
+    const buf = Buffer.from(String(image.base64 || ''), 'base64');
+    if (!buf.length) throw new Error('图生视频首帧为空（base64 解码失败）');
+    const mime = image.mime || 'image/png';
+    const ext = mime === 'image/jpeg' ? 'jpg' : (mime === 'image/webp' ? 'webp' : 'png');
+    const seconds = String(Math.max(1, Math.min(this.supportedOptions.maxDuration, parseInt(options.duration, 10) || 5)));
+
+    const form = new FormData();
+    form.append('model', this.modelId);
+    form.append('prompt', prompt.trim().slice(0, 8000));
+    form.append('seconds', seconds);
+    form.append('size', this._pickSize(image, options.resolution));
+    form.append('input_reference', new Blob([buf], { type: mime }), 'first_frame.' + ext);
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), Math.min(this.timeoutMs, 120000));
+    let response;
+    try {
+      response = await fetch(`${this.baseUrl}/videos`, {
+        method: 'POST',
+        // 不要手动设 Content-Type：FormData 需要 fetch 自动带 boundary
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        body: form,
+        signal: ac.signal
+      });
+    } catch (e) {
+      throw new Error(`提交图生视频任务失败（${this.baseUrl}）: ${e.name === 'AbortError' ? '超时' : e.message}`);
     } finally {
       clearTimeout(timer);
     }

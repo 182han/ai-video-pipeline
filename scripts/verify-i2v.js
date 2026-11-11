@@ -19,8 +19,8 @@ function check(cond, label, extra) {
 const calls = [];
 function stubFetch(handler) {
   global.fetch = async (url, opts) => {
-    const call = { url: String(url), opts: opts || {} };
-    try { call.body = opts && opts.body ? JSON.parse(opts.body) : null; } catch (e) { call.body = null; }
+    const call = { url: String(url), opts: opts || {}, rawBody: opts && opts.body };
+    try { call.body = opts && typeof opts.body === 'string' ? JSON.parse(opts.body) : null; } catch (e) { call.body = null; }
     calls.push(call);
     return handler(call);
   };
@@ -38,7 +38,8 @@ console.log('================================================================');
     const { getI2VInfo, listI2VModels } = require(path.join(APP, 'src', 'generators', 'i2vSupport'));
     check(!!getI2VInfo('kling'), '能力表：kling 已实现');
     check(!!getI2VInfo('seedance'), '能力表：seedance 已实现');
-    check(getI2VInfo('openai-video') === null, '能力表：openai-video 未实现（不冒充支持）');
+    check(!!getI2VInfo('openai-video'), '能力表：openai-video 已接（new-api Sora 格式，标注未实测）');
+    check((getI2VInfo('openai-video') || {}).input === 'multipart-input_reference', 'openai-video 能力：multipart input_reference');
     check(getI2VInfo('dashscope') === null, '能力表：dashscope 未实现（需公网 URL，未接）');
     check(listI2VModels().includes('mock'), '能力表：mock 可用于链路测试');
 
@@ -87,12 +88,39 @@ console.log('================================================================');
     check(threw, 'Seedance：第三方中转带图时明确报错（不静默丢图）');
     check(calls.length === 0, 'Seedance：第三方中转带图时没有发请求（不白花一分钱）');
 
-    // ---------- OpenAI 兼容视频带图 → 明确拒绝 ----------
+    // ---------- OpenAI 兼容（WhaleTV / new-api）：multipart input_reference ----------
     const OA = require(path.join(APP, 'src', 'generators', 'openaiVideo'));
+    const IMG_W = { base64: 'QUJDRA==', dataUrl: 'data:image/png;base64,QUJDRA==', mime: 'image/png', width: 1696, height: 960 };
+
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ id: 'whale_i2v_1', status: 'queued' }));
     const oa = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
-    threw = false;
-    try { await oa.generate('x', { image: IMG }); } catch (e) { threw = /未核实/.test(e.message); }
-    check(threw, 'OpenAI 兼容视频：图生视频未核实 → 明确拒绝，不冒充支持');
+    const oaRes = await oa.generate('雪山推近', { duration: 5, image: IMG_W });
+    const oaCall = calls[0];
+    const form = oaCall && oaCall.rawBody;
+    check(oaCall && oaCall.url.endsWith('/videos'), 'WhaleTV：仍提交 /videos');
+    check(form instanceof FormData, 'WhaleTV：图生视频用 multipart/form-data（不是 JSON）');
+    check(oaCall && oaCall.opts.headers && oaCall.opts.headers['Content-Type'] === undefined,
+      'WhaleTV：不手写 Content-Type（交给 fetch 带 boundary）');
+    if (form instanceof FormData) {
+      check(form.get('model') === 'wan3.0-video', 'WhaleTV：multipart 带 model');
+      check(form.get('seconds') === '5', 'WhaleTV：multipart 带 seconds=5');
+      check(form.get('size') === '1280x720', 'WhaleTV：size 按 16:9 图片选 1280x720', String(form.get('size')));
+      const ref = form.get('input_reference');
+      check(ref && typeof ref.size === 'number' && ref.size > 0, 'WhaleTV：带非空 input_reference 文件');
+      check(ref && ref.type === 'image/png', 'WhaleTV：input_reference MIME 正确', ref && ref.type);
+    } else {
+      check(false, 'WhaleTV：multipart 表单不可读（FormData 未生成）');
+    }
+    check(oaRes.taskId === 'whale_i2v_1', 'WhaleTV：返回任务 id');
+
+    // 不带图仍是原来的 JSON（文生视频零回归）
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ id: 'whale_t2v_1', status: 'queued' }));
+    const oa2 = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
+    await oa2.generate('纯文字', { duration: 5 });
+    check(calls[0] && calls[0].body && calls[0].body.model === 'wan3.0-video', 'WhaleTV：不带图仍走 JSON 文生视频（零回归）');
+    check(calls[0] && typeof calls[0].rawBody === 'string', 'WhaleTV：文生视频请求体仍是 JSON 字符串');
 
     // ---------- 静态接线：pipeline / server ----------
     const fs = require('fs');

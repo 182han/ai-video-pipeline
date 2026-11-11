@@ -22,6 +22,11 @@ const MODELS = Object.freeze({
     verified: 'docs-partial',
     note: '火山官方：content 追加 {type:"image_url", image_url:{url}, role:"first_frame"}；官方称支持 URL / Base64，具体编码形态未实测'
   },
+  'openai-video': {
+    input: 'multipart-input_reference',
+    verified: 'docs(new-api)-unverified-relay',
+    note: 'WhaleTV / new-api 的 Sora 格式：POST /v1/videos multipart，input_reference 为图片文件，size 需与图片宽高一致；中转是否实现该字段未实测'
+  },
   mock: {
     input: 'none',
     verified: 'n/a',

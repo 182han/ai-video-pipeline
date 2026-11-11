@@ -152,9 +152,11 @@
   再按 `docs/spec/review-gate-design.md` 走，并先修状态机前置①
 - [~] **图生视频（i2v）**：**用户 2026-11-11 改口径**——人工确认的含义就是「确认后继续用这张图生成视频」；
   同一轮还要求「所有生成的视频/图片都入库并保留提示词」。已实现：
-  - 视频侧：`src/generators/i2vSupport.js` 能力表；**可灵**（v1 `/v1/videos/image2video`，image=裸 base64，查询同端点）与
-    **Seedance 火山官方**（`content` 追加 `image_url` + `role:first_frame`）已实现；`mock` 可跑链路。
-    **OpenAI 兼容中转 / DashScope / Agnes / SiliconFlow 明确拒绝**（字段未核实或不适应，绝不静默丢掉首帧）。
+  - 视频侧：`src/generators/i2vSupport.js` 能力表；**可灵**（v1 `/v1/videos/image2video`，image=裸 base64，查询同端点）、
+    **Seedance 火山官方**（`content` 追加 `image_url` + `role:first_frame`）、
+    **WhaleTV / new-api 等 OpenAI 兼容中转**（2026-11-11 16:12 补：Sora 格式 `multipart/form-data` +
+    `input_reference` 图片文件 + `size` 按图片宽高比选 1280x720/720x1280；依据 new-api 官方文档，
+    **具体中转是否实现未实测**）、`mock` 可跑链路。DashScope / Agnes / SiliconFlow 仍明确拒绝（需公网 URL 或字段未核实）。
   - 数据侧：任务 `sourcePhotoId`（必须存在且 approved）、流水线 `_i2vPayload()` 读图并 attachUsage、
     片段库条目新增 `sourcePhotoId` 且原有 `prompt/originalPrompt` 继续保留。
   - ⚠️ **真实计费调用未验证**（没有用户 Key、未获计费同意）；只做了请求体构建的离线验收。
