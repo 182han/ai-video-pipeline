@@ -85,6 +85,9 @@ export function Assistant() {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(false);
   const [thinking, setThinking] = useState(false);
+  // 流式：已收到的 message 前缀（气泡里逐字显示）+ 已等待毫秒数（思考期给进度）
+  const [streamText, setStreamText] = useState('');
+  const [waitMs, setWaitMs] = useState(0);
   const [msgs, setMsgs] = useState([]);
   const [draft, setDraft] = useState('');
   const [suggested, setSuggested] = useState('');
@@ -142,6 +145,22 @@ export function Assistant() {
     if (pos) localStorage.setItem(POS_KEY, JSON.stringify(pos));
   }
 
+  // 失败气泡：原因 + 实际请求 + 状态码，一行一条。
+  // 抽成函数是因为流式 / 整段返回两条路径都要用同一套格式。
+  function failureText(j) {
+    const hint = j.error === 'NO_LLM_KEY'
+      ? '还没配置 LLM Key，请先去设置页填好'
+      : (j.message || ('助手没有响应（' + j.error + '）'));
+    // 失败原因一并带进气泡：只说「检查网络或 API Key」会把用户带偏
+    // （2026-11-10：真因是地址读错 / 模型名不在中转可用列表，照着这句话白查两轮）
+    const lines = ['⚠ ' + hint];
+    if (j.hint) lines.push('· ' + j.hint);
+    if (j.url) lines.push('· 实际请求 ' + j.url + (j.model ? '（模型 ' + j.model + '）' : ''));
+    if (j.status) lines.push('· HTTP ' + j.status + (j.detail ? '：' + j.detail : ''));
+    else if (j.detail) lines.push('· ' + j.detail);
+    return lines.join('\n');
+  }
+
   async function send() {
     const text = draft.trim();
     if (!text || thinking) return;
@@ -153,34 +172,75 @@ export function Assistant() {
     if (!hasKey) return;
 
     setThinking(true);
+    setStreamText('');
+    setWaitMs(0);
+    const startedAt = Date.now();
+    const tick = setInterval(() => setWaitMs(Date.now() - startedAt), 200);
+    const payload = {
+      messages: next.slice(-20),
+      llmApiKey: cfg.llmApiKey,
+      llmBaseUrl: cfg.llmBaseUrl,
+      llmModel: cfg.llmModel
+    };
+
     try {
+      // 先请求流式；老后端不认 stream 字段，会照常回整段 JSON，下面自动回退。
       const r = await fetch('/api/assistant/chat', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: next.slice(-20),
-          llmApiKey: cfg.llmApiKey,
-          llmBaseUrl: cfg.llmBaseUrl,
-          llmModel: cfg.llmModel
-        })
+        body: JSON.stringify({ ...payload, stream: true })
       });
-      const j = await r.json().catch(() => null);
-      if (!j) {
-        setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 返回不是 JSON，请重试' }]);
-      } else if (j.ok === false) {
-        const hint = j.error === 'NO_LLM_KEY'
-          ? '还没配置 LLM Key，请先去旧版设置里填好'
-          : (j.message || ('助手没有响应（' + j.error + '）'));
-        setMsgs((m) => [...m, { role: 'assistant', content: '⚠ ' + hint }]);
+      const ctype = r.headers.get('content-type') || '';
+
+      if (r.ok && r.body && ctype.includes('ndjson')) {
+        // ---- 流式：思考进度 + 正文逐字出现 ----
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let finalEvt = null;
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (!line) continue;
+            let evt = null;
+            try { evt = JSON.parse(line); } catch { continue; }
+            if (evt.type === 'message' && typeof evt.text === 'string') setStreamText(evt.text);
+            else if (evt.type === 'final' || evt.type === 'error') finalEvt = evt;
+          }
+        }
+        setStreamText('');
+        if (!finalEvt) {
+          setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 流式回复中断了，请重试' }]);
+        } else if (finalEvt.ok === false) {
+          setMsgs((m) => [...m, { role: 'assistant', content: failureText(finalEvt) }]);
+        } else {
+          setMsgs((m) => [...m, { role: 'assistant', content: finalEvt.message || '' }]);
+          if (finalEvt.ready && finalEvt.prompt) setSuggested(finalEvt.prompt);
+        }
       } else {
-        setMsgs((m) => [...m, { role: 'assistant', content: j.message || '' }]);
-        if (j.ready && j.prompt) setSuggested(j.prompt);
+        // ---- 回退：整段返回（旧后端 / 网关不转发流） ----
+        const j = await r.json().catch(() => null);
+        if (!j) {
+          setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 返回不是 JSON，请重试' }]);
+        } else if (j.ok === false) {
+          setMsgs((m) => [...m, { role: 'assistant', content: failureText(j) }]);
+        } else {
+          setMsgs((m) => [...m, { role: 'assistant', content: j.message || '' }]);
+          if (j.ready && j.prompt) setSuggested(j.prompt);
+        }
       }
     } catch (e) {
       setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
     } finally {
+      clearInterval(tick);
       setThinking(false);
+      setStreamText('');
     }
   }
 
@@ -252,7 +312,12 @@ export function Assistant() {
             <${Msg} role="assistant" text="说说你想拍什么？比如「极光」「喀斯特晨雾」。我会一次问一个问题，帮你收敛成一条可直接生成的提示词。" />
           `}
           ${msgs.map((m, i) => html`<${Msg} key=${i} role=${m.role} text=${m.content} />`)}
-          ${thinking && html`<${Msg} role="assistant" text="正在想…" />`}
+          ${thinking && html`
+            <${Msg}
+              role="assistant"
+              text=${streamText || ('正在想…' + (waitMs >= 800 ? '（已 ' + (waitMs / 1000).toFixed(1) + 's）' : ''))}
+            />
+          `}
 
           ${suggested && html`
             <div className="rounded-[8px] border border-accent/25 bg-accent/[.06] p-2.5">

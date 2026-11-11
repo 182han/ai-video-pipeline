@@ -45,6 +45,12 @@ const SUITES = [
     desc: 'Key 粘贴污染防护（非 ASCII 校验/回显实际请求地址/显示隐藏按钮不依赖 emoji）'
   },
   {
+    name: 'assistant-diagnostics',
+    script: 'verify-assistant-diagnostics.js',
+    group: 'fast',
+    desc: '提示词助手失败原因可诊断（失败分类/脱敏/模型名校验 + 接线，stub fetch 零花费）'
+  },
+  {
     name: 'image-gen-compat',
     script: 'verify-image-gen-compat.js',
     group: 'fast',

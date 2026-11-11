@@ -1,4 +1,4 @@
-// ==========================================
+﻿// ==========================================
 // AI 长视频自动生成流水线 - 服务端入口
 // ==========================================
 
@@ -1021,6 +1021,19 @@ app.post('/api/test-api-key', async (req, res) => {
           models
         });
       }
+      if (type === 'llm') {
+        // /models 对任何合法 Key 都回 200 —— 它验证不了「你要用的模型名是否被允许」。
+        // 2026-11-10 事故：Key/地址都对，模型填 deepseek-chat，该中转只挂了
+        // deepseek-v4-flash-0731 → 测试显示「连接成功」，对话永远 HTTP 403。
+        // 判定逻辑抽到 llmService.judgeModelsPayload（纯函数，可离线验收）。
+        return res.json(llmService.judgeModelsPayload({
+          data,
+          text,
+          model,
+          url,
+          fallbackModel: config.OPENAI_MODEL || 'gpt-4o-mini',
+        }));
+      }
       res.json({ success: true, message: '连接成功，API Key 有效' });
     } else {
       // 非 401 错误说明 Key 是对的，只是参数或额度问题
@@ -1437,6 +1450,134 @@ function findForbidden(promptText) {
     .map(f => f.why);
 }
 
+// 模型原文 → 最终响应体（JSON 解析 + ready 判定 + 禁用词硬校验）。
+// 整段返回与流式返回共用同一份判定，保证两条路径结果完全一致。
+function buildAssistantReply(raw) {
+  // ---- 解析 JSON（容错 markdown 代码块 / 前后废话） ----
+  let parsed = null;
+  try {
+    const s = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const a = s.indexOf('{');
+    const b = s.lastIndexOf('}');
+    if (a !== -1 && b > a) parsed = JSON.parse(s.slice(a, b + 1));
+  } catch (e) {
+    parsed = null;
+  }
+
+  if (!parsed || typeof parsed.message !== 'string') {
+    // 模型没按格式输出：把原文当成普通消息返回，不判定为失败
+    return { ok: true, ready: false, message: raw, prompt: null };
+  }
+
+  const ready = parsed.ready === true;
+  const prompt = ready && typeof parsed.prompt === 'string' && parsed.prompt.trim()
+    ? parsed.prompt.trim()
+    : null;
+
+  // ---- 输出端硬校验：LLM 自检不可靠，这里再拦一道 ----
+  // 命中禁用项就不把 prompt 交出去，避免跑题内容直接进流水线（生成按秒计费）。
+  if (prompt) {
+    const hits = findForbidden(prompt);
+    if (hits.length) {
+      // 留痕：出误杀时能凭日志还原「是哪个词触发的」，不要再靠猜
+      console.warn(`[assistant] 拦截 ${hits.join('、')} | prompt=${prompt.slice(0, 300)}`);
+      return {
+        ok: true,
+        ready: false,
+        rejected: hits,
+        // 只说明命中了哪条禁令，不列举"应该做什么"——避免变相白名单。
+        message: `这个方向里有「${hits.join('、')}」，这些不能出现，换个方向吧。`,
+        prompt: null
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    // ready 只在真的拿到提示词时才算数，防止模型说 ready 却没给正文
+    ready: !!(ready && prompt),
+    message: parsed.message,
+    prompt
+  };
+}
+
+// 失败响应体：整段返回与流式共用，保证前端只需要认一套字段。
+function llmFailurePayload(failure) {
+  const info = llmService.describeFailure(failure);
+  console.error('[assistant] LLM_FAILED ' + JSON.stringify({
+    kind: failure && failure.kind,
+    status: failure && failure.status,
+    url: failure && failure.url,
+    model: failure && failure.model
+  }));
+  return {
+    ok: false,
+    error: 'LLM_FAILED',
+    // 首行保持原句不变（后端契约与旧前端都可能依赖它），原因放结构化字段
+    message: '助手没有响应，请检查网络或 API Key 后重试',
+    reason: failure && failure.kind ? failure.kind : 'UNKNOWN',
+    status: failure && failure.status ? failure.status : null,
+    url: failure && failure.url ? failure.url : null,
+    model: failure && failure.model ? failure.model : null,
+    hint: info.hint,
+    detail: info.detail
+  };
+}
+
+// 流式响应：逐行 NDJSON（不用 SSE，因为这是 POST，EventSource 用不了）。
+//   {type:'start'}                              握手
+//   {type:'reasoning', chars, firstTokenMs}     思考链进度（只给数字，不给内容）
+//   {type:'message', text}                      当前应显示的 message 前缀（累计值，不是增量）
+//   {type:'final', ...buildAssistantReply}      最终结果，结构与非流式一致
+//   {type:'error', ...llmFailurePayload}        失败，字段与非流式一致
+// 前端断线时 write 会抛，吞掉并停止写；LLM 请求本身仍会跑完（避免留下半截连接）。
+async function streamAssistant(res, assistantSystem, history, llmCfg) {
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  let closed = false;
+  const write = (obj) => {
+    if (closed) return;
+    try { res.write(JSON.stringify(obj) + '\n'); } catch (e) { closed = true; }
+  };
+  write({ type: 'start' });
+
+  let shown = '';
+  let result;
+  try {
+    result = await llmService.chatMultiStream(assistantSystem, history, llmCfg, {
+      onReasoning: (chars, ms) => write({ type: 'reasoning', chars, firstTokenMs: ms }),
+      onContent: (buf) => {
+        // 流式时正文是「未写完的 JSON」，只显示其中 message 已生成的部分
+        const prefix = llmService.extractMessagePrefix(buf);
+        if (prefix && prefix !== shown) {
+          shown = prefix;
+          write({ type: 'message', text: prefix });
+        }
+      }
+    });
+  } catch (e) {
+    console.error('[assistant] 流式异常:', e && e.message);
+    write({ ...llmFailurePayload({ kind: 'UNKNOWN', detail: e && e.message }), type: 'error' });
+    return res.end();
+  }
+
+  if (!result || !result.text) {
+    write({ ...llmFailurePayload(result && result.failure), type: 'error' });
+    return res.end();
+  }
+  write({
+    ...buildAssistantReply(result.text),
+    type: 'final',
+    elapsedMs: result.elapsedMs,
+    firstTokenMs: result.firstTokenMs
+  });
+  res.end();
+}
+
 app.post('/api/assistant/chat', async (req, res) => {
   const { messages, llmApiKey, llmBaseUrl, llmModel } = req.body || {};
 
@@ -1478,61 +1619,20 @@ app.post('/api/assistant/chat', async (req, res) => {
   const assistantSystem = promptSkill.isEnabled()
     ? `${ASSISTANT_SYSTEM_PROMPT}\n\n${promptSkill.getSkillRules()}\n`
     : ASSISTANT_SYSTEM_PROMPT;
-  const raw = await llmService.chatMulti(assistantSystem, history, llmCfg);
+  // 流式模式：前端带 stream:true 时边走边吐，解决「正在想…」那 4–18 秒空白。
+  // 老前端（不带该字段）仍走下面的整段返回，契约不变。
+  if (req.body && req.body.stream === true) {
+    return streamAssistant(res, assistantSystem, history, llmCfg);
+  }
+
+  const { text: raw, failure } = await llmService.chatMulti(assistantSystem, history, llmCfg);
   if (!raw) {
-    return res.status(200).json({
-      ok: false,
-      error: 'LLM_FAILED',
-      message: '助手没有响应，请检查网络或 API Key 后重试'
-    });
+    // 失败原因必须能到达用户眼前：原先所有失败都回同一句话，用户只能照着
+    // 「检查网络或 API Key」乱试（2026-11-10 两起事故：地址读错 / 模型名不在中转列表）。
+    return res.status(200).json(llmFailurePayload(failure));
   }
 
-  // ---- 解析 JSON（容错 markdown 代码块 / 前后废话） ----
-  let parsed = null;
-  try {
-    const s = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const a = s.indexOf('{');
-    const b = s.lastIndexOf('}');
-    if (a !== -1 && b > a) parsed = JSON.parse(s.slice(a, b + 1));
-  } catch (e) {
-    parsed = null;
-  }
-
-  if (!parsed || typeof parsed.message !== 'string') {
-    // 模型没按格式输出：把原文当成普通消息返回，不判定为失败
-    return res.status(200).json({ ok: true, ready: false, message: raw, prompt: null });
-  }
-
-  const ready = parsed.ready === true;
-  const prompt = ready && typeof parsed.prompt === 'string' && parsed.prompt.trim()
-    ? parsed.prompt.trim()
-    : null;
-
-  // ---- 输出端硬校验：LLM 自检不可靠，这里再拦一道 ----
-  // 命中禁用项就不把 prompt 交出去，避免跑题内容直接进流水线（生成按秒计费）。
-  if (prompt) {
-    const hits = findForbidden(prompt);
-    if (hits.length) {
-      // 留痕：出误杀时能凭日志还原「是哪个词触发的」，不要再靠猜
-      console.warn(`[assistant] 拦截 ${hits.join('、')} | prompt=${prompt.slice(0, 300)}`);
-      return res.status(200).json({
-        ok: true,
-        ready: false,
-        rejected: hits,
-        // 只说明命中了哪条禁令，不列举"应该做什么"——避免变相白名单。
-        message: `这个方向里有「${hits.join('、')}」，这些不能出现，换个方向吧。`,
-        prompt: null
-      });
-    }
-  }
-
-  res.status(200).json({
-    ok: true,
-    // ready 只在真的拿到提示词时才算数，防止模型说 ready 却没给正文
-    ready: !!(ready && prompt),
-    message: parsed.message,
-    prompt
-  });
+  return res.status(200).json(buildAssistantReply(raw));
 });
 
 // 创建任务
