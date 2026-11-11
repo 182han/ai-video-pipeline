@@ -15,9 +15,53 @@
 // ============================================================
 
 const KEY = 'vs_create_draft_v1';
+// 从「照片」页带一张已生成的图进创作流程：点按钮时写这个 key，回到 / 时由向导取走并删除
+const SEED_KEY = 'vs_create_seed_photo';
 
 function storage() {
   try { return globalThis.sessionStorage || null; } catch (e) { return null; }
+}
+
+// 照片页调用：把图片库条目暂存给创作向导（下一个 / 页面读取一次）
+export function setSeedPhoto(photo) {
+  const s = storage();
+  if (!s || !photo) return;
+  try { s.setItem(SEED_KEY, JSON.stringify(photo)); } catch (e) { /* ignore */ }
+}
+
+// 创作向导挂载时调用：取走并清掉暂存（只生效一次，刷新不会重复带入）
+export function takeSeedPhoto() {
+  const s = storage();
+  if (!s) return null;
+  let raw = null;
+  try { raw = s.getItem(SEED_KEY); } catch (e) { return null; }
+  if (!raw) return null;
+  try { s.removeItem(SEED_KEY); } catch (e) { /* ignore */ }
+  try {
+    const p = JSON.parse(raw);
+    return p && p.url ? p : null;
+  } catch (e) { return null; }
+}
+
+// 把图片库条目变成向导里的「当前图」并写进草稿（第③步可确认，第⑥步可用于图生视频）
+export function adoptPhoto(photo) {
+  if (!photo || !photo.url) throw new Error('缺少图片信息');
+  const result = {
+    url: photo.url,
+    width: photo.width || null,
+    height: photo.height || null,
+    model: photo.model || null,
+    provider: photo.provider || null,
+    size: photo.size || null,
+    photoId: photo.id,
+    prompt: photo.prompt || '',
+    taskId: photo.taskId || null,
+    createdAt: Date.parse(photo.createdAt) || Date.now(),
+    importedFromLibrary: true
+  };
+  setImageState({ busy: false, error: '', result });
+  saveDraft({ image: result, useImage: true });
+  return result;
 }
 
 // 读草稿：没有 / 解析失败 / 版本不符 → null（调用方走默认值，绝不抛错）

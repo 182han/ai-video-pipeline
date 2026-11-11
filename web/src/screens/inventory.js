@@ -9,10 +9,11 @@
 // 照片：    依赖出图厂商（未接入）→ 只给说明，不装样子
 // ============================================================
 import { navigate } from '../router.js';
+import { setSeedPhoto } from '../createDraft.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
-const { useEffect, useState } = React;
+const { useEffect, useRef, useState } = React;
 
 function useJson(url, deps) {
   const [s, setS] = useState({ loading: true, data: null, error: null, tick: 0 });
@@ -273,6 +274,26 @@ export function PhotosView() {
     } catch (e) { setErr('删除失败：' + e.message); }
   }
 
+  // 把这张图带回创作流程：未审核的先标记通过，再写 seed 并跳回 /（向导会取走并跳到第③步）
+  async function useInCreation(p) {
+    setErr('');
+    try {
+      let photo = p;
+      if (p.status !== 'approved') {
+        const r = await fetch('/api/photos/' + encodeURIComponent(p.id), {
+          method: 'PUT', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'approved' })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+        photo = j.photo || { ...p, status: 'approved' };
+      }
+      setSeedPhoto(photo);
+      navigate('/');
+    } catch (e) { setErr('带入创作失败：' + e.message); }
+  }
+
   const promptText = (p) => (p.prompt || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
 
   return html`
@@ -323,6 +344,8 @@ export function PhotosView() {
               <div className="mt-1 flex items-center gap-2">
                 <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
                 <span className="flex-1"></span>
+                <button onClick=${() => useInCreation(p)}
+                  className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
                 ${p.status !== 'approved' && html`
                   <button onClick=${() => review(p.id, 'approved')}
                     className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>`}
@@ -371,6 +394,8 @@ export function PhotosView() {
               </span>
             </div>
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+              <button onClick=${() => useInCreation(detail)}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>用它生成视频</button>
               ${detail.status !== 'approved' && html`
                 <button onClick=${() => review(detail.id, 'approved')}
                   style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>通过</button>`}
@@ -407,11 +432,44 @@ export function MusicView() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({});
   const [uploading, setUploading] = useState(false);
+  const [playingId, setPlayingId] = useState('');
+  const [playErr, setPlayErr] = useState('');
+  const audioRef = useRef(null);
   const MAX_AUDIO_MB = 20;
+
+  // 离开配乐页时停掉试听，避免声音还在后台响
+  useEffect(() => () => {
+    try { if (audioRef.current) audioRef.current.pause(); } catch (e) { /* ignore */ }
+  }, []);
 
   const tracks = (s.data && s.data.tracks) || [];
   const prefs = s.data || {};
   const defaultId = prefs.defaultTrackId || '';
+
+  // 试听：/bgm 是不拦登录的静态目录，直接把音频文件地址交给 <audio>
+  function bgmUrl(track) {
+    return '/bgm/' + String(track.file || '').split('/').map(encodeURIComponent).join('/');
+  }
+
+  function togglePlay(t) {
+    setPlayErr('');
+    try {
+      let a = audioRef.current;
+      if (!a) { a = new window.Audio(); audioRef.current = a; }
+      if (playingId === t.id) { a.pause(); setPlayingId(''); return; }
+      a.onended = () => setPlayingId('');
+      a.onerror = () => { setPlayErr('试听失败：' + (t.title || t.id) + '（文件可能不存在）'); setPlayingId(''); };
+      a.src = bgmUrl(t);
+      const p = a.play();
+      if (p && p.catch) {
+        p.catch((e) => {
+          setPlayErr('试听失败：' + (e && e.message ? e.message : '浏览器拒绝播放'));
+          setPlayingId('');
+        });
+      }
+      setPlayingId(t.id);
+    } catch (e) { setPlayErr('试听失败：' + e.message); }
+  }
 
   async function setDefault(id) {
     setErr('');
@@ -521,6 +579,7 @@ export function MusicView() {
       </${Head}>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
+      ${playErr && html`<p className="mb-2 text-[12px] text-danger">${playErr}</p>`}
       ${s.error && html`<p className="mb-2 text-[12px] text-danger">${s.error}</p>`}
 
       ${adding && html`
@@ -553,8 +612,11 @@ export function MusicView() {
       <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
         ${tracks.map((t) => html`
           <div key=${t.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-white/[.05] last:border-0">
-            <span className="w-[26px] h-[26px] rounded-full border border-white/[.10] grid place-items-center text-[10px] text-ink2">▶</span>
-            <span className="flex-1 min-w-0">
+            <button onClick=${() => togglePlay(t)}
+              title=${playingId === t.id ? '停止试听' : '试听'}
+              className="w-[26px] h-[26px] rounded-full border border-white/[.10] grid place-items-center text-[10px] text-ink2 hover:bg-white/[.08] cursor-pointer"
+            >${playingId === t.id ? '⏸' : '▶'}</button>
+            <span className="flex-1 min-w-0 cursor-pointer" onClick=${() => togglePlay(t)}>
               <b className="block text-[12.5px] font-medium text-ink truncate">${t.title || t.id}</b>
               <span className="block text-[10px] text-ink3 font-num">
                 ${[t.cat, t.mood, t.author, t.license].filter(Boolean).join(' · ')}

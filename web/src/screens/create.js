@@ -13,12 +13,13 @@ import { navigate } from '../router.js';
 import { promptBus } from '../store.js';
 import {
   loadDraft, saveDraft, clearDraft,
-  getImageState, onImageState, startImage
+  getImageState, onImageState, startImage,
+  takeSeedPhoto, adoptPhoto
 } from '../createDraft.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
-const { useEffect, useState } = React;
+const { useEffect, useState, useRef } = React;
 
 const STEPS = ['提示词', '图片生成', '图片审核', '运镜', '时长与配乐', '确认'];
 
@@ -129,6 +130,9 @@ export function CreateWizard({ onChanged }) {
   const web = readWebConfig();
   // 草稿：上次没做完的向导状态（切页 / 刷新后恢复；见 ../createDraft.js）
   const [restored, setRestored] = useState(() => loadDraft());
+  // 从照片库带进来的图（照片页点「用它生成视频」后写入，进入这里取走一次）
+  const [seedPhoto] = useState(() => takeSeedPhoto());
+  const [seedNotice, setSeedNotice] = useState('');
   const [step, setStep] = useState(() => {
     const n = Number(restored && restored.step);
     return Number.isFinite(n) ? Math.max(0, Math.min(STEPS.length - 1, n)) : 0;
@@ -170,6 +174,22 @@ export function CreateWizard({ onChanged }) {
   }, [step, prompt, vprompt, p, customStages, strictQc, useImage]);
 
   useEffect(() => onImageState(setImgState), []);
+
+  // 照片库带入的图：放进当前图、跳到第③步确认；提示词为空时用图片自己的提示词填上
+  const seedApplied = useRef(false);
+  useEffect(() => {
+    if (!seedPhoto || seedApplied.current) return;
+    seedApplied.current = true;
+    try {
+      const adopted = adoptPhoto(seedPhoto);
+      setImgState(getImageState());
+      if (!prompt.trim() && seedPhoto.prompt) setPrompt(seedPhoto.prompt);
+      setStep(2);
+      setSeedNotice(adopted.photoId || seedPhoto.id || '');
+    } catch (e) {
+      setImgErrLocal('从照片库带入失败：' + e.message);
+    }
+  }, []);
 
   // 多行模式：行数即片段数（覆盖段数设置）
   const promptLines = splitPromptLines(prompt);
@@ -463,6 +483,9 @@ export function CreateWizard({ onChanged }) {
               </p>`}
               ${ready && html`<p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
                 后端已接入。这里只做「单张测试出图」，用来确认 Key 与画质；图片不会自动并入任务。
+              </p>`}
+              ${ready && html`<p className="mt-1 text-[11px] leading-[1.7] text-ink3">
+                已经生成过图？去左侧「照片」页，对那张图点「用它生成视频」，会自动把它带回这里并跳到第③步。
               </p>`}
             </div>
           `}
@@ -828,6 +851,14 @@ export function CreateWizard({ onChanged }) {
           </div>
         `)}
       </div>
+
+      ${seedNotice && html`
+        <div className="mb-2 flex items-center gap-2 flex-wrap rounded-[6px] border border-accent/25 bg-accent/[.06] px-3 py-2">
+          <span className="text-[11px] text-accent">
+            🖼 已从照片库带入这张图（${seedNotice}）——先在第③步确认，再继续下一步
+          </span>
+        </div>
+      `}
 
       ${restoredHint && html`
         <div className="mb-2 flex items-center gap-2 flex-wrap rounded-[6px] border border-accent/25 bg-accent/[.06] px-3 py-2">

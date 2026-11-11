@@ -209,6 +209,10 @@ async function runWizard() {
   check(/这张图是按旧提示词出的/.test(createSrc), '提示词改过后会标注「这是旧图」');
   check(/sessionStorage/.test(draftSrc), '草稿走 sessionStorage（同标签页 F5 也在）');
   check(/apiKey/.test(draftSrc) && !/saveDraft\(\{[^}]*apiKey/.test(draftSrc), '出图 Key 只进请求体，不写进草稿');
+  const invSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'inventory.js'), 'utf8');
+  check(/setSeedPhoto/.test(draftSrc) && /takeSeedPhoto/.test(draftSrc), '草稿模块支持照片库 seed（setSeedPhoto / takeSeedPhoto）');
+  check(/adoptPhoto/.test(createSrc), '向导支持 adoptPhoto（把照片库的图变成当前图）');
+  check(/setSeedPhoto/.test(invSrc) && /navigate\('\/'\)/.test(invSrc), '照片页「用它生成视频」写 seed 并跳回创作');
 
   // ---------- 2. 离线跑真实 create.js ----------
   try {
@@ -298,6 +302,19 @@ async function runWizard() {
     await p3;
     await w.settle();
     check(!w.draftMod.getImageState().result, '清空草稿后，在途出图结果不会复活到界面');
+
+    // 照片库带入：写 seed → 挂载时 adopt，自动跳到第③步
+    w.session.set('vs_create_seed_photo', JSON.stringify({
+      id: 'imported_1', url: '/clips/imported.png', width: 1696, height: 960,
+      model: 'wan2.7-image', provider: 'dashscope', size: '1696x960',
+      prompt: '照片库里的提示词', createdAt: new Date().toISOString(), taskId: 'imported'
+    }));
+    await w.remount();
+    await w.settle();
+    check(w.images().includes('/clips/imported.png'), '照片库带入的图出现在向导里');
+    check(/已从照片库带入/.test(w.pageText()), '显示「已从照片库带入」提示');
+    check(w.draft() && w.draft().step === 2, '带入后自动到第③步（图片审核）', String(w.draft() && w.draft().step));
+    check(w.draft() && w.draft().image && w.draft().image.photoId === 'imported_1', '草稿记录图片库 id');
 
     // 重新挂载后点「清空草稿」按钮
     await w.remount();
