@@ -130,7 +130,8 @@ const OPTS = { apiKey: SECRET, baseUrl: 'https://relay.example/v1/', model: 'dee
   });
   r = await llm.chatMulti('sys', [{ role: 'user', content: 'hi' }], OPTS);
   check(r.failure && r.failure.kind === 'TIMEOUT', 'kind=TIMEOUT');
-  check(r.failure.timeoutMs === 30000, '带 timeoutMs=30000（提示语据此算秒数）');
+  check(typeof r.failure.timeoutMs === 'number' && r.failure.timeoutMs >= 30000,
+    '带 timeoutMs（默认 ≥30s，提示语据此算秒数）', String(r.failure.timeoutMs));
 
   stubFetch(() => fakeResponse({ json: { choices: [{ message: { content: '   ' } }] } }));
   r = await llm.chatMulti('sys', [{ role: 'user', content: 'hi' }], OPTS);

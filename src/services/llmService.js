@@ -7,7 +7,10 @@
 
 const config = require('../../config');
 
-const REQUEST_TIMEOUT_MS = 30000;
+// 助手/LLM 请求超时：默认 120 秒（2026-11-11 从 30 秒上调）。
+// 30 秒对推理模型/中转高峰太短，实测会出现「模型 30 秒内没有回话 / This operation was aborted」。
+// 可用 LLM_TIMEOUT_MS 覆盖；流式请求把它当「空闲超时」用（收到数据就重置，不是总时长）。
+const REQUEST_TIMEOUT_MS = Math.max(5000, Number(process.env.LLM_TIMEOUT_MS) || 120000);
 
 // 所有要回传给前端或写进日志的文本都必须先过这里。
 // 厂商报错里偶尔会带回请求头 / key 片段；server.js 的契约是「Key 只走请求体、绝不落日志」，
@@ -335,7 +338,14 @@ class LLMService {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutMs = Math.max(5000, Number(options.timeoutMs) || REQUEST_TIMEOUT_MS);
+    // 流式用「空闲超时」：每读到一块数据就重置，避免长回答被总时长误杀
+    let timer = null;
+    const armTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+    };
+    armTimer();
     const t0 = Date.now();
     let firstTokenMs = null;
     let reasoningChars = 0;
@@ -378,6 +388,7 @@ class LLMService {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        armTimer();
         buf += decoder.decode(value, { stream: true });
         let nl;
         while ((nl = buf.indexOf('\n')) !== -1) {
@@ -423,7 +434,7 @@ class LLMService {
           ...base,
           kind: timedOut ? 'TIMEOUT' : 'NETWORK',
           detail,
-          ...(timedOut ? { timeoutMs: REQUEST_TIMEOUT_MS } : {})
+          ...(timedOut ? { timeoutMs } : {})
         },
         elapsedMs: Date.now() - t0
       };
