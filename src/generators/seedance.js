@@ -42,7 +42,12 @@ class SeedanceGenerator extends BaseGenerator {
     const body = {
       model: options.model || this.model,
       content: [
-        { type: 'text', text: prompt }
+        { type: 'text', text: prompt },
+        // 图生视频（2026-11-11）：火山官方要求把首帧放进 content 数组，
+        // role=first_frame；image_url.url 官方称支持 URL / Base64。
+        ...(options.image && options.image.dataUrl
+          ? [{ type: 'image_url', image_url: { url: options.image.dataUrl }, role: 'first_frame' }]
+          : [])
       ],
       parameters: {
         ratio: options.aspectRatio || '16:9',
@@ -75,6 +80,10 @@ class SeedanceGenerator extends BaseGenerator {
 
   // 第三方中转 API（兼容 OpenAI 格式）
   async _generateThirdParty(prompt, options = {}) {
+    if (options.image) {
+      // 第三方中转的图生视频字段没有任何官方依据，不许猜（AGENTS §4.8）
+      throw new Error('Seedance 第三方中转未实现图生视频：只有火山引擎官方端点（ark/volcengine）支持首帧');
+    }
     const response = await fetch(`${this.baseUrl}/videos/generations`, {
       method: 'POST',
       headers: {

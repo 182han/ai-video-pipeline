@@ -117,6 +117,8 @@ export async function startImage({ prompt, size, cfg }) {
       model: j.model,
       provider: j.provider,
       size: j.size,
+      // 图片库条目 id：审核通过后，任务用这个 id 做图生视频的输入
+      photoId: j.photoId || null,
       // 记下这张图是按哪条提示词出的：提示词改了以后，第③步要能提示「这是旧图」
       prompt: String(prompt || '').trim(),
       taskId: taskId,

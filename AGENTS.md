@@ -64,9 +64,9 @@ node scripts/verify-stages.js
 
 | 项 | 值 |
 |---|---|
-| `scripts/verify-*.js` 实有 | **64**（2026-11-10 实测；含门禁 runner `verify-all.js` 本身） |
-| 门禁注册 | **59**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
-| 未注册 | **5**（64 − 59）：`verify-all.js`（runner 本身）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件 `verify-bgm-api` / `verify-bgm-e2e2` / `verify-bgm-negative` / `verify-port3001`（未登录即失败，故不入门禁） |
+| `scripts/verify-*.js` 实有 | **67**（2026-11-11 实测；含门禁 runner `verify-all.js` 本身） |
+| 门禁注册 | **62**（`verify-all.js` 的 `SUITES`；运行时首行打印「共 N 个脚本」） |
+| 未注册 | **5**（67 − 62）：`verify-all.js`（runner 本身）+ 4 个**依赖运行中 3001 服务/登录态**的手动套件 `verify-bgm-api` / `verify-bgm-e2e2` / `verify-bgm-negative` / `verify-port3001`（未登录即失败，故不入门禁） |
 
 ### 2.4 本机限制（重要）
 
@@ -86,7 +86,8 @@ Error: spawn EPERM
   `verify-loop` **29/0**（`qcVersion` 改为从 `QC_VERSION` 同源取）→ 提交 `0194fa2`。
 - **未注册套件已收口**：2026-11-10 逐个跑完原 29 个未注册套件，**24 个绿 + `verify-adjust-pipeline`（修 bug 后绿）
   → 新注册 25 个**；之后又新增并注册 `verify-image-review`、`verify-bgm-upload`、
-  `verify-create-draft`（向导切页/刷新不丢草稿）→ 现 **59 注册 / 64 实有 / 5 未注册**
+  `verify-create-draft`（向导切页/刷新不丢草稿）、`verify-photo-library`（图片库）、
+  `verify-i2v`（图生视频请求构建）→ 现 **62 注册 / 67 实有 / 5 未注册**
   （runner + 4 个依赖运行中服务的手动套件）。
 - ⚠️ 本机仍**无法**用 `verify-all.js` 一次性拿总结果（`spawn EPERM`，见 2.4），只能逐个跑；
   逐个跑不代表整体已全绿，本轮只实跑了「新注册的 25 个 + 改动相关的若干套件」。

@@ -87,6 +87,18 @@ const SUITES = [
     desc: '创作向导切页/刷新不丢（草稿 sessionStorage + 出图任务不随组件卸载；离线跑真实 create.js）'
   },
   {
+    name: 'photo-library',
+    script: 'verify-photo-library.js',
+    group: 'fast',
+    desc: '图片库（自动入库/提示词原样保留/审核三态/删除防越界/回填扫描；隔离临时目录）'
+  },
+  {
+    name: 'i2v',
+    script: 'verify-i2v.js',
+    group: 'fast',
+    desc: '图生视频请求构建（可灵/Seedance 首帧字段、未实现厂商明确拒绝；不联网不计费）'
+  },
+  {
     name: 'bgm-upload',
     script: 'verify-bgm-upload.js',
     group: 'real',

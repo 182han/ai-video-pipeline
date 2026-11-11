@@ -140,15 +140,25 @@
   - [~] 视觉未人眼验证；兜底海报仍是白天雾山（2560×1440）
 - [x] 日志落盘（终端 + `data/logs/server-YYYY-MM-DD.log` 双写）
   - 证据：`server.js:15-32`
-- [x] **向导图片审核（人工确认，2026-11-10）**：第②步出图 → 第③步能看见同一张图 → 「通过」进第④步 /
-  「打回重做（只重做这一张）」再调 1 次出图；**不引入后端审核门状态机、不把图并入任务**。
-  - 证据：`web/src/screens/create.js`；`scripts/verify-image-review.js` **17/0**（离线跑真实 create.js：
-    只调 1 次 / 能看到同一张 / 打回替换旧图 / 通过进运镜）
+- [x] **向导图片审核（人工确认，2026-11-10；2026-11-11 补图片库与图生视频）**：第②步出图 → 第③步能看见同一张图 →
+  「通过，继续下一步」/「打回重做（只重做这一张）」。**2026-11-11 起**：出图自动进**图片库**（提示词原样保留），
+  第③步「通过」会把审核状态写回图片库；确认页可勾选「用这张图生成视频」，任务带 `sourcePhotoId` 走**图生视频**。
+  - 证据：`web/src/screens/create.js`；`src/photoLibrary.js`；`scripts/verify-image-review.js` **17/0**；
+    `scripts/verify-photo-library.js` **33/0**（隔离目录：入库/提示词/审核三态/删除防越界/回填扫描）；
+    `scripts/verify-i2v.js` **23/0**（可灵与 Seedance 首帧字段；未实现厂商明确拒绝）
+- [x] **图片库（2026-11-11）**：`data/photos/<id>.json` + `GET/PUT/DELETE /api/photos`；照片页显示网格、提示词、
+  审核状态、删除；历史 `clips/*_img_*.png` 由 `scripts/backfill-photo-library.js` 显式回填（历史文件没有落盘提示词，如实留空）。
 - [ ] **审核门（P0，已按用户口径暂缓）**：整套状态机不做；若以后要「生成完停下来等审、驳回回退阶段」，
   再按 `docs/spec/review-gate-design.md` 走，并先修状态机前置①
-- [~] **图生视频（i2v）**：**用户 2026-11-10 明确决定「不接」**（不把审核通过的图传给视频模型、不花这笔钱验证）。
-  现状保持：图片仅用于人工确认；视频仍按文字提示词生成。生成器 `supportsImageInput` 均为 `null`（未验证）。
-  **以后不要再主动提这个，除非用户改主意。**
+- [~] **图生视频（i2v）**：**用户 2026-11-11 改口径**——人工确认的含义就是「确认后继续用这张图生成视频」；
+  同一轮还要求「所有生成的视频/图片都入库并保留提示词」。已实现：
+  - 视频侧：`src/generators/i2vSupport.js` 能力表；**可灵**（v1 `/v1/videos/image2video`，image=裸 base64，查询同端点）与
+    **Seedance 火山官方**（`content` 追加 `image_url` + `role:first_frame`）已实现；`mock` 可跑链路。
+    **OpenAI 兼容中转 / DashScope / Agnes / SiliconFlow 明确拒绝**（字段未核实或不适应，绝不静默丢掉首帧）。
+  - 数据侧：任务 `sourcePhotoId`（必须存在且 approved）、流水线 `_i2vPayload()` 读图并 attachUsage、
+    片段库条目新增 `sourcePhotoId` 且原有 `prompt/originalPrompt` 继续保留。
+  - ⚠️ **真实计费调用未验证**（没有用户 Key、未获计费同意）；只做了请求体构建的离线验收。
+  - 入口：向导第⑥步勾选「用这张图生成视频」（模型不在能力表时提交前拦下）。
 
 ---
 
@@ -157,7 +167,7 @@
 | 优先级 | 功能 | 现状 | 阻塞点 |
 |---|---|---|---|
 | ~~**P0**~~ | ~~人工审核门 `awaiting_review`~~ **已被用户改口径（2026-11-10）** | 用户明确：**不要后端审核门状态机**（不新增待审状态、不做批次/超时/留痕），只要「出图后下一步能看见图、能打回重做这一张」。已按此实现为**向导内人工确认**（第③步看图 → 通过/打回），改动仅前端；`docs/spec/review-gate-design.md` 的整套方案**暂不实施** | — |
-| **P0** | 图片生成（厂商已接入，流水线待接） | ✅ 适配器/接口/CLI/验收已完成：`src/generators/imageProviders/dashscope.js`（wan2.7-image）、`GET /api/image-gen/status`、`POST /api/images/generate`、`scripts/test-image-gen.js`、`scripts/verify-image-gen.js`（100/0）；设置页已有「图片生成 · wan2.7-image」入口（本机 Key 运行时生效 + 测试连接 + 眼睛显示切换；Seedance/可灵默认折叠）；`scripts/check-server-version.js` 可检测运行中的后端是否过期。向导第二步可「单张测试出图」。前端已单版本收口：`/` → 302 `/app`，`public/index.html` 仅归档。**尚未接进 pipeline**：没有 `image_generation` 阶段、任务字段、审核门 | 阶段与审核门按 `docs/spec/review-gate-design.md` §15 ③–⑦ 做；需产品定 D1–D6/D8 |
+| **P0** | 图片生成（厂商已接入，流水线待接） | ✅ 适配器/接口/CLI/验收已完成：`src/generators/imageProviders/dashscope.js`（wan2.7-image）、`GET /api/image-gen/status`、`POST /api/images/generate`、`scripts/test-image-gen.js`、`scripts/verify-image-gen.js`（100/0）；设置页已有「图片生成 · wan2.7-image」入口（本机 Key 运行时生效 + 测试连接 + 眼睛显示切换；Seedance/可灵默认折叠）；`scripts/check-server-version.js` 可检测运行中的后端是否过期。向导第二步可「单张测试出图」。前端已单版本收口：`/` → 302 `/app`，`public/index.html` 仅归档。**尚未接进 pipeline**：没有 `image_generation` 阶段、审核门（2026-11-11 已补：图片库 + 任务 `sourcePhotoId` 图生视频，但 pipeline 内仍无独立「出图阶段」） | 阶段与审核门按 `docs/spec/review-gate-design.md` §15 ③–⑦ 做；需产品定 D1–D6/D8 |
 | ~~**P1**~~ | ~~配乐文件上传~~ **已完成（2026-11-10）** | 配乐页可直接上传（≤20MB，mp3/wav/m4a/ogg，头校验），自动登记；`verify-bgm-upload` 23/0 | — |
 | **P1** | 审核门前置①：状态机缺陷修复 | `paused` 重启永久卡死、暂停超时静默丢弃、多个历史状态不在回收白名单 | 设计文档 §4/§15 要求先做（否则新增状态必踩同坑） |
 | **P2** | 剪映「调节」UI 面板 | 后端与 LUT 已完成，`.env` 默认关 | `app/web/**` 属 UI 写权限，**需用户授权** |

@@ -228,20 +228,165 @@ export function ClipsView() {
 }
 
 // ---------------- 照片 ----------------
+// 2026-11-11：图片库落地。生成时自动入库（含提示词），这里做列表 / 人工审核 / 删除。
+// 审核通过 = 这张图可以用作下一步「图生视频」的输入（厂商通道按确认后接入）。
+const PHOTO_STATUS_TEXT = { pending: '待审', approved: '已通过', rejected: '已打回' };
+
 export function PhotosView() {
+  const [status, setStatus] = useState('');
+  const [q, setQ] = useState('');
+  const [err, setErr] = useState('');
+  const [detail, setDetail] = useState(null);
+
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  if (q.trim()) qs.set('q', q.trim());
+  const [s, reload] = useJson('/api/photos' + (qs.toString() ? '?' + qs : ''));
+
+  const photos = (s.data && s.data.photos) || [];
+  const totals = (s.data && s.data.totals) || {};
+
+  async function review(id, next) {
+    setErr('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(id), {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setDetail((d) => (d && d.id === id ? j.photo : d));
+      reload();
+    } catch (e) { setErr('审核失败：' + e.message); }
+  }
+
+  async function remove(id) {
+    if (!window.confirm('删除这张图片？（同时删除 clips/ 里的文件，不可恢复）')) return;
+    setErr('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setDetail(null);
+      reload();
+    } catch (e) { setErr('删除失败：' + e.message); }
+  }
+
+  const promptText = (p) => (p.prompt || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
+
   return html`
     <div className="px-6 py-5">
-      <${Head} title="照片" sub="0 张" />
-      <div className="rounded-[8px] border border-warn/30 bg-warn/[.06] px-4 py-3">
-        <p className="text-[12px] text-warn">出图后端已接入 wan2.7-image，但照片库的存储/审核接口还没做。</p>
-        <p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
-          <code className="font-num">src/generators/imageProviders/dashscope.js</code> 已注册并可出单张图；
-          后端还没有照片库的存储与审核接口。等照片库落地后，这里会显示静帧网格（画面 + 审核状态 + 花费）。
-        </p>
+      <${Head} title="照片" sub=${(totals.all || 0) + ' 张'}>
+        <span className="text-[11px] text-ink3 font-num">
+          待审 ${totals.pending || 0} · 通过 ${totals.approved || 0} · 打回 ${totals.rejected || 0}
+        </span>
+      </${Head}>
+
+      <p className="mb-3 text-[11px] leading-[1.7] text-ink3">
+        生成的图片会自动入库并保留提示词（不再只留一个 clips 文件）。点「通过」表示这张图可以作为下一步图生视频的输入。
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <select value=${status} onChange=${(e) => setStatus(e.target.value)}
+          className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+          <option value="">全部状态</option>
+          <option value="pending">待审</option>
+          <option value="approved">已通过</option>
+          <option value="rejected">已打回</option>
+        </select>
+        <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="搜索提示词…"
+          className="h-8 w-[190px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
+        <span className="flex-1"></span>
+        <span className="text-[11px] text-ink3">${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
       </div>
+
+      ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
+      ${s.error && html`<p className="mb-2 text-[12px] text-danger">${s.error}</p>`}
+
+      ${photos.length === 0 && !s.loading && html`<${Empty}>
+        ${status || q.trim() ? '没有匹配的照片' : '还没有照片。到「创作」第②步生成一张，就会自动入库。'}
+      </${Empty}>`}
+
+      <div className="grid grid-cols-4 gap-3">
+        ${photos.map((p) => html`
+          <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
+            <img src=${p.url} alt="生成的图片"
+              onClick=${() => setDetail(p)}
+              className="w-full aspect-video bg-black object-cover cursor-pointer" />
+            <div className="px-2 py-1.5">
+              <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${promptText(p)}</p>
+              <p className="text-[10px] text-ink3 font-num">
+                ${PHOTO_STATUS_TEXT[p.status] || p.status}
+                ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
+              </p>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
+                <span className="flex-1"></span>
+                ${p.status !== 'approved' && html`
+                  <button onClick=${() => review(p.id, 'approved')}
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>`}
+                ${p.status !== 'rejected' && html`
+                  <button onClick=${() => review(p.id, 'rejected')}
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">打回</button>`}
+                <button onClick=${() => remove(p.id)}
+                  className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+              </div>
+            </div>
+          </div>
+        `)}
+      </div>
+
+      ${detail && html`
+        <div
+          style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.72)', display: 'grid', placeItems: 'center' }}
+          onClick=${(e) => { if (e.target === e.currentTarget) setDetail(null); }}
+        >
+          <div style=${{ width: 'min(820px, 92vw)', maxHeight: '88vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
+            <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>图片详情</b>
+              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${PHOTO_STATUS_TEXT[detail.status] || detail.status}</span>
+              <span style=${{ flex: 1 }}></span>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+            </div>
+            <img src=${detail.url} alt="生成的图片" style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px' }} />
+            <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
+              <span style=${{ color: 'var(--ink3)' }}>提示词</span>
+              <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${promptText(detail)}</span>
+              <span style=${{ color: 'var(--ink3)' }}>模型</span>
+              <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}${detail.provider ? ' · ' + detail.provider : ''}</span>
+              <span style=${{ color: 'var(--ink3)' }}>规格</span>
+              <span style=${{ color: 'var(--ink2)' }}>${[
+                detail.width && detail.height ? detail.width + '×' + detail.height : '',
+                detail.size || '',
+                detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
+              ].filter(Boolean).join(' · ') || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>生成时间</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace' }}>${detail.createdAt || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>文件</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.fileName || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>用于视频</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
+                ${Array.isArray(detail.usedIn) && detail.usedIn.length ? detail.usedIn.map((u) => u.taskId).join(', ') : '（还没用过）'}
+              </span>
+            </div>
+            <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+              ${detail.status !== 'approved' && html`
+                <button onClick=${() => review(detail.id, 'approved')}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>通过</button>`}
+              ${detail.status !== 'rejected' && html`
+                <button onClick=${() => review(detail.id, 'rejected')}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>打回</button>`}
+              <button onClick=${() => remove(detail.id)}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>删除</button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>
   `;
 }
+
 
 // ---------------- 配乐 ----------------
 const MUSIC_FIELDS = [

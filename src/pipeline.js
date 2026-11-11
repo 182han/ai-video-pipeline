@@ -15,6 +15,7 @@ const { resolveResume } = require('./pipelineStages');
 const llmService = require('./services/llmService');
 const pricing = require('./pricing');
 const library = require('./library');
+const photoLibrary = require('./photoLibrary');
 
 const CLIPS_DIR = config.STORAGE.clipsDir;
 const OUTPUT_DIR = config.STORAGE.outputDir;
@@ -1939,9 +1940,44 @@ class Pipeline {
     return true;
   }
 
+  // 图生视频（2026-11-11 用户口径）：任务带 sourcePhotoId 时，把图片库里「已通过」的图
+  // 读成 base64 交给适配器。这里是唯一读图点：失败就让任务明确失败，不许静默退回文生视频。
+  _i2vPayload(task) {
+    if (!task || !task.sourcePhotoId) return null;
+    const photo = photoLibrary.get(task.sourcePhotoId);
+    if (!photo) throw new Error(`图生视频的源图片不存在（${task.sourcePhotoId}）`);
+    if (photo.status !== 'approved') throw new Error('图生视频的源图片还没通过审核（请在「照片」页点通过）');
+    let buf;
+    try {
+      buf = fs.readFileSync(photo.filePath);
+    } catch (e) {
+      throw new Error('读取图生视频的源图片失败: ' + e.message);
+    }
+    if (!buf || buf.length < 8) throw new Error('图生视频的源图片文件无效（空文件）');
+    // 可灵官方上限 10MB，提前拦，别等厂商报错（其余厂商也普遍 ≤10MB）
+    if (buf.length > 10 * 1024 * 1024) throw new Error('图生视频的源图片超过 10MB');
+    const ext = path.extname(photo.filePath).toLowerCase();
+    const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : (ext === '.webp' ? 'image/webp' : 'image/png');
+    const base64 = buf.toString('base64');
+    try { photoLibrary.attachUsage(photo.id, task.taskId); } catch (e) { /* 追溯失败不影响生成 */ }
+    return {
+      photoId: photo.id,
+      filePath: photo.filePath,
+      base64,
+      dataUrl: `data:${mime};base64,${base64}`,
+      mime,
+      sizeBytes: buf.length,
+      prompt: photo.prompt || ''
+    };
+  }
+
   async _batchGenerate(taskId, generator) {
     const task = taskManager.getTask(taskId);
     if (!task) return; // 任务已删除，直接结束批量生成
+
+    // 图生视频：把已审核通过的源图读成 base64（同一任务的每个片段都用这张图作首帧）。
+    // 读图失败会抛出 → 任务失败并带明确原因，不会退化成静默的文生视频。
+    const i2vImage = this._i2vPayload(task);
 
     // 补跑复用：已经成功的片段不再重新生成。
     //
@@ -2048,7 +2084,8 @@ class Pipeline {
         const genResp = await generator.generate(clip.prompt, {
           duration: task.clipDuration,
           resolution: task.resolution,
-          ...(clipTemplate && clipTemplate.negative ? { negative: clipTemplate.negative } : {})
+          ...(clipTemplate && clipTemplate.negative ? { negative: clipTemplate.negative } : {}),
+          ...(i2vImage ? { image: i2vImage } : {})
         });
         const genTaskId = genResp.taskId;
 

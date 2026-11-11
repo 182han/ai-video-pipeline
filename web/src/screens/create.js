@@ -157,14 +157,17 @@ export function CreateWizard({ onChanged }) {
     ? restored.customStages : ALL_STAGE_KEYS.slice()));
   const [strictQc, setStrictQc] = useState(() => (restored && Array.isArray(restored.strictQc)
     ? restored.strictQc : ALL_QC_KEYS.slice()));
+  // 图生视频（2026-11-11 用户口径）：第③步通过的图默认拿去生成视频
+  const [useImage, setUseImage] = useState(() => (restored && typeof restored.useImage === 'boolean'
+    ? restored.useImage : true));
 
   // 有实质内容才提示「已恢复」：只改过参数不算（参数本来就来自设置页）
   const restoredHint = !!(restored && (restored.prompt || restored.vprompt || (restored.image && restored.image.url)));
 
   // 任何改动都落草稿：切到别的页面 / F5 回来还在（Key 不进草稿）
   useEffect(() => {
-    saveDraft({ step, prompt, vprompt, params: p, customStages, strictQc });
-  }, [step, prompt, vprompt, p, customStages, strictQc]);
+    saveDraft({ step, prompt, vprompt, params: p, customStages, strictQc, useImage });
+  }, [step, prompt, vprompt, p, customStages, strictQc, useImage]);
 
   useEffect(() => onImageState(setImgState), []);
 
@@ -172,6 +175,10 @@ export function CreateWizard({ onChanged }) {
   const promptLines = splitPromptLines(prompt);
   const isMultiPrompt = promptLines.length > 1;
   const effectiveClips = isMultiPrompt ? promptLines.length : p.clipCount;
+
+  // 图生视频：服务端 /api/image-gen/status 返回已实现的视频模型清单
+  const i2vModels = (imgStatus && Array.isArray(imgStatus.i2vModels)) ? imgStatus.i2vModels : [];
+  const i2vSupported = !!(imgResult && imgResult.photoId && i2vModels.includes(p.model));
 
   // 自定义环节 / 质检严格度（nsfw 永远要紧，取消不生效）
   const toggleStage = (key, on) => setCustomStages((list) => (on
@@ -286,6 +293,26 @@ export function CreateWizard({ onChanged }) {
     });
   }
 
+  // 审核状态写回图片库：第③步的「通过 / 打回」必须落库，
+  // 否则图生视频时后端会以「尚未通过审核」拒绝（状态是唯一依据）。
+  async function reviewPhoto(status) {
+    if (!imgResult || !imgResult.photoId) return;
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(imgResult.photoId), {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + r.status));
+      }
+    } catch (e) {
+      setImgErrLocal('审核状态保存失败：' + e.message);
+    }
+  }
+
   const totalSec = (effectiveClips * p.clipDuration -
     (p.transition ? p.transitionDuration * (effectiveClips - 1) : 0));
 
@@ -294,6 +321,15 @@ export function CreateWizard({ onChanged }) {
   async function submit() {
     setErr('');
     if (!prompt.trim()) { setErr('提示词不能为空'); setStep(0); return; }
+
+    // 图生视频（2026-11-11 用户口径）：第③步通过 + 勾选「用这张图」→ 把图片库 id 交给后端。
+    // 没有已实现的通道就明确拦下，绝不静默退回文字生成。
+    const wantImage = !!(imgResult && imgResult.photoId && useImage);
+    if (wantImage && !i2vSupported) {
+      setErr(`当前视频模型「${p.model}」没有已实现的图生视频通道（已实现：${i2vModels.join(' / ') || '暂无'}）。`
+        + '请切换模型，或取消勾选「用这张图生成视频」。');
+      return;
+    }
 
     // 余额守门（旧版口径）：预计花费 > 余额 → 直接拦截，不发请求；余额留空 = 不拦截
     const balance = readBalance();
@@ -318,6 +354,8 @@ export function CreateWizard({ onChanged }) {
         clipCount: effectiveClips,
         totalClips: effectiveClips,
         clipDuration: p.clipDuration,
+        // 图生视频：带图片库条目 id（后端会校验存在 + 已通过审核 + 模型有已实现通道）
+        ...(wantImage ? { sourcePhotoId: imgResult.photoId } : {}),
         transition: p.transition
           ? { enabled: true, duration: p.transitionDuration, type: p.transitionType }
           : { enabled: false },
@@ -485,13 +523,13 @@ export function CreateWizard({ onChanged }) {
               `}
             </div>
             <div className="mt-3 flex items-center gap-2 flex-wrap">
-              <button onClick=${() => setStep(3)}
+              <button onClick=${async () => { await reviewPhoto('approved'); setStep(3); }}
                 className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
-              >通过，进入运镜</button>
-              <button onClick=${genTestImage}
+              >通过，继续下一步</button>
+              <button onClick=${async () => { await reviewPhoto('rejected'); await genTestImage(); }}
                 className="h-8 px-3 rounded-[6px] border border-white/[.12] text-ink text-[12px]"
               >打回重做（只重做这一张）</button>
-              <span className="text-[11px] text-ink3">打回会再调用 1 次出图（计费 1 张），不会重做整批</span>
+              <span className="text-[11px] text-ink3">「通过」= 这张图可用于下一步图生视频；打回会再调用 1 次出图（计费 1 张）</span>
             </div>
           `}
         </${Section}>
@@ -633,6 +671,32 @@ export function CreateWizard({ onChanged }) {
           </label>
           <p className="mt-1.5 text-[11px] text-ink3">校色依赖转场：打开校色会自动打开转场。</p>
         </${Section}>
+
+        <div className="mt-4">
+          <${Section} title="图生视频"
+            extra=${html`<${Info}>用第③步通过的那张图作首帧${imgResult && imgResult.photoId ? '' : '（当前没有可用的图片）'}</${Info}>`}>
+            ${imgResult && imgResult.photoId ? html`
+              <label className="flex items-center gap-2 text-[12px] text-ink">
+                <input type="checkbox" checked=${useImage}
+                  onChange=${(e) => setUseImage(e.target.checked)}
+                  className="w-[15px] h-[15px] accent-accent" />
+                用这张图生成视频（图片库：${imgResult.photoId}）
+              </label>
+              <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
+                ${i2vSupported
+                  ? `当前模型 ${p.model} 有已实现的图生视频通道。`
+                  : `当前模型 ${p.model} 没有已实现的图生视频通道（已实现：${i2vModels.join(' / ') || '暂无'}）。`}
+              </p>
+              ${useImage && !i2vSupported && html`
+                <p className="mt-1.5 text-[12px] text-warn">请切换视频模型，或取消勾选（取消后按文字提示词生成，图片不参与）。</p>
+              `}
+            ` : html`
+              <p className="text-[11px] leading-[1.7] text-ink3">
+                还没有图片库记录。请先在第②步生成、第③步点「通过」；历史草稿里的旧图没有库记录，不能用于图生视频。
+              </p>
+            `}
+          </${Section}>
+        </div>
 
         <div className="mt-4">
           <${Section} title="生成参数"

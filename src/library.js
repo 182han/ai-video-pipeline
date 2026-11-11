@@ -228,6 +228,8 @@ function buildEntry(task, clip, filePath, probe) {
     clipIndex: clip.index,
     prompt: clip.prompt || originalPrompt || '',
     originalPrompt: originalPrompt || '',
+    // 图生视频：记录这条视频用的是图片库里哪张图（追溯用，不复制文件）
+    sourcePhotoId: task.sourcePhotoId || null,
     model: task.model || 'unknown',
     resolution: task.resolution || label,
     width: width || null,

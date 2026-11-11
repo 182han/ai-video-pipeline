@@ -55,6 +55,8 @@ const adjustLut = require('./src/adjustLut');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
+const photoLibrary = require('./src/photoLibrary');
+const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 
 const app = express();
 const server = http.createServer(app);
@@ -563,6 +565,9 @@ app.get('/api/image-gen/status', (req, res) => {
   res.json({
     ...status,
     providers: listImageProviders(),
+    // 图生视频：只有本清单里的视频模型才会被 /api/tasks 接受 sourcePhotoId
+    i2vModels: listI2VModels(),
+    i2v: { models: listI2VModels(), support: Object.fromEntries(listI2VModels().map((m) => [m, getI2VInfo(m)])) },
     hint: status.usable
       ? `图片生成已就绪：${status.imageGen.provider} / ${status.imageGen.model}`
       : (!status.imageGen.hasApiKey
@@ -617,10 +622,36 @@ app.post('/api/images/generate', async (req, res) => {
       watermark: body.watermark,
       outDir: config.STORAGE.clipsDir
     });
+    // 用户 2026-11-11 要求：所有生成的图片都要入库，并保留对应提示词。
+    // 入库失败不推翻已生成的图（钱已经花了），但要显式告诉调用方，不能静默。
+    let photo = null;
+    let photoError = null;
+    try {
+      photo = photoLibrary.ingest({
+        id: photoLibrary.makeId(body.taskId, body.index),
+        taskId: body.taskId,
+        index: Number.isInteger(body.index) ? body.index : 0,
+        filePath: out.imagePath,
+        url: '/clips/' + encodeURIComponent(path.basename(out.imagePath)),
+        prompt,
+        negativePrompt: typeof body.negativePrompt === 'string' ? body.negativePrompt : '',
+        provider: out.provider,
+        model: out.model,
+        size: body.size || status.imageGen.size,
+        width: out.width,
+        height: out.height,
+        source: 'generation'
+      });
+    } catch (e) {
+      photoError = e && e.message ? e.message : String(e);
+      console.warn('[image-gen] 图片入库失败:', photoError);
+    }
     res.json({
       ok: true,
       ...out,
-      url: '/clips/' + path.basename(out.imagePath)
+      url: '/clips/' + encodeURIComponent(path.basename(out.imagePath)),
+      photoId: photo ? photo.id : null,
+      ...(photoError ? { photoLibraryError: photoError } : {})
     });
   } catch (e) {
     const msg = e && e.message ? e.message : String(e);
@@ -629,6 +660,42 @@ app.post('/api/images/generate', async (req, res) => {
     console.error('[image-gen] 生成失败:', msg);
     res.status(isValidation ? 400 : 502).json({ error: '图片生成失败: ' + msg });
   }
+});
+
+// ===== 图片库（照片）=====
+// 用户 2026-11-11 口径：所有生成的图片都要入库，并且保留对应提示词。
+// 审核三态：pending（待审）/ approved（通过，可拿去图生视频）/ rejected（打回）。
+app.get('/api/photos', (req, res) => {
+  const status = String(req.query.status || '').trim();
+  if (status && !photoLibrary.STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
+  }
+  const photos = photoLibrary.query({ status, q: req.query.q });
+  res.json({ photos, totals: photoLibrary.totals(photoLibrary.listAll()) });
+});
+
+app.get('/api/photos/:id', (req, res) => {
+  const photo = photoLibrary.get(req.params.id);
+  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  res.json(photo);
+});
+
+app.put('/api/photos/:id', (req, res) => {
+  const body = req.body || {};
+  const status = String(body.status || '').trim();
+  if (!photoLibrary.STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
+  }
+  const photo = photoLibrary.markReviewed(req.params.id, status, body.note);
+  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  res.json({ ok: true, photo });
+});
+
+app.delete('/api/photos/:id', (req, res) => {
+  const keepFile = String(req.query.keepFile || '') === '1';
+  const r = photoLibrary.remove(req.params.id, { deleteFile: !keepFile });
+  if (!r.success) return res.status(r.error === '图片不存在' ? 404 : 500).json({ error: r.error });
+  res.json({ ok: true, fileDeleted: r.fileDeleted, photo: r.entry });
 });
 
 // 测试 API Key 是否有效
@@ -1517,6 +1584,25 @@ app.post('/api/tasks', (req, res) => {
     return res.status(400).json({ error: '不支持的模型: ' + modelId });
   }
 
+  // 图生视频（2026-11-11 用户口径）：sourcePhotoId 必须是图片库里「已通过」的图，
+  // 且所选模型必须已有实现过的图生视频通道。否则直接 400，绝不静默按文字生成。
+  let sourcePhoto = null;
+  if (sourcePhotoId) {
+    sourcePhoto = photoLibrary.get(String(sourcePhotoId));
+    if (!sourcePhoto) {
+      return res.status(400).json({ error: '图生视频的源图片不存在: ' + sourcePhotoId });
+    }
+    if (sourcePhoto.status !== 'approved') {
+      return res.status(400).json({ error: '图生视频的源图片还没通过审核（请到「照片」页点通过）' });
+    }
+    if (!getI2VInfo(modelId)) {
+      return res.status(400).json({
+        error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
+          + '请切换视频模型，或取消勾选「用这张图生成视频」。'
+      });
+    }
+  }
+
   // 校验片段数量（多提示词模式下以行数为准）
   const count = multiPrompts ? multiPrompts.length : (clipCount || totalClips || 10);
   if (count < 1 || count > 200) {
@@ -1536,6 +1622,8 @@ app.post('/api/tasks', (req, res) => {
   const task = taskManager.createTask(firstPrompt.trim(), {
     model: modelId,
     theme: theme ?? null,
+    // 图生视频：存图片库条目 id；流水线运行时会重新校验文件与审核状态
+    sourcePhotoId: sourcePhoto ? sourcePhoto.id : undefined,
     totalClips: count,
     resolution: resolution || config.GENERATION.defaultResolution || '720p',
     clipDuration: duration,
@@ -1580,6 +1668,11 @@ app.post('/api/tasks', (req, res) => {
 
   // 启动流水线
   pipeline.startTask(task.taskId);
+
+  // 追溯：这张图被哪个视频任务用过（失败不影响任务）
+  if (sourcePhoto) {
+    try { photoLibrary.attachUsage(sourcePhoto.id, task.taskId); } catch (e) { console.warn('[tasks] 记录图片来源失败:', e.message); }
+  }
 
   res.json({
     taskId: task.taskId,

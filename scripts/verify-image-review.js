@@ -154,7 +154,7 @@ async function runWizard() {
   // ---------- 1. 静态 ----------
   check(!/awaiting_review/.test(createSrc), '前端不引入 awaiting_review 状态机');
   check(/图片审核/.test(createSrc), '第③步标题是「图片审核」');
-  check(/通过，进入运镜|通过并继续|审核通过/.test(createSrc), '第③步有「通过」按钮');
+  check(/通过，继续下一步|通过，进入运镜|通过并继续|审核通过/.test(createSrc), '第③步有「通过」按钮');
   check(/打回重做|重新生成这一张|重做这一张/.test(createSrc), '第③步有「打回重做」按钮');
   check(/imgResult && imgResult\.url/.test(createSrc) || /imgResult\.url/.test(createSrc), '第③步渲染上一张图（imgResult.url）');
   check(!/审核门（后端未实现）/.test(createSrc), '第③步不再显示「后端未实现」占位');

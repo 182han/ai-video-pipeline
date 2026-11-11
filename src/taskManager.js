@@ -265,6 +265,9 @@ class TaskManager {
       prompts: prompts ? prompts.map(p => ({ text: p.text, theme: p.theme, tag: p.tag, matched: p.matched })) : null,
       model: options.model || 'mock',
       theme: options.theme ?? null,
+      // 图生视频（2026-11-11 用户口径）：用图片库里「已通过」的那张图作为首帧。
+      // 存 id 而不是文件路径：图片库条目可能被更新/删除，运行时再解析并校验。
+      sourcePhotoId: options.sourcePhotoId || null,
       totalClips,
       clipDuration,
       resolution: options.resolution || config.GENERATION.defaultResolution || '720p',

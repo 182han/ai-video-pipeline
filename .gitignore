@@ -75,3 +75,6 @@ data/keep/
 
 # 剪映调节复刻的 cube 缓存（运行时产物）
 data/adjust/
+
+# 图片库元数据（每张生成图一个 json，运行时产物）
+data/photos/

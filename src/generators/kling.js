@@ -18,6 +18,8 @@ class KlingGenerator extends BaseGenerator {
     this.secretKey = config.secretKey || process.env.KLING_SECRET_KEY || '';
     this.baseUrl = (config.baseUrl || 'https://api-beijing.klingai.com').replace(/\/+$/, '');
     this.modelName = config.modelId || 'kling-v3';
+    // 图生视频走另一个端点，查询端点也要跟着变；按 taskId 记住本次用的是哪条路径。
+    this._taskEndpoints = new Map();
     this.supportedOptions = {
       maxDuration: 15,
       resolutions: ['720p', '1080p', '4K'],
@@ -68,22 +70,28 @@ class KlingGenerator extends BaseGenerator {
   async _createTask(prompt, options = {}) {
     const token = this._generateToken();
     const duration = this._mapDuration(options.duration);
+    // 图生视频（2026-11-11）：官方 v1 接口 /v1/videos/image2video，
+    // image 字段必须是**裸 base64**（官方明确：带 data:image/... 前缀会报错）。
+    const imgB64 = options.image && typeof options.image.base64 === 'string' ? options.image.base64 : '';
+    const endpoint = imgB64 ? '/v1/videos/image2video' : '/v1/videos/text2video';
 
-    const response = await fetch(`${this.baseUrl}/v1/videos/text2video`, {
+    const body = {
+      model_name: this.modelName,
+      prompt: (prompt || '').substring(0, 2500),
+      duration,
+      mode: this._mapMode(options.resolution),
+      ...(imgB64 ? { image: imgB64 } : { aspect_ratio: options.aspectRatio || '16:9' }),
+      // 负面词（官方字段 negative_prompt，≤2500 字符；无则省略）
+      ...(options.negative ? { negative_prompt: String(options.negative).substring(0, 2500) } : {})
+    };
+
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model_name: this.modelName,
-        prompt: (prompt || '').substring(0, 2500),
-        duration,
-        mode: this._mapMode(options.resolution),
-        aspect_ratio: options.aspectRatio || '16:9',
-        // 负面词（官方字段 negative_prompt，≤2500 字符；无则省略）
-        ...(options.negative ? { negative_prompt: String(options.negative).substring(0, 2500) } : {})
-      })
+      body: JSON.stringify(body)
     });
 
     const text = await response.text();
@@ -103,12 +111,14 @@ class KlingGenerator extends BaseGenerator {
     if (!taskId) {
       throw new Error('可灵API未返回任务ID');
     }
+    this._taskEndpoints.set(String(taskId), endpoint);
     return { taskId, status: 'submitted', duration };
   }
 
   async getStatus(taskId) {
     const token = this._generateToken();
-    const response = await fetch(`${this.baseUrl}/v1/videos/text2video/${encodeURIComponent(taskId)}`, {
+    const endpoint = this._taskEndpoints.get(String(taskId)) || '/v1/videos/text2video';
+    const response = await fetch(`${this.baseUrl}${endpoint}/${encodeURIComponent(taskId)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 

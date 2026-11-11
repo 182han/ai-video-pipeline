@@ -56,6 +56,11 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
   async generate(prompt, options = {}) {
     this._ensureReady();
     if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('视频生成提示词为空');
+    if (options.image) {
+      // 中转是否支持 input_reference / 图片字段：未核实（没有官方文档，也没有实测）。
+      // 宁可明确拒绝，也不假装支持后静默丢掉图片（用户会以为图生效了）。
+      throw new Error('OpenAI 兼容视频中转的图生视频能力未核实，暂不支持传首帧');
+    }
 
     // 只发经实测被接受的字段：model / prompt / seconds。
     // 分辨率、画幅等中转是否支持未验证，贸然发送可能 400，先不传。
