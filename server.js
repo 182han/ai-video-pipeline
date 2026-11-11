@@ -683,24 +683,33 @@ app.get('/api/photos/:id', (req, res) => {
 app.put('/api/photos/:id', (req, res) => {
   const body = req.body || {};
   const status = String(body.status || '').trim();
-  const hasPrompt = typeof body.prompt === 'string';
-  if (!status && !hasPrompt) {
-    return res.status(400).json({ error: '需要提供 status 或 prompt' });
+  const hasImage = typeof body.imagePrompt === 'string';
+  const hasVideo = typeof body.videoPrompt === 'string';
+  const hasLegacy = typeof body.prompt === 'string';
+  if (!status && !hasImage && !hasVideo && !hasLegacy) {
+    return res.status(400).json({ error: '需要提供 status / imagePrompt / videoPrompt' });
   }
   if (status && !photoLibrary.STATUSES.includes(status)) {
     return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
   }
   let photo = null;
   if (status) photo = photoLibrary.markReviewed(req.params.id, status, body.note);
-  if (hasPrompt) {
-    const prompt = body.prompt.trim().slice(0, 8000);
-    photo = photoLibrary.update(req.params.id, {
-      prompt,
-      promptAvailable: prompt.length > 0,
-      promptUpdatedAt: new Date().toISOString(),
-      promptSource: 'manual'
-    });
+  const patch = {};
+  if (hasImage || hasLegacy) {
+    // 画面提示词（旧字段 prompt 视为 imagePrompt）
+    const ip = String(hasImage ? body.imagePrompt : body.prompt).trim().slice(0, 8000);
+    patch.imagePrompt = ip;
+    patch.prompt = ip; // 兼容旧卡片/搜索字段
+    patch.promptAvailable = ip.length > 0;
+    patch.imagePromptUpdatedAt = new Date().toISOString();
+    patch.promptUpdatedAt = patch.imagePromptUpdatedAt;
+    patch.promptSource = 'manual';
   }
+  if (hasVideo) {
+    patch.videoPrompt = String(body.videoPrompt).trim().slice(0, 8000);
+    patch.videoPromptUpdatedAt = new Date().toISOString();
+  }
+  if (Object.keys(patch).length) photo = photoLibrary.update(req.params.id, patch);
   if (!photo) return res.status(404).json({ error: '图片不存在' });
   res.json({ ok: true, photo });
 });
@@ -1651,7 +1660,7 @@ app.post('/api/assistant/chat', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust, sourcePhotoId } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust, sourcePhotoId, sourcePhotoMotionPrompt } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1734,15 +1743,17 @@ app.post('/api/tasks', (req, res) => {
   // 创建任务（多提示词模式下 prompt 取第一行文本，各片段提示词/主题由 prompts 逐一分配）
   const firstPrompt = prompt || (multiPrompts ? multiPrompts[0].text : '') || '';
 
-  // 用户口径（2026-11-11）：「改过提示词再用这张图生成视频」→ 用提交的提示词覆盖图片库里的提示词。
-  // 出图时的原始提示词仍保留在 generationPrompt 字段（可追溯）。
-  if (sourcePhoto && firstPrompt.trim()) {
-    photoLibrary.update(sourcePhoto.id, {
-      prompt: firstPrompt.trim(),
-      promptAvailable: true,
-      promptUpdatedAt: new Date().toISOString(),
-      promptSource: 'video-task'
-    });
+  // 用户口径（2026-11-11）：「改过提示词再用这张图生成视频」→ 分开存：
+  // imagePrompt（画面）保持不动，videoPrompt 记录这次视频用的运动提示词，互不覆盖。
+  if (sourcePhoto) {
+    const motion = String(sourcePhotoMotionPrompt || firstPrompt || '').trim();
+    if (motion) {
+      photoLibrary.update(sourcePhoto.id, {
+        videoPrompt: motion.slice(0, 8000),
+        videoPromptUpdatedAt: new Date().toISOString(),
+        promptSource: 'video-task'
+      });
+    }
   }
 
   const task = taskManager.createTask(firstPrompt.trim(), {

@@ -54,7 +54,9 @@ export function adoptPhoto(photo) {
     provider: photo.provider || null,
     size: photo.size || null,
     photoId: photo.id,
-    prompt: photo.prompt || '',
+    // prompt 仍存「当前图」的展示用文案；imagePrompt 是画面基准，提交时自动拼到视频提示词前面
+    prompt: photo.imagePrompt || photo.generationPrompt || photo.prompt || '',
+    imagePrompt: photo.imagePrompt || photo.generationPrompt || photo.prompt || '',
     taskId: photo.taskId || null,
     createdAt: Date.parse(photo.createdAt) || Date.now(),
     importedFromLibrary: true

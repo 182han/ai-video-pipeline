@@ -8,6 +8,8 @@
 //     只要「第②步出完图，第③步能看见这张图，不满意就打回重做这一张」。
 //     因此第③步 = 纯前端人工确认（看图 → 通过 / 打回重做），不改任务状态机。
 //   · 图片仍不并入任务；提交走既有 POST /api/tasks（文生视频链路，能真跑）
+//     2026-11-11 起：勾选「用这张图生成视频」时任务带 sourcePhotoId，走图生视频（可灵 / Seedance / WhaleTV）
+//     最终提示词 = 画面提示词（图片库）。运动描述（主提示词 + 运镜）
 // ============================================================
 import { navigate } from '../router.js';
 import { promptBus } from '../store.js';
@@ -92,6 +94,28 @@ function splitPromptLines(text) {
   return String(text || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
 
+// 图生视频：画面基准（图片提示词）与运动描述明显冲突时，提交前让用户确认。
+// 只做保守的天气/昼夜对立词；其它交给用户判断，不擅自改写提示词。
+function findPromptConflict(base, motion) {
+  const b = String(base || '');
+  const m = String(motion || '');
+  if (!b || !m) return '';
+  const pairs = [
+    [['晴天', '晴朗', '阳光'], ['暴雨', '下雨', '雷雨', '暴风雪', '下雪', '大雪', '大雾', '阴天']],
+    [['白天', '正午', '清晨', '日出'], ['夜晚', '深夜', '夜景', '星空', '银河', '月夜']]
+  ];
+  const hit = (text, words) => words.filter((w) => text.includes(w));
+  for (const [a, bWords] of pairs) {
+    const inBaseA = hit(b, a);
+    const inMotionB = hit(m, bWords);
+    if (inBaseA.length && inMotionB.length) return `图里是「${inBaseA[0]}」，你写的是「${inMotionB[0]}」`;
+    const inBaseB = hit(b, bWords);
+    const inMotionA = hit(m, a);
+    if (inBaseB.length && inMotionA.length) return `图里是「${inBaseB[0]}」，你写的是「${inMotionA[0]}」`;
+  }
+  return '';
+}
+
 // 账户余额（元）：留空/非法 = 不拦截（旧版口径）
 function readBalance() {
   try {
@@ -133,8 +157,6 @@ export function CreateWizard({ onChanged }) {
   // 从照片库带进来的图（照片页点「用它生成视频」后写入，进入这里取走一次）
   const [seedPhoto] = useState(() => takeSeedPhoto());
   const [seedNotice, setSeedNotice] = useState('');
-  // 带入时提示词框已有别的内容：不覆盖，给一个「用图片原提示词填入」按钮
-  const [seedPrompt, setSeedPrompt] = useState('');
   const [step, setStep] = useState(() => {
     const n = Number(restored && restored.step);
     return Number.isFinite(n) ? Math.max(0, Math.min(STEPS.length - 1, n)) : 0;
@@ -177,20 +199,17 @@ export function CreateWizard({ onChanged }) {
 
   useEffect(() => onImageState(setImgState), []);
 
-  // 照片库带入的图：放进当前图、跳到第③步确认；提示词为空时用图片自己的提示词填上
+  // 照片库带入的图：放进当前图、跳到第③步确认；画面提示词只存在图里，提交时才拼
   const seedApplied = useRef(false);
   useEffect(() => {
     if (!seedPhoto || seedApplied.current) return;
     seedApplied.current = true;
     try {
-      const adopted = adoptPhoto(seedPhoto);
+      adoptPhoto(seedPhoto);
       setImgState(getImageState());
-      if (seedPhoto.prompt) {
-        if (!prompt.trim()) setPrompt(seedPhoto.prompt);
-        else if (prompt.trim() !== seedPhoto.prompt) setSeedPrompt(seedPhoto.prompt);
-      }
+      // 画面基准只在提交时自动拼到视频提示词前面，不写进主提示词（避免和运动描述打架）
       setStep(2);
-      setSeedNotice(adopted.photoId || seedPhoto.id || '');
+      setSeedNotice(seedPhoto.id || '');
     } catch (e) {
       setImgErrLocal('从照片库带入失败：' + e.message);
     }
@@ -355,6 +374,10 @@ export function CreateWizard({ onChanged }) {
         + '请切换模型，或取消勾选「用这张图生成视频」。');
       return;
     }
+    if (wantImage && isMultiPrompt) {
+      setErr('图生视频目前只支持单行提示词（多行会被当成多个场景，但只有同一张首帧）。请合并成一行再提交。');
+      return;
+    }
 
     // 余额守门（旧版口径）：预计花费 > 余额 → 直接拦截，不发请求；余额留空 = 不拦截
     const balance = readBalance();
@@ -367,9 +390,29 @@ export function CreateWizard({ onChanged }) {
     setSubmitting(true);
     try {
       const rt = collectRuntime(p.model);
+      // 提示词组装（2026-11-11 用户口径）：
+      //   图生视频 = 画面基准（图片提示词）。运动描述（主提示词 + 运镜）
+      //   文生视频 = 运动描述（主提示词 + 运镜）
+      const motionText = [prompt.trim(), vprompt.trim()].filter(Boolean).join('，');
+      const imageBase = (imgResult && imgResult.imagePrompt ? String(imgResult.imagePrompt) : '').trim();
+      const composedPrompt = wantImage
+        ? [imageBase, motionText].filter(Boolean).join('。')
+        : motionText;
+      if (!composedPrompt) { setErr('提示词不能为空'); setSubmitting(false); return; }
+      if (wantImage && imageBase) {
+        const conflict = findPromptConflict(imageBase, motionText);
+        if (conflict && !window.confirm(`提示词可能与图片冲突：${conflict}。\n\n仍要提交吗？`)) {
+          setSubmitting(false);
+          return;
+        }
+      }
       const body = {
-        // 多行模式：prompts 数组（每行一个场景，行数即片段数）；单行保持 prompt
-        ...(isMultiPrompt ? { prompts: promptLines } : { prompt: prompt.trim() }),
+        // 多行模式：prompts 数组（每行一个场景）；单行/图生视频用拼好的 composedPrompt
+        ...(isMultiPrompt
+          ? { prompts: promptLines.map((l) => (vprompt.trim() ? l + '，' + vprompt.trim() : l)) }
+          : { prompt: composedPrompt }),
+        // 图生视频额外带上「纯运动描述」，图片库分开存，不覆盖画面提示词
+        ...(wantImage ? { sourcePhotoMotionPrompt: motionText } : {}),
         model: p.model,
         resolution: p.resolution,
         preset: p.preset,
@@ -862,10 +905,6 @@ export function CreateWizard({ onChanged }) {
           <span className="text-[11px] text-accent">
             🖼 已从照片库带入这张图（${seedNotice}）——先在第③步确认，再继续下一步
           </span>
-          ${seedPrompt && html`
-            <button onClick=${() => { setPrompt(seedPrompt); setSeedPrompt(''); }}
-              className="text-[11px] text-accent underline underline-offset-2">用图片原提示词填入</button>
-          `}
         </div>
       `}
 

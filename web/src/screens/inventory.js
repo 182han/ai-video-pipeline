@@ -239,10 +239,12 @@ export function PhotosView() {
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState(null);
   const [editPrompt, setEditPrompt] = useState('');
+  const [editVideoPrompt, setEditVideoPrompt] = useState('');
 
   function openDetail(p) {
     setDetail(p);
-    setEditPrompt(p.prompt || '');
+    setEditPrompt(p.imagePrompt || p.prompt || '');
+    setEditVideoPrompt(p.videoPrompt || '');
   }
 
   const qs = new URLSearchParams();
@@ -280,18 +282,20 @@ export function PhotosView() {
     } catch (e) { setErr('删除失败：' + e.message); }
   }
 
-  // 手动修改/补录提示词：历史图（生成时没记录）也能补一条，之后带入创作会自动回填
+  // 画面提示词 / 视频提示词分开保存：互不覆盖
   async function savePrompt(id) {
     setErr('');
     try {
       const r = await fetch('/api/photos/' + encodeURIComponent(id), {
         method: 'PUT', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editPrompt })
+        body: JSON.stringify({ imagePrompt: editPrompt, videoPrompt: editVideoPrompt })
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
       setDetail(j.photo);
+      setEditPrompt(j.photo.imagePrompt || '');
+      setEditVideoPrompt(j.photo.videoPrompt || '');
       reload();
     } catch (e) { setErr('保存提示词失败：' + e.message); }
   }
@@ -316,7 +320,7 @@ export function PhotosView() {
     } catch (e) { setErr('带入创作失败：' + e.message); }
   }
 
-  const promptText = (p) => (p.prompt || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
+  const promptText = (p) => ((p.imagePrompt || p.prompt) || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
 
   return html`
     <div className="px-6 py-5">
@@ -396,16 +400,25 @@ export function PhotosView() {
             </div>
             <img src=${detail.url} alt="生成的图片" style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px' }} />
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
-              <span style=${{ color: 'var(--ink3)' }}>提示词</span>
+              <span style=${{ color: 'var(--ink3)' }}>画面提示词</span>
               <div>
                 <textarea value=${editPrompt} onInput=${(e) => setEditPrompt(e.target.value)}
-                  rows="3" placeholder="这张图的提示词（历史图可以手动补录）"
+                  rows="3" placeholder="画面内容（历史图可以手动补录）"
+                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
+                <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
+                  出图时原值：${detail.generationPrompt || '未记录'}
+                </span>
+              </div>
+              <span style=${{ color: 'var(--ink3)' }}>视频提示词</span>
+              <div>
+                <textarea value=${editVideoPrompt} onInput=${(e) => setEditVideoPrompt(e.target.value)}
+                  rows="2" placeholder="最近一次用它生成视频的运动描述（可空）"
                   style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                   <button onClick=${() => savePrompt(detail.id)}
                     style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>保存提示词</button>
                   <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
-                    出图时原提示词：${detail.generationPrompt || '未记录'}${detail.promptUpdatedAt ? ' · 已更新 ' + String(detail.promptUpdatedAt).slice(0, 19).replace('T', ' ') : ''}
+                    ${detail.videoPromptUpdatedAt ? '最近视频提示词更新于 ' + String(detail.videoPromptUpdatedAt).slice(0, 19).replace('T', ' ') : '还没有用它生成过视频'}
                   </span>
                 </div>
               </div>

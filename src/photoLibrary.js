@@ -60,6 +60,21 @@ function entryPath(id) {
   return path.join(PHOTO_DIR, safeId(id) + '.json');
 }
 
+function normalizeEntry(e) {
+  if (!e || typeof e !== 'object') return e;
+  if (typeof e.imagePrompt !== 'string') {
+    e.imagePrompt = (typeof e.generationPrompt === 'string' && e.generationPrompt)
+      || (typeof e.prompt === 'string' ? e.prompt : '');
+  }
+  if (typeof e.videoPrompt !== 'string') {
+    // 旧记录里 prompt 若被视频提示词覆盖过（promptSource=video-task），把它还原成 videoPrompt
+    e.videoPrompt = (e.promptSource === 'video-task' && typeof e.prompt === 'string' && e.prompt !== e.imagePrompt)
+      ? e.prompt : '';
+  }
+  if (typeof e.prompt !== 'string' || !e.prompt) e.prompt = e.imagePrompt;
+  return e;
+}
+
 function loadAll(force = false) {
   const sig = dirSignature();
   if (cache && !force && sig === cacheSignature) return cache;
@@ -74,7 +89,7 @@ function loadAll(force = false) {
   for (const n of names) {
     try {
       const entry = JSON.parse(fs.readFileSync(path.join(PHOTO_DIR, n), 'utf8'));
-      if (entry && entry.id) map.set(entry.id, entry);
+      if (entry && entry.id) map.set(entry.id, normalizeEntry(entry));
     } catch (e) {
       console.warn(`[photoLibrary] 读取失败 ${n}: ${e.message}`);
     }
@@ -131,6 +146,8 @@ function ingest(data = {}) {
     }
     filled.sizeBytes = st.size;
     if (!filled.generationPrompt) filled.generationPrompt = filled.prompt || '';
+    if (!filled.imagePrompt) filled.imagePrompt = filled.generationPrompt || filled.prompt || '';
+    if (typeof filled.videoPrompt !== 'string') filled.videoPrompt = '';
     return saveEntry(filled);
   }
 
@@ -145,6 +162,10 @@ function ingest(data = {}) {
     prompt: typeof data.prompt === 'string' ? data.prompt.trim() : '',
     // 出图时的原始提示词（之后用这张图生成视频时，prompt 可能被视频提示词覆盖，原值留在这里）
     generationPrompt: typeof data.prompt === 'string' ? data.prompt.trim() : '',
+    // 2026-11-11 用户口径：画面提示词与视频提示词分开存，互不覆盖
+    imagePrompt: typeof data.prompt === 'string' ? data.prompt.trim() : '',
+    videoPrompt: '',
+    imagePromptUpdatedAt: null,
     negativePrompt: typeof data.negativePrompt === 'string' ? data.negativePrompt.trim() : '',
     provider: data.provider || null,
     model: data.model || null,

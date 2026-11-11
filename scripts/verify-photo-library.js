@@ -55,6 +55,7 @@ const rec = photoLibrary.ingest({
 check(!!rec && rec.id === 'task_demo1_img_0', '入库生成 id <taskId>_img_<index>', rec && rec.id);
 check(rec.prompt === PROMPT, '提示词原样保留（不截断、不改写）');
 check(rec.promptAvailable === true, 'promptAvailable 标记为 true');
+check(rec.imagePrompt === PROMPT && rec.videoPrompt === '', '入库时画面提示词=出图提示词、视频提示词为空');
 check(rec.status === 'pending', '新图默认 pending（待审）');
 check(rec.sizeBytes > 8 && rec.width === 1696 && rec.height === 960, '文件大小与宽高已记录');
 check(photoLibrary.listAll().some((x) => x.id === rec.id), 'listAll 能读到刚入库的图');
@@ -86,11 +87,14 @@ photoLibrary.ingest({ id: missing[0].id, taskId: 'task_demo2', index: 0, filePat
 check(photoLibrary.get('task_demo2_img_0').promptAvailable === false, '回填图无提示词时 promptAvailable=false（不伪造）');
 check(photoLibrary.listUnregisteredImages().length === 0, '登记后再扫描为空');
 
-// ---- 6. 提示词可编辑/覆盖，但保留出图原值 ----
-photoLibrary.update(rec.id, { prompt: '改后的视频提示词', promptAvailable: true, promptSource: 'video-task' });
-check(photoLibrary.get(rec.id).prompt === '改后的视频提示词', '提示词可手动编辑/被视频提示词覆盖');
-check(photoLibrary.get(rec.id).generationPrompt === PROMPT, '出图原提示词保留在 generationPrompt（可追溯）');
-check(photoLibrary.query({ q: '改后的视频提示词' }).length === 1, '搜索能命中改后的提示词');
+// ---- 6. 画面提示词 / 视频提示词分开存 ----
+photoLibrary.update(rec.id, { imagePrompt: '手动补录的画面提示词', prompt: '手动补录的画面提示词' });
+check(photoLibrary.get(rec.id).imagePrompt === '手动补录的画面提示词', '画面提示词可手动补录/编辑');
+check(photoLibrary.get(rec.id).generationPrompt === PROMPT, '出图原值保留在 generationPrompt');
+photoLibrary.update(rec.id, { videoPrompt: '镜头缓慢推进，蒸汽上升' });
+check(photoLibrary.get(rec.id).videoPrompt === '镜头缓慢推进，蒸汽上升', '视频提示词单独保存');
+check(photoLibrary.get(rec.id).imagePrompt === '手动补录的画面提示词', '视频提示词不覆盖画面提示词');
+check(photoLibrary.query({ q: '手动补录的画面提示词' }).length === 1, '搜索能命中画面提示词');
 
 // ---- 7. 删除（记录 + 源文件） ----
 const r = photoLibrary.remove(rec.id);
@@ -118,8 +122,9 @@ check(serverSrc.includes("app.delete('/api/photos/:id'"), 'server.js 注册 DELE
 check(serverSrc.includes('photoLibrary.ingest({'), '出图接口成功后自动入库');
 check(serverSrc.includes('i2vModels: listI2VModels()'), '/api/image-gen/status 暴露 i2vModels');
 check(serverSrc.includes('sourcePhotoId'), '/api/tasks 接受 sourcePhotoId');
-check(serverSrc.includes('需要提供 status 或 prompt'), 'PUT /api/photos 支持只改提示词');
-check(serverSrc.includes("promptSource: 'video-task'"), '提交图生视频时用视频提示词覆盖图片提示词');
+check(serverSrc.includes('需要提供 status / imagePrompt / videoPrompt'), 'PUT /api/photos 支持画面/视频提示词分开改');
+check(serverSrc.includes('sourcePhotoMotionPrompt'), '提交图生视频时单独上报运动提示词');
+check(serverSrc.includes('videoPrompt: motion'), '视频提示词写入 videoPrompt，不覆盖画面提示词');
 check(pipelineSrc.includes('_i2vPayload(task)'), 'pipeline 有图生视频取图逻辑');
 check(pipelineSrc.includes('image: i2vImage'), 'pipeline 把源图传给视频适配器');
 check(createSrc.includes('sourcePhotoId: imgResult.photoId'), '创作向导提交 sourcePhotoId');
