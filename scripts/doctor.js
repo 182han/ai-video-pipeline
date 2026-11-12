@@ -119,6 +119,28 @@ if (cfg) {
   probeBin(cfg.FFPROBE_PATH, 'ffprobe');
 }
 
+// ---------- 5.1 ffmpeg 能不能往「系统临时目录」写文件 ----------
+// 为什么单独查：本机沙箱下 Node/PowerShell 能写 %TEMP%，但 **ffmpeg 子进程写会 EACCES**，
+// 而 scripts/ 里有 36 处用 os.tmpdir()，凡让 ffmpeg 往临时目录写媒体的套件都会假红。
+// 这不是代码 bug，是环境限制；对策：把 TEMP/TMP 指到工作区（scripts/run-verify.ps1 已这么做）。
+if (cfg && cfg.FFMPEG_PATH) {
+  const os = require('os');
+  const probeOut = path.join(os.tmpdir(), `doctor_tmp_${process.pid}.mp4`);
+  try {
+    execFileSync(cfg.FFMPEG_PATH, ['-y', '-hide_banner', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'color=c=black:s=64x36:r=10:d=0.2',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', probeOut], { stdio: 'ignore', timeout: 20000 });
+    const okSize = fs.existsSync(probeOut) && fs.statSync(probeOut).size > 0;
+    try { fs.unlinkSync(probeOut); } catch (e) {}
+    if (okSize) rec('OK', 'ffmpeg 写临时目录', os.tmpdir());
+    else rec('WARN', 'ffmpeg 写临时目录', '命令成功但没产出文件', '测试里的抽帧/合成可能失败');
+  } catch (e) {
+    try { fs.unlinkSync(probeOut); } catch (e2) {}
+    rec('WARN', 'ffmpeg 不能写系统临时目录', String(os.tmpdir()),
+      '本机的 36 处 os.tmpdir() 套件会假红。对策：把 TEMP/TMP 指到工作区，或直接 `pwsh -File scripts/run-verify.ps1`');
+  }
+}
+
 // ---------- 6. .env 与代码/env 模板的差异 ----------
 const envPath = path.join(ROOT, '.env');
 const examplePath = path.join(ROOT, '.env.example');
