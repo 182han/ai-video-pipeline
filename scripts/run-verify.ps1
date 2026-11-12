@@ -30,6 +30,13 @@ $env:TEMP = $tmpRoot
 $env:TMP  = $tmpRoot
 Write-Host "临时目录已重定向: $tmpRoot" -ForegroundColor Cyan
 
+# 1.1) 日志目录同样重定向：测试起的临时服务不要往真实的 data/logs 里写
+#      （否则真实运行日志里会混入 AUTH_ENABLED=false、localhost:3198 这类测试噪声）
+$logDir = Join-Path $root 'data\tmp\logs'
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$env:LOG_DIR = $logDir
+Write-Host "测试日志目录: $logDir" -ForegroundColor Cyan
+
 # 2) 收集套件
 $all = Get-ChildItem (Join-Path $root 'scripts') -Filter 'verify-*.js' |
   Where-Object { $_.Name -ne 'verify-all.js' } |

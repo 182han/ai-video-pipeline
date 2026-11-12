@@ -12,7 +12,13 @@ const path = require('path');
 // 为什么加：服务跑在用户自己的终端里，输出只在该窗口滚动，出问题时无法事后追溯，
 // 也无法把日志交给排查方（实测：2026-10-20 片段文件丢失，日志已随窗口滚走）。
 // 现在同时写 data/logs/server-YYYY-MM-DD.log，终端行为完全不变。
-const LOG_DIR = path.join(__dirname, 'data', 'logs');
+// 2026-11-12：允许用 LOG_DIR 环境变量覆盖日志目录。
+// 为什么：验收脚本会自起临时服务，它们也往 data/logs 写，真实运行日志里会混进
+// "AUTH_ENABLED=false"、"服务已启动: http://localhost:3198" 这类测试噪声（排查时误导过我一次）。
+// 默认行为完全不变：不设 LOG_DIR 时仍然是 data/logs。
+const LOG_DIR = process.env.LOG_DIR
+  ? path.resolve(process.env.LOG_DIR)
+  : path.join(__dirname, 'data', 'logs');
 const LOG_FILE = path.join(LOG_DIR, `server-${new Date().toISOString().slice(0, 10)}.log`);
 try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch (e) {}
 
@@ -44,6 +50,7 @@ const { getAvailableModels } = require('./src/generators');
 // 必须在任何 getImageGenStatus()/generateImage 之前执行一次。
 require('./src/generators/imageProviders');
 const { getImageGenStatus, listImageProviders, ImageGenerator } = require('./src/generators/imageGen');
+const { generateBatch: generateImageBatch } = require('./src/processors/imageBatch');
 const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
@@ -693,6 +700,82 @@ app.post('/api/images/generate', async (req, res) => {
     const isValidation = /提示词|尺寸|n=1|taskId|index|为空/i.test(msg);
     console.error('[image-gen] 生成失败:', msg);
     res.status(isValidation ? 400 : 502).json({ error: '图片生成失败: ' + msg });
+  }
+});
+
+// ==========================================
+// 批量出图 + 逐图自适应调色 + 自动通过（2026-11-12 用户口径）
+// ------------------------------------------------------------
+// 输入 N 条图片提示词；逐条生成 → 逐图调色 → 写图片库（status=approved，跳过人工审核）。
+// 返回的 photoId 可直接按顺序传给 POST /api/tasks 的 photoIds，走逐片段图生视频。
+//
+// 注意：这是真实计费接口（每张图一次调用）。调用方必须先确认数量与预算。
+// ==========================================
+app.post('/api/images/generate-batch', async (req, res) => {
+  const body = req.body || {};
+  const prompts = Array.isArray(body.prompts)
+    ? body.prompts.map(p => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
+    : [];
+  if (prompts.length === 0) return res.status(400).json({ error: 'prompts 不能为空' });
+  if (prompts.length > 200) return res.status(400).json({ error: '单次最多 200 条（当前 ' + prompts.length + '）' });
+
+  const runtime = {};
+  if (typeof body.apiKey === 'string' && body.apiKey.trim()) runtime.IMAGE_GEN_API_KEY = body.apiKey.trim();
+  if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) runtime.IMAGE_GEN_BASE_URL = body.baseUrl.trim();
+  if (typeof body.model === 'string' && body.model.trim()) runtime.IMAGE_GEN_MODEL = body.model.trim();
+  if (typeof body.size === 'string' && body.size.trim()) runtime.IMAGE_GEN_SIZE = body.size.trim();
+  if (typeof body.provider === 'string' && body.provider.trim()) runtime.IMAGE_GEN_PROVIDER = body.provider.trim();
+
+  const status = getImageGenStatus(runtime);
+  if (!status.usable) {
+    return res.status(503).json({
+      error: '图片生成尚未就绪',
+      missing: status.missing,
+      hint: status.imageGen.hasApiKey
+        ? `缺少: ${status.missing.join(', ') || '所选厂商的适配器未注册'}`
+        : '在「设置 → 图片生成」填 API Key'
+    });
+  }
+
+  const palette = ['cold', 'warm', 'night', 'calm'].includes(body.palette) ? body.palette : 'calm';
+  const taskId = String(body.taskId || ('imgbatch_' + Date.now().toString(36)));
+  const outDir = config.STORAGE.clipsDir;
+  const generator = new ImageGenerator({
+    provider: status.imageGen.provider,
+    model: status.imageGen.model,
+    ...runtime
+  });
+
+  try {
+    const batch = await generateImageBatch({
+      prompts,
+      taskId,
+      palette,
+      outDir,
+      size: body.size || status.imageGen.size,
+      negativePrompt: typeof body.negativePrompt === 'string' ? body.negativePrompt : '',
+      generateImage: (prompt, meta) => generator.generateImage(prompt, {
+        taskId,
+        index: meta.index,
+        size: body.size || status.imageGen.size,
+        negativePrompt: body.negativePrompt,
+        promptExtend: body.promptExtend,
+        watermark: body.watermark,
+        outDir
+      })
+    });
+    return res.json({
+      ok: batch.items.length > 0,
+      taskId: batch.taskId,
+      palette: batch.palette,
+      count: batch.count,
+      succeeded: batch.items.length,
+      failed: batch.errors.length,
+      items: batch.items,
+      errors: batch.errors
+    });
+  } catch (e) {
+    return res.status(502).json({ error: '批量出图失败: ' + (e && e.message ? e.message : e) });
   }
 });
 
@@ -1785,7 +1868,7 @@ app.post('/api/assistant/batch', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, preset, stages, transition, colorMatch, adjust, sourcePhotoId, sourcePhotoMotionPrompt } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, autoRetry, preset, stages, transition, colorMatch, adjust, sourcePhotoId, photoIds, sourcePhotoMotionPrompt } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -1859,6 +1942,31 @@ app.post('/api/tasks', (req, res) => {
     });
   }
 
+  // 图片优先链路（2026-11-12）：按顺序给每个片段一张已通过的图。
+  // 与 sourcePhotoId 的区别：sourcePhotoId = 全任务同一张首帧；photoIds = 每片段各自首帧。
+  let photoIdList = null;
+  if (Array.isArray(photoIds) && photoIds.length > 0) {
+    if (!getI2VInfo(modelId)) {
+      return res.status(400).json({
+        error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
+      });
+    }
+    if (photoIds.length !== count) {
+      return res.status(400).json({
+        error: `photoIds 数量（${photoIds.length}）必须与片段数（${count}）一致`
+      });
+    }
+    photoIdList = [];
+    for (let i = 0; i < photoIds.length; i++) {
+      const p = photoLibrary.get(String(photoIds[i]));
+      if (!p) return res.status(400).json({ error: `第 ${i + 1} 个片段的图片不存在: ${photoIds[i]}` });
+      if (p.status !== 'approved') {
+        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过审核（批量链路请用 status=approved 的图）` });
+      }
+      photoIdList.push(p.id);
+    }
+  }
+
   // 校验单段时长
   const duration = clipDuration || config.GENERATION.defaultClipDuration || 15;
   if (duration < 1 || duration > 60) {
@@ -1883,6 +1991,8 @@ app.post('/api/tasks', (req, res) => {
 
   const task = taskManager.createTask(firstPrompt.trim(), {
     model: modelId,
+    // 自动重试：缺省 true（API/旧前端兼容）；新版创作页传 false → 只试一次，失败交用户决定
+    autoRetry: autoRetry !== false,
     theme: theme ?? null,
     // 图生视频：存图片库条目 id；流水线运行时会重新校验文件与审核状态
     sourcePhotoId: sourcePhoto ? sourcePhoto.id : undefined,
@@ -1927,6 +2037,13 @@ app.post('/api/tasks', (req, res) => {
       strictQcItems: Array.isArray(strictQcItems) && strictQcItems.length ? strictQcItems : null
     }
   });
+
+  // 图片优先：把每张已通过的图按顺序挂到对应片段，流水线逐片段取首帧。
+  if (photoIdList) {
+    for (let i = 0; i < photoIdList.length; i++) {
+      taskManager.updateClip(task.taskId, i, { photoId: photoIdList[i] });
+    }
+  }
 
   // 启动流水线
   pipeline.startTask(task.taskId);
