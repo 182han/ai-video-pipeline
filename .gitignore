@@ -78,3 +78,7 @@ data/adjust/
 
 # 图片库元数据（每张生成图一个 json，运行时产物）
 data/photos/
+
+# 验收/测试临时目录（scripts/run-verify.ps1 把 TEMP/LOG_DIR 指到这里；
+# 本机沙箱下 ffmpeg 写不了系统 %TEMP%，测试必须落在工作区内。2026-11-12）
+data/tmp/
