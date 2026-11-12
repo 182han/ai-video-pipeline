@@ -134,7 +134,12 @@ function _probeDurationFallback(ffprobe, mediaPath) {
   const outDir = path.join(__dirname, '..', '..', 'output');
   const tmp = path.join(outDir, `_probe_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
   try {
-    const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+    // 2026-11-12 加固：同文件其它两处的 q()，拒绝命令行危险字符。
+    const q = (s) => {
+      const v = String(s);
+      if (/["%&|<>^\r\n]/.test(v)) throw new Error('拒绝执行：路径含命令行危险字符');
+      return '"' + v + '"';
+    };
     execSync(`${q(ffprobe)} -v error -show_entries format=duration -of csv=p=0 ${q(mediaPath)} > ${q(tmp)} 2>&1`, { stdio: 'ignore' });
   } catch (e) {
     // ffprobe 无输出参数时可能非 0 退出，产物仍可能已写入，继续读
@@ -162,7 +167,12 @@ function _runProbe(bin, args) {
   return new Promise((resolve) => {
     const fallback = () => {
       try {
-        const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+        // 2026-11-12 加固：同文件其它两处的 q()，拒绝命令行危险字符。
+        const q = (s) => {
+          const v = String(s);
+          if (/["%&|<>^\r\n]/.test(v)) throw new Error('拒绝执行：路径含命令行危险字符');
+          return '"' + v + '"';
+        };
         const outDir = path.join(__dirname, '..', '..', 'output');
         const tmp = path.join(outDir, `_probe_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
         const cmd = [q(bin)].concat(args.map(q)).join(' ') + ` > ${q(tmp)} 2>&1`;
@@ -344,7 +354,12 @@ function runFfmpeg(args, totalDuration, onProgress) {
     // 代价是拿不到进度回调，但混音本身能完成。
     const fallback = () => {
       try {
-        const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+        // 2026-11-12 加固：同文件其它两处的 q()，拒绝命令行危险字符。
+        const q = (s) => {
+          const v = String(s);
+          if (/["%&|<>^\r\n]/.test(v)) throw new Error('拒绝执行：路径含命令行危险字符');
+          return '"' + v + '"';
+        };
         execSync([q(ffmpeg)].concat(args.map(q)).join(' '), { stdio: 'ignore' });
         resolve({ ok: true, fallback: true });
       } catch (e) {

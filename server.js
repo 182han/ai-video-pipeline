@@ -56,11 +56,26 @@ const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
 const library = require('./src/library');
 const photoLibrary = require('./src/photoLibrary');
+const security = require('./src/utils/security');
 const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = config.SERVER.port || 3000;
+
+// ===== 安全响应头（零依赖，2026-11-12 外发部署前加固）=====
+// 不引入 helmet（依赖极简是刻意设计）。只加「不会破坏现有页面」的几项：
+//   nosniff   → 防止浏览器把上传的 .mp3 当脚本执行
+//   SAMEORIGIN→ 防止被别的站点 iframe 套壳点击
+//   no-referrer→ 跨站跳转时不泄漏内部路径
+// 刻意不加 CSP：web/ 里有内联样式与 UMD vendor，CSP 需要逐个放行，贸然加会把界面打坏。
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
 // 版本探针：记录本进程启动时 server.js 的 mtime 与启动时间。
 // 前端静态文件是「每次请求读磁盘」，后端模块是「启动时加载」——
@@ -84,7 +99,7 @@ wsManager.init(server, auth.isEnabled() ? { authorize: (req) => auth.authorizeRe
 //                         公网部署时必须连同这三处一起拦，否则成片可被直接下载）
 //
 // 放行清单：登录页本身、登录/登出接口、/api/status（Docker HEALTHCHECK 用它）。
-const AUTH_PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/status']);
+const AUTH_PUBLIC_API = new Set(['/api/auth/login', '/api/auth/logout', '/api/status', '/healthz']);
 
 app.use((req, res, next) => {
   if (!auth.isEnabled()) return next();
@@ -300,6 +315,22 @@ app.get(/^\/app(\/.*)?$/, (req, res, next) => {
   res.sendFile(path.join(__dirname, 'web', 'index.html'));
 });
 
+// ===== 媒体目录跟随登录墙（2026-11-12 外发部署前加固）=====
+//
+// 历史行为：/output、/clips、/bgm 三个目录刻意不拦（见 docs/spec/changelog.md「登录墙」），
+// 理由是本机演示够用。但对外部署时这等于「知道 URL 就能下载成片/素材」，所以改成跟随登录墙：
+//   AUTH_ENABLED=true（默认） → 三个目录都要求有效会话
+//   AUTH_ENABLED=false        → 与验收脚本行为一致，放行（只用于跑测试）
+//
+// 注意：<video>/<audio> 标签是同源请求，会自带 cookie，所以登录后播放/试听不受影响。
+app.use((req, res, next) => {
+  if (!auth.isEnabled()) return next();
+  if (!security.isMediaRequestPath(req.path)) return next();
+  if (auth.authorizeRequest(req)) return next();
+  console.log(`[auth] 拦截未登录的媒体请求: ${req.method} ${req.path}`);
+  return res.status(401).json({ error: '未登录', code: 'AUTH_REQUIRED' });
+});
+
 // 输出文件静态访问（用于视频播放和下载）
 app.use('/output', express.static(config.STORAGE.outputDir, {
   setHeaders: (res, filePath) => {
@@ -415,10 +446,13 @@ app.delete('/api/bgm/:id', (req, res) => {
 // 注意：已不再按主题选曲，track 传 'auto' 表示在轻音乐池随机取一首。
 app.post('/api/bgm/mix', async (req, res) => {
   const { videoPath, track, loudness, fadeSeconds } = req.body || {};
-  if (!videoPath || !videoPath.startsWith('output')) {
-    return res.status(400).json({ error: 'videoPath 必须以 output 开头（防止路径穿越）' });
+  // 2026-11-12 加固：原先用 `startsWith('output')` 防穿越，但 `output/../../server.js`
+  // 同样满足该判断（弱校验）。改为「解析后必须仍在 output/ 内」，且拒绝会被 cmd.exe
+  // 解释的字符（引号/百分号等），因为路径最终会拼进 ffmpeg 命令行。
+  const inputVideo = security.resolveUnderOutput(__dirname, videoPath);
+  if (!inputVideo) {
+    return res.status(400).json({ error: 'videoPath 必须是 output 目录内的合法路径（防路径穿越）' });
   }
-  const inputVideo = path.join(__dirname, videoPath);
   if (!fs.existsSync(inputVideo)) {
     return res.status(400).json({ error: '视频文件不存在: ' + videoPath });
   }
@@ -1140,6 +1174,10 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// 最小健康检查（Docker HEALTHCHECK 用）：只回 ok，不暴露 pid/路径/配置。
+// 对外部署时把它给反代探活，比让 /api/status 公开更合适。
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
 // 获取主题列表
 app.get('/api/themes', (req, res) => {
   res.json(promptOptimizer.getThemes());
@@ -1656,6 +1694,93 @@ app.post('/api/assistant/chat', async (req, res) => {
   }
 
   return res.status(200).json(buildAssistantReply(raw));
+});
+
+// ==========================================
+// 提示词助手：批量生成（数量由用户指定）
+// 与单条 /api/assistant/chat 分开：
+//   单条 = 一次一条、边聊边改；批量 = 一次 N 条、不同地貌、直接填进创作页。
+// 输出是一个纯文本块（每行一条），创作页会把多行解析成多个场景。
+// ==========================================
+const BATCH_LANDFORMS = ['雪山冰川', '沙漠沙丘', '海岸礁岩', '云雾山谷', '森林', '湖泊', '瀑布', '极光'];
+
+function parseBatchJson(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const a = s.indexOf('[');
+  const b = s.lastIndexOf(']');
+  if (a < 0 || b <= a) return null;
+  try {
+    const arr = JSON.parse(s.slice(a, b + 1));
+    return Array.isArray(arr) ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
+function batchSystemPrompt(n, seconds) {
+  return `你是「风光长视频分镜师」。用户要 ${n} 条互不重复的镜头提示词，每条 ${seconds} 秒。
+必须遵守：
+1. 输出恰好 ${n} 条，不要多也不要少；不要问问题、不要解释、不要 markdown 代码块。
+2. 地貌按顺序轮转：${BATCH_LANDFORMS.join('、')}；每条一个独立镜头，相邻不重复。
+3. 同一批固定一个色板（极冷极淡 / 暖浓 / 暗底暖星云，按地貌选最贴的一套）和一个焦段族；同一批内不许换。
+4. 画面里绝不能出现：人物、动物、室内、生活物件、文字/招牌/水印、城市/街道/建筑、抽象图形、科幻特效、微距特写。
+5. 每条按七段写：主体（地貌专名）+ 运动 + 运镜 + 光线 + 氛围 + 质感 + 结尾留白；只允许一条运动主轴；结尾锁死画面（不引入新元素）。
+6. 只输出 JSON 数组，元素格式：{"index":1,"landform":"雪山冰川","palette":"极冷极淡","prompt":"完整中文提示词"}。数组以外不要输出任何字符。`;
+}
+
+app.post('/api/assistant/batch', async (req, res) => {
+  const body = req.body || {};
+  const count = Math.max(1, Math.min(200, parseInt(body.count, 10) || 20));
+  const seconds = Math.max(3, Math.min(30, parseInt(body.seconds, 10) || 10));
+  const theme = String(body.theme || '自然风光').slice(0, 200);
+  const llmCfg = { apiKey: body.llmApiKey, baseUrl: body.llmBaseUrl, model: body.llmModel };
+
+  if (!llmCfg.apiKey && !config.OPENAI_API_KEY) {
+    return res.status(200).json({ ok: false, error: 'NO_LLM_KEY' });
+  }
+
+  // 每批最多 20 条：一条提示词约 60–100 字，20 条约 2k 字，避免输出被截断。
+  const BATCH = 20;
+  const items = [];
+  const warnings = [];
+  for (let start = 0; start < count; start += BATCH) {
+    const need = Math.min(BATCH, count - start);
+    const sys = batchSystemPrompt(need, seconds);
+    const user = `主题：${theme}。本批第 ${start + 1}–${start + need} 条，共 ${need} 条；每条 ${seconds} 秒。地貌从「${BATCH_LANDFORMS[start % BATCH_LANDFORMS.length]}」开始轮转。`;
+    let arr = null;
+    for (let attempt = 0; attempt < 2 && !arr; attempt++) {
+      const { text, failure } = await llmService.chatMulti(sys, [{ role: 'user', content: user }], llmCfg);
+      if (!text) return res.status(200).json(llmFailurePayload(failure));
+      arr = parseBatchJson(text);
+      if (!arr) warnings.push(`第 ${start + 1} 批返回不是 JSON，已重试`);
+    }
+    if (!arr) {
+      return res.status(200).json({ ok: false, error: 'BAD_LLM_JSON', message: warnings.join('；') || '模型没有返回 JSON 数组' });
+    }
+    const clean = arr
+      .filter(x => x && typeof x.prompt === 'string' && x.prompt.trim())
+      .slice(0, need);
+    for (let i = 0; i < clean.length; i++) {
+      items.push({
+        index: start + i + 1,
+        landform: String(clean[i].landform || BATCH_LANDFORMS[(start + i) % BATCH_LANDFORMS.length]),
+        palette: String(clean[i].palette || ''),
+        // 一行一条：把模型可能带回来的换行压平，否则创作页会多算场景。
+        prompt: String(clean[i].prompt).replace(/\s*\r?\n+\s*/g, ' ').trim()
+      });
+    }
+    if (clean.length < need) warnings.push(`第 ${start + 1} 批少 ${need - clean.length} 条`);
+  }
+
+  return res.status(200).json({
+    ok: true,
+    items,
+    text: items.map(x => x.prompt).join('\n'),
+    meta: { count, seconds, theme, landforms: BATCH_LANDFORMS, warnings }
+  });
 });
 
 // 创建任务

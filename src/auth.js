@@ -100,13 +100,24 @@ function tokenFromRequest(req) {
   return parseCookies(req.headers.cookie)[COOKIE_NAME] || null;
 }
 
+// 2026-11-12 加固：HTTPS 部署时给会话 cookie 补 Secure，防止明文链路被嗅探。
+// 判定顺序：COOKIE_SECURE=true 强制；否则看反代是否透传 X-Forwarded-Proto=https。
+// 默认不加 —— 本机 http://localhost 加了 Secure 会导致浏览器直接不保存 cookie（登录失效）。
+function _secureSuffix(res) {
+  const forced = String(process.env.COOKIE_SECURE || '').toLowerCase();
+  if (forced === '1' || forced === 'true') return '; Secure';
+  const proto = res && res.req && res.req.headers && res.req.headers['x-forwarded-proto'];
+  if (typeof proto === 'string' && proto.split(',')[0].trim().toLowerCase() === 'https') return '; Secure';
+  return '';
+}
+
 function setSessionCookie(res, token) {
   // 刻意不写 Max-Age / Expires：这是会话 cookie，关浏览器即失效。
-  res.append('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax`);
+  res.append('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${_secureSuffix(res)}`);
 }
 
 function clearSessionCookie(res) {
-  res.append('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.append('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${_secureSuffix(res)}`);
 }
 
 // ===== 会话 =====
@@ -174,6 +185,18 @@ function authorizeRequest(req) {
 // ===== 失败锁定 =====
 
 function getClientIp(req) {
+  // 2026-11-12 加固：前面挂 nginx/云反代时，remoteAddress 恒为 127.0.0.1，
+  // 会让「连续失败锁 IP」退化成「锁所有人」，也让登录日志失去意义。
+  // 但默认仍然不信任 X-Forwarded-For（客户端可伪造），必须显式显开 TRUST_PROXY=1。
+  const trustProxy = String(process.env.TRUST_PROXY || '').toLowerCase();
+  const trust = trustProxy === '1' || trustProxy === 'true' || trustProxy === 'yes';
+  if (trust) {
+    const xff = req && req.headers && req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.trim()) {
+      const first = xff.split(',')[0].trim();
+      if (first) return first.replace(/^::ffff:/, '');
+    }
+  }
   const addr = (req && req.socket && req.socket.remoteAddress) || 'unknown';
   // ::ffff:127.0.0.1 与 127.0.0.1 视为同一个来源
   return addr.replace(/^::ffff:/, '');

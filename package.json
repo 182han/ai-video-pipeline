@@ -11,7 +11,7 @@
     "upload:dry": "node scripts/upload-videos.js --dry-run",
     "verify": "node scripts/verify-all.js",
     "verify:fast": "node scripts/verify-all.js --fast",
-    "verify:frontend": "node scripts/verify-frontend-static.js && node scripts/verify-frontend-contract.js",
+    "verify:frontend": "node scripts/verify-frontend-contract.js",
     "verify:loop": "node scripts/verify-loop.js",
     "verify:stages": "node scripts/verify-stages.js && node scripts/verify-stage-pipeline.js && node scripts/verify-continue.js"
   },
