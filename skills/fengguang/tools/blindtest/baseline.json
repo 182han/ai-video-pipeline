@@ -1,0 +1,12 @@
+{
+  "version": "2026-10-27",
+  "skillVersion": "0.2.6",
+  "withSkill": {
+    "total": 27
+  },
+  "noSkill": {
+    "total": 6
+  },
+  "gap": 21,
+  "tolerance": 1
+}

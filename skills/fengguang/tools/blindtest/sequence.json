@@ -1,0 +1,10 @@
+{
+  "brief": "冰岛，5 个连续镜头，做 30 秒屏保片段：海岸、瀑布、冰川、黑沙滩、极光",
+  "segments": 5,
+  "theme": "iceland",
+  "rules": {
+    "distinctMove": 4,
+    "distinctLight": 3,
+    "paletteConsistent": true
+  }
+}
