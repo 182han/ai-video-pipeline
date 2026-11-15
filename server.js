@@ -784,17 +784,18 @@ app.post('/api/images/generate-batch', async (req, res) => {
 // 审核三态：pending（待审）/ approved（通过，可拿去图生视频）/ rejected（打回）。
 app.get('/api/photos', (req, res) => {
   const status = String(req.query.status || '').trim();
+  const finalOnly = String(req.query.final || '') === '1';
   if (status && !photoLibrary.STATUSES.includes(status)) {
     return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
   }
-  const photos = photoLibrary.query({ status, q: req.query.q });
-  res.json({ photos, totals: photoLibrary.totals(photoLibrary.listAll()) });
+  const photos = photoLibrary.query({ status, q: req.query.q, finalOnly });
+  res.json({ photos, finalOnly, totals: photoLibrary.totals(photoLibrary.listAll()) });
 });
 
 app.get('/api/photos/:id', (req, res) => {
   const photo = photoLibrary.get(req.params.id);
   if (!photo) return res.status(404).json({ error: '图片不存在' });
-  res.json(photo);
+  res.json({ ...photo, versions: photoLibrary.versions(photo.versionGroupId) });
 });
 
 app.put('/api/photos/:id', (req, res) => {
@@ -803,13 +804,23 @@ app.put('/api/photos/:id', (req, res) => {
   const hasImage = typeof body.imagePrompt === 'string';
   const hasVideo = typeof body.videoPrompt === 'string';
   const hasLegacy = typeof body.prompt === 'string';
-  if (!status && !hasImage && !hasVideo && !hasLegacy) {
-    return res.status(400).json({ error: '需要提供 status / imagePrompt / videoPrompt' });
+  const hasFinal = typeof body.isFinal === 'boolean';
+  const hasScience = ['unchecked', 'passed', 'failed'].includes(body.scienceStatus) || typeof body.scienceNotes === 'string';
+  if (!status && !hasImage && !hasVideo && !hasLegacy && !hasFinal && !hasScience) {
+    return res.status(400).json({ error: '需要提供 status / imagePrompt / videoPrompt / isFinal / scienceStatus' });
   }
   if (status && !photoLibrary.STATUSES.includes(status)) {
     return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
   }
   let photo = null;
+  if (hasFinal && body.isFinal) {
+    const current = photoLibrary.get(req.params.id);
+    if (!current) return res.status(404).json({ error: '图片不存在' });
+    if (current.scienceStatus !== 'passed') {
+      return res.status(400).json({ error: '科学/物理审查未通过，不能设为最终版' });
+    }
+  }
+  if (hasFinal) photo = photoLibrary.setFinal(req.params.id, body.isFinal);
   if (status) photo = photoLibrary.markReviewed(req.params.id, status, body.note);
   const patch = {};
   if (hasImage || hasLegacy) {
@@ -826,9 +837,14 @@ app.put('/api/photos/:id', (req, res) => {
     patch.videoPrompt = String(body.videoPrompt).trim().slice(0, 8000);
     patch.videoPromptUpdatedAt = new Date().toISOString();
   }
+  if (hasScience) {
+    if (['unchecked', 'passed', 'failed'].includes(body.scienceStatus)) patch.scienceStatus = body.scienceStatus;
+    if (typeof body.scienceNotes === 'string') patch.scienceNotes = body.scienceNotes.trim().slice(0, 2000);
+    patch.scienceReviewedAt = new Date().toISOString();
+  }
   if (Object.keys(patch).length) photo = photoLibrary.update(req.params.id, patch);
   if (!photo) return res.status(404).json({ error: '图片不存在' });
-  res.json({ ok: true, photo });
+  res.json({ ok: true, photo, versions: photoLibrary.versions(photo.versionGroupId) });
 });
 
 app.delete('/api/photos/:id', (req, res) => {
@@ -1926,6 +1942,12 @@ app.post('/api/tasks', (req, res) => {
     if (sourcePhoto.status !== 'approved') {
       return res.status(400).json({ error: '图生视频的源图片还没通过审核（请到「照片」页点通过）' });
     }
+    if (sourcePhoto.scienceStatus !== 'passed') {
+      return res.status(400).json({ error: '图生视频的源图片未通过科学/物理审查，不能生成视频' });
+    }
+    if (sourcePhoto.isFinal !== true) {
+      return res.status(400).json({ error: '图生视频只能使用最终确认图；请先设为最终版' });
+    }
     if (!getI2VInfo(modelId)) {
       return res.status(400).json({
         error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
@@ -1962,6 +1984,12 @@ app.post('/api/tasks', (req, res) => {
       if (!p) return res.status(400).json({ error: `第 ${i + 1} 个片段的图片不存在: ${photoIds[i]}` });
       if (p.status !== 'approved') {
         return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过审核（批量链路请用 status=approved 的图）` });
+      }
+      if (p.scienceStatus !== 'passed') {
+        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过科学/物理审查，不能生成视频` });
+      }
+      if (p.isFinal !== true) {
+        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片不是最终确认图，不能生成视频` });
       }
       photoIdList.push(p.id);
     }

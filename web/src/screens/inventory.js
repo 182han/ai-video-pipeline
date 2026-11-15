@@ -63,6 +63,18 @@ export function ClipsView() {
   const [res, setRes] = useState('');
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState(null);
+  const [sourceVersions, setSourceVersions] = useState([]);
+
+  useEffect(() => {
+    const pid = detail && detail.sourcePhotoId;
+    if (!pid) { setSourceVersions([]); return; }
+    let alive = true;
+    fetch('/api/photos/' + encodeURIComponent(pid), { credentials: 'same-origin' })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => { if (alive) setSourceVersions(Array.isArray(j.versions) ? j.versions : []); })
+      .catch(() => { if (alive) setSourceVersions([]); });
+    return () => { alive = false; };
+  }, [detail && detail.id]);
 
   const qs = new URLSearchParams();
   if (fav) qs.set('favorite', '1');
@@ -208,6 +220,20 @@ export function ClipsView() {
               <span style=${{ color: 'var(--ink2)' }}>${qcText(detail.qc)}${detail.qc && detail.qc.reason ? ' · ' + detail.qc.reason : ''}${detail.qc && detail.qc.qcVersion ? ' · v' + detail.qc.qcVersion : ''}</span>
               <span style=${{ color: 'var(--ink3)' }}>来源任务</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.taskId || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>源图</span>
+              <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.sourcePhotoId || '-'}</span>
+              ${sourceVersions.length > 1 && html`
+                <div style=${{ gridColumn: '1 / -1', marginTop: '4px' }}>
+                  <div style=${{ fontSize: '11px', color: 'var(--ink3)', marginBottom: '6px' }}>源图版本链（相邻版本并排）</div>
+                  ${sourceVersions.slice(1).map((v, i) => {
+                    const prev = sourceVersions[i];
+                    return html`
+                      <div key=${v.id} style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                        <div><img src=${prev.url} style=${{ width: '100%', maxHeight: '150px', objectFit: 'contain', background: '#000', borderRadius: '4px' }} /><div style=${{ fontSize: '10px', color: 'var(--ink3)', textAlign: 'center' }}>V${prev.version}</div></div>
+                        <div><img src=${v.url} style=${{ width: '100%', maxHeight: '150px', objectFit: 'contain', background: '#000', borderRadius: '4px' }} /><div style=${{ fontSize: '10px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? ' · 最终' : ''}</div></div>
+                      </div>`;
+                  })}
+                </div>`}
               <span style=${{ color: 'var(--ink3)' }}>文件</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.fileName || '-'}</span>
             </div>
@@ -238,16 +264,30 @@ export function PhotosView() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState(null);
+  const [versions, setVersions] = useState([]);
+  const [zoomImg, setZoomImg] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
   const [editVideoPrompt, setEditVideoPrompt] = useState('');
 
-  function openDetail(p) {
+  async function openDetail(p) {
     setDetail(p);
+    setVersions([]);
     setEditPrompt(p.imagePrompt || p.prompt || '');
     setEditVideoPrompt(p.videoPrompt || '');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(p.id), { credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j && j.id) {
+        setDetail(j);
+        setVersions(Array.isArray(j.versions) ? j.versions : []);
+        setEditPrompt(j.imagePrompt || j.prompt || '');
+        setEditVideoPrompt(j.videoPrompt || '');
+      }
+    } catch (e) { /* 详情失败不回滚列表 */ }
   }
 
   const qs = new URLSearchParams();
+  qs.set('final', '1');
   if (status) qs.set('status', status);
   if (q.trim()) qs.set('q', q.trim());
   const [s, reload] = useJson('/api/photos' + (qs.toString() ? '?' + qs : ''));
@@ -268,6 +308,38 @@ export function PhotosView() {
       setDetail((d) => (d && d.id === id ? j.photo : d));
       reload();
     } catch (e) { setErr('审核失败：' + e.message); }
+  }
+
+  async function makeFinal(id) {
+    setErr('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(id), {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isFinal: true })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setDetail(j.photo);
+      setVersions(Array.isArray(j.versions) ? j.versions : []);
+      reload();
+    } catch (e) { setErr('设为最终版失败：' + e.message); }
+  }
+
+  async function reviewScience(id, next) {
+    setErr('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(id), {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scienceStatus: next })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setDetail(j.photo);
+      setVersions(Array.isArray(j.versions) ? j.versions : []);
+      reload();
+    } catch (e) { setErr('科学审查失败：' + e.message); }
   }
 
   async function remove(id) {
@@ -356,34 +428,76 @@ export function PhotosView() {
       </${Empty}>`}
 
       <div className="grid grid-cols-4 gap-3">
-        ${photos.map((p) => html`
-          <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
-            <img src=${p.url} alt="生成的图片"
-              onClick=${() => openDetail(p)}
-              className="w-full aspect-video bg-black object-cover cursor-pointer" />
-            <div className="px-2 py-1.5">
-              <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${promptText(p)}</p>
-              <p className="text-[10px] text-ink3 font-num">
-                ${PHOTO_STATUS_TEXT[p.status] || p.status}
-                ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
-              </p>
-              <div className="mt-1 flex items-center gap-2">
-                <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
-                <span className="flex-1"></span>
-                <button onClick=${() => useInCreation(p)}
-                  className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
-                ${p.status !== 'approved' && html`
-                  <button onClick=${() => review(p.id, 'approved')}
-                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>`}
-                ${p.status !== 'rejected' && html`
-                  <button onClick=${() => review(p.id, 'rejected')}
-                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">打回</button>`}
-                <button onClick=${() => remove(p.id)}
-                  className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+        ${photoGroups.map((g) => {
+          if (g.before && g.after) {
+            const p = g.after;
+            return html`
+              <div key=${g.key} style=${{ gridColumn: 'span 2' }} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
+                <div className="grid grid-cols-2 gap-px bg-black">
+                  <div style=${{ position: 'relative' }}>
+                    <img src=${g.before.url} alt="调色前"
+                      onClick=${() => openDetail(g.before)}
+                      className="w-full aspect-video bg-black object-cover cursor-pointer" />
+                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色前</span>
+                  </div>
+                  <div style=${{ position: 'relative' }}>
+                    <img src=${g.after.url} alt="调色后"
+                      onClick=${() => openDetail(g.after)}
+                      className="w-full aspect-video bg-black object-cover cursor-pointer" />
+                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色后</span>
+                  </div>
+                </div>
+                <div className="px-2 py-1.5">
+                  <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${cleanPrompt(p)}</p>
+                  <p className="text-[10px] text-ink3 font-num">
+                    ${PHOTO_STATUS_TEXT[p.status] || p.status}
+                    ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
+                    ${' · 生成 ' + (costText(g.before.cost) || '-')}
+                    ${' · 调色 ' + (costText(g.after.cost) || '-')}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-ink3">${usedText(g.after)}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
+                    <span className="flex-1"></span>
+                    <button onClick=${() => openDetail(g.after)}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">查看对比</button>
+                    <button onClick=${() => useInCreation(g.after)}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
+                  </div>
+                </div>
+              </div>`;
+          }
+          const p = g.after || g.before || g.singles[0];
+          return html`
+            <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
+              <img src=${p.url} alt="生成的图片"
+                onClick=${() => openDetail(p)}
+                className="w-full aspect-video bg-black object-cover cursor-pointer" />
+              <div className="px-2 py-1.5">
+                <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${promptText(p)}</p>
+                <p className="text-[10px] text-ink3 font-num">
+                  ${PHOTO_STATUS_TEXT[p.status] || p.status}
+                  ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
+                  ${costText(p.cost) ? ' · ' + costText(p.cost) : ''}
+                </p>
+                <p className="mt-0.5 text-[10px] text-ink3">${usedText(p)}</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
+                  <span className="flex-1"></span>
+                  <button onClick=${() => useInCreation(p)}
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
+                  ${p.status !== 'approved' && html`
+                    <button onClick=${() => review(p.id, 'approved')}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>`}
+                  ${p.status !== 'rejected' && html`
+                    <button onClick=${() => review(p.id, 'rejected')}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">打回</button>`}
+                  <button onClick=${() => remove(p.id)}
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+                </div>
               </div>
-            </div>
-          </div>
-        `)}
+            </div>`;
+        })}
       </div>
 
       ${detail && html`
@@ -398,7 +512,40 @@ export function PhotosView() {
               <span style=${{ flex: 1 }}></span>
               <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
             </div>
-            <img src=${detail.url} alt="生成的图片" style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px' }} />
+            <img src=${detail.url} alt="生成的图片" onClick=${() => setZoomImg(detail.url)}
+              style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
+            ${versions.length > 1 && html`
+              <div style=${{ marginTop: '14px' }}>
+                <div style=${{ fontSize: '12px', color: 'var(--ink2)', marginBottom: '8px' }}>
+                  版本过程（相邻版本并排，共 ${versions.length} 版）
+                  ${detail.isFinal ? html`<span style=${{ marginLeft: '8px', color: 'var(--accent)', fontSize: '10.5px' }}>当前最终版</span>` : ''}
+                </div>
+                ${versions.slice(1).map((v, i) => {
+                  const prev = versions[i];
+                  return html`
+                    <div key=${v.id} style=${{ marginBottom: '10px' }}>
+                      <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <img src=${prev.url} alt=${'V' + prev.version} onClick=${() => setZoomImg(prev.url)}
+                            style=${{ width: '100%', maxHeight: '260px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
+                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${prev.version}${prev.isFinal ? ' · 最终' : ''}${prev.status === 'rejected' ? ' · 已淘汰' : ''}</div>
+                        </div>
+                        <div>
+                          <img src=${v.url} alt=${'V' + v.version} onClick=${() => setZoomImg(v.url)}
+                            style=${{ width: '100%', maxHeight: '260px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
+                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? ' · 最终' : ''}${v.status === 'rejected' ? ' · 已淘汰' : ''}</div>
+                        </div>
+                      </div>
+                      ${v.revisionNote ? html`<div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)' }}>${v.revisionNote}</div>` : ''}
+                    </div>`;
+                })}
+              </div>`}
+            ${versions.some((v) => v.failureSummary) && html`
+              <div style=${{ marginTop: '10px', padding: '8px 10px', border: '1px solid rgba(217,139,106,.25)', borderRadius: '6px', background: 'rgba(217,139,106,.06)' }}>
+                <div style=${{ fontSize: '11px', color: 'var(--ink2)', marginBottom: '4px' }}>失败 / 淘汰记录（不展示失败图）</div>
+                ${versions.filter((v) => v.failureSummary).map((v) => html`
+                  <div key=${'fail-' + v.id} style=${{ fontSize: '10.5px', color: 'var(--ink3)', lineHeight: 1.6 }}>V${v.version}：${v.failureSummary}</div>`)}
+              </div>`}
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
               <span style=${{ color: 'var(--ink3)' }}>画面提示词</span>
               <div>
@@ -430,6 +577,11 @@ export function PhotosView() {
                 detail.size || '',
                 detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ') || '-'}</span>
+              <span style=${{ color: 'var(--ink3)' }}>生成费用</span>
+              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}</span>
+              ${detail.failureSummary && html`
+                <span style=${{ color: 'var(--ink3)' }}>失败记录</span>
+                <span style=${{ color: 'var(--ink2)' }}>${detail.failureSummary}</span>`}
               <span style=${{ color: 'var(--ink3)' }}>生成时间</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace' }}>${detail.createdAt || '-'}</span>
               <span style=${{ color: 'var(--ink3)' }}>文件</span>
@@ -440,6 +592,9 @@ export function PhotosView() {
               </span>
             </div>
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+              ${!detail.isFinal && html`
+                <button onClick=${() => makeFinal(detail.id)}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>设为最终版</button>`}
               <button onClick=${() => useInCreation(detail)}
                 style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>用它生成视频</button>
               ${detail.status !== 'approved' && html`
@@ -454,6 +609,12 @@ export function PhotosView() {
           </div>
         </div>
       `}
+      ${zoomImg && html`
+        <div onClick=${() => setZoomImg('')}
+          style=${{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,.92)', display: 'grid', placeItems: 'center', cursor: 'zoom-out', padding: '18px' }}>
+          <img src=${zoomImg} alt="放大查看"
+            style=${{ maxWidth: '96vw', maxHeight: '94vh', objectFit: 'contain', borderRadius: '4px' }} />
+        </div>`}
     </div>
   `;
 }

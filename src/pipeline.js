@@ -343,6 +343,8 @@ class Pipeline {
     // 回写真实时长：避免任务记录与实际文件不一致（同 §四 改动点 5 的缺陷类别）
     const qcDuration = finalQC && finalQC.details && finalQC.details.videoInfo
       ? finalQC.details.videoInfo.duration : null;
+    try { library.ingestFinal(taskManager.getTask(taskId) || task, finalPath); }
+    catch (e) { console.warn(`[${taskId}] 恢复成片入库失败: ${e.message}`); }
     taskManager.updateTaskStatus(taskId, isPartial ? 'partial' : 'completed', {
       currentStep: isPartial ? '部分完成' : '已完成',
       outputPath: finalPath,
@@ -503,6 +505,8 @@ class Pipeline {
       } catch (qe) {
         console.error(`[${taskId}] 配乐后最终质检异常:`, qe.message);
       }
+      try { library.ingestFinal(taskManager.getTask(taskId) || task, finalPath); }
+      catch (e) { console.warn(`[${taskId}] 重建母版入库失败: ${e.message}`); }
       return { success: true, outputPath: finalPath, duration: info.duration };
     } catch (e) {
       try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
@@ -1856,6 +1860,13 @@ class Pipeline {
       ? finalQC.details.videoInfo.duration : null;
     // 跳过终检时 finalQC 为 null：不能用 null 覆盖掉历史结论，
     // 所以只在真的跑了终检时才写入 finalQC 字段，并显式记下「终检被档位跳过」。
+    try {
+      const finalTask = taskManager.getTask(taskId) || task;
+      library.ingestFinal(finalTask, finalPath);
+    } catch (e) {
+      console.warn(`[${taskId}] 成片入库失败: ${e.message}`);
+    }
+
     taskManager.updateTaskStatus(taskId, isPartial ? 'partial' : 'completed', {
       currentStep: isPartial ? '部分完成' : '已完成',
       outputPath: finalPath,
