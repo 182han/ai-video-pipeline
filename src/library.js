@@ -226,10 +226,12 @@ function buildEntry(task, clip, filePath, probe) {
     url: '/clips/' + encodeURIComponent(path.basename(filePath)),
     taskId: task.taskId,
     clipIndex: clip.index,
+    kind: 'clip',
     prompt: clip.prompt || originalPrompt || '',
     originalPrompt: originalPrompt || '',
     // 图生视频：记录这条视频用的是图片库里哪张图（追溯用，不复制文件）
-    sourcePhotoId: task.sourcePhotoId || null,
+    // 图片优先链路是“每片段一张图”，必须优先取 clip.photoId，不能只看 task.sourcePhotoId。
+    sourcePhotoId: clip.sourcePhotoId || clip.photoId || task.sourcePhotoId || null,
     model: task.model || 'unknown',
     resolution: task.resolution || label,
     width: width || null,
@@ -337,6 +339,58 @@ function ingestClip(task, clip, probeOverride) {
  *
  * 只处理 status==='success'；已有档案的跳过，不覆盖用户的收藏/替代关系。
  */
+// 最终成片入库（与 10 秒片段分开，kind=final）。用户要求片段和成片都保留。
+function ingestFinal(task, finalPath, probeOverride) {
+  try {
+    if (!task || !finalPath || !fs.existsSync(finalPath)) return null;
+    if (task.model === 'mock') return null;
+    const id = `${task.taskId}_final`;
+    const existing = get(id);
+    const probe = probeOverride || (() => {
+      try { return require('./videoProcessor').probeDetail(finalPath); } catch (e) { return null; }
+    })();
+    const info = probe && probe.success ? probe : null;
+    const entry = {
+      id,
+      kind: 'final',
+      fileName: path.basename(finalPath),
+      filePath: finalPath,
+      url: '/output/' + encodeURIComponent(path.basename(finalPath)),
+      taskId: task.taskId,
+      clipIndex: null,
+      prompt: task.prompt || '',
+      originalPrompt: task.prompt || '',
+      sourcePhotoId: task.sourcePhotoId || null,
+      model: task.model || 'unknown',
+      resolution: task.resolution || (info ? resolutionLabel(info.width, info.height) : null),
+      width: info ? info.width : null,
+      height: info ? info.height : null,
+      fps: info ? fpsNumber(info.fps) : null,
+      codec: info ? info.codec : null,
+      durationSec: info && Number.isFinite(info.duration) ? Math.round(info.duration * 1000) / 1000 : (task.totalDuration || null),
+      sizeBytes: (() => { try { return fs.statSync(finalPath).size; } catch (e) { return null; } })(),
+      hasAudio: info && info.hasAudio !== undefined ? !!info.hasAudio : null,
+      cost: { amount: 0, basis: 'final', label: '成片（费用已计入片段）', computed: true },
+      timing: { startedAt: task.createdAt || null, completedAt: new Date().toISOString(), totalMs: null, genMs: null, qcMs: null, splitAvailable: false, historical: true },
+      qc: task.finalQC ? { passed: !!task.finalQC.passed, unverified: false, level: task.finalQC.passed ? 'pass' : 'fail', reason: task.finalQC.reason || '', qcVersion: task.finalQC.qcVersion || null } : { passed: false, unverified: true, level: 'unknown', reason: '无终检记录', qcVersion: null },
+      theme: task.theme || null,
+      themeTag: task.themeTag || null,
+      tags: { theme: task.theme || null, model: task.model || null, resolution: resolutionLabel(info && info.width, info && info.height) },
+      favorite: existing ? !!existing.favorite : false,
+      replacedBy: existing ? existing.replacedBy || null : null,
+      regeneratedFrom: task.regeneratedFrom || null,
+      source: 'final',
+      addedAt: existing ? existing.addedAt : new Date().toISOString()
+    };
+    entry.updatedAt = new Date().toISOString();
+    saveEntry(entry);
+    return entry;
+  } catch (e) {
+    console.warn(`[library] 成片入库失败 ${task && task.taskId}: ${e.message}`);
+    return null;
+  }
+}
+
 function ingestMissing(task) {
   const added = [];
   if (!task || !Array.isArray(task.clips)) return added;
@@ -426,6 +480,7 @@ module.exports = {
   update,
   remove,
   ingestClip,
+  ingestFinal,
   ingestMissing,
   markRegenerateStarted,
   markRegenerateFailed,

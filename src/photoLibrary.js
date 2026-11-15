@@ -21,6 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const pricing = require('./pricing');
 
 const APP_DIR = path.join(__dirname, '..');
 // 允许测试用 PHOTOS_DIR / CLIPS_DIR 指向临时目录，避免验收脚本污染真实库
@@ -60,8 +61,21 @@ function entryPath(id) {
   return path.join(PHOTO_DIR, safeId(id) + '.json');
 }
 
+function inferGroupId(id) {
+  return String(id || '')
+    .replace(/_original$/, '')
+    .replace(/_v\d+$/, '');
+}
+
 function normalizeEntry(e) {
   if (!e || typeof e !== 'object') return e;
+  // 版本链：同一次创作的多个尝试归到同一个 group；列表只显示 isFinal。
+  if (!e.versionGroupId) e.versionGroupId = inferGroupId(e.id);
+  if (!Number.isInteger(e.version) || e.version < 1) e.version = 1;
+  if (typeof e.isFinal !== 'boolean') e.isFinal = e.status === 'approved';
+  if (typeof e.failureSummary !== 'string') e.failureSummary = '';
+  if (!['unchecked', 'passed', 'failed'].includes(e.scienceStatus)) e.scienceStatus = 'unchecked';
+  if (typeof e.scienceNotes !== 'string') e.scienceNotes = '';
   if (typeof e.imagePrompt !== 'string') {
     e.imagePrompt = (typeof e.generationPrompt === 'string' && e.generationPrompt)
       || (typeof e.prompt === 'string' ? e.prompt : '');
@@ -72,6 +86,8 @@ function normalizeEntry(e) {
       ? e.prompt : '';
   }
   if (typeof e.prompt !== 'string' || !e.prompt) e.prompt = e.imagePrompt;
+  // 旧记录没有费用字段：按模型单价补一个只读估算，避免图片库显示“无价格”。
+  if (!e.cost) e.cost = pricing.computeImageCost({ model: e.model });
   return e;
 }
 
@@ -139,7 +155,7 @@ function ingest(data = {}) {
   if (existing) {
     // 已有记录：只补缺失字段（提示词、尺寸等），绝不覆盖审核状态
     const filled = { ...existing };
-    for (const k of ['prompt', 'negativePrompt', 'provider', 'model', 'size', 'width', 'height', 'taskId']) {
+    for (const k of ['prompt', 'negativePrompt', 'provider', 'model', 'size', 'width', 'height', 'taskId', 'versionGroupId', 'parentId', 'revisionNote', 'failureSummary', 'scienceStatus', 'scienceNotes']) {
       if ((filled[k] === undefined || filled[k] === null || filled[k] === '') && data[k] !== undefined && data[k] !== null && data[k] !== '') {
         filled[k] = data[k];
       }
@@ -151,8 +167,17 @@ function ingest(data = {}) {
     return saveEntry(filled);
   }
 
+  const versionGroupId = safeId(data.versionGroupId || inferGroupId(id));
   const entry = {
     id,
+    versionGroupId,
+    version: Number.isInteger(data.version) && data.version > 0 ? data.version : 1,
+    parentId: data.parentId || null,
+    isFinal: data.isFinal === true,
+    revisionNote: typeof data.revisionNote === 'string' ? data.revisionNote.slice(0, 1000) : '',
+    failureSummary: typeof data.failureSummary === 'string' ? data.failureSummary.slice(0, 2000) : '',
+    scienceStatus: ['unchecked', 'passed', 'failed'].includes(data.scienceStatus) ? data.scienceStatus : 'unchecked',
+    scienceNotes: typeof data.scienceNotes === 'string' ? data.scienceNotes.slice(0, 2000) : '',
     fileName: path.basename(filePath),
     filePath,
     url: data.url || '/clips/' + encodeURIComponent(path.basename(filePath)),
@@ -169,6 +194,8 @@ function ingest(data = {}) {
     negativePrompt: typeof data.negativePrompt === 'string' ? data.negativePrompt.trim() : '',
     provider: data.provider || null,
     model: data.model || null,
+    // 图片库展示生成费用；调色派生条目由调用方显式传 0 元，避免重复计费。
+    cost: data.cost || pricing.computeImageCost({ model: data.model }),
     size: data.size || null,
     width: Number.isFinite(data.width) ? data.width : null,
     height: Number.isFinite(data.height) ? data.height : null,
@@ -241,6 +268,37 @@ function remove(id, { deleteFile = true } = {}) {
   return { success: true, fileDeleted, entry };
 }
 
+// 同一 group 的全部成功版本（按 version 排序）
+function versions(groupId) {
+  const gid = safeId(groupId || '');
+  if (!gid) return [];
+  return listAll()
+    .filter((e) => e.versionGroupId === gid)
+    .sort((a, b) => (a.version || 1) - (b.version || 1));
+}
+
+// 设置/取消最终版；同一 group 只保留一个 isFinal
+function setFinal(id, isFinal = true) {
+  const entry = get(id);
+  if (!entry) return null;
+  const gid = entry.versionGroupId || inferGroupId(entry.id);
+  if (isFinal) {
+    for (const other of versions(gid)) {
+      if (other.id !== entry.id && other.isFinal) {
+        other.isFinal = false;
+        saveEntry(other);
+      }
+    }
+    entry.isFinal = true;
+    entry.status = 'approved';
+    entry.finalizedAt = new Date().toISOString();
+  } else {
+    entry.isFinal = false;
+    entry.finalizedAt = null;
+  }
+  return saveEntry(entry);
+}
+
 function totals(list) {
   const t = { all: list.length, pending: 0, approved: 0, rejected: 0 };
   for (const it of list) {
@@ -249,8 +307,9 @@ function totals(list) {
   return t;
 }
 
-function query({ status = '', q = '' } = {}) {
+function query({ status = '', q = '', finalOnly = false } = {}) {
   let list = listAll();
+  if (finalOnly) list = list.filter((it) => it.isFinal === true);
   if (status) list = list.filter((it) => it.status === status);
   const kw = String(q || '').trim().toLowerCase();
   if (kw) {
@@ -302,6 +361,8 @@ module.exports = {
   ingest,
   get,
   listAll,
+  versions,
+  setFinal,
   query,
   totals,
   update,
