@@ -56,3 +56,28 @@ ffprobe：两张均 `png 1696x960`（2881533 / 2659858 字节）——**图确�
 - 你改 `server.js` / `imageGen.js` / `pipeline.js` 时**不要覆盖** `web/src/screens/createSmart.js:116` 这一行。
 - 若你把「场景卡→逐段出图→i2v」接到后台（30 段出图），**同样会遇到 `?final=1` 的口径问题**：
   后台自己拿 `clip.photoId` 不经过这个查询，不受影响；但任何**前端展示**新出图的地方都要避开 `?final=1`。
+
+## 6. 口径放宽（2026-11-16 13:2x，用户明确同意）
+
+用户答复「可以把这个口径放宽吧」→ 库 · 图片 tab 不再只显示最终版。
+
+改 `web/src/screens/inventory.js` 两处（**仅删过滤，不碰 C 窗口的 +220 行在途改动**）：
+
+1. `PhotosPanel`（约 437 行）：删掉 `qs.set('final', '1')`，只保留 status / q 过滤。
+2. `LibraryView`（约 1351 行）：`useJson('/api/photos?final=1')` → `useJson('/api/photos')`，让**顶部计数与列表同源**。
+3. 顶部注释同步为「全量：最终版 + 审核中 + 调色前后各版本」。
+
+实测（零计费只读）：
+
+```
+GET /api/photos        → HTTP 200, photos=21   ← 改后口径（原 final=1 只有 6）
+  含 smart_mwit3r22_img_0/1（调色后，approved, isFinal=false）
+GET /api/photos?final=1 → 6 条（API 行为不变，其它调用方不受影响）
+```
+
+语法门 `node --check` **exit 0**；`grep final=1` 已无生效代码（仅注释提及）。
+
+**提交状态：故意未单独提交。**
+`inventory.js` 里同时有 C 窗口 +220 行未提交改动，按红线「按路径 add、不混入他人在途工作」，
+这 2 行只能随 C 的 `inventory.js` 一起提交 —— **请 C 在提交信息里注明「含 Lead 的 2026-11-16 图片口径放宽 2 行」**。
+在此之前改动已在工作区生效（前端静态文件，刷新即生效，无需重启 3001）。
