@@ -101,6 +101,12 @@ export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggle
               请先重启 3001 再点确认，或关掉本开关走纯文生视频。
             </p>
           `}
+          ${plan.model === 'openai-video' && html`
+            <p className="mt-0.5 text-[10px] leading-[1.6] text-danger">
+              ⛔ 中转通道（WhaleTV）实测不收首帧图（400：上游只收公网 URL）。出图请走百炼官方：
+              在对话里说「用万相官方」重新出计划卡，或关掉本开关。
+            </p>
+          `}
           ${!hasImageKey && html`
             <p className="mt-0.5 text-[10px] leading-[1.6] text-warn">
               设置里没有「图片生成」的 Key：现在确认会返回「出图未就绪」，不建任务、不扣费。

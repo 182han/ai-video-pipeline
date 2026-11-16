@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // P4 本轮（2026-11-16）真浏览器端到端验收：小智逐段出图 + 审图暂停 + 图片审核页调色滑杆
 // ------------------------------------------------------------
 // 背景：本轮改了两个前端功能区，静态断言证明不了「点得动、显示得对」：
@@ -371,6 +371,12 @@ async function main() {
       whaletvKey: 'e2e-video-key-1234',
       whaletvBaseUrl: 'https://e2e.example.test/v1',
       whaletvVideoModel: 'wan3.0-video',
+      // 出图链路必须走百炼官方（2026-11-16 实测：WhaleTV 中转不收首帧图 → 400）。
+      // 百炼计划卡的 runtime = dashScopeKey + 由 WorkspaceId/Region 拼出的 baseUrl + modelId=wan3.0-video，
+      // 所以这三个键必须一起种，否则计划卡会显示「没填 Key」。
+      dashScopeKey: 'e2e-dashscope-key-9012',
+      dashScopeRegion: 'cn-beijing',
+      dashScopeWorkspaceId: 'e2e-ws-1234',
       imageKey: 'e2e-image-key-5678',
       imageBaseUrl: 'https://e2e.example.test/img',
       imageProvider: 'dashscope',
@@ -383,7 +389,10 @@ async function main() {
     await js(`localStorage.setItem('vs_config', ${JSON.stringify(JSON.stringify(SEED))}); true`);
 
     // ---------- 3. 小智首页：计划卡 + 出图开关 + 确认执行请求体 ----------
-    console.log('\n[3] 首页小智：发一句「10 分钟的长视频」→ 计划卡');
+    // 用「万相官方」明确走百炼：旧进程 planCard 默认是中转（openai-video），而中转不收首帧图；
+    // 重启后的新计划卡默认就是百炼。两种进程下这句话都能得到 dashscope。
+    const MSG_DASHSCOPE = '10 分钟的长视频，用万相官方';
+    console.log('\n[3] 首页小智：发一句「' + MSG_DASHSCOPE + '」→ 计划卡');
     await send('Page.navigate', { url: BASE + '/app' });
     await waitFor('!!document.querySelector("textarea.xz-input")', '首页输入框', 20000);
     check(true, '首页（/）渲染出小智对话页与输入框');
@@ -396,7 +405,7 @@ async function main() {
     await js(`(() => {
       const ta = document.querySelector('textarea.xz-input');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, '10 分钟的长视频');
+      setter.call(ta, ${JSON.stringify(MSG_DASHSCOPE)});
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     })()`);
@@ -409,6 +418,8 @@ async function main() {
     await waitFor('document.body.innerText.includes("确认执行")', '计划卡出现（确认执行按钮）', 25000);
     const t3 = await bodyText();
     check(/10\.00\s*分钟|10 分钟/.test(t3), '计划卡显示 10 分钟', (t3.match(/10[^\n]{0,20}分钟/) || [''])[0]);
+    check(/百炼|万相 3\.0（官方）/.test(t3), '计划卡走百炼官方通道（出图必须走这条）',
+      (t3.match(/模型\s*\n?[^\n]{0,30}/) || [''])[0] || (t3.match(/百炼[^\n]{0,20}/) || [''])[0]);
     check(t3.includes('逐段出图'), '计划卡出现「逐段出图」开关');
     check(t3.includes('图生视频'), '计划卡写明「→ 图生视频」');
     check(/出图\s*60\s*张/.test(t3), '出图张数 = 60（10 分钟 / 10 秒）', (t3.match(/出图\s*\d+\s*张[^\n]{0,40}/) || [''])[0]);
@@ -434,8 +445,11 @@ async function main() {
       'body.imageModel / imageProvider 透传', exec.imageModel + ' / ' + exec.imageProvider);
     check(exec.imageSize === SEED.imageSize && exec.imageBaseUrl === SEED.imageBaseUrl,
       'body.imageSize / imageBaseUrl 透传', exec.imageSize);
-    check(exec.apiKey === SEED.whaletvKey && exec.approved === true,
-      '原有视频 Key / approved 未被破坏', 'approved=' + exec.approved);
+    check(exec.apiKey === SEED.dashScopeKey && exec.approved === true,
+      '原有视频 Key（百炼 dashScopeKey） / approved 未被破坏',
+      'approved=' + exec.approved + ' / keyLen=' + String(exec.apiKey || '').length);
+    check(exec.modelId === 'wan3.0-video' && /e2e-ws-1234\.cn-beijing/.test(String(exec.apiBaseUrl)),
+      '百炼 baseUrl 由 WorkspaceId + Region 拼出（出图→图生视频走这条通道）', String(exec.apiBaseUrl));
     check(!!exec.sessionId && !!exec.planId, 'sessionId / planId 都在请求体里');
 
     console.log('\n[5] 关掉出图开关后再确认 → imagePerClip=false（纯文生视频链路保留）');
@@ -454,8 +468,50 @@ async function main() {
     })()`);
     await sleep(200);
 
+    // ---------- 5b. 中转通道 + 出图 → 前端必须拦下（中转不收首帧图，实测 400） ----------
+    console.log('\n[5b] 中转通道（openai-video）+ 逐段出图 → 确认被拦（不误花图片钱）');
+    const sendMsg = async (text) => {
+      const literal = JSON.stringify(text);
+      await js(`(() => {
+        const ta = document.querySelector('textarea.xz-input');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(ta, ${literal});
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`);
+      await sleep(250);
+      await js(`(() => {
+        const ta = document.querySelector('textarea.xz-input');
+        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await sleep(1500);
+    };
+    const execCallsBefore5b = await js('window.__e2e.calls.filter(c=>c.kind==="execute").length');
+    await sendMsg('10 分钟的长视频，走中转');
+    await waitFor('document.body.innerText.includes("中转")', '中转计划卡', 25000);
+    const t5b = await bodyText();
+    check(/WhaleTV|中转/.test(t5b), '计划卡切到 WhaleTV 中转（openai-video）', (t5b.match(/WhaleTV[^\n]{0,20}/) || [''])[0]);
+    check(/不收首帧图|400/.test(t5b), '计划卡给出「中转不收首帧图」的红色提示');
+    await clickByText('确认执行', 'button');
+    await sleep(800);
+    const t5b2 = await bodyText();
+    const execCallsAfter5b = await js('window.__e2e.calls.filter(c=>c.kind==="execute").length');
+    check(execCallsAfter5b === execCallsBefore5b, '确认被前端拦下：没有发 execute 请求（不会真扣费）',
+      `${execCallsBefore5b} → ${execCallsAfter5b}`);
+    check(/不收首帧图/.test(t5b2) && /百炼|万相官方/.test(t5b2), '对话里给出可执行的替换方案（改用百炼 / 关掉出图）',
+      (t5b2.match(/(⛔|当前计划走的是)[^\n]{0,80}/) || [''])[0]);
+    await shot('p4-08-relay-image-blocked');
+    // 再切回百炼计划，后面的审图卡片/图片库用例不依赖 plan.model
+    await sendMsg(MSG_DASHSCOPE);
+    await waitFor('document.body.innerText.includes("百炼")', '切回百炼计划卡', 25000).catch(() => {});
+
     // ---------- 6. 审图暂停卡片 + 继续生成 ----------
     console.log('\n[6] 审图暂停：「图已出好」卡片 + 继续生成（POST unpause）');
+    // [5b] 连续发了两句对话 → assistant.send() 会 setXstate(null)，状态机轮询随之停止。
+    // 先用一次（被 stub 拦截的）确认把运行态挂回去，再切到「审图暂停」的 state 响应。
+    await clickByText('确认执行', 'button');
+    await waitFor('document.body.innerText.includes("重试 0/2")', '运行态状态条（state 轮询已启动）', 12000);
     await js(`window.__e2e.stateMode = 'review'; true`);
     await waitFor('document.body.innerText.includes("图已出好")', '图已出好卡片', 12000);
     const t6 = await bodyText();
