@@ -111,7 +111,7 @@ export function StateStrip({ state, task, onOpenTask }) {
 
 // 首页气泡：在创作页给一个「我是小智」的引导气泡；可关，关一次不再打扰。
 export function GreetingBubble({ onPick, onClose, bottom = 136 }) {
-  const chips = ['10 分钟的极光', '上一次的视频', '现在进度怎样'];
+  const chips = ['30 分钟的雪山、星空和极光', '上一次的视频', '现在进度怎样'];
   return html`
     <div
       role="status"
@@ -125,7 +125,7 @@ export function GreetingBubble({ onPick, onClose, bottom = 136 }) {
         <div className="flex-1">
           <p className="text-[12px] text-ink font-medium">我是小智</p>
           <p className="mt-1 text-[11px] leading-[1.65] text-ink3">
-            说个总时长和想拍的主题，我来排计划；也可以问我「上一次的视频」。
+            说个总时长和想拍的景色，我来排计划；长片可以一次说多个主题，比如「30 分钟的雪山、星空和极光」。
           </p>
         </div>
         <button

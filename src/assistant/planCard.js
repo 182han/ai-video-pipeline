@@ -179,14 +179,32 @@ function findSceneCardsFlag(text) {
   return null; // 默认按产品口径开启（见 buildPlan）
 }
 
-function findTheme(text) {
-  const lower = text.toLowerCase();
+// 一段话里可能同时说多个地貌（长视频的正常需求），全部识别出来：
+// 返回按原文出现顺序去重的 [{ id, label, index }]。theme 仍取第一个（promptComposer 的氛围参数），
+// themeLabel 展示全部（如「雪山冰川、星空银河、极光」），避免把 30 分钟长片说成全是极光。
+function findThemes(text) {
+  const lower = String(text || '').toLowerCase();
+  const hits = [];
   for (const t of THEMES) {
     for (const w of t.words) {
-      if (lower.includes(String(w).toLowerCase())) return { id: t.id, label: t.label, word: w };
+      const idx = lower.indexOf(String(w).toLowerCase());
+      if (idx >= 0) { hits.push({ id: t.id, label: t.label, index: idx }); break; }
     }
   }
-  return null;
+  hits.sort((a, b) => a.index - b.index);
+  const seen = new Set();
+  const out = [];
+  for (const h of hits) {
+    if (seen.has(h.id)) continue;
+    seen.add(h.id);
+    out.push(h);
+  }
+  return out;
+}
+
+function findTheme(text) {
+  const list = findThemes(text);
+  return list.length ? list[0] : null;
 }
 
 /**
@@ -202,7 +220,8 @@ function parseUtterance(text) {
   const resolution = findResolution(raw);
   const model = findModel(raw);
   const sceneCardsFlag = findSceneCardsFlag(raw);
-  const theme = findTheme(raw);
+  const themes = findThemes(raw);
+  const theme = themes.length ? themes[0] : null;
   // 用户原句（去掉明显的时间/参数短语后剩余部分）作为氛围提示词；保留原句更稳妥，
   // promptComposer 只把它当「氛围」，不覆盖卡里的场景内容。
   return {
@@ -214,7 +233,8 @@ function parseUtterance(text) {
     model,
     sceneCards: sceneCardsFlag,
     theme: theme ? theme.id : null,
-    themeLabel: theme ? theme.label : null,
+    // 多主题时全部展示，避免「30 分钟雪山+星空+极光」被显示成「全是极光」
+    themeLabel: themes.length ? themes.map((t) => t.label).join('、') : null,
     userPrompt: raw
   };
 }

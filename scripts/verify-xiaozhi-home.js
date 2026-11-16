@@ -70,8 +70,9 @@ async function httpGet(url) {
   console.log('\n[3] 整页对话：大球 + 介绍卡 + 底部输入框');
   check(/export function Assistant\(\{ page = false \}/.test(assistant), 'Assistant 支持 page 模式');
   check(/data-page="xiaozhi"/.test(assistant), '整页容器 data-page=xiaozhi');
-  check(/PAGE_CHIPS = \['10 分钟的极光', '上一次的视频', '现在进度怎样'\]/.test(assistant), '介绍卡 3 个建议 chips');
-  check(/xz-intro-title[\s\S]{0,160}我是小智，告诉我视频多长、想拍什么/.test(assistant), '介绍卡 1–2 句开场白');
+  check(/PAGE_CHIPS = \['30 分钟的雪山、星空和极光', '上一次的视频', '现在进度怎样'\]/.test(assistant), '介绍卡 3 个建议 chips（长片多主题示例）');
+  check(!/10 分钟的极光/.test(assistant), '不再用「10 分钟全是极光」示例');
+  check(/xz-intro-title[\s\S]{0,160}我是小智，告诉我视频多长、想拍哪些景色/.test(assistant), '介绍卡 1–2 句开场白（多主题长片）');
   check(/xz-composer-wrap/.test(assistant) && /xz-inputbar/.test(assistant), '底部微信式输入框');
   check(/VoiceButton/.test(assistant), '语音按钮复用（ASR → 失败回退打字）');
   check(/is-compact/.test(assistant), '有消息后大球缩小（is-compact）');

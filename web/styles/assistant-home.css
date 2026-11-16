@@ -192,8 +192,14 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: radial-gradient(circle at 34% 28%, #e7fbff 0%, #7fe6f6 22%, #1aa9cf 48%, #075a78 72%, #03202c 100%);
-  box-shadow: 0 0 12px rgba(52, 211, 153, .50), inset -3px -4px 6px rgba(0, 0, 0, .35);
+  border: 1px solid rgba(167, 243, 208, .28);
+  /* 与大球（首页/展开态的绿色液态球）同一套绿系，不要另起一个蓝色球 */
+  background: radial-gradient(circle at 34% 28%,
+    #f2ffe9 0%, #c8f8a8 16%, #6fdc7f 38%, #1c9a5a 62%, #075a3a 82%, #03170f 100%);
+  box-shadow:
+    0 0 14px rgba(74, 222, 128, .55),
+    inset -3px -4px 7px rgba(0, 0, 0, .38),
+    inset 2px 2px 5px rgba(255, 255, 255, .35);
 }
 .rail-home-title {
   display: block;

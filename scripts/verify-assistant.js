@@ -173,6 +173,12 @@ async function main() {
     p30.ok ? `${p30.plan.clipCount}×${p30.plan.clipDurationSec}` : p30.code);
   ok('场景卡默认开启且 180 张可容纳', p30.ok && p30.plan.sceneCards === true && p30.plan.totalSec === 1800);
   ok('主题识别 aurora + 中文标签', p30.ok && p30.plan.theme === 'aurora' && p30.plan.themeLabel === '极光');
+  const pMulti = planCard.buildPlan({ text: '来一条 30 分钟的雪山、星空和极光视频，每段 10 秒' });
+  ok('多主题长片：theme 取第一个，themeLabel 展示全部（不再显示成全是极光）',
+    pMulti.ok && pMulti.plan.theme === 'mountain'
+    && pMulti.plan.themeLabel === '雪山冰川、星空银河、极光'
+    && pMulti.plan.clipCount === 180,
+    pMulti.ok ? pMulti.plan.theme + ' / ' + pMulti.plan.themeLabel : pMulti.code);
   ok('预算：720p 30 分钟 = ¥1080，重试上限 ¥108（10%），最多 2 次',
     p30.ok && p30.plan.estimate.totalCny === 1080 && p30.plan.estimate.retryCapCny === 108
     && p30.plan.estimate.autoQcRetries === 2,

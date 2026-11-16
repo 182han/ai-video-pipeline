@@ -164,7 +164,7 @@ function replyForPlan(plan) {
 }
 
 function replyForGreeting() {
-  return '我是小智。说个总时长 + 主题就能排计划，例如「10 分钟的极光」；'
+  return '我是小智。说个总时长和想拍的景色就能排计划，例如「30 分钟的雪山、星空和极光」；'
     + '也可以问「上一次的视频」或「现在进度怎样」。语音按钮在输入框左侧。';
 }
 
