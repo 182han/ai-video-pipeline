@@ -45,7 +45,9 @@ function RailItem({ item, collapsed, foot = false }) {
 
 export function AssistantPage() {
   const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(RAIL_KEY) === '1'; } catch (e) { return false; }
+    // 默认收起（用户 2026-11-16 指定：首页要第三张截图那样，只留图标气泡）；
+    // 点三个点展开后记住选择（vs_rail_collapsed=0）。
+    try { return localStorage.getItem(RAIL_KEY) !== '0'; } catch (e) { return true; }
   });
 
   useEffect(() => {

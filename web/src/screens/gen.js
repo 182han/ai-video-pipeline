@@ -79,7 +79,7 @@ export function GenView({ tasks }) {
         <span className="flex-1"></span>
         <${PauseButton} taskId=${task.taskId} status=${task.status} onChanged=${() => {}} />
         <button
-          onClick=${() => navigate('/create')}
+          onClick=${() => navigate('/')}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
         >退出观看</button>
       </div>

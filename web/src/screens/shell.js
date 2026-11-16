@@ -85,11 +85,26 @@ function Rail({ view }) {
   const routeOf = {
     create: '/create', edit: '/edit', library: '/library', music: '/music'
   };
+  // 2026-11-16 用户问「进入板块后怎么退出」：左栏顶部固定「小智 · 对话首页」入口，点击回 /。
   return html`
     <aside className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
       <div className="font-display text-[14px] uppercase tracking-[.13em] px-4 pb-3.5 text-ink select-none">
         Video Studio
       </div>
+
+      <button
+        type="button"
+        onClick=${() => navigate('/')}
+        title="回到小智首页"
+        aria-label="回到小智首页"
+        className="rail-home"
+      >
+        <span className="rail-home-orb" aria-hidden="true"></span>
+        <span className="min-w-0">
+          <span className="rail-home-title">小智</span>
+          <span className="rail-home-sub">对话首页 · 点这里回来</span>
+        </span>
+      </button>
 
       ${NAV.map((n, i) =>
         n.section
