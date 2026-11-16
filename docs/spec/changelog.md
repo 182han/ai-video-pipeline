@@ -3569,3 +3569,17 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - `verify-mic-permission` **41/0**；`verify-xiaozhi-home` **45/0**；`verify-assistant` **105/0**；
   `verify-all --only mic-permission,xiaozhi-home` **86/0**。
 - 用户侧：Ctrl+F5 后再按住，**说话**（不要只按住不动）；状态条会提示正在录音/识别。
+
+### 17:45 复核：真正没声音的是 Chrome 默认麦克风选成了 ToDesk 虚拟声卡
+
+- `chrome://settings/content/microphone` 实测：
+  `BEFORE = 麦克风 (ToDesk Virtual Audio)`；
+  `AFTER  = 阵列麦克风 (AMD Audio Device)（系统默认设置）`。
+- `麦克风 (ToDesk Virtual Audio)` 没有用户人声，浏览器录到的是杂音；
+  新前端按设计提示「没听清：只识别到标点/杂音」。这不是 ASR/权限问题，是**选错输入设备**。
+- 已在本机 Chrome 把默认麦克风改为 `阵列麦克风 (AMD Audio Device)`（浏览器设置，不是代码）。
+  若用户是通过 ToDesk 远程操作这台电脑：应改回 `麦克风 (ToDesk Virtual Audio)`，
+  并在 ToDesk 里打开远程麦克风转发，否则本机阵列麦克风听不到远端说话。
+- 17:31 左右 3001 服务进程退出，页面出现 `网络异常：Failed to fetch` / `语音上传异常：Failed to fetch`
+  （与语音代码无关）；17:32 已用后台进程重启（PID 138100），stdout/stderr 落
+  `data/logs/console-2026-11-16-1735*.log`。重启清空内存会话，用户 17:34 重新登录。
