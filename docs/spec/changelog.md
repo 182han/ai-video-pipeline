@@ -3336,3 +3336,58 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 
 
 
+
+---
+
+## 2026-11-16 小智首页改造（/ = 整页对话页）+ 图片库缺失对账 + 81 项提交
+
+### 背景（用户口径）
+- 登录后的 `/` 不再是六步向导：整页 = 「小智」对话页（大球 + 球与对话窗口之间的 1–2 句介绍卡 +
+  微信式底部输入框 + 左侧可收起气泡导航 + 与球呼应的绿色背景）；六步向导保留在 `/create`。
+- 左侧「三个点」= 收起/展开（不是退出）；导航 4 项：创作 / 剪辑 / 库 / 设置。
+- 先完成图片库 17/17 缺失与 81 项未提交改动，再做页面（用户 2026-11-16 10:31 指定顺序）。
+
+### 图片库 17 条缺失（2026-11-16 10:39–10:44）
+- 只读复核：17 条记录、`fs.existsSync` 0/17 存在，`clips/ output/ data/` 内按文件名检索 0 份可找回。
+- 先快照到 `app/data/keep/photos-missing-20261116/`（`snapshot.json` 28KB + `raw/` 17 个原始条目副本 + README + delete-result），
+  再走两步删除：`src/photoLibrary.remove()` 逐条移入回收站（17/17，`fileCount=0`，文件本就缺失）→ `POST /api/recycle/photo/purge`（removed 17）。
+- 验收（线上 3001，只读）：`/api/photos` 0 条、`hiddenMissing=0`、`totals={all:0}`、`?includeMissing=1` 也是 0；
+  `/api/recycle` 0；`/api/library` 仍 23（12 成片 + 11 片段）；库页「图片 0」空态、0 张破图、无 console 错误。
+- **未发起任何付费重新生成**；快照保留在本地（`data/keep/` 已 gitignore）。
+
+### 81 项未提交改动（2026-11-16 10:44–10:49）
+- 按路径 `git add <file>`，未用 `git add -A`；排除 `tools/asr/*`（约 330MB，只提交 README）、`data/`、`output/`、`clips/`、`logs/`、`.env`。
+- 11 个 commit（按主题）：fbb4316 gitignore/ASR、219fe7b 配乐/波形、425a9f1 回收站/入库、
+  2ee7334 场景卡、d7a4533 小智、38a1231 图生视频/预算/图片优先、b9b2d12 server/pipeline/qualityChecker 接线、
+  88cb8f2 前端 P2/P3/P6、653c8d4 门禁注册、c806c00 交接文档/changelog、e386cfd 浏览器验收脚本与截图。
+- `server.js` / `pipeline.js` / `qualityChecker.js` 提交前逐行 `git diff`：内容为 P1/P3/P4/P5 + 11-12~14 的
+  回收站/隐藏缺失/场景卡/小智/预算/图生视频/autoRetry=false/质检分级/归一化拼接/四项并行，无来路不明的半成品；
+  因跨阶段混在同一文件，提交信息逐条列明（AGENTS §8「混合提交必须列出实际内容」）。
+- 提交后 `git status --porcelain` 为空；`node scripts/check-server-version.js` 仍 exit 0（PID 25988，未重启）。
+
+### 首页改造（2026-11-16 10:49–11:0x，只改 web/）
+- 新增 `web/src/screens/assistantPage.js`：整页绿色外壳 + 左侧可收起气泡导航（`vs_rail_collapsed` 记住状态；
+  三个点 `•••` 的 aria-label 为「展开/收起导航」，不是退出；4 项 → /create /edit /library /settings）。
+- 新增 `web/styles/assistant-home.css`（手写 CSS，不依赖离线 Tailwind 产物）：深绿/祖母绿渐变 + 极光光晕、
+  大球辉光、介绍卡、消息气泡、微信式底部 composer、64px 收起态、空态垂直居中、窄屏适配。
+- `web/src/components/assistant.js`：新增 `page` 模式，整页复用同一套状态与接口
+  （记忆恢复 / 计划卡 / 状态机轮询 / `/api/assistant/message|execute|state|memory|asr` / 语音）；
+  介绍卡 1–2 句 + 3 个 chips（10 分钟的极光 / 上一次的视频 / 现在进度怎样）；有消息后大球缩小、介绍卡收起；
+  输入框随内容长高、Enter 发送；`navigate('/')` 改 `/create`（填入提示词回向导）。
+- `web/src/screens/shell.js`：`/` → home（渲染 AssistantPage，无全局左栏/任务条/悬浮球）；`/create` → 六步向导；
+  导航「创作」→ `/create`。`gen/inventory/templates/editor` 里的 `navigate('/')` 一并改 `/create`（原意都是回向导）。
+- 未新增依赖；未改后端；3001 未重启（`express.static` 刷新即生效）。
+
+### 验收（本机实测，零计费）
+- CDP 9222 浏览器实操 **18/0**：1440×900 / 1280×800 截图；`.xz-page`、4 导航项、大球、介绍卡 + 3 chips、
+  底部输入框贴底；三个点 212→64→刷新仍 64→再点回 212；`/create` 打开六步向导（有提示词/下一步）；
+  发「10 分钟的极光」→ 用户消息 + 小智回复 + 计划卡出现（未点确认执行，零计费）；is-compact 生效；无 console 错误。
+  截图：`.scratch/auto_chain/xiaozhi-home/`（6 张，含收起态与计划卡）。
+- `node scripts/verify-xiaozhi-home.js` → **37 通过 / 0 失败**（静态 31 + 3001 只读 6；已注册 verify-all 的 fast 组）。
+- 回归：`verify-editor-nav` 15/0、`verify-p6-offline` 41/0、`verify-editor-shell` 25/0。
+- 其他路由 smoke：/library、/edit、/settings 正常；全局悬浮球面板可打开。
+
+### 未验证 / 已知限制
+- 未点击计划卡「确认执行」（真实模型会产生计费；Mock 也会建任务）；语音按钮未实际录音（ASR 接口已由 P5 验收）。
+- 首页导航只在 `/` 可收起；其它页面仍是 212px 固定左栏（用户草图针对首页，后续可统一）。
+- 浏览器证据来自 CDP 9222（本机 Chrome），非人工手感验收；1440/1280 之外的分辨率未截图。
