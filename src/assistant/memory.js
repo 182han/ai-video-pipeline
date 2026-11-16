@@ -233,7 +233,7 @@ const RE_SEGMENT_EDIT = /提示词|画面|改成|换成|改为|写成|换掉|换
 //   ② 「第 N 首」且没有时长词（= 列库后的选曲上下文）；
 //   ③ 换一首/换首/换一曲/再来一首（且不是创建句）。
 const RE_BGM_NOUN = /配乐|背景音乐|\bbgm\b|曲目|曲名|音乐/i;
-const RE_BGM_ACTION = /有哪些|有什么|哪几首|换成|改成|改为|用第|选第|要第|放第|听第|设为默认|设成默认|默认配乐|不要|关掉|关闭|取消|去掉/;
+const RE_BGM_ACTION = /有哪些|有什么|哪几首|换成|改成|改为|用第|选第|要第|放第|听第|设为默认|设成默认|默认配乐|不要|关掉|关闭|取消|去掉|换掉|换个/;
 const RE_BGM_INDEX = /第\s*(?:\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
 const RE_BGM_SWAP = /换一首|换首|换一曲|再来一首/;
 const RE_TIME_WORD = /(?:分钟|小时|秒|段)/;
@@ -243,6 +243,18 @@ const RE_TIME_WORD = /(?:分钟|小时|秒|段)/;
 // 「这一段不想要」会因含「段」被 RE_CREATE 抢成 create）。
 const RE_SEGMENT_VAGUE = /(?:这|那)(?:个地方|里|块|张卡|张|个场景|段|一段|一张)|那条/;
 const RE_SEGMENT_SWAP_WORD = /换一个|换一张|换个|换掉|换成别的|换别的|不想要|不满意|不要这个/;
+// 2026-11-16 用户反馈（截图实证）：看完整批 3 张卡后说「三个都想换掉」→ 被 create 分支
+// 当成续问重排了一条新计划（回复「我按 30 秒排好了」），应该**整批换卡**、planId 不变。
+// 判定：批量指代（都/全部/三个/三张/这批/整批/整个/重抽…）+ 换卡动作
+// （换掉/换一个/换一批/要换（非「要换成」）/不满意/不想要…），且**不是配乐句**。
+// 故意不收「改成/换成（+分辨率）」这类词，避免抢「都换成 1080p」的分辨率续问。
+const RE_SEGMENT_BATCH_REF = /都|全部|全都|全换|三个|三张|3\s*[个张]|这几[个张]|这两个|这一批|这批|整批|一批|这一?组|整个|重抽|重新抽|重新选/;
+const RE_SEGMENT_BATCH_SWAP = /换掉|换一个|换一张|换一批|换个|全换|重抽|重新抽|重新选|换成别的|换别的|不满意|不想要|不要了|要换(?![成为])|都换(?![成为])/;
+
+function isBatchSceneEdit(text) {
+  const s = String(text || '');
+  return RE_SEGMENT_BATCH_REF.test(s) && RE_SEGMENT_BATCH_SWAP.test(s) && !RE_BGM_NOUN.test(s);
+}
 
 function classify(text) {
   const s = String(text || '').trim();
@@ -254,10 +266,11 @@ function classify(text) {
   if (RE_PLAN_SCENES.test(s)) return { intent: 'plan_scenes' };
   if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
   // 2026-11-16 P7-A：计划内修改必须排在 create 之前（否则「第 2 个场景换一个」会被当成新计划重排）；
-  // 但只能匹配带「第 N 段/个」或「这个地方/这里 + 换一个」的句子，
+  // 但只能匹配带「第 N 段/个」、「这个地方/这里 + 换一个」或「三个/都 + 换掉」的句子，
   // 不能抢「改成 1080p」「每段 15 秒」「再来一条」。
   if ((RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s))
-    || (RE_SEGMENT_VAGUE.test(s) && RE_SEGMENT_SWAP_WORD.test(s))) return { intent: 'plan_edit' };
+    || (RE_SEGMENT_VAGUE.test(s) && RE_SEGMENT_SWAP_WORD.test(s))
+    || isBatchSceneEdit(s)) return { intent: 'plan_edit' };
   if ((RE_BGM_NOUN.test(s) && RE_BGM_ACTION.test(s))
     || (RE_BGM_INDEX.test(s) && !RE_TIME_WORD.test(s))
     || (RE_BGM_SWAP.test(s) && !RE_CREATE.test(s))) return { intent: 'bgm' };
@@ -402,6 +415,7 @@ module.exports = {
   listMessages,
   listSessions,
   classify,
+  isBatchSceneEdit,
   retrieveTasks,
   taskRef,
   formatWhen

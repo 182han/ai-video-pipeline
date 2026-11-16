@@ -417,6 +417,13 @@ async function main() {
     && assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene
     && taskManager.getAllTasks().length === tasksBeforeScene,
     String(vagueEdit.reply || '').slice(0, 60));
+  // 2026-11-16 用户反馈（截图实证）：看完整批 3 张卡说「三个都想换掉」被当成续问重排了新计划。
+  ok('整批换卡意图：三个都想换掉 / 这三张都换 / 换一批 / 全部重抽 → plan_edit',
+    ['三个都想换掉', '这三张都换掉', '换一批', '全部重抽', '这个章节的三个都换', '都换掉']
+      .every((t) => assistantMemory.classify(t).intent === 'plan_edit'));
+  ok('整批换卡不抢其他意图：都换成 1080p 不是 plan_edit；配乐全部换掉 → bgm',
+    assistantMemory.classify('都换成 1080p').intent !== 'plan_edit'
+    && assistantMemory.classify('配乐全部换掉').intent === 'bgm');
   ok('finals 参与检索并标 kind=final', (() => {
     const r = assistantMemory.retrieveTasks({ query: '上一次的视频', tasks: [], finals: [{ id: 'fin_1', kind: 'final', prompt: '成片 A', filePath: 'output/a.mp4', createdAt: new Date().toISOString() }] });
     return r.refs.length === 1 && r.refs[0].kind === 'final';
@@ -489,6 +496,37 @@ async function main() {
     swap2Msg.intent === 'plan_edit' && idsAfterSwap2[1] !== planAfterSwap.sceneCardIds[1]
     && idsAfterSwap2[0] === editIdsBefore[0] && idsAfterSwap2[2] === editIdsBefore[2],
     idsAfterSwap2.join(','));
+
+  // 整批换卡（2026-11-16 用户截图）：看完整批 3 张卡说「三个都想换掉」
+  // 原实现会掉进 create 续问、重排一条新计划；现在应整批换卡、planId 不变、不建任务。
+  const sidBatch = 's_p7a_batch_swap_1';
+  const batchPlanMsg = supervisor.handleMessage({ sessionId: sidBatch, text: 'mock 3段，每段10秒' });
+  const batchIdsBefore = assistantMemory.lastPlan(sidBatch).sceneCardIds.slice();
+  const batchPlanId = batchPlanMsg.plan.planId;
+  const tasksBeforeBatch = taskManager.getAllTasks().length;
+  const batchMsg = supervisor.handleMessage({ sessionId: sidBatch, text: '三个都想换掉' });
+  const batchPlanAfter = assistantMemory.lastPlan(sidBatch);
+  const batchIdsAfter = batchPlanAfter.sceneCardIds.slice();
+  ok('整批换卡：「三个都想换掉」→ plan_edit、3 张全换、planId 不变、不重排计划/不建任务',
+    batchMsg.ok === true && batchMsg.intent === 'plan_edit'
+    && /已换掉全部 3 段/.test(batchMsg.reply) && !/排好了/.test(batchMsg.reply)
+    && batchPlanAfter.planId === batchPlanId
+    && batchIdsAfter.length === 3
+    && batchIdsAfter.every((id, i) => id !== batchIdsBefore[i])
+    && new Set(batchIdsAfter).size === 3
+    && !!batchMsg.plan && batchMsg.plan.planId === batchPlanId
+    && taskManager.getAllTasks().length === tasksBeforeBatch,
+    `${batchIdsBefore.join(',')} → ${batchIdsAfter.join(',')}`);
+  ok('整批换卡回复：逐段旧→新 + 当前 3 张卡 + 计划摘要',
+    /#1 .*→/.test(batchMsg.reply) && /#2 .*→/.test(batchMsg.reply) && /#3 .*→/.test(batchMsg.reply)
+    && /当前 3 张场景卡/.test(batchMsg.reply) && /总时长/.test(batchMsg.reply));
+  const batchMsg2 = supervisor.handleMessage({ sessionId: sidBatch, text: '换一批' });
+  const batchIds2 = assistantMemory.lastPlan(sidBatch).sceneCardIds.slice();
+  ok('整批换卡可反复（换一批）：再整批换、仍是同一计划、不建任务',
+    batchMsg2.intent === 'plan_edit' && /已换掉全部/.test(batchMsg2.reply)
+    && batchIds2.every((id, i) => id !== batchIdsAfter[i])
+    && assistantMemory.lastPlan(sidBatch).planId === batchPlanId
+    && taskManager.getAllTasks().length === tasksBeforeBatch);
 
   // 卡库尽头：180 段 = 全部正片都在 used 里 → 换卡必须明确报错，不静默复用
   const sidExhaust = 's_p7a_plan_edit_exhaust';

@@ -469,7 +469,10 @@ function replyForPlanEdit(sessionId, text) {
       + '我排好计划你再改第几段。';
   }
   const m = String(text || '').match(RE_SEGMENT_INDEX);
+  const batch = memory.isBatchSceneEdit(text);
   if (!m) {
+    // 2026-11-16 用户反馈：看完整批卡后说「三个都想换掉」→ 整批换，不要重排计划。
+    if (batch) return replyForBatchSwap(sessionId, plan);
     // 2026-11-16 Lead 复核：用户指代卡片（「这个地方的换一个」/「这一段不想要」）时没有段号，
     // 直接告诉他怎么补段号；不要掉回「这条视频要做多长」。
     return '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」。';
@@ -525,6 +528,52 @@ function replyForPlanEdit(sessionId, text) {
   const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
     ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
   return `已换第 ${n} 段：${fromKey} → ${toKey}${chapterSeq}\n`
+    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
+    + describeReply(plan);
+}
+
+// 2026-11-16 用户反馈（截图实证）：3 段计划看完卡后说「三个都想换掉」→ 原实现掉进 create 续问，
+// 重排了一条新计划（回复「我按 30 秒排好了」）。这里改成**整批换卡**：
+//   · planId 不变、不建任务、不重新 allocate；
+//   · 逐段取「下一张未用过」的候选（与单段换卡同一规则），批内不重复；
+//   · 任何一段取不到（卡库耗尽）就整批放弃、计划保持原样，不留下换了一半的状态。
+function replyForBatchSwap(sessionId, plan) {
+  if (plan.sceneCards === false) {
+    return '这条计划关了场景卡（自由提示词），没有可换的卡；'
+      + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
+  }
+  const currentIds = (Array.isArray(plan.sceneCardIds) && plan.sceneCardIds.length === plan.clipCount)
+    ? plan.sceneCardIds.slice()
+    : planSceneEntries(plan).map((e) => e.id);
+  if (!currentIds.length) {
+    return '这条计划还没有场景卡，没法整批换；先确认场景卡是开着的。';
+  }
+  const used = new Set(currentIds);
+  const nextIds = currentIds.slice();
+  const changes = [];
+  for (let i = 0; i < currentIds.length; i += 1) {
+    const oldId = currentIds[i];
+    const oldCard = sceneCardLibrary.getCardById(oldId);
+    let next;
+    try {
+      next = sceneCardLibrary.nextSwapCandidate(oldId, [...used]);
+    } catch (e) {
+      return `整批换卡失败（第 ${i + 1} 段）：${(e && e.message) || e}；计划没有改动。`;
+    }
+    const nextCard = sceneCardLibrary.getCardById(next.id);
+    nextIds[i] = next.id;
+    used.add(next.id);
+    const fromKey = oldCard ? oldCard.scene_key : oldId;
+    const toKey = nextCard ? nextCard.scene_key : next.id;
+    const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
+      ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
+    changes.push(`#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`);
+  }
+  plan.sceneCardIds = nextIds;
+  savePlanInPlace(sessionId, plan);
+  const shown = changes.slice(0, SCENE_PREVIEW_LIMIT);
+  if (changes.length > shown.length) shown.push(`…… 共 ${changes.length} 段，其余同样换了。`);
+  return `已换掉全部 ${nextIds.length} 段：\n${shown.join('\n')}\n`
     + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
     + describeReply(plan);
 }
@@ -598,7 +647,7 @@ function replyForBgm(sessionId, text) {
   }
 
   // 3) 选曲 / 换一首
-  const wantsNext = /换一首|换首|换一曲|再来一首/.test(text);
+  const wantsNext = /换一首|换首|换一曲|再来一首|换掉|换个/.test(text);
   const selectionVerb = /换成|改用|选用|用|选|要|放|听/.test(text);
   if (nMatch || named || wantsNext || (selectionVerb && /配乐|音乐|曲/.test(text))) {
     if (!plan) {
