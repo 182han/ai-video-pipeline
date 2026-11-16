@@ -35,7 +35,7 @@ function imageBillingText(plan, unitCny) {
 
 // 2026-11-16 契约 §0/§1：全自动链路 = 场景卡 → 逐段出图 → 图生视频；出图后整批停一次审图。
 // 开关默认开启（用户口径「全自动」），状态由调用方存 localStorage（vs_image_per_clip）。
-export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey }) {
+export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady }) {
   if (!plan) return null;
   const est = plan.estimate || {};
   const imgOn = imagePerClip !== false;
@@ -95,6 +95,12 @@ export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggle
           <p className="mt-0.5 text-[10px] leading-[1.6] text-warn">
             出图完成后整批暂停，等你审图后再点继续（不点就不会花视频的钱）。
           </p>
+          ${imageBackendReady === false && html`
+            <p className="mt-0.5 text-[10px] leading-[1.6] text-danger">
+              ⛔ 服务端还是旧进程（info 里没有 image 段）：逐段出图**不会生效**，确认会被拦下。
+              请先重启 3001 再点确认，或关掉本开关走纯文生视频。
+            </p>
+          `}
           ${!hasImageKey && html`
             <p className="mt-0.5 text-[10px] leading-[1.6] text-warn">
               设置里没有「图片生成」的 Key：现在确认会返回「出图未就绪」，不建任务、不扣费。

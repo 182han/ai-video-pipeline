@@ -354,7 +354,9 @@ async function main() {
     check(true, '首页（/）渲染出小智对话页与输入框');
 
     check(await js('!!(window.__e2e && window.__e2e.installed)'), 'fetch stub 已在页面脚本之前装好（execute/state/unpause/adjust 全部拦截）');
-    check((await js('window.__e2e.infoStubCount')) > 0, 'info 补字段拦截已生效（组件挂载时就能拿到 image.unitCny）');
+    // info 是挂载后异步发的：不能只查一次（会偶发 0），等它计数 > 0
+    const infoStubOk = await waitFor('window.__e2e.infoStubCount > 0', 'info 拦截计数', 8000).catch(() => false);
+    check(infoStubOk === true, 'info 补字段拦截已生效（组件挂载时就能拿到 image.unitCny）');
 
     await js(`(() => {
       const ta = document.querySelector('textarea.xz-input');

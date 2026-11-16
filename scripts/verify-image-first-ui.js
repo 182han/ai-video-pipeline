@@ -118,9 +118,18 @@ function slice(src, startRe, endRe, maxLen) {
   // ------------------------------------------------------------
   section('[3] confirmPlan：请求体带 imagePerClip + 5 个图片字段（契约 §1/§3.1）');
   check('POST /api/assistant/execute 仍在', /\/api\/assistant\/execute/.test(assist));
-  check('请求体显式 imagePerClip: imagePerClip === true', /imagePerClip: imagePerClip === true,/.test(assist));
-  check('请求体展开 ...runtime（5 个图片字段随行）',
-    /imagePerClip: imagePerClip === true,[\s\S]{0,80}\.\.\.runtime/.test(assist));
+  check('请求体显式 imagePerClip: imagePerClip === true',
+    /body: JSON\.stringify\(\{[\s\S]{0,300}imagePerClip: imagePerClip === true/.test(assist));
+  // 2026-11-16 集成修订：imagePerClip 放在 `...runtime` 之后（避免被同名键覆盖），
+  // 且 `...runtime` 必须紧跟 `approved: true,`（scripts/verify-assistant.js 的既有静态断言）。
+  check('请求体展开 ...runtime（5 个图片字段随行；且紧跟 approved 以保持既有断言）',
+    /planId: plan\.planId, approved: true, \.\.\.runtime[\s\S]{0,100}imagePerClip: imagePerClip === true/.test(assist));
+  const backendGuard = slice(assist, /if \(imagePerClip && !imageBackendReady\) \{/, /\n    \}/);
+  check('服务端无 image 能力（旧进程）时 confirmPlan 拦截（不误跑纯文生视频）',
+    /!imageBackendReady/.test(assist) && backendGuard.length > 0 && /return;/.test(backendGuard)
+    && /重启 3001/.test(assist));
+  check('PlanCard 显示「服务端还是旧进程」的红色提示（imageBackendReady === false）',
+    /imageBackendReady === false/.test(plan) && /旧进程/.test(plan));
   const warnBlock = slice(assist, /if \(imagePerClip && !runtime\.imageApiKey\) \{/, /\n    \}/);
   check('图片 Key 为空 → 对话里警告（不拦截）', /设置里没有填「图片生成」的 Key/.test(warnBlock));
   check('该警告块内没有 return（确认流程不被拦）', warnBlock.length > 0 && !/return;/.test(warnBlock));
@@ -175,8 +184,8 @@ function slice(src, startRe, endRe, maxLen) {
 
   // ------------------------------------------------------------
   section('[6] xiaozhiPlan.js：计划卡出图行 + 状态条「等待审图」（契约 §1/§2.3）');
-  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey',
-    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey \}\)/.test(plan));
+  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey(+imageBackendReady)',
+    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady \}\)/.test(plan));
   check('计划卡一行「出图：逐段 N 张 → 图生视频」',
     /'出图', imgOn \? `逐段 \$\{plan\.clipCount\} 张 → 图生视频` : '关（纯文生视频）'/.test(plan));
   check('关掉时文案「关（纯文生视频）」', /关（纯文生视频）/.test(plan));

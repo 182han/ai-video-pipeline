@@ -170,6 +170,10 @@ export function Assistant({ page = false } = {}) {
   const imageRuntime = readRuntimeConfig('image');
   const imageKeyPresent = !!imageRuntime.imageApiKey;
   const imageUnitCny = (backend.info && backend.info.image) ? backend.info.image.unitCny : null;
+  // 服务端是否已有「出图」能力（GET /api/assistant/info 的 image 段，2026-11-16 起）。
+  // 旧进程没有这段 → 逐段出图**不会生效**：不暂停、不出图，确认后会按纯文生视频一路跑完
+  // （用户以为只是出图费 ¥12，实际直接花掉整条视频的钱）。所以要拦住，不能只警告。
+  const imageBackendReady = !!(backend.info && backend.info.image);
 
   // 能力探测（只读 GET，不产生费用）
   useEffect(() => {
@@ -493,6 +497,20 @@ export function Assistant({ page = false } = {}) {
           + '开了「逐段出图」却没有 Key，服务端会直接返回「出图未就绪」：不会出图，也不会扣费。'
           + '要出图请先填 Key；不想出图就把计划卡上的「逐段出图」关掉（改走纯文生视频）。'
       }]);
+    }
+    // 服务端还是旧进程（/api/assistant/info 没有 image 段）：出图开关不会生效。
+    // 这里**必须拦住**：不拦的话确认后不会出图、不会暂停审图，会直接按纯文生视频跑完整条任务
+    // （用户按「出图 ¥12」的预期点了确认，实际花掉整条视频的钱）。要么重启服务，要么关开关。
+    if (imagePerClip && !imageBackendReady) {
+      setMsgs((m) => [...m, {
+        role: 'assistant',
+        content: '⛔ 服务端还是旧进程：`/api/assistant/info` 里没有出图能力（image 段），'
+          + '「逐段出图」现在不会生效——不会出图、也不会在出图后暂停，确认后会按**纯文生视频**一路跑完。'
+          + '为避免按错误预期扣费，这次没有提交。请二选一：'
+          + '\n① 重启 3001（node server.js）让出图能力上线后再点确认；'
+          + '\n② 确实只要纯文生视频：先把计划卡上的「逐段出图」关掉，再点确认。'
+      }]);
+      return;
     }
     setXbusy(true);
     try {
@@ -853,6 +871,7 @@ export function Assistant({ page = false } = {}) {
                   onToggleImage=${toggleImagePerClip}
                   unitCny=${imageUnitCny}
                   hasImageKey=${imageKeyPresent}
+                  imageBackendReady=${imageBackendReady}
                 />
               </div>
             `}
@@ -1044,6 +1063,7 @@ export function Assistant({ page = false } = {}) {
               onToggleImage=${toggleImagePerClip}
               unitCny=${imageUnitCny}
               hasImageKey=${imageKeyPresent}
+              imageBackendReady=${imageBackendReady}
             />
           `}
           ${xstate && xstate.state && html`
