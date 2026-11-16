@@ -10,6 +10,10 @@ const storage = require('./storage');
 const redact = require('./utils/redact');
 const { applyTaskDefaults } = require('./taskDefaults');
 const { resolveStages } = require('./pipelineStages');
+const budget = require('./budget');
+// 场景卡（P4）：任务创建时取一轮卡，promptComposer 运行时拼提示词（卡只读）
+const sceneCards = require('./sceneCards');
+const promptComposer = require('./promptComposer');
 
 const DATA_DIR = config.STORAGE.dataDir;
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
@@ -159,6 +163,40 @@ class TaskManager {
         completedAt: null
       });
     }
+    // ===== 场景卡模式（P4）=====
+    // 只读卡库：按 chapter+sequence 取一轮（不放回），缓冲区不参与初始分配；
+    // 提示词由 promptComposer 运行时拼出（不写回卡），任务里记录 scene_key 便于审计。
+    // 不足 180 张（或本次请求超过卡库正片数）直接抛错，由调用方转成明确提示，不静默复用。
+    const sceneCardOption = options.sceneCards;
+    const sceneCardRequested = sceneCardOption === true
+      || (sceneCardOption && typeof sceneCardOption === 'object' && sceneCardOption.enabled === true);
+    let sceneCardPlan = null;
+    if (sceneCardRequested) {
+      if (prompts) {
+        // 服务端入口会先拒绝这个组合；这里兜底给直接调用 createTask 的脚本留痕，
+        // 避免「传了逐行提示词却完全没用上」这种静默行为。
+        console.warn(`[${taskId}] 同时收到 prompts 与 sceneCards：按场景卡模式执行，逐行提示词被忽略`);
+      }
+      sceneCardPlan = sceneCards.allocate(totalClips);
+      for (let i = 0; i < clips.length; i++) {
+        const entry = sceneCardPlan.used[i];
+        const card = sceneCards.getCardById(entry.id);
+        if (!card) {
+          const e = new Error(`场景卡缺失：${entry.id}（卡库文件可能被替换，请核对 assets/scene-cards/v3.3-final.json）`);
+          e.code = 'SCENE_CARDS_MISSING_CARD';
+          throw e;
+        }
+        Object.assign(clips[i], promptComposer.composeClipPatch(card, {
+          theme: clips[i].theme,
+          userPrompt: prompt
+        }));
+      }
+      const firstKey = sceneCardPlan.used[0] ? sceneCardPlan.used[0].scene_key : '';
+      const lastKey = sceneCardPlan.used[sceneCardPlan.used.length - 1]
+        ? sceneCardPlan.used[sceneCardPlan.used.length - 1].scene_key : '';
+      console.log(`[${taskId}] 场景卡：取 ${totalClips} 张（round ${sceneCardPlan.roundId}，${firstKey} → ${lastKey}），本轮不放回`);
+    }
+
     // ===== 配乐配置（整片级，替代旧的逐片段 clipTracks）=====
     // 向后兼容：老前端仍可能传 clipTracks。若全段音轨相同，收敛成整片主曲；
     // 若不一致，取首条并记录迁移痕迹（旧语义已无法表达）。
@@ -264,6 +302,10 @@ class TaskManager {
       // 原始多段提示词（§10A）：持久化用户输入，供历史记录/详情完整展示
       prompts: prompts ? prompts.map(p => ({ text: p.text, theme: p.theme, tag: p.tag, matched: p.matched })) : null,
       model: options.model || 'mock',
+      // 自动重试开关（2026-11-12 用户口径）：
+      //   true  = 生成/质检失败后自动重试（旧行为，API 兼容）
+      //   false = 只尝试一次；失败写入 failedClips，由用户决定是否重新生成
+      autoRetry: options.autoRetry !== false,
       theme: options.theme ?? null,
       // 图生视频（2026-11-11 用户口径）：用图片库里「已通过」的那张图作为首帧。
       // 存 id 而不是文件路径：图片库条目可能被更新/删除，运行时再解析并校验。
@@ -273,6 +315,10 @@ class TaskManager {
       resolution: options.resolution || config.GENERATION.defaultResolution || '720p',
       totalDuration: totalClips * clipDuration,
       clips,
+      // 场景卡取卡计划（P4）：{ roundId, used:[{id,scene_key,chapter,sequence,...}], buffers, ... }；
+      // null = 普通提示词任务。卡文件本身仍是只读输入，这里只存审计所需的最小字段。
+      sceneCards: sceneCardPlan,
+      promptSource: sceneCardPlan ? 'scene-card' : null,
       steps,
       // 配乐：整片多轨时间轴。bgmPlan 为编辑结果（见 processors/bgmPlan.js），
       // bgmResult 为最近一次混音结果；masterPath 是无声母版，改配乐时在它上面重混。
@@ -654,6 +700,22 @@ class TaskManager {
     this._saveTask(taskId);
     console.log(`任务 ${taskId} 状态: ${newStatus}`);
 
+    // 预算结算（2026-11-14）：创建任务时按「段数 × 时长」预扣美元，
+    // 结束/失败时按真正成功的片段数修正，避免失败任务把余额锁死。
+    if (newStatus === 'completed' || newStatus === 'failed') {
+      try {
+        const clips = Array.isArray(task.clips) ? task.clips : [];
+        const success = clips.filter(c => c && c.status === 'success').length;
+        // 合成素材（Mock 降级）不产生真实费用，结算按 0 计，全额退回预扣
+        const synthetic = task.mockFallback === true || task.model === 'mock';
+        const count = synthetic ? 0 : (success > 0 ? success : (newStatus === 'completed' ? (task.totalClips || 0) : 0));
+        const seconds = Number(task.clipDuration) || 0;
+        budget.settle(taskId, count * seconds * budget.videoRate(task.resolution));
+      } catch (e) {
+        console.warn('[budget] 任务结算失败:', e && e.message ? e.message : e);
+      }
+    }
+
     // WebSocket 推送状态变化
     try {
       const progress = this.getProgress(taskId);
@@ -661,6 +723,17 @@ class TaskManager {
       wsManager.broadcastStatusChange(taskId, newStatus, extra);
     } catch (e) {}
 
+    return task;
+  }
+
+  // 场景卡取卡计划持久化（P4）：任务创建时由 createTask 写入；
+  // pipeline 在「补取卡 / buffer 替换」时调用本方法写回，避免直接操作内部对象漏存盘。
+  setSceneCards(taskId, plan) {
+    const task = this.tasks[taskId];
+    if (!task) return null;
+    task.sceneCards = plan || null;
+    if (plan && plan.enabled) task.promptSource = 'scene-card';
+    this._saveTask(taskId);
     return task;
   }
 
