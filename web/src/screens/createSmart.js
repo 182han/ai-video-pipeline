@@ -110,7 +110,10 @@ export function CreateSmartWizard() {
         throw new Error((j && (j.error || (j.errors && j.errors[0] && j.errors[0].error))) || ('HTTP ' + r.status));
       }
       const ids = j.items.map((x) => x.photoId);
-      const pr = await fetch('/api/photos?final=1', { credentials: 'same-origin' });
+      // 2026-11-16 fix（Lead 诊断，实测）：批量出图的记录 isFinal=false（设最终版要求 scienceStatus=passed，
+      // 新图是 unchecked，永远进不了 final 集合），所以用 ?final=1 按 id 查不到 → 卡片显示「无预览」。
+      // 改为全量查询后按 id 匹配；文件缺失由 p.url 空值兜底。
+      const pr = await fetch('/api/photos?includeMissing=1', { credentials: 'same-origin' });
       const pj = await pr.json().catch(() => ({ photos: [] }));
       const all = (pj && pj.photos) || [];
       setPhotos(ids.map((id) => {

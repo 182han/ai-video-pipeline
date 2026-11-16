@@ -1,0 +1,58 @@
+# Lead 修复记录：`/app/create-smart` ③ 出图后「无预览」
+
+> 2026-11-16 13:16（Lead 监督窗口）｜触发：用户在 B 测试里出图 2 张（已花 ¥0.40），卡片显示「无预览」。
+> **与 C 窗口在途改动无关**（`web/src/screens/createSmart.js` 提交时是干净的），属新向导第一次真实走到 ③ 才暴露的既有缺陷。
+
+## 1. 现象
+
+- `/app/create-smart` 步骤 ③：提示「已出图 2 张（¥0.40）」，但两张卡片都是「无预览」，看不到图。
+
+## 2. 根因（实测，非推断）
+
+`createSmart.js` 出图后用 **`GET /api/photos?final=1`** 取预览地址，再按 `photoId` 匹配。
+但批量出图（`src/processors/imageBatch.js`）入库的记录 **`isFinal` 默认 false**：
+
+- `imageBatch.js` ingest 未传 `isFinal` → `photoLibrary.js:177` `isFinal: data.isFinal === true` → **false**；
+- 而把它设为最终版（`PUT /api/photos/:id {isFinal:true}`）要求 **`scienceStatus === 'passed'`**（`server.js:916`），
+  新图是 `unchecked` —— **结构上永远进不了 `?final=1` 的结果集**。
+- 于是前端 `all.find(p => p.id === id)` 落空 → `url: ''` → 渲染「无预览」（`createSmart.js:253` 的兜底分支）。
+
+**只读实测证据**（`.scratch/auto_chain/diag_photo_preview.js`，登录后仅 GET，零计费）：
+
+```
+GET /api/photos?final=1        → HTTP 200, photos=6
+  smart_mwit3r22_img_0: found=false
+  smart_mwit3r22_img_1: found=false
+GET /api/photos?includeMissing=1 → HTTP 200, photos=21
+  smart_mwit3r22_img_0: found=true url=/clips/smart_mwit3r22_img_0_graded.png status=approved isFinal=false
+  smart_mwit3r22_img_1: found=true url=/clips/smart_mwit3r22_img_1_graded.png status=approved isFinal=false
+/clips/smart_mwit3r22_img_0_graded.png → HTTP 200 image/png 2881533 bytes
+/clips/smart_mwit3r22_img_1_graded.png → HTTP 200 image/png 2659858 bytes
+```
+
+ffprobe：两张均 `png 1696x960`（2881533 / 2659858 字节）——**图确实生成成功，文件在，只是前端没取到地址**。
+
+## 3. 改动（1 行，前端静态文件，刷新即生效，**不需要重启 3001**）
+
+`web/src/screens/createSmart.js:116`
+
+```diff
+- const pr = await fetch('/api/photos?final=1', { credentials: 'same-origin' });
++ // 批量出图 isFinal=false（设最终版要求 scienceStatus=passed），?final=1 按 id 查不到 → 无预览
++ const pr = await fetch('/api/photos?includeMissing=1', { credentials: 'same-origin' });
+```
+
+语法门：`node --check`（改后 ESM 副本）**exit 0**。
+
+## 4. 未修 / 待产品决定
+
+- **库 · 图片 tab 仍是「最终版」口径**（`inventory.js:1346` 也读 `?final=1`，当前 6 张）。
+  新出图（`isFinal=false`）**不会出现在库里**，用户想事后审/删这 2 张图只能靠接口。
+  这是既有产品口径（2026-11-15「最终版」），要不要放宽需用户拍板——**本次未动**。
+- 已生成但未审核的图，`scienceStatus=unchecked` 时无法设最终版；若将来要「通过即最终」，需先过科学审查链路。
+
+## 5. 给 C 窗口的提示
+
+- 你改 `server.js` / `imageGen.js` / `pipeline.js` 时**不要覆盖** `web/src/screens/createSmart.js:116` 这一行。
+- 若你把「场景卡→逐段出图→i2v」接到后台（30 段出图），**同样会遇到 `?final=1` 的口径问题**：
+  后台自己拿 `clip.photoId` 不经过这个查询，不受影响；但任何**前端展示**新出图的地方都要避开 `?final=1`。
