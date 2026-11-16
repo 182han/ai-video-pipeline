@@ -54,7 +54,7 @@ export function TemplatesView() {
     const en = Array.isArray(t.styleEnhancers) ? t.styleEnhancers.slice(0, 3).join('，') : '';
     const text = [kw ? kw + '的画面' : t.name, en].filter(Boolean).join('，');
     promptBus.setPrompt(text + '。');
-    navigate('/');
+    navigate('/create');
   }
 
   async function saveRules() {
@@ -121,7 +121,7 @@ export function TemplatesView() {
         <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">模板库</h1>
         <span className="text-[11px] text-ink3 font-num">${list.length} 个</span>
         <span className="flex-1"></span>
-        <button onClick=${() => navigate('/')}
+        <button onClick=${() => navigate('/create')}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]">返回创作</button>
         <button onClick=${() => setEditing({ __isNew: true, name: '', keywords: '', styleEnhancers: '', negative: '' })}
           className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">＋ 新增模板</button>

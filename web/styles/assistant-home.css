@@ -1,0 +1,481 @@
+/* ============================================================
+   小智首页（2026-11-16）
+   ------------------------------------------------------------
+   整页对话：可收起气泡导航 + 大球 + 介绍卡 + 微信式底部输入框；
+   深绿/祖母绿渐变与大球（青绿粒子）呼应，保留 P2/P3 暗色 + 香槟金。
+   本文件为手写 CSS（app.css 是离线 Tailwind 产物，新文件里的新类不会自动生成）。
+   ============================================================ */
+
+.xz-root {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--ink);
+  background:
+    radial-gradient(1100px 720px at 52% -12%, rgba(52, 211, 153, .22), transparent 62%),
+    radial-gradient(820px 560px at 88% 12%, rgba(34, 211, 238, .10), transparent 60%),
+    radial-gradient(760px 520px at 6% 88%, rgba(16, 185, 129, .10), transparent 62%),
+    linear-gradient(158deg, #05130f 0%, #08251c 42%, #04110d 100%);
+}
+
+/* 极光/星尘颗粒感：纯 CSS，无图片依赖 */
+.xz-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 18% 26%, rgba(214, 179, 106, .55), transparent 60%),
+    radial-gradient(1px 1px at 72% 18%, rgba(167, 243, 208, .55), transparent 60%),
+    radial-gradient(1px 1px at 84% 62%, rgba(214, 179, 106, .35), transparent 60%),
+    radial-gradient(1.5px 1.5px at 36% 74%, rgba(110, 231, 183, .35), transparent 60%);
+  opacity: .55;
+}
+
+/* ===== 左侧可收起气泡导航 ===== */
+.xz-rail {
+  position: relative;
+  z-index: 6;
+  flex: 0 0 212px;
+  width: 212px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 14px 16px;
+  background: linear-gradient(180deg, rgba(6, 24, 18, .82) 0%, rgba(4, 15, 11, .62) 100%);
+  border-right: 1px solid rgba(255, 255, 255, .06);
+  backdrop-filter: blur(16px);
+  transition: flex-basis .22s ease, width .22s ease, padding .22s ease;
+}
+.xz-rail.is-collapsed {
+  flex-basis: 64px;
+  width: 64px;
+  padding: 18px 9px 16px;
+}
+
+.xz-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 22px;
+  padding: 0 4px;
+}
+.xz-rail.is-collapsed .xz-rail-head {
+  justify-content: center;
+  padding: 0;
+}
+
+.xz-brand {
+  font-family: var(--font-display, 'Bodoni MT', Georgia, serif);
+  font-size: 13px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity .16s ease;
+  user-select: none;
+}
+.xz-rail.is-collapsed .xz-brand { display: none; }
+
+/* 三个点：只负责收起/展开，不是退出 */
+.xz-dots {
+  margin-left: auto;
+  width: 30px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  background: rgba(255, 255, 255, .04);
+  color: var(--ink2);
+  font-size: 13px;
+  letter-spacing: 1px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+.xz-dots:hover {
+  color: #d1fae5;
+  border-color: rgba(52, 211, 153, .35);
+  background: rgba(52, 211, 153, .12);
+}
+.xz-rail.is-collapsed .xz-dots { margin-left: 0; }
+
+.xz-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+.xz-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  height: 42px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, .022);
+  color: var(--ink2);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.xz-nav-item:hover {
+  color: #ecfff6;
+  background: rgba(52, 211, 153, .10);
+  border-color: rgba(52, 211, 153, .26);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
+  transform: translateY(-1px);
+}
+.xz-nav-item:focus-visible {
+  outline: 2px solid rgba(52, 211, 153, .55);
+  outline-offset: 2px;
+}
+.xz-nav-ico {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .05);
+  color: #b9d8cc;
+  font-size: 11px;
+}
+.xz-nav-item:hover .xz-nav-ico {
+  background: rgba(52, 211, 153, .16);
+  color: #d1fae5;
+}
+.xz-nav-label { overflow: hidden; text-overflow: ellipsis; }
+.xz-rail.is-collapsed .xz-nav-item {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto;
+  padding: 0;
+  justify-content: center;
+}
+.xz-rail.is-collapsed .xz-nav-label { display: none; }
+
+.xz-rail-foot { margin-top: auto; padding-top: 12px; }
+
+/* ===== 主区 ===== */
+.xz-main {
+  position: relative;
+  z-index: 3;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.xz-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.xz-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  display: flex;
+  flex-direction: column;
+}
+.xz-stage {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 36px 32px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+/* 空态（还没有消息）：大球 + 介绍卡在输入框上方垂直居中，收掉页面下半截的空洞 */
+.xz-stage.is-empty {
+  margin-top: auto;
+  margin-bottom: auto;
+  padding-bottom: 44px;
+}
+
+/* 大球 + 标题 */
+.xz-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 0 2px;
+  transition: gap .24s ease, padding .24s ease;
+}
+.xz-orb-wrap {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  flex: 0 0 auto;
+  transition: width .28s ease, height .28s ease;
+}
+.xz-orb-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 211, 153, .22) 0%, rgba(34, 211, 238, .10) 42%, transparent 68%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+.xz-orb-wrap canvas { position: relative; z-index: 1; }
+
+.xz-title-block { text-align: center; }
+.xz-kicker {
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: rgba(167, 243, 208, .60);
+  font-family: var(--font-num, 'SF Mono', Consolas, monospace);
+}
+.xz-title {
+  margin: 6px 0 0;
+  font-family: var(--font-display, 'Bodoni MT', Georgia, serif);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  color: #f2fbf7;
+}
+.xz-top.is-compact {
+  flex-direction: row;
+  justify-content: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+.xz-top.is-compact .xz-orb-wrap { width: 56px; height: 56px; }
+.xz-top.is-compact .xz-orb-wrap::before { inset: -12px; }
+.xz-top.is-compact .xz-title-block { text-align: left; }
+.xz-top.is-compact .xz-title { font-size: 15px; margin: 0; }
+.xz-top.is-compact .xz-kicker { font-size: 9.5px; letter-spacing: .18em; }
+
+/* 介绍卡：大球与对话窗口之间（1–2 句 agent 开场白 + 建议 chips） */
+.xz-intro {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 22px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(52, 211, 153, .20);
+  background:
+    linear-gradient(135deg, rgba(10, 40, 31, .82) 0%, rgba(6, 23, 18, .66) 58%, rgba(6, 20, 16, .60) 100%);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+.xz-intro::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  top: -80px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 211, 153, .16), transparent 66%);
+  pointer-events: none;
+}
+.xz-intro-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.6;
+  font-weight: 500;
+  color: #f2fbf7;
+  letter-spacing: .01em;
+}
+.xz-intro-kicker {
+  margin: 0 0 7px;
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: rgba(214, 179, 106, .85);
+  font-family: var(--font-num, 'SF Mono', Consolas, monospace);
+}
+.xz-intro-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--ink2);
+}
+.xz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+.xz-chip {
+  height: 31px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .035);
+  color: var(--ink2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+.xz-chip:hover {
+  color: #d1fae5;
+  border-color: rgba(52, 211, 153, .35);
+  background: rgba(52, 211, 153, .10);
+  transform: translateY(-1px);
+}
+.xz-chip:active { transform: translateY(0); }
+
+/* 消息区 */
+.xz-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+}
+.xz-msg-row { display: flex; }
+.xz-msg-row.is-user { justify-content: flex-end; }
+.xz-msg-row.is-bot { justify-content: flex-start; }
+.xz-bubble {
+  max-width: min(80%, 640px);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 16px;
+}
+.xz-bubble.is-user {
+  color: #11170f;
+  background: linear-gradient(135deg, #e3c27d 0%, #d0a95d 100%);
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .22);
+}
+.xz-bubble.is-bot {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .055);
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-bottom-left-radius: 6px;
+  backdrop-filter: blur(8px);
+}
+.xz-block {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+}
+.xz-warning {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(224, 179, 79, .28);
+  background: rgba(224, 179, 79, .08);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--warn);
+}
+
+/* 底部输入框：像微信一样固定在主区底部 */
+.xz-composer-wrap {
+  flex: 0 0 auto;
+  padding: 8px 32px 16px;
+  background: linear-gradient(180deg, rgba(4, 15, 11, 0) 0%, rgba(4, 15, 11, .72) 46%, rgba(4, 15, 11, .92) 100%);
+}
+.xz-composer {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.xz-inputbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 10px 10px 10px 13px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  background: rgba(9, 28, 22, .88);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(18px);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.xz-inputbar:focus-within {
+  border-color: rgba(52, 211, 153, .38);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, .42), 0 0 0 3px rgba(52, 211, 153, .08);
+}
+.xz-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 140px;
+  padding: 8px 2px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+}
+.xz-input::placeholder { color: rgba(167, 179, 173, .60); }
+.xz-input:disabled { opacity: .45; }
+.xz-send {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e3c27d 0%, #cba75c 100%);
+  color: #11170f;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: filter .16s ease, transform .16s ease;
+}
+.xz-send:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
+.xz-send:disabled { opacity: .32; cursor: not-allowed; }
+.xz-footnote {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  color: rgba(167, 179, 173, .62);
+}
+
+/* 窄屏：导航自动收窄，主区留白收敛 */
+@media (max-width: 1080px) {
+  .xz-stage { padding: 26px 20px 14px; }
+  .xz-composer-wrap { padding: 8px 20px 14px; }
+}
+@media (max-width: 860px) {
+  .xz-rail { flex-basis: 64px; width: 64px; padding: 16px 9px; }
+  .xz-rail .xz-brand { display: none; }
+  .xz-rail .xz-dots { margin-left: 0; }
+  .xz-rail .xz-nav-item { width: 44px; height: 44px; padding: 0; justify-content: center; margin: 0 auto; }
+  .xz-rail .xz-nav-label { display: none; }
+  .xz-orb-wrap { width: 120px; height: 120px; }
+  .xz-title { font-size: 22px; }
+  .xz-stage { padding: 20px 14px 12px; }
+  .xz-composer-wrap { padding: 8px 12px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xz-rail, .xz-orb-wrap, .xz-top, .xz-nav-item, .xz-chip, .xz-send { transition: none !important; }
+  .xz-scroll { scroll-behavior: auto; }
+}

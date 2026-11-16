@@ -460,7 +460,7 @@ export function PhotosPanel({ onChanged }) {
         photo = j.photo || { ...p, status: 'approved' };
       }
       setSeedPhoto(photo);
-      navigate('/');
+      navigate('/create');
     } catch (e) { setErr('带入创作失败：' + e.message); }
   }
 

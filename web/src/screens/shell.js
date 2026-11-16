@@ -21,6 +21,7 @@ import { navigate } from '../router.js';
 import { JobBar, useTasksPoll } from '../components/jobBar.js';
 import { Assistant } from '../components/assistant.js';
 import { Boundary } from '../components/boundary.js';
+import { AssistantPage } from './assistantPage.js';
 import { CreateWizard } from './create.js';
 import { GenView } from './gen.js';
 import { LibraryView, MusicView } from './inventory.js';
@@ -36,13 +37,16 @@ const { useEffect } = React;
 // 历史记录与产出已于 P6 下线（不再有视图/路由项）；失败任务改由「库 · 成片」的未完成卡片承接。
 // 配乐入口并入剪辑台。
 const NAV = [
-  { key: 'create', route: '/', label: '创作', icon: '◆' },
+  { key: 'create', route: '/create', label: '创作', icon: '◆' },
   { key: 'edit', route: '/edit', label: '剪辑', icon: '✂' },
   { section: '素材' },
   { key: 'library', route: '/library', label: '库', icon: '▤' }
 ];
 
 function viewOf(route) {
+  // 2026-11-16：登录后的 `/` = 整页「小智」对话页；六步向导保留在 /create。
+  if (route === '/' || route === '') return 'home';
+  if (route.startsWith('/create')) return 'create';
   if (route.startsWith('/edit')) return 'edit';
   if (route.startsWith('/clips')) return 'library';
   if (route.startsWith('/photos')) return 'library';
@@ -79,7 +83,7 @@ function RailItem({ item, active }) {
 
 function Rail({ view }) {
   const routeOf = {
-    create: '/', edit: '/edit', library: '/library', music: '/music'
+    create: '/create', edit: '/edit', library: '/library', music: '/music'
   };
   return html`
     <aside className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
@@ -105,6 +109,11 @@ export function AppShell({ route }) {
 
   // 切视图时回到顶部（长列表否则会保留滚动位置）
   useEffect(() => { window.scrollTo(0, 0); }, [view]);
+
+  // 首页是整页小智对话（含自己的可收起导航），不套全局左栏、任务条与悬浮球。
+  if (view === 'home') {
+    return html`<${Boundary}><${AssistantPage} /></${Boundary}>`;
+  }
 
   // 剪辑台是整屏工作台：不套全局左栏与任务条（2026-11-04）
   if (view === 'edit') {

@@ -56,7 +56,7 @@ export function GenView({ tasks }) {
         <div className="text-center">
           <p className="font-display text-[20px] text-ink3">当前没有进行中的任务</p>
           <button
-            onClick=${() => navigate('/')}
+            onClick=${() => navigate('/create')}
             className="mt-3 h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px]"
           >去创作</button>
         </div>
@@ -79,7 +79,7 @@ export function GenView({ tasks }) {
         <span className="flex-1"></span>
         <${PauseButton} taskId=${task.taskId} status=${task.status} onChanged=${() => {}} />
         <button
-          onClick=${() => navigate('/')}
+          onClick=${() => navigate('/create')}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
         >退出观看</button>
       </div>

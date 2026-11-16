@@ -930,7 +930,7 @@ export function EditorView() {
   return html`
     <div className="ed-root">
       <header className="ed-top">
-        <button className="ed-back" onClick=${() => navigate('/')} title="返回工作台">←</button>
+        <button className="ed-back" onClick=${() => navigate('/create')} title="返回工作台">←</button>
         <span className="ed-brand">剪辑台</span>
         <input
           className="ed-name"
