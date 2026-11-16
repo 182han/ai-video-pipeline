@@ -165,7 +165,15 @@ export function CreateSmartWizard() {
   const list = showAll ? prompts : prompts.slice(0, 12);
 
   return html`
-    <div className="px-6 py-5 max-w-[980px]" style=${{ paddingBottom: '90px' }}>
+    <div className="xz2 px-6 py-5" style=${{ paddingBottom: '90px' }}>
+      <style>${`
+        .xz2 { max-width: 1180px; }
+        .xz2 div, .xz2 p, .xz2 span, .xz2 label { font-size: 13px; line-height: 1.75; }
+        .xz2 textarea { font-size: 13.5px; line-height: 1.8; }
+        .xz2 button { font-size: 13px; }
+        .xz2 h1 { font-size: 24px; }
+        .xz2 .rounded-\\[8px\\] { padding: 18px 20px; }
+      `}</style>
       <div className="flex items-baseline gap-3 mb-1">
         <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">创作</h1>
         <span className="text-[11px] text-ink3">场景卡 → 提示词 → 出图（可选）→ 视频 → 拼接 → 配乐</span>
