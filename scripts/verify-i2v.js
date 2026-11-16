@@ -38,8 +38,8 @@ console.log('================================================================');
     const { getI2VInfo, listI2VModels } = require(path.join(APP, 'src', 'generators', 'i2vSupport'));
     check(!!getI2VInfo('kling'), '能力表：kling 已实现');
     check(!!getI2VInfo('seedance'), '能力表：seedance 已实现');
-    check(!!getI2VInfo('openai-video'), '能力表：openai-video 已接（new-api Sora 格式，标注未实测）');
-    check((getI2VInfo('openai-video') || {}).input === 'multipart-input_reference', 'openai-video 能力：multipart input_reference');
+    check(!!getI2VInfo('openai-video'), '能力表：openai-video 已接（NewAPI /video/generations，URL 已实测）');
+    check((getI2VInfo('openai-video') || {}).input === 'json-image-url-or-base64', 'openai-video 能力：JSON image（URL 或 Base64）');
     check(getI2VInfo('dashscope') && getI2VInfo('dashscope').input === 'oss-temp-upload',
       '能力表：dashscope 已接（官方临时上传 oss://，无需用户公网存储）');
     check(listI2VModels().includes('dashscope'), '能力表：dashscope 在 i2v 清单里');
@@ -90,39 +90,93 @@ console.log('================================================================');
     check(threw, 'Seedance：第三方中转带图时明确报错（不静默丢图）');
     check(calls.length === 0, 'Seedance：第三方中转带图时没有发请求（不白花一分钱）');
 
-    // ---------- OpenAI 兼容（WhaleTV / new-api）：multipart input_reference ----------
+    // ---------- OpenAI 兼容（WhaleTV / NewAPI）：/video/generations + image ----------
     const OA = require(path.join(APP, 'src', 'generators', 'openaiVideo'));
     const IMG_W = { base64: 'QUJDRA==', dataUrl: 'data:image/png;base64,QUJDRA==', mime: 'image/png', width: 1696, height: 960 };
 
+    // 1) 图生视频：有公网 URL → 优先传 URL（2026-11-16 实测通过的形态）
     calls.length = 0;
-    stubFetch(() => jsonResponse({ id: 'whale_i2v_1', status: 'queued' }));
+    stubFetch(() => jsonResponse({ id: 'whale_i2v_1', task_id: 'whale_i2v_1', status: 'queued' }));
     const oa = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
-    const oaRes = await oa.generate('雪山推近', { duration: 5, image: IMG_W });
+    const oaRes = await oa.generate('雪山推近', { duration: 5, image: { ...IMG_W, url: 'https://img.example/a.png' } });
     const oaCall = calls[0];
-    const form = oaCall && oaCall.rawBody;
-    check(oaCall && oaCall.url.endsWith('/videos'), 'WhaleTV：仍提交 /videos');
-    check(form instanceof FormData, 'WhaleTV：图生视频用 multipart/form-data（不是 JSON）');
-    check(oaCall && oaCall.opts.headers && oaCall.opts.headers['Content-Type'] === undefined,
-      'WhaleTV：不手写 Content-Type（交给 fetch 带 boundary）');
-    if (form instanceof FormData) {
-      check(form.get('model') === 'wan3.0-video', 'WhaleTV：multipart 带 model');
-      check(form.get('seconds') === '5', 'WhaleTV：multipart 带 seconds=5');
-      check(form.get('size') === '1280x720', 'WhaleTV：size 按 16:9 图片选 1280x720', String(form.get('size')));
-      const ref = form.get('input_reference');
-      check(ref && typeof ref.size === 'number' && ref.size > 0, 'WhaleTV：带非空 input_reference 文件');
-      check(ref && ref.type === 'image/png', 'WhaleTV：input_reference MIME 正确', ref && ref.type);
-    } else {
-      check(false, 'WhaleTV：multipart 表单不可读（FormData 未生成）');
-    }
-    check(oaRes.taskId === 'whale_i2v_1', 'WhaleTV：返回任务 id');
+    check(oaCall && oaCall.url.endsWith('/video/generations'), 'WhaleTV：图生视频走 /video/generations（NewAPI 形态）', oaCall && oaCall.url);
+    check(oaCall && oaCall.opts.headers && oaCall.opts.headers['Content-Type'] === 'application/json', 'WhaleTV：JSON 请求体');
+    check(oaCall && oaCall.body && oaCall.body.model === 'wan3.0-video', 'WhaleTV：body.model');
+    check(oaCall && oaCall.body && oaCall.body.image === 'https://img.example/a.png', 'WhaleTV：有公网 URL 时优先传 URL');
+    check(oaCall && oaCall.body && oaCall.body.duration === 5, 'WhaleTV：duration=5（数字，不是 seconds 字符串）');
+    check(oaRes.taskId === 'whale_i2v_1', 'WhaleTV：返回 task_id');
 
-    // 不带图仍是原来的 JSON（文生视频零回归）
+    // 2) 图生视频：没有 URL → base64（未实测，但代码必须明确走这条路而不是丢图）
     calls.length = 0;
-    stubFetch(() => jsonResponse({ id: 'whale_t2v_1', status: 'queued' }));
+    stubFetch(() => jsonResponse({ task_id: 'whale_i2v_2', id: 'whale_i2v_2' }));
+    const oaB64 = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
+    const oaB64Res = await oaB64.generate('雪山推近', { duration: 5, image: IMG_W });
+    check(calls[0] && calls[0].body && calls[0].body.image === 'QUJDRA==', 'WhaleTV：无 URL 时传裸 base64（该形态未实测）');
+    check(oaB64Res.taskId === 'whale_i2v_2', 'WhaleTV：base64 路径也返回 task_id');
+
+    // 3) 查询：完成态（2026-11-16 实测结构 data.status=SUCCESS + data.result_url）
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ code: 'success', data: { status: 'SUCCESS', progress: '100%', result_url: 'https://cdn.example/v.mp4' } }));
+    const stDone = await oa.getStatus('whale_i2v_1');
+    check(stDone.status === 'completed' && stDone.videoUrl === 'https://cdn.example/v.mp4',
+      'WhaleTV：查询完成态 → completed + result_url', JSON.stringify(stDone));
+
+    // 4) 查询：生成中（IN_PROGRESS + "30%"）
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ code: 'success', data: { status: 'IN_PROGRESS', progress: '30%' } }));
+    const stProc = await oa.getStatus('whale_i2v_1');
+    check(stProc.status === 'processing' && stProc.progress === 30, 'WhaleTV：IN_PROGRESS → processing + progress 30',
+      JSON.stringify(stProc));
+
+    // 5) 查询：失败（FAILED + fail_reason）
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ code: 'success', data: { status: 'FAILED', fail_reason: '内容不合规' } }));
+    const stBad = await oa.getStatus('whale_i2v_1');
+    check(stBad.status === 'failed' && /内容不合规/.test(String(stBad.error)), 'WhaleTV：FAILED → failed + fail_reason');
+
+    // 6) 查询：旧 /videos 任务（/video/generations 404）→ 自动回退旧端点（零回归）
+    let legacyHit = 0;
+    calls.length = 0;
+    stubFetch((call) => {
+      if (call.url.includes('/video/generations/')) return { ok: false, status: 404, text: async () => '{}', json: async () => ({}) };
+      legacyHit++;
+      return jsonResponse({ id: 'whale_t2v_1', status: 'completed', progress: 100 });
+    });
+    const stLegacy = await oa.getStatus('whale_t2v_1');
+    check(stLegacy.status === 'completed' && legacyHit === 1, 'WhaleTV：新端点 404 → 回退 /videos/{id}（旧任务零回归）');
+
+    // 7) 取片：result_url 直链（不需要 Bearer）→ 落盘 + MP4 头校验
+    const os = require('os');
+    const fs2 = require('fs');
+    const path2 = require('path');
+    const tmpDir = fs2.mkdtempSync(path2.join(os.tmpdir(), 'i2v-url-'));
+    const fakeMp4 = Buffer.alloc(4096);
+    fakeMp4.write('ftypisom', 4, 'ascii');
+    calls.length = 0;
+    stubFetch((call) => {
+      if (call.url.includes('/video/generations/')) {
+        return jsonResponse({ code: 'success', data: { status: 'SUCCESS', result_url: 'https://cdn.example/v.mp4' } });
+      }
+      return { ok: true, status: 200, arrayBuffer: async () => fakeMp4 };
+    });
+    const oaDl = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
+    await oaDl.getStatus('whale_dl_1');
+    const dlFile = path2.join(tmpDir, 'out.mp4');
+    const dlOk = await oaDl.downloadVideo('whale_dl_1', dlFile);
+    check(dlOk === true && fs2.existsSync(dlFile) && fs2.statSync(dlFile).size === fakeMp4.length,
+      'WhaleTV：downloadVideo 用 result_url 直链落盘成功');
+    check(fs2.existsSync(dlFile) && fs2.readFileSync(dlFile).subarray(4, 8).toString('ascii') === 'ftyp',
+      'WhaleTV：直链下载产物是 MP4（ftyp）');
+    try { fs2.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+
+    // 不带图仍是旧 JSON 文生视频（零回归）
+    calls.length = 0;
+    stubFetch(() => jsonResponse({ id: 'whale_t2v_2', status: 'queued' }));
     const oa2 = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
     await oa2.generate('纯文字', { duration: 5 });
     check(calls[0] && calls[0].body && calls[0].body.model === 'wan3.0-video', 'WhaleTV：不带图仍走 JSON 文生视频（零回归）');
-    check(calls[0] && typeof calls[0].rawBody === 'string', 'WhaleTV：文生视频请求体仍是 JSON 字符串');
+    check(calls[0] && calls[0].url.endsWith('/videos'), 'WhaleTV：文生视频仍打 /videos（旧形态不变）');
 
     // ---------- 静态接线：pipeline / server ----------
     const fs = require('fs');

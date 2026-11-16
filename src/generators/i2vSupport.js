@@ -23,9 +23,11 @@ const MODELS = Object.freeze({
     note: '火山官方：content 追加 {type:"image_url", image_url:{url}, role:"first_frame"}；官方称支持 URL / Base64，具体编码形态未实测'
   },
   'openai-video': {
-    input: 'multipart-input_reference',
-    verified: 'docs(new-api)-unverified-relay',
-    note: 'WhaleTV / new-api 的 Sora 格式：POST /v1/videos multipart，input_reference 为图片文件，size 需与图片宽高一致；中转是否实现该字段未实测'
+    input: 'json-image-url-or-base64',
+    verified: 'real-url-2026-11-16',
+    note: 'WhaleTV / new-api：POST /v1/video/generations JSON，image 支持 URL/Base64；'
+      + '**公网 URL 已实测通过**（wan3.0-video、5 秒 → SUCCESS，完成态给 result_url 签名直链 24h）；'
+      + 'base64 形态未实测（文档称支持，失败会抛厂商原文，不静默退回文生视频）'
   },
   dashscope: {
     input: 'oss-temp-upload',

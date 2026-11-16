@@ -1,10 +1,10 @@
-﻿// ============================================================
+// ============================================================
 // P5 验收：小智计划卡 + WhaleTV 中转（openai-video）通道 —— 零计费、零网络
-// 2026-11-16 14:0x 口径变更：小智**默认改为百炼官方 dashscope**（中转图生视频实测 400），
-// WhaleTV 保留为「用户显式说中转」时的可选通道；本套件继续覆盖该通道自身的请求体/价目。
+// 2026-11-16 19:23 真实测试后口径更新：中转**图生视频可用**（POST /v1/video/generations + 公网图片 URL
+// → 200 task_id → SUCCESS → result_url 签名直链）；本套件继续覆盖该通道自身的请求体/价目。
 // ------------------------------------------------------------
 // 做法：替换全局 fetch 为「记录器」，直接调用生成器，断言它将要发出的
-// POST {baseUrl}/videos 请求体（model / prompt / seconds / 鉴权头 / 图生视频 multipart）。
+// POST {baseUrl}/videos（文生视频）与 POST {baseUrl}/video/generations（图生视频，JSON+image）请求体。
 // 不发起任何真实请求，不创建任务，不产生费用。
 //
 // 覆盖：
@@ -13,7 +13,7 @@
 //   [3] 生成器请求体：POST {base}/videos，model/prompt/seconds，Bearer 鉴权
 //   [4] seconds 边界：10/15 原样、60 夹到 30、缺省 5
 //   [5] 运行时 Key 不再降级 Mock（createGenerator 带 apiKey）
-//   [6] 图生视频走 multipart，含 input_reference / size / seconds
+//   [6] 图生视频：POST {base}/video/generations JSON，image 优先 URL、其次 base64
 //   [7] 非 2xx 与缺 id 都明确报错，不伪装成功
 //
 // 用法：cd app && node scripts/verify-whaletv-video.js
@@ -121,25 +121,27 @@ function restoreFetch() { global.fetch = origFetch; }
   ok('无 Key 且服务端未配 → 明确降级 Mock 并打标（可被识别）', noKey && noKey.fallbackToMock === true && noKey.requestedModel === 'openai-video',
     noKey && String(noKey.name));
 
-  // ================= [6] 图生视频 multipart =================
-  console.log('\n[6] 图生视频：multipart + input_reference');
+  // ================= [6] 图生视频：NewAPI /video/generations + image =================
+  console.log('\n[6] 图生视频：POST /video/generations JSON + image（URL 优先 / base64 兜底）');
   installFetch();
   const gen3 = new OpenAICompatibleVideoGenerator({ apiKey: 'k', baseUrl: 'https://relay.example.test/v1' });
   const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   await gen3.generate('图生视频测试', { duration: 10, image: { base64: png1x1, mime: 'image/png', width: 1280, height: 720 } });
   const c3 = captured[0] || { url: '', init: {} };
-  ok('图生视频也打 {base}/videos', c3.url === 'https://relay.example.test/v1/videos', c3.url);
-  const isForm = c3.init.body && typeof c3.init.body.entries === 'function';
-  ok('body 是 multipart（FormData）', !!isForm, isForm ? 'FormData' : typeof c3.init.body);
-  let fields = {};
-  if (isForm) {
-    for (const [k, v] of c3.init.body.entries()) fields[k] = (typeof v === 'string') ? v : `[file:${v && v.size}]`;
-  }
-  ok('含 input_reference 文件字段', Object.prototype.hasOwnProperty.call(fields, 'input_reference'), JSON.stringify(fields));
-  ok('含 size（按图片宽高比 1280x720）', fields.size === '1280x720', String(fields.size));
-  ok('含 seconds = 10', fields.seconds === '10', JSON.stringify(fields.seconds));
-  ok('Content-Type 由 fetch 自动生成（不手工塞 JSON）',
-    !((c3.init.headers || {})['Content-Type']), String((c3.init.headers || {})['Content-Type']));
+  ok('图生视频打 {base}/video/generations', c3.url === 'https://relay.example.test/v1/video/generations', c3.url);
+  const b3 = (() => { try { return JSON.parse(c3.init.body); } catch (e) { return null; } })();
+  ok('body 是 JSON（不是 multipart）', !!b3 && typeof c3.init.body === 'string', typeof c3.init.body);
+  ok('含 image（无公网 URL 时传 base64）', b3 && b3.image === png1x1, b3 ? String(b3.image).slice(0, 12) + '…' : '');
+  ok('含 duration = 10', b3 && b3.duration === 10, JSON.stringify(b3 && b3.duration));
+  ok('Content-Type = application/json', (c3.init.headers || {})['Content-Type'] === 'application/json',
+    String((c3.init.headers || {})['Content-Type']));
+
+  // 有公网 URL 时优先 URL（2026-11-16 实测通过的形态）
+  installFetch();
+  await gen3.generate('图生视频 URL', { duration: 5, image: { url: 'https://img.example/a.png', base64: png1x1, mime: 'image/png' } });
+  const c3b = captured[0] || { url: '', init: {} };
+  const b3b = (() => { try { return JSON.parse(c3b.init.body); } catch (e) { return null; } })();
+  ok('有公网 URL 时 image 用 URL（优先）', b3b && b3b.image === 'https://img.example/a.png', b3b && b3b.image);
 
   // ================= [7] 错误路径 =================
   console.log('\n[7] 错误路径不伪装成功');

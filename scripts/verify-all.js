@@ -335,7 +335,7 @@ const SUITES = [
     name: 'whaletv-video',
     script: 'verify-whaletv-video.js',
     group: 'fast',
-    desc: 'P5 默认走 WhaleTV 中转（openai-video）：计划卡 ¥180/$30、按秒价目、POST /videos body(model/prompt/seconds)、seconds 边界、图生视频 multipart（stub fetch 零花费）'
+    desc: 'WhaleTV 中转（openai-video）：计划卡 ¥180/$30、按秒价目、POST /videos 文生视频 body(model/prompt/seconds)、seconds 边界、图生视频 POST /video/generations JSON+image（URL 优先/base64 兜底，stub fetch 零花费）'
   },
   {
     name: 'p6-offline',

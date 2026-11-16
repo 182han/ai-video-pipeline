@@ -5,6 +5,9 @@
 //   POST {base}/videos {model,prompt,seconds} → {id,status:'queued'}
 //   GET  {base}/videos/{id}                   → {status:'queued|in_progress|completed',progress}
 //   GET  {base}/videos/{id}/content           → video/mp4（要 Bearer；completed 不给 URL）
+// 2026-11-16 追加：**图生视频**走 NewAPI 形态 POST {base}/video/generations（JSON + image），
+//   查询 GET {base}/video/generations/{task_id}（data.status / data.result_url）——
+//   那部分由 scripts/verify-i2v.js 覆盖；本脚本继续覆盖文生视频 /videos 旧形态（零回归）。
 // 本脚本用本地 stub 覆盖：提交/轮询/下载、参数、以及负向（401、失败状态、下到 HTML、缺 Key/地址）。
 // 不联网、不花钱。用法：node scripts/verify-openai-video.js
 // ============================================================
