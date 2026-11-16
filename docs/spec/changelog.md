@@ -3453,3 +3453,57 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
   CDP 9222 **22/0**（新前端无 console 错误），6 张截图已刷新；`verify-xiaozhi-home` **44/0**。
 - 未做：15 秒/段。场景卡按 10 秒/张设计（180 张 = 30 分钟），15 秒会被 `PLAN_SCENE_CARD_DURATION` 拒绝；
   是否开放需产品决定 + Mock/真实生成验证，不能只改校验。
+
+## 2026-11-16 小智语音：麦克风权限死胡同修复（Permission denied）
+
+用户反馈（截图 13:30，`VIDEO STUDIO` 小智对话页）：
+- 按住麦克风后，气泡只显示「拿不到麦克风权限：Permission denied；请改用打字。」，没有下一步。
+- 页面来自 `http://localhost:3001`（`isSecureContext=true`）；Windows
+  `ConsentStore\microphone` 与 `NonPackaged` 均为 Allow，Chrome 该站点无 `media_stream_mic` 例外
+  —— 不是系统级禁用，而是浏览器授权弹窗被忽略/拒绝后缺少可恢复路径。
+
+根因（两层）：
+1. 旧 `web/src/components/xiaozhiPlan.js` 的 `VoiceButton.start()` 直接 `getUserMedia`，
+   catch 后只回一行文本；没有区分「已被 Chrome 阻止」「没有设备」「被占用」「非 localhost/https」，
+   也没有告诉用户去哪里把权限改回来。
+2. 按住说话与授权弹窗天然冲突：用户在 Chrome 授权弹窗出现后松手，`pointerup` 已执行，
+   但 `getUserMedia` 仍在等待；授权通过后旧实现会开始录音且不再有 pointerup 可停（会一直录）。
+
+改动：
+- `web/src/components/xiaozhiPlan.js`（增量 edit，+约 400 行）：
+  - 新增 `queryMicPermission()`（`navigator.permissions.query({name:'microphone'})`）：
+    `denied` 时不再盲调 `getUserMedia`，直接开权限卡；
+  - 新增 `MicPermissionModal`（挂 `document.body` 的 portal）：拒绝时给 Chrome
+    「地址栏 ⚙/🔒 → 网站设置 → 麦克风 → 允许」/ `chrome://settings/content/microphone` /
+    Windows「设置 → 隐私和安全性 → 麦克风 → 允许应用访问麦克风 + 允许桌面应用访问麦克风」；
+    提供「重新请求麦克风」「复制排查步骤」「先打字」；
+  - 请求前显示「正在请求麦克风」卡（提示在 Chrome 弹窗点「允许」），授权成功显示「麦克风已允许」；
+  - 加 `pressedRef`：授权晚到且用户已松手 → 立即 `stop()` 所有 track，提示「请再按住说话一次」，不偷录；
+  - `NotFoundError` / `NotReadableError` / `INSECURE_CONTEXT` / `NO_GETUSERMEDIA` 分别给原因与处置；
+  - 麦克风按钮 `title` 随权限态变化（拒绝时提示点开说明），并加 `data-mic-button` / `data-mic-modal` 便于验收。
+- `web/styles/assistant-home.css`（+136 行）：`.xz-mic-overlay`（z-index 140）/ `.xz-mic-card` /
+  步骤 / 按钮 / spinner / 窄屏样式；深绿 + 香槟金，沿用现有 token。
+- `scripts/verify-mic-permission.js`（新，32 项）：静态断言 + 3001 只读；
+  `scripts/verify-all.js` 注册 `mic-permission` 套件（fast）。
+
+验收（本机实测）：
+- `node scripts/verify-mic-permission.js` → **32 / 0**。
+- `node scripts/verify-xiaozhi-home.js` → **45 / 0**。
+- `node scripts/verify-assistant.js` → **105 / 0**（离线 ASR 真样例仍通过）。
+- 真实 Chrome 9222 + CDP（DSH 浏览器 profile，`Browser.setPermission` 控制权限态）：
+  - 权限 `denied`：点麦克风 → 弹权限卡，全文包含 Chrome/Windows 步骤与实际 `NotAllowedError ·
+    Permission denied`；截图 `.scratch/mic-diag/mic-a-denied.png`；
+  - 权限 `prompt` + 注入 pending `getUserMedia`：点按 → 「正在请求麦克风」卡（截图
+    `mic-c-requesting.png`）；松手后 resolve → 「✓ 麦克风已允许」卡（截图 `mic-d-granted.png`），
+    未进入录音；
+  - 真 `getUserMedia` 在 DSH 浏览器 profile 里仍被 Chrome 拒绝（该 Chrome 窗口/标签在后台，
+    不是页面代码问题），所以「授权后真录音→ASR」只做了代码审查 + 旧链路回归，**未在本机
+    DSH 浏览器取得录音证据**；正常 Chrome 可见标签页需用户点一次「允许」。
+- **未改** 3001 进程/端口，未重启服务，未建任务，未产生计费调用；`web/` 静态文件刷新即生效。
+- 本机正常 Chrome（用户截图所在窗口，PID 123808）的站点权限已从「询问（默认）」改为
+  **「允许」**，实测落盘：
+  `Preferences → profile.content_settings.exceptions.media_stream_mic["http://localhost:3001,*"].setting = 1`
+  —— 之后按麦克风不会再弹授权框。这是**本机浏览器设置，不是代码**；如果要恢复询问：
+  `chrome://settings/content/microphone` → 把 `http://localhost:3001` 改回「询问」。
+- 用户侧操作：刷新 `/` → 按住麦克风即可；若之后换机器/换 profile，权限卡仍会按上面的步骤引导。
+- Windows 隐私两处开关均已 Allow（本轮只读确认）。

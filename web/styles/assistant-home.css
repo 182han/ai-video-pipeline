@@ -528,3 +528,139 @@
   .xz-rail, .xz-orb-wrap, .xz-top, .xz-nav-item, .xz-chip, .xz-send { transition: none !important; }
   .xz-scroll { scroll-behavior: auto; }
 }
+
+/* ============================================================
+   麦克风权限卡（2026-11-16）
+   - 首次请求：说明 Chrome 会弹「允许」，不让人以为按钮没反应
+   - 被拒绝：Chrome 地址栏 / Windows 隐私开关两步照做
+   - 授权晚到（用户已松手）：只拿权限，不偷偷录音
+   ============================================================ */
+.xz-mic-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 8, 6, .72);
+  backdrop-filter: blur(8px);
+}
+.xz-mic-card {
+  width: min(520px, 100%);
+  max-height: min(86vh, 640px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background:
+    radial-gradient(420px 240px at 12% -10%, rgba(52, 211, 153, .16), transparent 70%),
+    linear-gradient(180deg, #0b241c 0%, #061611 100%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .62), inset 0 1px 0 rgba(255, 255, 255, .06);
+  color: var(--ink);
+}
+.xz-mic-kicker {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #d6b36a;
+}
+.xz-mic-title {
+  margin: 8px 0 0;
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: #f4f7f5;
+}
+.xz-mic-body {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: #c9d4cf;
+}
+.xz-mic-steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  list-style: decimal;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #dbe5e0;
+}
+.xz-mic-steps li + li { margin-top: 7px; }
+.xz-mic-code {
+  display: inline-block;
+  margin: 10px 0 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(255, 255, 255, .055);
+  font-family: SF Mono, Cascadia Mono, Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #e3c27d;
+  word-break: break-all;
+}
+.xz-mic-err {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(240, 138, 132, .88);
+  word-break: break-all;
+}
+.xz-mic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.xz-mic-btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .045);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, filter .16s ease;
+}
+.xz-mic-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .08);
+  border-color: rgba(214, 179, 106, .35);
+}
+.xz-mic-btn.is-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #e3c27d 0%, #cba75c 100%);
+  color: #11170f;
+  font-weight: 600;
+}
+.xz-mic-btn.is-primary:hover:not(:disabled) { filter: brightness(1.06); }
+.xz-mic-btn:disabled { opacity: .55; cursor: wait; }
+.xz-mic-note {
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(167, 179, 173, .62);
+}
+.xz-mic-spinner {
+  width: 22px;
+  height: 22px;
+  margin-top: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(227, 194, 125, .22);
+  border-top-color: #e3c27d;
+  animation: xzMicSpin .8s linear infinite;
+}
+@keyframes xzMicSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .xz-mic-spinner { animation-duration: 2.4s; }
+  .xz-mic-btn { transition: none; }
+}
+@media (max-width: 640px) {
+  .xz-mic-overlay { padding: 14px; }
+  .xz-mic-card { padding: 18px; border-radius: 14px; }
+  .xz-mic-title { font-size: 19px; }
+  .xz-mic-body { font-size: 13px; }
+  .xz-mic-steps { font-size: 12px; }
+}

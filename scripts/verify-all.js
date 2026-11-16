@@ -350,6 +350,12 @@ const SUITES = [
     desc: '小智首页：/ 整页对话（大球/介绍卡/底部输入/可收起导航）+ /create 六步向导（静态 + 3001 只读）'
   },
   {
+    name: 'mic-permission',
+    script: 'verify-mic-permission.js',
+    group: 'fast',
+    desc: '麦克风权限：Permissions API 前置、Chrome/Windows 指引、portal 遮罩、松手不偷录、错误分类（静态 + 3001 只读）'
+  },
+  {
     name: 'image-first-pipeline',
     script: 'verify-image-first-pipeline.js',
     group: 'real',
