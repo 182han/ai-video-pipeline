@@ -10,7 +10,28 @@ const planner = require('../src/processors/bgmPlan');
 
 const FFMPEG = config.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = config.FFPROBE_PATH || 'ffprobe';
-const BGM_DIR = path.join(__dirname, '..', 'assets', 'bgm');
+const guard = require('./_bgm-guard');
+
+// 隔离：不再引用真实 assets/bgm（那里只有 2 首 mp3，且多数历史条目文件已不存在）。
+// 本脚本自己用 ffmpeg 合成静音/正弦 fixture，全部落在 output/verify_bgm_* 临时目录。
+const fixtureDir = path.join(__dirname, '..', 'output', 'verify_bgm_fix_' + Date.now());
+fs.mkdirSync(fixtureDir, { recursive: true });
+
+function makeTone(file, freq, durSec) {
+  execSync(
+    `"${FFMPEG}" -y -hide_banner -loglevel error -f lavfi -i "sine=frequency=${freq}:duration=${durSec}" `
+    + `-c:a libmp3lame -q:a 5 "${file}"`,
+    { stdio: 'ignore' }
+  );
+  if (!fs.existsSync(file) || fs.statSync(file).size === 0) throw new Error('fixture 生成失败: ' + file);
+}
+
+const music = path.join(fixtureDir, 'fixture_music.mp3');
+const ambient = path.join(fixtureDir, 'fixture_ambient.mp3');
+const music2 = path.join(fixtureDir, 'fixture_music2.mp3');
+makeTone(music, 440, 60);
+makeTone(ambient, 523, 60);
+makeTone(music2, 660, 60);
 
 function execCapture(cmd) {
   try {
@@ -47,10 +68,7 @@ if (!fs.existsSync(video)) { console.log('缺少测试视频，跳过'); process
 const videoDur = probeDuration(video);
 console.log('测试视频时长:', videoDur.toFixed(3), 's');
 
-const music = path.join(BGM_DIR, 'calm', 'comfortable_mystery.mp3');
-const ambient = path.join(BGM_DIR, 'nature', 'pixabay_02.mp3');
-const music2 = path.join(BGM_DIR, 'calm', 'morning.mp3');
-
+const realBefore = guard.snapshotRealBgm();
 const scenarios = [
   { name: 'S1 单曲覆盖整片（无 aloop / 无 2s 循环）',
     plan: { music: [{ trackId:'calm_01', filePath: music, timelineStart:0, timelineEnd:35, sourceIn:0, sourceOut:35, volume:1, fadeIn:2, fadeOut:2, speed:1, fillMode:'none' }] } },
@@ -87,6 +105,11 @@ for (const s of scenarios) {
   console.log(`  ${status}  ${s.name}\n        dur=${d.toFixed(3)}s (期望 ${videoDur.toFixed(3)})  mean_volume=${mv}dB`);
   if (log.trim()) console.log('        log: ' + log.trim().slice(0, 300));
 }
-console.log('\n结果: ' + (scenarios.length - fail) + '/' + scenarios.length + ' 通过');
+const realCheck = guard.diffRealBgm(realBefore);
+console.log((realCheck.ok ? '  PASS  ' : '  FAIL  ') + '真实 assets/bgm 隔离: ' + realCheck.message);
+if (!realCheck.ok) fail++;
+const total = scenarios.length + 1;
+console.log('\n结果: ' + (total - fail) + '/' + total + ' 通过');
 try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) {}
+try { fs.rmSync(fixtureDir, { recursive: true, force: true }); } catch (e) {}
 process.exit(fail === 0 ? 0 : 1);

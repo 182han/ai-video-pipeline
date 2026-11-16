@@ -13,11 +13,39 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const net = require('net');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 const APP = path.join(__dirname, '..');
 const SCRIPTS = __dirname;
 const SRC_ID = 'task_mv4v7qp2_m8r0';
+const config = require('../config');
+const FFMPEG = config.FFMPEG_PATH || 'ffmpeg';
+const guard = require('./_bgm-guard');
+
+// 配乐目录隔离：不再让临时服务使用真实 assets/bgm。
+// 生成 2 条正弦 fixture + 自己的 manifest（id 沿用子套件引用的 calm_01 / nature_02）。
+function makeBgmFixture(root) {
+  const dir = path.join(root, 'bgm');
+  fs.mkdirSync(path.join(dir, 'calm'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'nature'), { recursive: true });
+  const tone = (rel, freq, dur) => {
+    const p = path.join(dir, rel);
+    execSync(
+      `"${FFMPEG}" -y -hide_banner -loglevel error -f lavfi -i "sine=frequency=${freq}:duration=${dur}" `
+      + `-c:a libmp3lame -q:a 5 "${p}"`,
+      { stdio: 'ignore' }
+    );
+    if (!fs.existsSync(p) || fs.statSync(p).size === 0) throw new Error('BGM fixture 生成失败: ' + p);
+  };
+  tone(path.join('calm', 'fixture_music.mp3'), 440, 40);
+  tone(path.join('nature', 'fixture_ambient.mp3'), 523, 40);
+  const manifest = [
+    { id: 'calm_01', file: 'calm/fixture_music.mp3', title: 'fixture music', author: 'fixture', license: 'test-only', durationSec: 40, mood: ['calm'], bpm: null, instruments: 'sine' },
+    { id: 'nature_02', file: 'nature/fixture_ambient.mp3', title: 'fixture ambient', author: 'fixture', license: 'test-only', durationSec: 40, mood: ['nature'], bpm: null, instruments: 'sine' }
+  ];
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+  return { dir };
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -106,8 +134,11 @@ async function waitReady(base, getLog, server) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bgm-suite-'));
   let server = null;
   let failures = 0;
+  let guardFailed = false;
+  const realBefore = guard.snapshotRealBgm();
   try {
     const { dataDir, outDir } = makeFixture(root, taskId);
+    const bgm = makeBgmFixture(root);
     const clipsDir = path.join(root, 'clips');
     fs.mkdirSync(clipsDir, { recursive: true });
 
@@ -125,6 +156,7 @@ async function waitReady(base, getLog, server) {
         DATA_DIR: dataDir,
         OUTPUT_DIR: outDir,
         CLIPS_DIR: clipsDir,
+        BGM_DIR: bgm.dir,
         STORAGE_DRIVER: ''
       },
       stdio: ['ignore', serverFd, serverFd]
@@ -139,7 +171,8 @@ async function waitReady(base, getLog, server) {
       ...process.env,
       BGM_TEST_BASE: base,
       BGM_TEST_TASK_ID: taskId,
-      BGM_TEST_OUTPUT_DIR: outDir
+      BGM_TEST_OUTPUT_DIR: outDir,
+      BGM_DIR: bgm.dir
     };
     const suites = ['verify-bgm-e2e2.js', 'verify-bgm-api.js', 'verify-bgm-negative.js'];
     for (const s of suites) {
@@ -154,6 +187,9 @@ async function waitReady(base, getLog, server) {
         console.log(r.out);
       }
     }
+    const realCheck = guard.diffRealBgm(realBefore);
+    guardFailed = !realCheck.ok;
+    console.log('\n' + (realCheck.ok ? 'PASS  ' : 'FAIL  ') + realCheck.message);
   } catch (e) {
     failures++;
     console.error('RUNNER ERROR:', e.message);
@@ -164,6 +200,6 @@ async function waitReady(base, getLog, server) {
     }
     try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {}
   }
-  console.log('\n结果: ' + (3 - Math.min(failures, 3)) + '/3 套件通过');
-  process.exit(failures ? 1 : 0);
+  console.log('\n结果: ' + (3 - Math.min(failures, 3)) + '/3 套件通过；真实 assets/bgm 隔离: ' + (guardFailed ? 'FAIL' : 'PASS'));
+  process.exit(failures || guardFailed ? 1 : 0);
 })();

@@ -2,6 +2,10 @@
 const fs=require('fs'), path=require('path');
 const { execSync } = require('child_process');
 const config = require('../config');
+const fixture = require('./_bgm-fixture');
+const guard = require('./_bgm-guard');
+fixture.ensureIsolatedBgm('bgm_tracks');   // 必须在 require audioMixer 之前
+const realBefore = guard.snapshotRealBgm();
 const mixer = require('../src/processors/audioMixer');
 function cap(cmd){ try{return execSync(cmd,{encoding:'utf8',maxBuffer:64*1024*1024});}catch(e){ if(!(e&&(e.code==='EPERM'||/EPERM|EACCES/.test(String(e.message||''))))) return String((e.stdout||'')+(e.stderr||'')); const t=path.join(__dirname,'..','output','_c'+process.pid+'.txt'); try{execSync(cmd+' > "'+t+'" 2>&1',{stdio:'ignore'});}catch(e2){} try{return fs.existsSync(t)?fs.readFileSync(t,'utf8'):'';}finally{try{fs.unlinkSync(t);}catch(e3){}} } }
 const shq=p=>'"'+String(p).replace(/"/g,'\\"')+'"';
@@ -55,6 +59,10 @@ const dur=p=>parseFloat(cap(shq(config.FFPROBE_PATH)+' -v error -show_entries fo
     console.log('  '+(ok2?'PASS':'FAIL')+'  10s 源循环铺满 '+vd.toFixed(1)+'s：dur='+d2.toFixed(3)+'s mean='+mv2+'dB');
     if(!ok2)fail++;
   } else { console.log('  FAIL  循环混音失败: '+r2.error); fail++; }
+
+  const realCheck = guard.diffRealBgm(realBefore);
+  console.log('  '+(realCheck.ok?'PASS':'FAIL')+'  真实 assets/bgm 隔离: '+realCheck.message);
+  if(!realCheck.ok)fail++;
 
   console.log('\n'+(fail?'FAIL '+fail:'全部通过'));
   try{fs.rmSync(outDir,{recursive:true,force:true});}catch(e){}

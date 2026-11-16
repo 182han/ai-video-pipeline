@@ -18,6 +18,7 @@ const { spawn, execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const HOST = '127.0.0.1';
 const START_PORT = Number(process.env.BGM_UPLOAD_PORT || 3916);
+const guard = require('./_bgm-guard');
 
 let pass = 0;
 let fail = 0;
@@ -57,6 +58,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/不是合法 base64|base64/.test(mixerSrc), '后端校验 base64');
 
   // ---------- 2. 真传（临时服务 + 临时 BGM_DIR） ----------
+  const realBefore = guard.snapshotRealBgm();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bgm_upload_'));
   const bgmDir = path.join(tmp, 'bgm');
   let child = null;
@@ -139,6 +141,10 @@ async function waitReady(base, timeoutMs = 25000) {
     await sleep(300);
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+
+  // 隔离守卫：真实 assets/bgm 必须一个字节都没变
+  const realCheck = guard.diffRealBgm(realBefore);
+  check(realCheck.ok, '真实 assets/bgm 未被触碰', realCheck.message);
 
   console.log('\n================================================================');
   console.log(`结果: ${pass} 通过 / ${fail} 失败`);

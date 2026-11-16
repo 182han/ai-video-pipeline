@@ -8,6 +8,10 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const config = require('../config');
+const fixture = require('./_bgm-fixture');
+const guard = require('./_bgm-guard');
+fixture.ensureIsolatedBgm('bgm_ducking');  // 必须在 require audioMixer 之前
+const realBefore = guard.snapshotRealBgm();
 const planner = require('../src/processors/bgmPlan');
 const mixer = require('../src/processors/audioMixer');
 
@@ -95,6 +99,10 @@ function seg(trackId, dur) {
   } finally {
     try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) {}
   }
+
+  const realCheck = guard.diffRealBgm(realBefore);
+  console.log('  '+(realCheck.ok?'PASS':'FAIL')+'  真实 assets/bgm 隔离: '+realCheck.message);
+  if (!realCheck.ok) fail++;
 
   console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
   process.exit(fail ? 1 : 0);

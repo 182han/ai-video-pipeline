@@ -4,6 +4,10 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const config = require('../config');
+const fixture = require('./_bgm-fixture');
+const guard = require('./_bgm-guard');
+fixture.ensureIsolatedBgm('bgm_mix');      // 必须在 require audioMixer 之前
+const realBefore = guard.snapshotRealBgm();
 const mixer = require('../src/processors/audioMixer');
 
 const FFMPEG = config.FFMPEG_PATH || 'ffmpeg';
@@ -60,6 +64,9 @@ const dur = p => parseFloat(cap(shq(FFPROBE)+' -v error -show_entries format=dur
     console.log('  '+(ok?'PASS':'FAIL')+'  '+c.name);
     console.log('        dur='+d.toFixed(3)+'s mean='+mv+'dB'+(r.warnings&&r.warnings.length?(' warn='+r.warnings.length):''));
   }
+  const realCheck = guard.diffRealBgm(realBefore);
+  console.log('  '+(realCheck.ok?'PASS':'FAIL')+'  真实 assets/bgm 隔离: '+realCheck.message);
+  if(!realCheck.ok) fail++;
   console.log('\n结果: '+(cases.length-fail)+'/'+cases.length+' 通过');
   try{fs.rmSync(outDir,{recursive:true,force:true});}catch(e){}
   process.exit(fail?1:0);

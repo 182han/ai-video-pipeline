@@ -15,38 +15,73 @@ const config = require('../../config');
 
 const BUCKETS = 1600;        // 采样桶数：足够画满屏，体积小
 const SAMPLE_RATE = 8000;    // 解码采样率：画包络足够
-const CACHE_DIR = path.join(__dirname, '..', '..', 'data', 'waveforms');
+// 跟随 DATA_DIR：测试/部署换数据目录时波形缓存也隔离，不再写死 app/data/waveforms
+const CACHE_DIR = path.join(path.dirname(config.STORAGE.dataDir), 'waveforms');
 const memCache = new Map();
 
 function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-// 用 spawn 收集 stdout 的原始字节。
-// 注意不能用 execFile：它默认按 utf8 解码 stdout，会把 s16le 二进制弄坏。
+// 解出 s16le PCM。
+// 不用管道读 stdout：本环境 pipe 会 spawn EPERM（AGENTS §4.6：读输出的 ffmpeg 必须走
+// 「落临时文件再读」降级），因此统一让 ffmpeg 直接写临时 pcm 文件，再读文件。
+const os = require('os');
 function decodeToPcm(filePath) {
   return new Promise((resolve) => {
     const ffmpeg = config.FFMPEG_PATH || 'ffmpeg';
-    const args = ['-v', 'error', '-i', filePath, '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-'];
+    const base = path.join(os.tmpdir(), `wf_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    const pcmPath = base + '.pcm';
+    const errPath = base + '.err';
+    let outFd = null;
+    let errFd = null;
+    const cleanup = () => {
+      try { if (outFd !== null) fs.closeSync(outFd); } catch (e) { /* ignore */ }
+      try { if (errFd !== null) fs.closeSync(errFd); } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(pcmPath); } catch (e) { /* ignore */ }
+      try { fs.unlinkSync(errPath); } catch (e) { /* ignore */ }
+    };
+    try {
+      outFd = fs.openSync(pcmPath, 'w');
+      errFd = fs.openSync(errPath, 'w');
+    } catch (e) {
+      cleanup();
+      return resolve({ ok: false, error: '无法创建临时文件: ' + e.message });
+    }
+    const args = ['-y', '-v', 'error', '-i', filePath, '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', pcmPath];
     let proc;
     try {
-      proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawn(ffmpeg, args, { stdio: ['ignore', outFd, errFd] });
     } catch (e) {
+      cleanup();
       return resolve({ ok: false, error: '无法启动 ffmpeg: ' + e.message });
     }
-    const chunks = [];
-    let errText = '';
     let settled = false;
-    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
-
-    proc.stdout.on('data', (c) => chunks.push(c));
-    proc.stderr.on('data', (c) => { errText += c.toString(); if (errText.length > 8192) errText = errText.slice(-8192); });
+    const finish = (v) => { if (!settled) { settled = true; cleanup(); resolve(v); } };
     proc.on('error', (e) => finish({ ok: false, error: 'ffmpeg 进程错误: ' + e.message }));
-    proc.on('close', () => {
-      if (chunks.length === 0) return finish({ ok: false, error: 'ffmpeg 未输出音频数据: ' + (errText.slice(0, 200) || '未知原因') });
-      finish({ ok: true, buf: Buffer.concat(chunks) });
+    proc.on('close', (code) => {
+      let buf = null;
+      let errText = '';
+      try { buf = fs.readFileSync(pcmPath); } catch (e) { /* ignore */ }
+      try { errText = fs.readFileSync(errPath, 'utf8').slice(0, 400); } catch (e) { /* ignore */ }
+      if (!buf || buf.length === 0) {
+        return finish({ ok: false, error: 'ffmpeg 未输出音频数据: ' + (errText.slice(0, 200) || ('exit=' + code)) });
+      }
+      finish({ ok: true, buf });
     });
   });
+}
+
+// 音频文件的指纹：文件改了（替换/重下）就作废旧缓存
+function sourceSig(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    return { mtimeMs: Math.round(st.mtimeMs), size: st.size };
+  } catch (e) { return null; }
+}
+function cacheValid(saved, buckets, sig) {
+  return !!saved && Array.isArray(saved.peaks) && saved.peaks.length === buckets
+    && !!sig && !!saved.source && saved.source.mtimeMs === sig.mtimeMs && saved.source.size === sig.size;
 }
 
 // 从 s16le PCM 计算每桶最大值（0..255）
@@ -72,9 +107,12 @@ function pcmToPeaks(buf, buckets) {
 }
 
 async function extractPeaks(trackId, filePath, buckets = BUCKETS) {
-  // 一级缓存：内存
+  if (!fs.existsSync(filePath)) return { ok: false, error: '音频文件不存在: ' + path.basename(filePath) };
+  const sig = sourceSig(filePath);
+
+  // 一级缓存：内存（文件指纹变了就作废）
   const hit = memCache.get(trackId);
-  if (hit && hit.buckets === buckets) return { ok: true, ...hit, cached: 'mem' };
+  if (cacheValid(hit, buckets, sig)) return { ok: true, ...hit, cached: 'mem' };
 
   // 二级缓存：磁盘
   ensureCacheDir();
@@ -82,14 +120,12 @@ async function extractPeaks(trackId, filePath, buckets = BUCKETS) {
   try {
     if (fs.existsSync(cacheFile)) {
       const saved = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      if (saved && Array.isArray(saved.peaks) && saved.peaks.length === buckets) {
+      if (cacheValid(saved, buckets, sig)) {
         memCache.set(trackId, saved);
         return { ok: true, ...saved, cached: 'disk' };
       }
     }
   } catch (e) { /* 缓存损坏就当没有 */ }
-
-  if (!fs.existsSync(filePath)) return { ok: false, error: '音频文件不存在: ' + path.basename(filePath) };
 
   const dec = await decodeToPcm(filePath);
   if (!dec.ok) return { ok: false, error: dec.error };
@@ -98,7 +134,7 @@ async function extractPeaks(trackId, filePath, buckets = BUCKETS) {
   if (!peaks.length) return { ok: false, error: '音频为空' };
 
   const durationSec = Math.round((dec.buf.length / 2 / SAMPLE_RATE) * 100) / 100;
-  const record = { buckets, peaks, durationSec };
+  const record = { buckets, peaks, durationSec, source: sig };
 
   memCache.set(trackId, record);
   try { fs.writeFileSync(cacheFile, JSON.stringify(record), 'utf8'); } catch (e) { /* 写不进缓存不影响返回 */ }
