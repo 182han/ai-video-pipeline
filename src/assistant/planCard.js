@@ -27,9 +27,12 @@ const PLAN_VERSION = 'assistant-plan.v1';
 // 模型 → 单段时长范围（§7 已定）。
 // mock 只在验收/演示里用，本身不计费；范围放宽到 1–60s（与流水线允许值一致）。
 const MODELS = Object.freeze({
-  dashscope: { id: 'dashscope', label: '万相 3.0（DashScope）', minSec: 2, maxSec: 30 },
-  // 2026-11-16 用户口径：长片默认走 WhaleTV 中转（openai-video），标签用「WhaleTV 万相 3.0（中转）」。
-  // 中转发 POST {baseUrl}/videos {model,prompt,seconds}，与官方万相同一模型，按秒计费。
+  // 2026-11-16 14:0x 用户口径变更：小智链路默认走**百炼官方**（dashscope）。
+  // 原因（实测）：WhaleTV 中转的图生视频 400 —— `Alibaba requires image references to be URLs`，
+  // 中转把 multipart/base64 传给上游，而上游只收公网 URL；百炼通道用 `getPolicy → 临时 OSS`
+  // 拿 oss:// 私有地址（48h），**不需要用户自己的公网存储**，是已验证的图生视频通道。
+  dashscope: { id: 'dashscope', label: '百炼万相 3.0（官方）', minSec: 2, maxSec: 30 },
+  // 中转保留：用户明确说「WhaleTV / 中转 / agglm」时才走（纯文生视频可用；有图会被管道拒绝/上游 400）。
   'openai-video': { id: 'openai-video', label: 'WhaleTV 万相 3.0（中转）', minSec: 2, maxSec: 30 },
   kling: { id: 'kling', label: '可灵（Kling）', minSec: 3, maxSec: 15 },
   seedance: { id: 'seedance', label: '即梦（Seedance）', minSec: 2, maxSec: 15 },
@@ -310,8 +313,9 @@ function buildPlan(input = {}) {
   const parsed = parseUtterance(input.text || '');
   const pick = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : v);
 
-  // 默认模型 = WhaleTV 中转（openai-video，2026-11-16 用户口径）；用户明确说 dashscope/可灵/即梦时按说的来。
-  const modelId = String(pick(input.model, pick(parsed.model, 'openai-video')));
+  // 默认模型 = 百炼官方（dashscope，2026-11-16 14:0x 用户口径：小智链路不能再踩中转图生视频的 400）；
+  // 用户明确说「WhaleTV / 中转 / 可灵 / 即梦」时按说的来。
+  const modelId = String(pick(input.model, pick(parsed.model, 'dashscope')));
   const model = MODELS[modelId];
   if (!model) {
     return fail('PLAN_UNKNOWN_MODEL', `不认识的视频模型：${modelId}（可用：${Object.keys(MODELS).join(' / ')}）`);

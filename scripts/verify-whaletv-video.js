@@ -1,5 +1,7 @@
-// ============================================================
-// P5 验收：小智计划卡接入 WhaleTV 中转（openai-video）—— 零计费、零网络
+﻿// ============================================================
+// P5 验收：小智计划卡 + WhaleTV 中转（openai-video）通道 —— 零计费、零网络
+// 2026-11-16 14:0x 口径变更：小智**默认改为百炼官方 dashscope**（中转图生视频实测 400），
+// WhaleTV 保留为「用户显式说中转」时的可选通道；本套件继续覆盖该通道自身的请求体/价目。
 // ------------------------------------------------------------
 // 做法：替换全局 fetch 为「记录器」，直接调用生成器，断言它将要发出的
 // POST {baseUrl}/videos 请求体（model / prompt / seconds / 鉴权头 / 图生视频 multipart）。
@@ -44,12 +46,12 @@ function installFetch(responder) {
 function restoreFetch() { global.fetch = origFetch; }
 
 (async () => {
-  // ================= [1] 计划卡默认走 WhaleTV 中转 =================
+  // ================= [1] 计划卡：默认走百炼官方（2026-11-16 14:0x 口径变更） =================
   console.log('\n[1] 计划卡默认模型 / 文案 / 费用');
   const p = planCard.buildPlan({ text: '5 分钟' });
   ok('5 分钟 → 计划卡 ok', p.ok === true, p.ok ? '' : p.code);
-  ok('默认模型 = openai-video', p.ok && p.plan.model === 'openai-video', p.ok ? p.plan.model : '');
-  ok('标签 = WhaleTV 万相 3.0（中转）', p.ok && p.plan.modelLabel === 'WhaleTV 万相 3.0（中转）', p.ok ? p.plan.modelLabel : '');
+  ok('默认模型 = dashscope（小智默认走百炼，避免中转图生视频 400）', p.ok && p.plan.model === 'dashscope', p.ok ? p.plan.model : '');
+  ok('标签 = 百炼万相 3.0（官方）', p.ok && p.plan.modelLabel === '百炼万相 3.0（官方）', p.ok ? p.plan.modelLabel : '');
   ok('30 段 × 10 秒', p.ok && p.plan.clipCount === 30 && p.plan.clipDurationSec === 10,
     p.ok ? `${p.plan.clipCount} × ${p.plan.clipDurationSec}s` : '');
   ok('预估 ¥180 / $30', p.ok && p.plan.estimate.totalCny === 180 && p.plan.estimate.budget.usd === 30,

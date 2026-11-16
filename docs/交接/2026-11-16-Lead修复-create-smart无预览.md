@@ -222,3 +222,40 @@ B 测试实测：WhaleTV 中转的图生视频 **400** —— `Alibaba requires 
 
 - **小智链路（C 本轮交付）默认仍走 WhaleTV 做图生视频**，同样会踩 400 → 需产品决定：给小智也加百炼通道，或改 WhaleTV 通道复用百炼 URL（后者需一次真实探测字段，须用户同意）。
 - 百炼真实付费提交未由 Lead 执行（留给用户点确认）。
+
+## 10. 小智链路默认改走百炼（2026-11-16 14:0x，用户明确指令）
+
+用户原话：「小志的这条链路必须让他不能踩400 同样也改成走百炼」。
+
+### 10.1 改动（后端默认值 + 文案 + 断言）
+
+1. `src/assistant/planCard.js`
+   - `MODELS.dashscope.label`：`万相 3.0（DashScope）` → **`百炼万相 3.0（官方）`**
+   - `buildPlan` 默认模型：`openai-video` → **`dashscope`**（显式说「WhaleTV / 中转 / agglm」仍走中转）
+2. 前端**无需改**：`assistant.js confirmPlan()` 已是 `readRuntimeConfig(plan.model)` →
+   plan.model=dashscope 时自动带上 `dashScopeKey` + 由 WorkspaceId/Region 拼出的 baseUrl + `modelId=wan3.0-video`
+   （`/api/assistant/execute` 的 runtimeConfig 白名单已含 `apiKey/apiBaseUrl`）。
+3. 同步断言（按契约改断言、不删检查项）：
+   - `scripts/verify-assistant.js` [8]：默认计费模型断言 → dashscope + 新标签
+   - `scripts/verify-whaletv-video.js` [1]：默认断言 → dashscope；**「whale 中转」显式用例保留**
+   - `scripts/verify-all.js` 的套件描述同步（该文件当前有 C 窗口在途改动，**未单独提交**，随 C 一起入库）
+
+### 10.2 验收（零计费，本机实跑）
+
+```
+node -e planCard.buildPlan：'mock 2段...' → model=mock（Mock 流程不受影响）
+                              无模型词的默认  → model=dashscope / label=百炼万相 3.0（官方）
+verify-assistant             105/0   ✅
+verify-whaletv-video          37/0   ✅（中转通道自身的请求体/价目仍覆盖）
+verify-image-first-pipeline   77/0   ✅（两行 ❌ 是套件故意构造的负向用例）
+```
+
+**注意**：13:5x 首次跑 `verify-assistant` 得到 **96/9**，原因是 **C 窗口同时在跑它自己的 `verify-assistant`**，
+两个进程共用真实 `app/clips/_samples`（都会建/删 mock 样片）→ 竞态。C 停下后复跑 **105/0**。
+结论：以后跑这个套件不要与另一窗口的同一套件并行。
+
+### 10.3 生效条件与风险
+
+- **需重启 3001**（后端默认值在进程内）；B（create-smart）不需要重启。
+- 小智真实长片仍是**付费**（5 分钟 ¥180 / $30），且 C 的「出图后暂停审图」需用户审图后继续。
+- 中转通道保留：用户显式说「用中转 / WhaleTV」时才走；**有图走中转仍会 400**（本次未改中转载荷）。
