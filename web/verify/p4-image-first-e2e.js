@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // P4 本轮（2026-11-16）真浏览器端到端验收：小智逐段出图 + 审图暂停 + 图片审核页调色滑杆
 // ------------------------------------------------------------
 // 背景：本轮改了两个前端功能区，静态断言证明不了「点得动、显示得对」：
@@ -28,12 +28,15 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawn } = require('child_process');
+const net = require('net');
+const { spawn, execFileSync } = require('child_process');
 
 const APP = path.resolve(__dirname, '..', '..');
 const OUT = path.join(APP, 'docs', '交接', 'p4-screenshots');
 const BASE = 'http://127.0.0.1:3001';
-const DEBUG_PORT = 9471;
+// 固定调试端口会在「上一轮 Chrome 没退干净」时踩到：/json/list 拿到旧实例的空白 target 列表，
+// 表现为「Chrome 已启动但没有 page target」。改成每次挑一个空闲端口。
+let DEBUG_PORT = 0;
 const CHROME = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -49,6 +52,34 @@ function check(cond, label, extra) {
   else { fail++; failures.push({ label, extra }); console.log(`  ❌ ${label}${extra ? '  —  ' + extra : ''}`); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 挑一个没人在听的本地端口（同步探测：能 listen 成功就是空闲，立刻关闭）
+function pickFreePort(start = 9471, end = 9511) {
+  for (let p = start; p < end; p++) {
+    const srv = net.createServer();
+    try {
+      srv.listen(p, '127.0.0.1');
+      srv.close();
+      return p;
+    } catch (e) {
+      try { srv.close(); } catch (e2) { /* ignore */ }
+    }
+  }
+  return start;
+}
+
+// 杀掉我们 spawn 出来的 Chrome 整棵进程树（Windows 上 kill() 只结束父进程，
+// 子进程会占着调试端口 → 下一轮「没有 page target」）。只杀自己的 pid。
+function killChromeTree(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch (e) { /* 已经退出就算了 */ }
+}
 
 function wsConnect(url) {
   const ws = new WebSocket(url);
@@ -233,6 +264,8 @@ async function main() {
   if (!PASS) { console.log('  ❌ 无法从 config 读取登录密码'); process.exit(1); }
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'p4-e2e-'));
+  DEBUG_PORT = pickFreePort(9471, 9511);
+  console.log(`  调试端口 ${DEBUG_PORT}；临时 profile ${profile}`);
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-sync', '--disable-background-networking',
@@ -246,14 +279,16 @@ async function main() {
   chrome.on('exit', () => { chromeExit = true; });
   try {
     let page = null;
-    for (let i = 0; i < 100 && !page; i++) {
+    for (let i = 0; i < 120 && !page; i++) {
+      if (chromeExit) break;
       await sleep(150);
       try {
         const r = await fetch('http://127.0.0.1:' + DEBUG_PORT + '/json/list');
         if (r.ok) {
           const list = await r.json();
           page = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
-          if (!page && i === 20) {
+          // 没有 page target 时多次尝试主动开一个（启动早期 PUT 可能瞬时失败）
+          if (!page && i >= 6 && i % 6 === 0) {
             try {
               const nr = await fetch('http://127.0.0.1:' + DEBUG_PORT + '/json/new?about:blank', { method: 'PUT' });
               if (nr.ok) { const t = await nr.json(); if (t && t.webSocketDebuggerUrl) page = t; }
@@ -262,7 +297,7 @@ async function main() {
         }
       } catch (e) { /* 还没起来 */ }
     }
-    if (!page) throw new Error('Chrome 已启动但没有 page target');
+    if (!page) throw new Error('Chrome 已启动但没有 page target（debugPort=' + DEBUG_PORT + '）');
     if (chromeExit) throw new Error('Chrome 启动后退出（沙箱/权限问题）');
 
     cdp = wsConnect(page.webSocketDebuggerUrl);
@@ -511,8 +546,17 @@ async function main() {
     await shot('p4-05-css-preview');
 
     console.log('\n[9] 应用 → POST adjust（绝对值四参数）+ cache-busting');
+    // React 状态更新到 DOM 有 1 帧延迟：滑杆刚 setValue 完就点，按钮可能还是 disabled → 偶发不触发请求。
+    // 统一先等「按钮可点」，再用调色请求计数（而不是 lastAdjust）判断本次确实发了请求。
+    const waitEnabled = (label) => waitFor(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').trim() === ${JSON.stringify(label)});
+      return !!(b && !b.disabled);
+    })()`, label + ' 可点击', 8000);
+    const adjustCalls = () => js('window.__e2e.calls.filter(c=>c.kind==="adjust").length');
+    await waitEnabled('应用');
+    const calls9 = await adjustCalls();
     await clickExact('应用', 'button');
-    await waitFor('!!(window.__e2e && window.__e2e.lastAdjust)', 'adjust 请求被拦截', 12000);
+    await waitFor(`window.__e2e.calls.filter(c=>c.kind==="adjust").length > ${calls9}`, 'adjust 请求被拦截', 12000);
     const adj = await js('window.__e2e.lastAdjust');
     check(adj.brightness === 30 && adj.contrast === 20 && adj.saturation === 15 && adj.temperature === 25,
       '请求体是四条滑杆的绝对值', JSON.stringify(adj));
@@ -528,13 +572,18 @@ async function main() {
 
     console.log('\n[10] 失败路径：后端错误原文必须显示（不吞）');
     await js(`window.__e2e.adjustMode = 'fail'; true`);
+    await waitEnabled('应用');
+    const calls10 = await adjustCalls();
     await clickExact('应用', 'button');
+    await waitFor(`window.__e2e.calls.filter(c=>c.kind==="adjust").length > ${calls10}`, '第二次 adjust 请求被拦截', 12000);
     await waitFor('document.body.innerText.includes("调色失败")', '失败文案', 12000);
     const t10 = await bodyText();
     check(/调色失败：ffmpeg 模拟失败/.test(t10), '把后端 error 原文显示出来', (t10.match(/调色失败[^\n]{0,60}/) || [''])[0]);
     await js(`window.__e2e.adjustMode = 'ok'; true`);
 
     console.log('\n[11] 恢复原图 → POST adjust {reset:true}');
+    // 「恢复原图」在未调色时是 disabled；刚应用成功要等它变可点
+    await waitEnabled('恢复原图');
     await clickExact('恢复原图', 'button');
     await waitFor('window.__e2e.lastAdjust && window.__e2e.lastAdjust.reset === true', 'reset 请求被拦截', 12000);
     check(true, '「恢复原图」提交 {reset:true}');
@@ -560,7 +609,7 @@ async function main() {
     console.log('\n  ❌ 脚本执行异常: ' + (err && err.stack ? err.stack : err));
   } finally {
     try { if (cdp) cdp.close(); } catch (e) { /* ignore */ }
-    try { chrome.kill(); } catch (e) { /* ignore */ }
+    try { killChromeTree(chrome.pid); } catch (e) { /* ignore */ }
     await sleep(300);
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) { /* ignore */ }
 
