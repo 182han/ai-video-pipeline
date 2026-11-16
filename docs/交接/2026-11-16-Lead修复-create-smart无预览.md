@@ -181,3 +181,44 @@ PUT 两张 {isFinal:true}                                      → 200
 
 - **真实提交（付费）未由我执行**：④→⑤ 的「确认提交」按红线留给用户点。本次 E2E 只验证到 ④，未建任务（40→40）。
 - 重启后 §7 的闸门放宽才生效；在那之前选中**非最终版**的库图仍会被旧进程拦（本次 2 张已被标为最终版+审查通过）。
+
+## 9. 视频通道选择：有图时强制走百炼（2026-11-16 13:5x，用户确认「借用百炼」）
+
+### 9.1 背景
+
+B 测试实测：WhaleTV 中转的图生视频 **400** —— `Alibaba requires image references to be URLs`
+（中转把 multipart/base64 传给 Alibaba，上游只收公网 URL）。而项目早已实现「借用百炼」：
+
+- `src/generators/dashscopeUpload.js`：`GET {base}/uploads?action=getPolicy` → POST OSS → 得到 `oss://dashscope-instant/...`（48h 私有）；
+- 调视频接口时带 `X-DashScope-OssResourceResolve: enable`（`i2vSupport.js` 的 `dashscope: oss-temp-upload`）；
+- **不需要用户自己的公网存储**；11-13 那 4 个 completed 的图生视频任务全是这条通道。
+
+### 9.2 改动（`web/src/screens/createSmart.js`）
+
+1. 新增「视频通道」选择：`WhaleTV 中转(openai-video)` / `百炼官方(dashscope)`；默认中转（文生视频）。
+2. **有图时强制百炼**：`effectiveModel = useImages ? 'dashscope' : model`；有图时「中转」按钮 **disabled** 并给出原因。
+3. 提交体改为按通道取运行时配置：`readRuntimeConfig(effectiveModel)`（百炼 = `dashScopeKey` + 由 `WorkspaceId/Region` 拼出的 baseUrl + `modelId=wan3.0-video`；中转 = whaletvKey/BaseUrl）。
+4. ⑤ 模型行按实际通道显示；草稿持久化新增 `model` 字段。
+
+### 9.3 验收（零计费，CDP 拦截 + abort）
+
+脚本 `.scratch/auto_chain/e2e_dashscope_payload.js`：incognito → 走到 ⑤ → `Fetch.enable` 拦截 `/api/tasks` →
+读 `postData` 断言 → `Fetch.failRequest` abort（**请求不发送**）。为验证键名映射，测试内注入**假配置**（假 Key/workspace，真实 Key 不出现在脚本里）。
+
+```
+结果: 18 通过 / 0 失败
+  OK ④ 有「百炼官方」/「已选图 → 自动走百炼」/ 有图时中转 disabled / 合计 ¥12.00
+  OK ⑤ 模型显示「百炼万相 3.0（官方）」
+  OK 截获 POST /api/tasks：model=dashscope / modelId=wan3.0-video
+  OK apiBaseUrl=https://wsf***.cn-beijing.maas.aliyuncs.com/api/v1 / apiKey len=115
+  OK photoIds=2（smart_mwit3r22_img_0/1）/ prompts=2 / clipDuration=10 / resolution=720p
+  OK preset=final / autoRetry=false / 质检 Key 透传
+  OK 未创建任务（before=41 after=41）
+```
+
+截图：`docs/交接/create-smart-picker/04-step5-dashscope.png`。回归：`verify-xiaozhi-home` 45/0、`verify-p6-offline` 41/0。
+
+### 9.4 仍未解决
+
+- **小智链路（C 本轮交付）默认仍走 WhaleTV 做图生视频**，同样会踩 400 → 需产品决定：给小智也加百炼通道，或改 WhaleTV 通道复用百炼 URL（后者需一次真实探测字段，须用户同意）。
+- 百炼真实付费提交未由 Lead 执行（留给用户点确认）。

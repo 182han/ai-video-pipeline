@@ -13,6 +13,7 @@
 // 手动调色：按用户口径放到图片审核页，**本轮先不做**（这里只展示卡片的调色参数）。
 // ============================================================
 import { navigate } from '../router.js';
+import { readRuntimeConfig } from '../store.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -76,6 +77,10 @@ export function CreateSmartWizard() {
   const [imagePrompts, setImagePrompts] = useState(draft0 && Array.isArray(draft0.imagePrompts) ? draft0.imagePrompts : []);
   const [photos, setPhotos] = useState(draft0 && Array.isArray(draft0.photos) ? draft0.photos : []);   // [{id,url,status,paid}]
   const [res, setRes] = useState(draft0 && draft0.res ? draft0.res : '720p');
+  // 视频通道（2026-11-16 用户口径）：中转 openai-video / 百炼 dashscope。
+  // 实测：**有图时必须走百炼**（中转 400: Alibaba requires image references to be URLs）；
+  // 百炼的图生视频用「getPolicy → 临时 OSS 上传」拿 oss:// 私有地址，不需要用户公网存储。
+  const [model, setModel] = useState(draft0 && draft0.model ? draft0.model : 'openai-video');
   const [transition, setTransition] = useState(draft0 ? draft0.transition !== false : true);
   const [bgm, setBgm] = useState(draft0 ? draft0.bgm !== false : true);
   const [restored, setRestored] = useState(!!(draft0 && draft0.step > 1)); // 仅「开局就是从草稿恢复」时提示
@@ -87,8 +92,8 @@ export function CreateSmartWizard() {
   // 真的动过才落盘（避免一进来就写空草稿，害得下次永远显示「已恢复」）
   useEffect(() => {
     if (step <= 1 && prompts.length === 0 && photos.length === 0) return;
-    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, at: new Date().toISOString() });
-  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm]);
+    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, at: new Date().toISOString() });
+  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model]);
 
   function restart() {
     if (!window.confirm('清空当前进度，从第 ① 步重新开始？（已出的图仍在图片库里，不会丢）')) return;
@@ -107,6 +112,10 @@ export function CreateSmartWizard() {
   const approved = photos.filter((p) => p.status !== 'rejected');
   const pickedCount = photos.filter((p) => p.paid === false).length;
   const photoCountMismatch = photos.length > 0 && photos.length !== clips;
+  // 图生视频统一走百炼（中转通道实测不接受图片）；纯文生视频仍可用中转
+  const useImages = approved.length === prompts.length && prompts.length > 0;
+  const effectiveModel = useImages ? 'dashscope' : model;
+  const MODEL_LABEL = { 'openai-video': 'WhaleTV 万相 3.0（中转）', dashscope: '百炼万相 3.0（官方）' };
 
   // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
   async function openPicker() {
@@ -204,19 +213,17 @@ export function CreateSmartWizard() {
     const cfg = readConfig();
     const rejected = photos.filter((p) => p.status === 'rejected').length;
     if (rejected > 0) { setErr(`有 ${rejected} 张图被打回：请改成「通过」或点「不出图/跳过」，否则图与段对不上。`); return; }
-    const useImages = approved.length === prompts.length && prompts.length > 0;
-    if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频' : '文生视频'}）\n视频约 ${yuan(videoCost)}${useImages ? '，图片已花 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
+    if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频 · ' : '文生视频 · '}${MODEL_LABEL[effectiveModel] || effectiveModel}）\n视频约 ${yuan(videoCost)}${imageCost ? '，本次图片 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
     setErr(''); setBusy('submit');
     try {
+      // 运行时配置按通道取（百炼：Key + 由 WorkspaceId/Region 拼出的 baseUrl；中转：whaletvKey/BaseUrl）
+      const rt = readRuntimeConfig(effectiveModel);
       const body = {
-        prompts, model: 'openai-video', resolution: res, clipDuration: clipDur,
+        ...rt,
+        model: effectiveModel, prompts, resolution: res, clipDuration: clipDur,
         preset: 'final', autoRetry: false,
         transition: { enabled: transition, duration: 0.4, type: 'fade' },
-        bgm: { enabled: bgm, mode: 'auto' },
-        apiKey: cfg.whaletvKey || '', apiBaseUrl: cfg.whaletvBaseUrl || '',
-        modelId: cfg.whaletvVideoModel || 'wan3.0-video',
-        llmApiKey: cfg.llmKey || '', llmBaseUrl: cfg.llmUrl || '', llmModel: cfg.llmModel || '',
-        multimodalApiKey: cfg.multimodalKey || '', multimodalBaseUrl: cfg.multimodalUrl || '', multimodalModel: cfg.multimodalModel || ''
+        bgm: { enabled: bgm, mode: 'auto' }
       };
       if (useImages) body.photoIds = approved.map((p) => p.id);
       const r = await fetch('/api/tasks', {
@@ -347,6 +354,16 @@ export function CreateSmartWizard() {
       ${step === 4 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <div className="flex items-center gap-3 mb-3 flex-wrap">
+            <label className="text-[12px] text-ink3">视频通道</label>
+            ${[['openai-video', 'WhaleTV 中转'], ['dashscope', '百炼官方']].map(([k, lab]) => html`
+              <button key=${k} onClick=${() => setModel(k)} disabled=${useImages && k === 'openai-video'}
+                className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (effectiveModel === k ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
+                style=${{ opacity: (useImages && k === 'openai-video') ? .4 : 1, cursor: (useImages && k === 'openai-video') ? 'not-allowed' : 'pointer' }}
+                title=${k === 'openai-video' ? '中转通道实测不接受图片（400: Alibaba requires image references to be URLs）' : '图片走百炼临时 OSS（48h 私有），不需要你自己的公网存储'}
+              >${lab}</button>`)}
+          </div>
+          ${useImages && html`<p className="text-[11px] text-ink3 mb-3">已选图 → 自动走 <b className="text-ink2">百炼</b>：中转通道实测不接受图片（400 requires image references to be URLs），百炼会先把图传到临时 OSS（48h 私有），不需要你的公网存储。</p>`}
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="text-[12px] text-ink3">分辨率</label>
             ${RES.map((r) => html`<button key=${r.key} onClick=${() => setRes(r.key)}
               className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (res === r.key ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
@@ -374,7 +391,7 @@ export function CreateSmartWizard() {
       ${step === 5 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <div className="text-[12px] text-ink2 leading-[1.9]">
-            模型：WhaleTV 万相 3.0（中转）· ${res}<br/>
+            模型：${MODEL_LABEL[effectiveModel] || effectiveModel} · ${res}<br/>
             时长：${clips} 段 × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟<br/>
             画面：${approved.length === prompts.length && prompts.length ? '图生视频（' + approved.length + ' 张首帧）' : '文生视频（场景卡提示词）'}<br/>
             转场：${transition ? '0.4s 淡化' : '关闭'} · 配乐：${bgm ? '自动' : '关闭'}<br/>
