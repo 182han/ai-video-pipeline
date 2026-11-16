@@ -123,10 +123,26 @@ function toOutputUrl(p) {
 function buildRuntimeConfig(task) {
   let cfg = {};
   try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { cfg = {}; }
+  // 出图（图生视频首帧）字段——2026-11-16 契约 §1：
+  //   · 5 个图片字段与其它 Key 同一套口径：**任务内存态已有的值优先**（本轮真正生效的那份），
+  //     缺失时回落 vs_config（重启后任务里的 Key 被 redact 清空，靠这里补上新填的 Key，
+  //     否则补跑时出图会「出图未就绪」）。
+  //   · imagePerClip 只认任务自己的值，**不从全局开关兜底**：老任务（纯文生视频）若被
+  //     塞成 true，补跑会先对每段真实出图（真计费），这不是用户点这一下想要的结果。
+  const rc = (task && task.runtimeConfig) || {};
+  const image = {
+    imageApiKey: rc.imageApiKey || cfg.imageKey || '',
+    imageBaseUrl: rc.imageBaseUrl || cfg.imageBaseUrl || '',
+    imageProvider: rc.imageProvider || cfg.imageProvider || '',
+    imageModel: rc.imageModel || cfg.imageModel || '',
+    imageSize: rc.imageSize || cfg.imageSize || '',
+    imagePerClip: rc.imagePerClip === true
+  };
   const base = {
     llmApiKey: cfg.llmKey || '', llmBaseUrl: cfg.llmUrl || '', llmModel: cfg.llmModel || '',
     multimodalApiKey: cfg.multimodalKey || '', multimodalBaseUrl: cfg.multimodalUrl || '',
     multimodalModel: cfg.multimodalModel || '',
+    ...image,
     strictQcItems: (task && task.runtimeConfig && task.runtimeConfig.strictQcItems) || null
   };
   const model = task && task.model;

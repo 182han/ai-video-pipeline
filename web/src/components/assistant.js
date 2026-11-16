@@ -13,13 +13,23 @@
 import { promptBus, readLLMConfig, readRuntimeConfig } from '../store.js';
 import { navigate, currentRoute } from '../router.js';
 import { createOrb } from './assistantOrb.js';
-import { PlanCard, StateStrip, GreetingBubble, VoiceButton } from './xiaozhiPlan.js';
+import { PlanCard, StateStrip, GreetingBubble, VoiceButton, ImageReviewCard } from './xiaozhiPlan.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
 
 const POS_KEY = 'vs_assistant_pos';
+
+// 逐段出图开关（2026-11-16 契约 §0/§1）：默认开启 = 用户口径「全自动」。
+// 只存一个标记在 localStorage：'0' = 关；缺失或其它 = 开（老用户升级后默认开）。
+const IMAGE_PER_CLIP_KEY = 'vs_image_per_clip';
+function readImagePerClip() {
+  try { return localStorage.getItem(IMAGE_PER_CLIP_KEY) !== '0'; } catch (e) { return true; }
+}
+function writeImagePerClip(on) {
+  try { localStorage.setItem(IMAGE_PER_CLIP_KEY, on ? '1' : '0'); } catch (e) { /* 隐私模式忽略 */ }
+}
 
 // 液态球：WebGL2 可用时渲染粒子缎带 + 玻璃外壳；
 // 取不到上下文/着色器失败时退回 CSS 径向渐变球，功能不受影响。
@@ -122,6 +132,11 @@ export function Assistant({ page = false } = {}) {
   const cfg = readLLMConfig();
   const hasKey = !!cfg.llmApiKey;
 
+  // 逐段出图开关 + 「继续生成」提交中标记（2026-11-16 契约 §1/§2.3）。
+  // 开关状态跨会话记住；默认开（用户口径是全自动：场景卡 → 首帧图 → 图生视频）。
+  const [imagePerClip, setImagePerClip] = useState(readImagePerClip);
+  const [reviewBusy, setReviewBusy] = useState(false);
+
   // ===== 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 =====
   // 后端是旧进程时（没有 /api/assistant/info），退回原来的「提示词助手」对话，
   // 并在面板里提示「服务端还没重启」，不让新 UI 假装能用。
@@ -147,6 +162,14 @@ export function Assistant({ page = false } = {}) {
   const [greet, setGreet] = useState(() => {
     try { return localStorage.getItem('vs_xiaozhi_greet_dismissed') !== '1'; } catch (e) { return true; }
   });
+
+  // 出图运行态（2026-11-16 契约 §3.1/§3.2）：
+  //   · 5 个图片字段与 Key 走 store.readRuntimeConfig()（只读 localStorage，不打印、不上报）；
+  //   · 单价**只信** GET /api/assistant/info 的 image.unitCny，拿不到就是 null → 计划卡写「单价未知」，
+  //     绝不硬编码（换模型/换价目表会谎报，用户按假数字点确认就是真实扣费）。
+  const imageRuntime = readRuntimeConfig('image');
+  const imageKeyPresent = !!imageRuntime.imageApiKey;
+  const imageUnitCny = (backend.info && backend.info.image) ? backend.info.image.unitCny : null;
 
   // 能力探测（只读 GET，不产生费用）
   useEffect(() => {
@@ -461,17 +484,42 @@ export function Assistant({ page = false } = {}) {
           + '要真实生成，请先到「设置」填 Key 再点确认。'
       }]);
     }
+    // 逐段出图（契约 §1）：开了开关但图片 Key 为空 → 先警告，不拦截。
+    // 是否真的能用由后端 IMAGE_GEN_NOT_READY 判定（.env 的 IMAGE_GEN_API_KEY 也可能配了）。
+    if (imagePerClip && !runtime.imageApiKey) {
+      setMsgs((m) => [...m, {
+        role: 'assistant',
+        content: '⚠ 设置里没有填「图片生成」的 Key（设置 → 图片生成）。'
+          + '开了「逐段出图」却没有 Key，服务端会直接返回「出图未就绪」：不会出图，也不会扣费。'
+          + '要出图请先填 Key；不想出图就把计划卡上的「逐段出图」关掉（改走纯文生视频）。'
+      }]);
+    }
     setXbusy(true);
     try {
       const r = await fetch('/api/assistant/execute', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        // service 端白名单：apiKey/apiBaseUrl/modelId/kling*/llm*/multimodal*（server.js:2051）。
-        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true, ...runtime })
+        // 服务端白名单：apiKey/apiBaseUrl/modelId/kling*/llm*/multimodal*/image*（server.js:2162）。
+        // imagePerClip 显式传（后端判 body.imagePerClip === true）；5 个图片字段随 ...runtime
+        // 一起过去 —— readRuntimeConfig 对所有 model 都带这 5 个键（契约 §1）。
+        // 注意：`...runtime` 必须紧跟 `approved: true,`（scripts/verify-assistant.js 的静态断言
+        // 就认这个形状，也保证运行 Key 一定在请求体里）；imagePerClip 放在 spread 之后，
+        // 避免被 runtime 里的同名键覆盖。
+        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true, ...runtime, imagePerClip: imagePerClip === true })
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
+        // 出图未就绪（契约 §3.1 code=IMAGE_GEN_NOT_READY）：把后端 error 原文显示出来，
+        // 别压成「HTTP 400」——用户要知道到底是缺 Key、缺地址还是厂商未注册。
+        if (j && j.code === 'IMAGE_GEN_NOT_READY') {
+          setMsgs((m) => [...m, {
+            role: 'assistant',
+            content: '⚠ ' + (j.error || '出图未就绪：请到「设置 → 图片生成」填 Key / 地址 / 模型。')
+              + '\n（这次没有建任务，也没有产生费用；不想出图就把「逐段出图」关掉。）'
+          }]);
+          return;
+        }
         setMsgs((m) => [...m, { role: 'assistant', content: '⚠ ' + ((j && (j.error || j.code)) || ('HTTP ' + r.status)) }]);
         return;
       }
@@ -481,6 +529,58 @@ export function Assistant({ page = false } = {}) {
       setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
     } finally {
       setXbusy(false);
+    }
+  }
+
+  // 计划卡「逐段出图」开关：状态存 localStorage（vs_image_per_clip），即时生效。
+  function toggleImagePerClip(on) {
+    const next = on !== false;
+    setImagePerClip(next);
+    writeImagePerClip(next);
+  }
+
+  // 审图暂停的三个动作（契约 §2.3/§2.4：用户点「继续」才结算并开始花视频的钱）。
+  function goReview() {
+    navigate('/library');
+    if (!page) setOpen(false);
+  }
+
+  async function continueAfterReview() {
+    const tid = xstate && xstate.task && xstate.task.taskId;
+    if (!tid || reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      const r = await fetch('/api/tasks/' + encodeURIComponent(tid) + '/unpause', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || (j && j.success === false)) {
+        setMsgs((m) => [...m, {
+          role: 'assistant',
+          content: '⚠ 继续失败：' + ((j && j.error) || ('HTTP ' + r.status))
+        }]);
+        return;
+      }
+      setMsgs((m) => [...m, {
+        role: 'assistant',
+        content: '已继续，开始生成视频'
+          + (j && j.approvedPhotos ? `（${j.approvedPhotos} 张未单独审核的图按通过处理）` : '')
+          + '。'
+      }]);
+      // 保持轮询：paused → running 仍在非终态集合里，原来的 2s 定时器自己会接着跑；
+      // 这里再立刻拉一次，免得状态条最多 2 秒后才更新。
+      fetch('/api/assistant/state?sessionId=' + encodeURIComponent(sessionId)
+        + (plan && plan.planId ? '&planId=' + encodeURIComponent(plan.planId) : ''), { credentials: 'same-origin' })
+        .then((rr) => (rr.ok ? rr.json() : null))
+        .then((sj) => { if (sj && sj.ok) setXstate(sj); })
+        .catch(() => {});
+    } catch (e) {
+      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 继续失败：' + (e && e.message ? e.message : e) }]);
+    } finally {
+      setReviewBusy(false);
     }
   }
 
@@ -657,6 +757,10 @@ export function Assistant({ page = false } = {}) {
     }
   }
 
+  // 审图暂停（契约 §2.3）：**只有** awaitingImageReview === true 才显示「图已出好」卡片。
+  // paused 但 awaitingImageReview 为 false（普通暂停 / 暂停超时）继续走 StateStrip 的既有提示，不抢。
+  const reviewTask = (xstate && xstate.task && xstate.task.awaitingImageReview === true) ? xstate.task : null;
+
   const ballStyle = pos
     ? { left: pos.left + 'px', top: pos.top + 'px' }
     : { right: '24px', bottom: '24px' };
@@ -725,6 +829,19 @@ export function Assistant({ page = false } = {}) {
               </div>
             `}
 
+            ${reviewTask && html`
+              <div className="xz-block">
+                <${ImageReviewCard}
+                  review=${reviewTask.imageReview}
+                  taskId=${reviewTask.taskId}
+                  currentStep=${reviewTask.currentStep}
+                  busy=${reviewBusy}
+                  onGoReview=${goReview}
+                  onContinue=${continueAfterReview}
+                />
+              </div>
+            `}
+
             ${plan && backend.ok && html`
               <div className="xz-block">
                 <${PlanCard}
@@ -732,6 +849,10 @@ export function Assistant({ page = false } = {}) {
                   busy=${xbusy}
                   onConfirm=${confirmPlan}
                   onEdit=${() => { if (inputRef.current) inputRef.current.focus(); }}
+                  imagePerClip=${imagePerClip}
+                  onToggleImage=${toggleImagePerClip}
+                  unitCny=${imageUnitCny}
+                  hasImageKey=${imageKeyPresent}
                 />
               </div>
             `}
@@ -902,12 +1023,27 @@ export function Assistant({ page = false } = {}) {
             />
           `}
 
+          ${reviewTask && html`
+            <${ImageReviewCard}
+              review=${reviewTask.imageReview}
+              taskId=${reviewTask.taskId}
+              currentStep=${reviewTask.currentStep}
+              busy=${reviewBusy}
+              onGoReview=${goReview}
+              onContinue=${continueAfterReview}
+            />
+          `}
+
           ${plan && backend.ok && html`
             <${PlanCard}
               plan=${plan}
               busy=${xbusy}
               onConfirm=${confirmPlan}
               onEdit=${() => { if (inputRef.current) inputRef.current.focus(); }}
+              imagePerClip=${imagePerClip}
+              onToggleImage=${toggleImagePerClip}
+              unitCny=${imageUnitCny}
+              hasImageKey=${imageKeyPresent}
             />
           `}
           ${xstate && xstate.state && html`

@@ -25,13 +25,23 @@ export function readRuntimeConfig(model) {
   } catch {
     cfg = {};
   }
+  // 出图（图生视频首帧）——2026-11-16 契约 §1：**所有 model** 都要带这 5 个键，
+  // 由调用方随 /api/assistant/execute 发出；后端白名单与 pipeline._mergeRuntimeConfig
+  // 用同名键透传。键名对应 screens/settingsPage.js:41-53 的「图片生成」分组，
+  // 没填就是空串（后端回落 .env 的 IMAGE_GEN_*，与 /api/images/* 现有口径一致）。
+  // 依旧只读 localStorage 的 vs_config，不打印、不落盘、不上报。
   const base = {
     llmApiKey: cfg.llmKey || '',
     llmBaseUrl: cfg.llmUrl || '',
     llmModel: cfg.llmModel || '',
     multimodalApiKey: cfg.multimodalKey || '',
     multimodalBaseUrl: cfg.multimodalUrl || '',
-    multimodalModel: cfg.multimodalModel || ''
+    multimodalModel: cfg.multimodalModel || '',
+    imageApiKey: cfg.imageKey || '',
+    imageBaseUrl: cfg.imageBaseUrl || '',
+    imageProvider: cfg.imageProvider || '',
+    imageModel: cfg.imageModel || '',
+    imageSize: cfg.imageSize || ''
   };
   if (model === 'dashscope') {
     // 官方 API 根地址 = https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1
