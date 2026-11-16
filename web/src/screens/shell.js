@@ -25,6 +25,8 @@ import { JobBar, useTasksPoll } from '../components/jobBar.js';
 import { Boundary } from '../components/boundary.js';
 import { AssistantPage } from './assistantPage.js';
 import { CreateWizard } from './create.js';
+// 2026-11-16 P2：小智流程版五步向导（先并存在 /create-smart，验收后再替换默认入口）
+import { CreateSmartWizard } from './createSmart.js';
 import { GenView } from './gen.js';
 import { LibraryView, MusicView } from './inventory.js';
 import { TemplatesView } from './templates.js';
@@ -48,6 +50,7 @@ const NAV = [
 function viewOf(route) {
   // 2026-11-16：登录后的 `/` = 整页「小智」对话页；六步向导保留在 /create。
   if (route === '/' || route === '') return 'home';
+  if (route.startsWith('/create-smart')) return 'createSmart';
   if (route.startsWith('/create')) return 'create';
   if (route.startsWith('/edit')) return 'edit';
   if (route.startsWith('/clips')) return 'library';
@@ -145,6 +148,7 @@ export function AppShell({ route }) {
         <${JobBar} tasks=${tasks} onChanged=${refreshTasks} />
 
         <div className="flex-1 min-h-0 overflow-auto">
+          ${view === 'createSmart' && html`<${Boundary}><${CreateSmartWizard} /></${Boundary}>`}
           ${view === 'create' && html`<${Boundary}><${CreateWizard} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
           ${view === 'gen' && html`<${Boundary}><${GenView} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
           ${view === 'library' && html`<${Boundary}><${LibraryView}

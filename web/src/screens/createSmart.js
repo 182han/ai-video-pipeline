@@ -1,0 +1,304 @@
+// ============================================================
+// 创作向导 · 小智流程版（P2，2026-11-16）
+// ------------------------------------------------------------
+// 与旧六步向导（/create）并存，先给用户验收；确认后再替换默认入口。
+// 五步（对齐小智的真实链路）：
+//   ① 时长 + 场景卡（预览 N 段，可排除）
+//   ② 提示词（按卡片字段自动合成，逐段可改；图片词只读展示）
+//   ③ 出图 + 审核（可选、真实计费 ¥0.20/张；**整批停一次**让用户抽看/通过/打回）
+//   ④ 生成设置（分辨率 / 转场 / 配乐 / 费用）
+//   ⑤ 确认提交 → 生成中（逐段视频→质检→拼接→配乐）
+// 图生视频 = ③ 出了图就用「图+视频提示词」，跳过 ③ 就是纯文生视频。
+// 手动调色：按用户口径放到图片审核页，**本轮先不做**（这里只展示卡片的调色参数）。
+// ============================================================
+import { navigate } from '../router.js';
+
+const { React } = window;
+const html = window.htm.bind(React.createElement);
+const { useState } = React;
+
+const RES = [
+  { key: '720p', label: '720P', rate: 0.6 },
+  { key: '1080p', label: '1080P', rate: 1.2 }
+];
+const IMAGE_UNIT = 0.2; // wan2.7-image ¥0.20/张（与 src/pricing.js 一致）
+
+function readConfig() {
+  try { return JSON.parse(localStorage.getItem('vs_config') || '{}') || {}; } catch (e) { return {}; }
+}
+function yuan(n) { return '¥' + (Number(n) || 0).toFixed(2); }
+
+function Btn({ children, onClick, disabled, primary, danger }) {
+  return html`<button onClick=${onClick} disabled=${disabled}
+    className=${'h-8 px-3 rounded-[6px] text-[12px] border ' + (primary
+      ? 'bg-accent text-onaccent border-accent'
+      : (danger ? 'border-danger/40 text-danger hover:bg-danger/10' : 'border-white/[.12] text-ink2 hover:bg-white/[.05]'))}
+    style=${{ opacity: disabled ? .45 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+  >${children}</button>`;
+}
+
+function StepBar({ step }) {
+  const names = ['① 时长 + 场景卡', '② 提示词', '③ 出图 + 审核', '④ 生成设置', '⑤ 确认'];
+  return html`<div className="flex items-center gap-1 flex-wrap mb-4">
+    ${names.map((n, i) => html`<span key=${i}
+      className=${'h-7 px-2.5 rounded-[5px] text-[11px] ' + (step === i + 1 ? 'bg-accent/[.16] text-accent' : (step > i + 1 ? 'text-ink2' : 'text-ink3'))}
+    >${n}</span>`)}
+  </div>`;
+}
+
+export function CreateSmartWizard() {
+  const [step, setStep] = useState(1);
+  const [minutes, setMinutes] = useState('5');
+  const [clipDur, setClipDur] = useState(10);
+  const [cards, setCards] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+  const [prompts, setPrompts] = useState([]);
+  const [imagePrompts, setImagePrompts] = useState([]);
+  const [photos, setPhotos] = useState([]);   // [{id,url,status}]
+  const [res, setRes] = useState('720p');
+  const [transition, setTransition] = useState(true);
+  const [bgm, setBgm] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+
+  const totalSec = Math.max(1, Math.round((parseFloat(minutes) || 0) * 60));
+  const clips = Math.max(1, Math.ceil(totalSec / clipDur - 1e-9));
+  const tooMany = clips > 180;
+  const rate = (RES.find((r) => r.key === res) || RES[0]).rate;
+  const videoCost = clips * clipDur * rate;
+  const imageCost = photos.length * IMAGE_UNIT;
+  const approved = photos.filter((p) => p.status !== 'rejected');
+
+  async function loadCards() {
+    if (tooMany) { setErr(`场景卡正片只有 180 张，本次 ${clips} 段超了；请缩短时长或改成 15 秒/段。`); return; }
+    setErr(''); setBusy('cards');
+    try {
+      const r = await fetch('/api/scene-cards/preview?count=' + clips, { credentials: 'same-origin' });
+      const j = await r.json().catch(() => null);
+      if (!j || j.ok !== true) {
+        throw new Error((j && (j.error || j.code)) || ('HTTP ' + r.status)
+          + '（若是 404：服务端还没有预览接口，需要重启一次 3001）');
+      }
+      setCards(j.cards || []);
+      setPrompts((j.cards || []).map((c) => c.prompt));
+      setImagePrompts((j.cards || []).map((c) => c.imagePrompt));
+      setStep(2);
+    } catch (e) { setErr('读取场景卡失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  async function genImages() {
+    const cfg = readConfig();
+    if (!cfg.imageKey) { setErr('设置里还没填图片生成的 Key（设置 → 图片生成）。'); return; }
+    if (!window.confirm(`将生成 ${imagePrompts.length} 张图（真实计费 ${yuan(imagePrompts.length * IMAGE_UNIT)}），继续？`)) return;
+    setErr(''); setInfo(''); setBusy('images');
+    try {
+      const r = await fetch('/api/images/generate-batch', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompts: imagePrompts,
+          apiKey: cfg.imageKey || '', baseUrl: cfg.imageBaseUrl || '',
+          provider: cfg.imageProvider || 'dashscope', model: cfg.imageModel || 'wan2.7-image',
+          size: cfg.imageSize || '1696*960', palette: 'calm',
+          taskId: 'smart_' + Date.now().toString(36)
+        })
+      });
+      const j = await r.json().catch(() => null);
+      if (!j || j.ok !== true || !Array.isArray(j.items)) {
+        throw new Error((j && (j.error || (j.errors && j.errors[0] && j.errors[0].error))) || ('HTTP ' + r.status));
+      }
+      const ids = j.items.map((x) => x.photoId);
+      const pr = await fetch('/api/photos?final=1', { credentials: 'same-origin' });
+      const pj = await pr.json().catch(() => ({ photos: [] }));
+      const all = (pj && pj.photos) || [];
+      setPhotos(ids.map((id) => {
+        const it = all.find((p) => p.id === id) || {};
+        return { id, url: it.url || '', status: it.status || 'unchecked' };
+      }).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)));
+      setInfo(`已出图 ${ids.length} 张（${yuan(ids.length * IMAGE_UNIT)}）。请逐张看，打回不满意的；确认后点下一步。`);
+    } catch (e) { setErr('出图失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  async function review(id, status) {
+    setPhotos((ps) => ps.map((p) => (p.id === id ? { ...p, status } : p)));
+    try {
+      await fetch('/api/photos/' + encodeURIComponent(id), {
+        method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+    } catch (e) { setErr('审核写回失败：' + e.message); }
+  }
+
+  async function submit() {
+    const cfg = readConfig();
+    const rejected = photos.filter((p) => p.status === 'rejected').length;
+    if (rejected > 0) { setErr(`有 ${rejected} 张图被打回：请改成「通过」或点「不出图/跳过」，否则图与段对不上。`); return; }
+    const useImages = approved.length === prompts.length && prompts.length > 0;
+    if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频' : '文生视频'}）\n视频约 ${yuan(videoCost)}${useImages ? '，图片已花 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
+    setErr(''); setBusy('submit');
+    try {
+      const body = {
+        prompts, model: 'openai-video', resolution: res, clipDuration: clipDur,
+        preset: 'final', autoRetry: false,
+        transition: { enabled: transition, duration: 0.4, type: 'fade' },
+        bgm: { enabled: bgm, mode: 'auto' },
+        apiKey: cfg.whaletvKey || '', apiBaseUrl: cfg.whaletvBaseUrl || '',
+        modelId: cfg.whaletvVideoModel || 'wan3.0-video',
+        llmApiKey: cfg.llmKey || '', llmBaseUrl: cfg.llmUrl || '', llmModel: cfg.llmModel || '',
+        multimodalApiKey: cfg.multimodalKey || '', multimodalBaseUrl: cfg.multimodalUrl || '', multimodalModel: cfg.multimodalModel || ''
+      };
+      if (useImages) body.photoIds = approved.map((p) => p.id);
+      const r = await fetch('/api/tasks', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.taskId) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      navigate('/gen');
+    } catch (e) { setErr('提交失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  const list = showAll ? prompts : prompts.slice(0, 12);
+
+  return html`
+    <div className="px-6 py-5 max-w-[980px]" style=${{ paddingBottom: '90px' }}>
+      <div className="flex items-baseline gap-3 mb-1">
+        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">创作</h1>
+        <span className="text-[11px] text-ink3">场景卡 → 提示词 → 出图（可选）→ 视频 → 拼接 → 配乐</span>
+        <span className="flex-1"></span>
+        <${Btn} onClick=${() => navigate('/create')}>用旧版六步向导</${Btn}>
+      </div>
+      <${StepBar} step=${step} />
+
+      ${err && html`<p className="mb-3 text-[12px] text-danger">${err}</p>`}
+      ${info && html`<p className="mb-3 text-[12px] text-accent">${info}</p>`}
+
+      ${step === 1 && html`
+        <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
+          <p className="text-[12px] text-ink2 mb-3">说总时长，场景从卡库按章节顺序自动抽（同一任务不重复）。</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="text-[12px] text-ink3">总时长</label>
+            <input value=${minutes} onInput=${(e) => setMinutes(e.target.value)} type="number" min="1" max="60"
+              className="h-8 w-[90px] px-2 rounded-[5px] bg-s2 text-[12px] text-ink border border-white/[.12] outline-none" />
+            <span className="text-[12px] text-ink3">分钟</span>
+            <span className="w-4"></span>
+            <label className="text-[12px] text-ink3">每段</label>
+            ${[10, 15].map((d) => html`<button key=${d} onClick=${() => setClipDur(d)}
+              className=${'h-8 px-2.5 rounded-[5px] text-[12px] border ' + (clipDur === d ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
+            >${d} 秒</button>`)}
+          </div>
+          <div className="mt-3 text-[12px] text-ink2">
+            预计 <b className="text-ink">${clips} 段</b> × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟
+            ${tooMany ? html`<span className="text-danger"> · 超过卡库 180 张</span>` : ''}
+          </div>
+          <div className="mt-4 flex gap-2">
+            <${Btn} primary=${true} disabled=${busy === 'cards' || tooMany} onClick=${loadCards}>
+              ${busy === 'cards' ? '读卡中…' : '看场景卡（' + clips + ' 段）'}
+            </${Btn}>
+          </div>
+        </div>`}
+
+      ${step === 2 && html`
+        <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[12px] text-ink2">提示词（按卡片字段自动合成，可逐段改）</span>
+            <span className="text-[10px] text-ink3">共 ${prompts.length} 段</span>
+            <span className="flex-1"></span>
+            <${Btn} onClick=${() => setShowAll(!showAll)}>${showAll ? '收起' : '显示全部'}</${Btn}>
+          </div>
+          ${list.map((p, i) => html`
+            <div key=${i} className="border-t border-white/[.05] py-2">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] text-ink3 font-num">第 ${i + 1} 段</span>
+                <span className="text-[10px] text-ink3">${cards && cards[i] ? cards[i].sceneKey : ''}</span>
+                <span className="text-[10px] text-ink3">${cards && cards[i] && cards[i].adjust ? '· 有卡色调参数' : ''}</span>
+              </div>
+              <textarea value=${p} rows="2"
+                onInput=${(e) => { const v = e.target.value; setPrompts((arr) => arr.map((x, k) => (k === i ? v : x))); }}
+                className="w-full resize-y rounded-[5px] bg-s2 text-[12px] text-ink border border-white/[.12] px-2 py-1.5 outline-none leading-[1.7]"></textarea>
+            </div>`)}
+          ${!showAll && prompts.length > 12 && html`<p className="mt-2 text-[11px] text-ink3">还有 ${prompts.length - 12} 段未展开（不改就是自动合成的结果）。</p>`}
+          <div className="mt-4 flex gap-2">
+            <${Btn} onClick=${() => setStep(1)}>上一步</${Btn}>
+            <${Btn} primary=${true} onClick=${() => setStep(3)}>下一步：出图（可选）</${Btn}>
+          </div>
+        </div>`}
+
+      ${step === 3 && html`
+        <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
+          <p className="text-[12px] text-ink2 mb-1">这一步是<b className="text-ink">可选</b>的：出图后走图生视频（画面更可控），跳过就是纯文生视频。</p>
+          <p className="text-[11px] text-ink3 mb-3">出图真实计费 ${yuan(IMAGE_UNIT)}/张，本次 ${imagePrompts.length} 张 ≈ ${yuan(imagePrompts.length * IMAGE_UNIT)}。出完会停在这里让你抽看。</p>
+          <div className="flex gap-2 mb-4">
+            <${Btn} primary=${true} disabled=${busy === 'images'} onClick=${genImages}>
+              ${busy === 'images' ? '出图中…' : '出图 ' + imagePrompts.length + ' 张'}
+            </${Btn}>
+            <${Btn} onClick=${() => { setPhotos([]); setStep(4); }}>不出图，直接下一步</${Btn}>
+          </div>
+          ${photos.length > 0 && html`
+            <div className="grid grid-cols-4 gap-2">
+              ${photos.map((p) => html`
+                <div key=${p.id} className="rounded-[6px] border border-white/[.10] overflow-hidden bg-s2">
+                  ${p.url ? html`<img src=${p.url} alt="出图" className="w-full h-[110px] object-cover" />` : html`<div className="w-full h-[110px] grid place-items-center text-[10px] text-ink3">无预览</div>`}
+                  <div className="flex items-center gap-1 p-1.5">
+                    <span className=${'text-[10px] ' + (p.status === 'rejected' ? 'text-danger' : 'text-ink3')}>${p.status === 'rejected' ? '已打回' : (p.status === 'approved' ? '已通过' : '待看')}</span>
+                    <span className="flex-1"></span>
+                    <button onClick=${() => review(p.id, 'approved')} className="h-5 px-1 rounded-[3px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>
+                    <button onClick=${() => review(p.id, 'rejected')} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">打回</button>
+                  </div>
+                </div>`)}
+            </div>`}
+          <div className="mt-4 flex gap-2">
+            <${Btn} onClick=${() => setStep(2)}>上一步</${Btn}>
+            <${Btn} primary=${true} onClick=${() => setStep(4)}>下一步：生成设置</${Btn}>
+          </div>
+        </div>`}
+
+      ${step === 4 && html`
+        <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            <label className="text-[12px] text-ink3">分辨率</label>
+            ${RES.map((r) => html`<button key=${r.key} onClick=${() => setRes(r.key)}
+              className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (res === r.key ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
+            >${r.label}</button>`)}
+          </div>
+          <label className="flex items-center gap-2 text-[12px] text-ink2 mb-2">
+            <input type="checkbox" checked=${transition} onChange=${(e) => setTransition(e.target.checked)} />
+            片段间 0.4s 交叉淡化（关掉 = 直拼，接缝偏硬）
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-ink2 mb-3">
+            <input type="checkbox" checked=${bgm} onChange=${(e) => setBgm(e.target.checked)} />
+            自动配乐（从 BGM 库选曲并混音）
+          </label>
+          <div className="text-[12px] text-ink2 leading-[1.9]">
+            片段：${clips} 段 × ${clipDur} 秒<br/>
+            视频：${yuan(videoCost)}（${res} ¥${rate}/s）${photos.length ? html`<br/>图片：${yuan(imageCost)}（已生成 ${photos.length} 张）` : ''}<br/>
+            <b className="text-ink">合计：${yuan(videoCost + imageCost)}</b>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <${Btn} onClick=${() => setStep(3)}>上一步</${Btn}>
+            <${Btn} primary=${true} onClick=${() => setStep(5)}>下一步：确认</${Btn}>
+          </div>
+        </div>`}
+
+      ${step === 5 && html`
+        <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
+          <div className="text-[12px] text-ink2 leading-[1.9]">
+            模型：WhaleTV 万相 3.0（中转）· ${res}<br/>
+            时长：${clips} 段 × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟<br/>
+            画面：${approved.length === prompts.length && prompts.length ? '图生视频（' + approved.length + ' 张首帧）' : '文生视频（场景卡提示词）'}<br/>
+            转场：${transition ? '0.4s 淡化' : '关闭'} · 配乐：${bgm ? '自动' : '关闭'}<br/>
+            费用：视频 ${yuan(videoCost)}${photos.length ? ' + 图片 ' + yuan(imageCost) : ''} = <b className="text-ink">${yuan(videoCost + imageCost)}</b>
+          </div>
+          <p className="mt-3 text-[11px] text-ink3">提交后进入「生成中」：逐段生成 → 质检 → 转场拼接 → 无缝循环 → 配乐 → 转码。真实计费，确认后才开始。</p>
+          <div className="mt-4 flex gap-2">
+            <${Btn} onClick=${() => setStep(4)}>上一步</${Btn}>
+            <${Btn} primary=${true} disabled=${busy === 'submit'} onClick=${submit}>${busy === 'submit' ? '提交中…' : '确认提交（' + yuan(videoCost + imageCost) + '）'}</${Btn}>
+          </div>
+        </div>`}
+    </div>
+  `;
+}
