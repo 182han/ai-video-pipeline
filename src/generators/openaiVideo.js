@@ -114,25 +114,36 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
     return { taskId, status: 'queued' };
   }
 
-  // 图生视频（2026-11-16 实测通过，WhaleTV 中转 / NewAPI 形态）
+ // 图生视频（2026-11-16 实测通过，WhaleTV 中转 / NewAPI 形态）
   //   POST {baseUrl}/video/generations  JSON {model, prompt, image, duration}
-  //   image 官方文档写明支持 URL 或 Base64；URL 已实测，base64 未实测（失败会把厂商原文抛出来）。
+  //   image 官方文档写明支持 URL 或 Base64；URL 已实测。
+  //   Base64 形态按阿里云百炼官方文档用 **data URL**（`data:{mime};base64,...`），
+  //   不是裸 base64；中转是否原样透传尚未实测（失败会抛厂商原文，不静默退回文生视频）。
   async _generateWithImage(prompt, options) {
     const image = options.image || {};
     const imageUrl = String(image.url || '').trim();
+    const dataUrl = String(image.dataUrl || '').trim();
     const base64 = String(image.base64 || '').trim();
-    if (!imageUrl && !base64) throw new Error('图生视频首帧为空（既没有公网 URL 也没有 base64）');
+    if (!imageUrl && !dataUrl && !base64) throw new Error('图生视频首帧为空（URL / data URL / base64 都没有）');
 
-    // URL 优先：2026-11-16 实测这条能过（5 秒、wan3.0-video、最终 SUCCESS）。
-    // 没有 URL 才会用 base64；**不要为了“试一下”重复提交**——每次成功提交都会真实计费。
-    if (!imageUrl) {
-      console.warn('[openai-video] 图生视频无公网 URL，改用 base64（该形态未实测；失败会抛厂商原文）');
+    // 优先级：公网 URL（已实测） > data URL（官方文档格式） > 裸 base64（兜底）。
+    // **不要为了“试一下”重复提交**——每次成功提交都会真实计费。
+    let imagePayload = imageUrl;
+    let imageKind = 'url';
+    if (!imagePayload && dataUrl) { imagePayload = dataUrl; imageKind = 'dataUrl'; }
+    if (!imagePayload && base64) {
+      const mime = String(image.mime || 'image/png');
+      imagePayload = `data:${mime};base64,${base64}`;
+      imageKind = 'base64→dataUrl';
+    }
+    if (imageKind !== 'url') {
+      console.warn(`[openai-video] 图生视频无公网 URL，改用 ${imageKind}（按阿里云文档格式；中转透传未实测，失败会抛厂商原文）`);
     }
     const body = {
       model: this.modelId,
       prompt: prompt.trim().slice(0, 8000),
       duration: Math.max(1, Math.min(this.supportedOptions.maxDuration, parseInt(options.duration, 10) || 5)),
-      image: imageUrl || base64
+      image: imagePayload
     };
 
     const ac = new AbortController();

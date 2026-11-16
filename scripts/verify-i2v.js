@@ -107,13 +107,14 @@ console.log('================================================================');
     check(oaCall && oaCall.body && oaCall.body.duration === 5, 'WhaleTV：duration=5（数字，不是 seconds 字符串）');
     check(oaRes.taskId === 'whale_i2v_1', 'WhaleTV：返回 task_id');
 
-    // 2) 图生视频：没有 URL → base64（未实测，但代码必须明确走这条路而不是丢图）
+    // 2) 图生视频：没有 URL → 按阿里云文档发 data URL（`data:{mime};base64,...`）
     calls.length = 0;
     stubFetch(() => jsonResponse({ task_id: 'whale_i2v_2', id: 'whale_i2v_2' }));
     const oaB64 = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
     const oaB64Res = await oaB64.generate('雪山推近', { duration: 5, image: IMG_W });
-    check(calls[0] && calls[0].body && calls[0].body.image === 'QUJDRA==', 'WhaleTV：无 URL 时传裸 base64（该形态未实测）');
-    check(oaB64Res.taskId === 'whale_i2v_2', 'WhaleTV：base64 路径也返回 task_id');
+    check(calls[0] && calls[0].body && calls[0].body.image === 'data:image/png;base64,QUJDRA==',
+      'WhaleTV：无 URL 时发 data URL（阿里云文档格式，中转透传未实测）', calls[0] && String(calls[0].body.image).slice(0, 40));
+    check(oaB64Res.taskId === 'whale_i2v_2', 'WhaleTV：data URL 路径也返回 task_id');
 
     // 3) 查询：完成态（2026-11-16 实测结构 data.status=SUCCESS + data.result_url）
     calls.length = 0;

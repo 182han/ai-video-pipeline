@@ -131,7 +131,8 @@ function restoreFetch() { global.fetch = origFetch; }
   ok('图生视频打 {base}/video/generations', c3.url === 'https://relay.example.test/v1/video/generations', c3.url);
   const b3 = (() => { try { return JSON.parse(c3.init.body); } catch (e) { return null; } })();
   ok('body 是 JSON（不是 multipart）', !!b3 && typeof c3.init.body === 'string', typeof c3.init.body);
-  ok('含 image（无公网 URL 时传 base64）', b3 && b3.image === png1x1, b3 ? String(b3.image).slice(0, 12) + '…' : '');
+  ok('含 image（无公网 URL 时传 data URL）', b3 && b3.image === 'data:image/png;base64,' + png1x1,
+    b3 ? String(b3.image).slice(0, 30) + '…' : '');
   ok('含 duration = 10', b3 && b3.duration === 10, JSON.stringify(b3 && b3.duration));
   ok('Content-Type = application/json', (c3.init.headers || {})['Content-Type'] === 'application/json',
     String((c3.init.headers || {})['Content-Type']));
