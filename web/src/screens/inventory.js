@@ -6,7 +6,7 @@
 //   片段：GET /api/library?favorite=&q=&resolution=&model=
 //         PUT /api/library/:id {favorite} · DELETE /api/library/:id（进回收站）
 //         POST /api/library/:id/regenerate {prompt}
-//   图片：GET /api/photos?final=1 · PUT/DELETE /api/photos/:id
+//   图片：GET /api/photos（全量：最终版 + 审核中 + 调色前后各版本）· PUT/DELETE /api/photos/:id
 // 回收站：GET /api/recycle · POST /api/recycle/:type/:id/restore
 //         DELETE /api/recycle/:type/:id · POST /api/recycle/:type/purge
 // 删除分两步：页面删除只移入回收站；彻底删除必须在回收站抽屉里再确认一次。
@@ -330,6 +330,73 @@ export function ClipsPanel({ onChanged }) {
 // 审核通过 = 这张图可以用作下一步「图生视频」的输入（厂商通道按确认后接入）。
 const PHOTO_STATUS_TEXT = { pending: '待审', approved: '已通过', rejected: '已打回' };
 
+// ---------------- 照片手动调色（2026-11-16 契约 §3.5） ----------------
+// 接口：POST /api/photos/:id/adjust
+//   调色 { brightness, contrast, saturation, temperature }（各 -100..100 整数，绝对值，每次从原图重渲）
+//   回退 { reset: true }
+// 响应：{ ok, adjusted, reverted, filter, url, photo }；photo.adjust = { params, versions, current, ... }
+// 调色是本地派生、不计费；调色前后是同一 photo 条目的版本链，不拆成新条目。
+const ADJUST_KEYS = [
+  { key: 'brightness', label: '亮度' },
+  { key: 'contrast', label: '对比度' },
+  { key: 'saturation', label: '饱和度' },
+  { key: 'temperature', label: '色温' }
+];
+const ADJUST_ZERO = { brightness: 0, contrast: 0, saturation: 0, temperature: 0 };
+
+// 取当前生效参数：photo.adjust.params（服务端当前渲染用的那组），没有就全 0。
+function adjustParamsOf(photo) {
+  const src = (photo && photo.adjust && photo.adjust.params) || null;
+  const out = { ...ADJUST_ZERO };
+  for (const key of Object.keys(out)) {
+    const n = Number(src && src[key]);
+    if (Number.isFinite(n)) out[key] = Math.max(-100, Math.min(100, Math.round(n)));
+  }
+  return out;
+}
+
+// 当前调色版本号 N（显示「已调色 vN」）：优先 adjust.current.version，回退版本链长度；未调色 = 0。
+function adjustVersion(photo) {
+  const a = photo && photo.adjust;
+  if (!a || !a.params) return 0;
+  const v = Number(a.current && a.current.version);
+  if (Number.isFinite(v) && v > 0) return v;
+  return Array.isArray(a.versions) && a.versions.length ? a.versions.length : 1;
+}
+
+// 参数摘要：亮度+20 · 对比度-5 · 饱和度 0 · 色温+10
+function adjustSummary(params) {
+  const p = params || ADJUST_ZERO;
+  return ADJUST_KEYS.map(({ key, label }) => {
+    const n = Number(p[key]);
+    const v = Number.isFinite(n) ? Math.round(n) : 0;
+    return label + (v > 0 ? '+' : '') + v;
+  }).join(' · ');
+}
+
+// 即时预览的 CSS filter：brightness/contrast/saturate 近似 ffmpeg eq，
+// 色温用 sepia + hue-rotate 近似（暖 → 偏黄、冷 → 偏蓝）。只喂给详情大图，不发请求。
+// 入参是「滑杆值 - 服务端已生效值」的增量：这样预览是在当前图基础上叠加，不会把已调色重复算两遍。
+function adjustPreviewFilter(delta) {
+  const clamp = (n) => Math.max(-100, Math.min(100, Number(n) || 0));
+  const parts = [
+    'brightness(' + (1 + clamp(delta.brightness) / 100).toFixed(3) + ')',
+    'contrast(' + (1 + clamp(delta.contrast) / 100).toFixed(3) + ')',
+    'saturate(' + (1 + clamp(delta.saturation) / 100).toFixed(3) + ')'
+  ];
+  const t = clamp(delta.temperature);
+  if (t > 0) parts.push('sepia(' + (t / 100 * 0.45).toFixed(3) + ')', 'hue-rotate(-8deg)');
+  else if (t < 0) parts.push('sepia(' + (-t / 100 * 0.35).toFixed(3) + ')', 'hue-rotate(160deg)');
+  return parts.join(' ');
+}
+
+// cache-busting：服务端调色后文件名可能不变，必须让浏览器重取。
+// 原 url 可能已经带 query（如 /clips/a.png?x=1），必须用 & 续接，不能拼出两个 ?。
+function withCacheBust(url, tag) {
+  if (!url || !tag) return url;
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(String(tag));
+}
+
 export function PhotosPanel({ onChanged }) {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
@@ -339,12 +406,21 @@ export function PhotosPanel({ onChanged }) {
   const [zoomImg, setZoomImg] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
   const [editVideoPrompt, setEditVideoPrompt] = useState('');
+  // 手动调色：滑杆值（绝对值，-100..100）、请求中标记、错误/提示、图片版本号
+  const [adjParams, setAdjParams] = useState({ ...ADJUST_ZERO });
+  const [adjBusy, setAdjBusy] = useState('');
+  const [adjErr, setAdjErr] = useState('');
+  const [adjNote, setAdjNote] = useState('');
+  const [adjBust, setAdjBust] = useState({});
 
   async function openDetail(p) {
     setDetail(p);
     setVersions([]);
     setEditPrompt(p.imagePrompt || p.prompt || '');
     setEditVideoPrompt(p.videoPrompt || '');
+    setAdjParams(adjustParamsOf(p));
+    setAdjErr('');
+    setAdjNote('');
     try {
       const r = await fetch('/api/photos/' + encodeURIComponent(p.id), { credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
@@ -353,12 +429,14 @@ export function PhotosPanel({ onChanged }) {
         setVersions(Array.isArray(j.versions) ? j.versions : []);
         setEditPrompt(j.imagePrompt || j.prompt || '');
         setEditVideoPrompt(j.videoPrompt || '');
+        setAdjParams(adjustParamsOf(j));
       }
     } catch (e) { /* 详情失败不回滚列表 */ }
   }
 
   const qs = new URLSearchParams();
-  qs.set('final', '1');
+  // 2026-11-16 用户口径放宽：图片 tab 不再只显示「最终版」，审核中/调色前后/多版本全显示。
+  // （原 qs.set('final','1') 导致新出图 isFinal=false 永远看不见）
   if (status) qs.set('status', status);
   if (q.trim()) qs.set('q', q.trim());
   const [s, reload] = useJson('/api/photos' + (qs.toString() ? '?' + qs : ''));
@@ -444,6 +522,83 @@ export function PhotosPanel({ onChanged }) {
     } catch (e) { setErr('保存提示词失败：' + e.message); }
   }
 
+  // ---- 手动调色：POST /api/photos/:id/adjust ----
+  // 成功后一律用服务端返回的 photo 覆盖详情（不用本地参数拼结果），并给图片 URL 换版本号让浏览器重取。
+  function adoptAdjustedPhoto(photo, url) {
+    const next = Object.assign({}, photo || {});
+    if (url && !next.url) next.url = url;
+    // 服务端每次写库都会更新 updatedAt；没有就用当前时间兜底
+    const tag = next.updatedAt || Date.now();
+    if (next.id) setAdjBust((m) => Object.assign({}, m, { [next.id]: tag }));
+    setDetail(next);
+    setAdjParams(adjustParamsOf(next));
+    reload();
+  }
+
+  async function postAdjust(body, kind) {
+    if (!detail) return null;
+    setAdjBusy(kind);
+    setAdjErr('');
+    setAdjNote('');
+    try {
+      const r = await fetch('/api/photos/' + encodeURIComponent(detail.id) + '/adjust', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => ({}));
+      // 后端错误原文（400 参数非法 / 404 不存在 / 409 原图缺失 / 502 ffmpeg 失败）直接透出：
+      // 不吞、不改写、不把失败当成功。
+      if (!r.ok || !j || j.ok !== true) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      adoptAdjustedPhoto(j.photo, j.url);
+      if (onChanged) onChanged();
+      return j;
+    } catch (e) {
+      // 后端 error 已经带「调色失败：/回退原图失败：」前缀时不要再叠一层
+      // （实测会出现「调色失败：调色失败：ffmpeg…」，用户以为是两次错误）。
+      const msg = String((e && e.message) || '');
+      setAdjErr(/^(调色失败|回退原图失败|恢复原图失败)[:：]/.test(msg)
+        ? msg
+        : ((kind === 'revert' ? '恢复原图失败：' : '调色失败：') + msg));
+      return null;
+    } finally {
+      setAdjBusy('');
+    }
+  }
+
+  async function applyAdjust() {
+    const body = {};
+    for (const { key } of ADJUST_KEYS) body[key] = Math.round(Number(adjParams[key]) || 0);
+    const j = await postAdjust(body, 'apply');
+    if (j) {
+      const v = adjustVersion(j.photo);
+      setAdjNote('已应用调色' + (v ? '（v' + v + '）' : '') + '，改用服务端渲染结果');
+    }
+  }
+
+  async function revertAdjust() {
+    const j = await postAdjust({ reset: true }, 'revert');
+    if (j) {
+      setAdjParams({ ...ADJUST_ZERO });
+      setAdjNote('已恢复原图，滑杆归 0');
+    }
+  }
+
+  // 「重置为 0」只清本地滑杆（不提交）：归 0 不是合法调色，真回退原图必须走「恢复原图」。
+  function resetAdjustSliders() {
+    setAdjParams({ ...ADJUST_ZERO });
+    setAdjErr('');
+    setAdjNote('滑杆已归 0（未提交）。要丢弃调色、回到原图请点「恢复原图」。');
+  }
+
+  // 「载入上次参数」把滑杆设回 photo.adjust.params（服务端当前版本），只是回填，不提交。
+  function loadLastAdjust() {
+    setAdjParams(adjustParamsOf(detail));
+    setAdjErr('');
+    setAdjNote('已载入上次应用参数（未提交）');
+  }
+
   // 把这张图带回创作流程：未审核的先标记通过，再写 seed 并跳回 /（向导会取走并跳到第③步）
   async function useInCreation(p) {
     setErr('');
@@ -499,6 +654,20 @@ export function PhotosPanel({ onChanged }) {
     ? photoGroups.find((g) => g.key === pairKey(detail) && g.before && g.after)
     : null;
 
+  // 手动调色的渲染派生值：滑杆值 - 服务端当前已生效值 = 预览增量（避免把已调色重复叠加两遍）。
+  // 有增量才加 CSS filter；应用成功 / 恢复原图后参数与服务端一致，增量归 0，预览自动清掉。
+  const serverAdjParams = adjustParamsOf(detail);
+  const adjustDelta = {};
+  let adjustChanged = false;
+  for (const { key } of ADJUST_KEYS) {
+    const d = (Number(adjParams[key]) || 0) - (Number(serverAdjParams[key]) || 0);
+    adjustDelta[key] = d;
+    if (Math.abs(d) > 0.0001) adjustChanged = true;
+  }
+  const adjustIsZero = ADJUST_KEYS.every(({ key }) => Math.round(Number(adjParams[key]) || 0) === 0);
+  const adjustVer = detail ? adjustVersion(detail) : 0;
+  const previewFilterText = adjustChanged ? adjustPreviewFilter(adjustDelta) : '';
+
   return html`
     <div>
       <p className="mb-3 text-[11px] leading-[1.7] text-ink3">
@@ -537,13 +706,13 @@ export function PhotosPanel({ onChanged }) {
               <div key=${g.key} style=${{ gridColumn: 'span 2' }} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
                 <div className="grid grid-cols-2 gap-px bg-black">
                   <div style=${{ position: 'relative' }}>
-                    <img src=${g.before.url} alt="调色前"
+                    <img src=${withCacheBust(g.before.url, adjBust[g.before.id])} alt="调色前"
                       onClick=${() => openDetail(g.before)}
                       className="w-full aspect-video bg-black object-cover cursor-pointer" />
                     <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色前</span>
                   </div>
                   <div style=${{ position: 'relative' }}>
-                    <img src=${g.after.url} alt="调色后"
+                    <img src=${withCacheBust(g.after.url, adjBust[g.after.id])} alt="调色后"
                       onClick=${() => openDetail(g.after)}
                       className="w-full aspect-video bg-black object-cover cursor-pointer" />
                     <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色后</span>
@@ -573,7 +742,7 @@ export function PhotosPanel({ onChanged }) {
           const p = g.after || g.before || g.singles[0];
           return html`
             <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
-              <img src=${p.url} alt="生成的图片"
+              <img src=${withCacheBust(p.url, adjBust[p.id])} alt="生成的图片"
                 onClick=${() => openDetail(p)}
                 className="w-full aspect-video bg-black object-cover cursor-pointer" />
               <div className="px-2 py-1.5">
@@ -616,8 +785,55 @@ export function PhotosPanel({ onChanged }) {
               <span style=${{ flex: 1 }}></span>
               <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
             </div>
-            <img src=${detail.url} alt="生成的图片" onClick=${() => setZoomImg(detail.url)}
-              style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
+            <img src=${withCacheBust(detail.url, adjBust[detail.id])} alt="生成的图片" onClick=${() => setZoomImg(detail.url)}
+              style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in', ...(previewFilterText ? { filter: previewFilterText } : {}) }} />
+            <div style=${{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '2px' }}>
+                <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>手动调色</b>
+                ${adjustVer
+                  ? html`
+                    <span style=${{ padding: '1px 6px', borderRadius: '3px', border: '1px solid rgba(214,179,106,.45)', color: 'var(--accent)', fontSize: '10px' }}>已调色 v${adjustVer}</span>
+                    <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjustSummary(detail.adjust.params)}</span>
+                    <button onClick=${loadLastAdjust}
+                      style=${{ height: '22px', padding: '0 8px', borderRadius: '4px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '10.5px', cursor: 'pointer' }}>载入上次参数</button>`
+                  : html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>未调色（当前是原始版本）</span>`}
+                <span style=${{ flex: 1 }}></span>
+                ${previewFilterText ? html`<span style=${{ color: 'var(--accent)', fontSize: '10.5px' }}>即时预览 · 未提交</span>` : ''}
+                ${adjBusy ? html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjBusy === 'revert' ? '恢复中…' : '应用中…'}</span>` : ''}
+              </div>
+              ${ADJUST_KEYS.map(({ key, label }) => html`
+                <div key=${'adjust-' + key} style=${{ display: 'grid', gridTemplateColumns: '52px 1fr 44px', alignItems: 'center', gap: '8px', margin: '3px 0' }}>
+                  <span style=${{ color: 'var(--ink2)', fontSize: '11px' }}>${label}</span>
+                  <input type="range" min="-100" max="100" step="1" value=${adjParams[key]} aria-label=${label}
+                    onChange=${(e) => {
+                      const n = Number(e.target.value);
+                      setAdjParams((p) => Object.assign({}, p, { [key]: Number.isFinite(n) ? n : 0 }));
+                      setAdjErr('');
+                    }}
+                    style=${{ width: '100%', accentColor: 'var(--accent)' }} />
+                  <span className="text-[11px] text-ink2 font-num" style=${{ textAlign: 'right' }}>${adjParams[key]}</span>
+                </div>`)}
+              <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                <button onClick=${applyAdjust}
+                  disabled=${adjBusy !== '' || adjustIsZero}
+                  title=${adjustIsZero ? '四项全 0 不是合法调色：要用原图请点「恢复原图」' : '按当前滑杆值从原图重新渲染'}
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: adjustIsZero ? 'var(--ink3)' : 'var(--accent)', fontSize: '11px', cursor: adjBusy !== '' || adjustIsZero ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || adjustIsZero ? 0.5 : 1 }}>应用</button>
+                <button onClick=${resetAdjustSliders}
+                  disabled=${adjBusy !== ''}
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: adjBusy !== '' ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' ? 0.5 : 1 }}>重置为 0</button>
+                <button onClick=${revertAdjust}
+                  disabled=${adjBusy !== '' || !adjustVer}
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: adjustVer ? 'var(--ink2)' : 'var(--ink3)', fontSize: '11px', cursor: adjBusy !== '' || !adjustVer ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || !adjustVer ? 0.5 : 1 }}>恢复原图</button>
+                <span style=${{ flex: 1 }}></span>
+                ${adjustIsZero && html`
+                  <span style=${{ color: 'var(--ink3)', fontSize: '10px' }}>四项全 0 不能应用：先拖动滑杆；要丢弃调色回原图请点「恢复原图」</span>`}
+              </div>
+              ${adjErr && html`<p style=${{ margin: '6px 0 0', fontSize: '11px', color: 'var(--danger)' }}>${adjErr}</p>`}
+              ${adjNote && html`<p style=${{ margin: '6px 0 0', fontSize: '10.5px', color: 'var(--ink3)' }}>${adjNote}</p>`}
+              <p style=${{ margin: '6px 0 0', fontSize: '10px', color: 'var(--ink3)', lineHeight: 1.6 }}>
+                调色参数是绝对值（-100..100），每次都从原图重新渲染、不叠加、不计费。拖动滑杆时大图上只是 CSS 近似预览（不发请求）；点「应用」才提交到 POST /api/photos/:id/adjust，「恢复原图」提交 reset:true。
+              </p>
+            </div>
             ${versions.length > 1 && html`
               <div style=${{ marginTop: '14px' }}>
                 <div style=${{ fontSize: '12px', color: 'var(--ink2)', marginBottom: '8px' }}>
@@ -1133,7 +1349,7 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
   const [recycleOpen, setRecycleOpen] = useState(false);
   const [taskTrashOpen, setTaskTrashOpen] = useState(false);
   const [libS, reloadLib] = useJson('/api/library');
-  const [photoS, reloadPhotos] = useJson('/api/photos?final=1');
+  const [photoS, reloadPhotos] = useJson('/api/photos');  // 2026-11-16 口径放宽：计数与图片 tab 列表同源（全量）
   const [recS, reloadRec] = useJson('/api/recycle');
   const [trashS, reloadTrash] = useJson('/api/trash');
 
