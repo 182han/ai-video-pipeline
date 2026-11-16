@@ -371,7 +371,8 @@ async function main() {
       whaletvKey: 'e2e-video-key-1234',
       whaletvBaseUrl: 'https://e2e.example.test/v1',
       whaletvVideoModel: 'wan3.0-video',
-      // 出图链路必须走百炼官方（2026-11-16 实测：WhaleTV 中转不收首帧图 → 400）。
+      // 2026-11-16 20:30 实测更新：WhaleTV 中转图生视频已可用（/video/generations + data URL），
+      // 百炼仍是已验证通道（临时 OSS）；两个通道的 Key 都种上，后面用例可自由切换。
       // 百炼计划卡的 runtime = dashScopeKey + 由 WorkspaceId/Region 拼出的 baseUrl + modelId=wan3.0-video，
       // 所以这三个键必须一起种，否则计划卡会显示「没填 Key」。
       dashScopeKey: 'e2e-dashscope-key-9012',
@@ -487,8 +488,8 @@ async function main() {
     })()`);
     await sleep(200);
 
-    // ---------- 5b. 中转通道 + 出图 → 前端必须拦下（中转不收首帧图，实测 400） ----------
-    console.log('\n[5b] 中转通道（openai-video）+ 逐段出图 → 确认被拦（不误花图片钱）');
+    // ---------- 5b. 中转通道 + 出图 → 不再拦截（2026-11-16 20:30 实测 data URL 可用） ----------
+    console.log('\n[5b] 中转通道（openai-video）+ 逐段出图 → 不再显示「不收首帧图」旧提示');
     const sendMsg = async (text) => {
       const literal = JSON.stringify(text);
       await js(`(() => {
@@ -506,21 +507,12 @@ async function main() {
       })()`);
       await sleep(1500);
     };
-    const execCallsBefore5b = await js('window.__e2e.calls.filter(c=>c.kind==="execute").length');
     await sendMsg('10 分钟的长视频，走中转');
     await waitFor('document.body.innerText.includes("中转")', '中转计划卡', 25000);
     const t5b = await bodyText();
     check(/WhaleTV|中转/.test(t5b), '计划卡切到 WhaleTV 中转（openai-video）', (t5b.match(/WhaleTV[^\n]{0,20}/) || [''])[0]);
-    check(/不收首帧图|400/.test(t5b), '计划卡给出「中转不收首帧图」的红色提示');
-    await clickByText('确认执行', 'button');
-    await sleep(800);
-    const t5b2 = await bodyText();
-    const execCallsAfter5b = await js('window.__e2e.calls.filter(c=>c.kind==="execute").length');
-    check(execCallsAfter5b === execCallsBefore5b, '确认被前端拦下：没有发 execute 请求（不会真扣费）',
-      `${execCallsBefore5b} → ${execCallsAfter5b}`);
-    check(/不收首帧图/.test(t5b2) && /百炼|万相官方/.test(t5b2), '对话里给出可执行的替换方案（改用百炼 / 关掉出图）',
-      (t5b2.match(/(⛔|当前计划走的是)[^\n]{0,80}/) || [''])[0]);
-    await shot('p4-08-relay-image-blocked');
+    check(!/不收首帧图/.test(t5b), '计划卡不再显示「中转不收首帧图」旧提示（实测已可用）');
+    await shot('p4-08-relay-image-no-block');
     // 再切回百炼计划，后面的审图卡片/图片库用例不依赖 plan.model
     await sendMsg(MSG_DASHSCOPE);
     await waitFor('document.body.innerText.includes("百炼")', '切回百炼计划卡', 25000).catch(() => {});

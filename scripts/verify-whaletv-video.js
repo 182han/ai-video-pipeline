@@ -50,7 +50,7 @@ function restoreFetch() { global.fetch = origFetch; }
   console.log('\n[1] 计划卡默认模型 / 文案 / 费用');
   const p = planCard.buildPlan({ text: '5 分钟' });
   ok('5 分钟 → 计划卡 ok', p.ok === true, p.ok ? '' : p.code);
-  ok('默认模型 = dashscope（小智默认走百炼，避免中转图生视频 400）', p.ok && p.plan.model === 'dashscope', p.ok ? p.plan.model : '');
+  ok('默认模型 = dashscope（用户 2026-11-16 14:0x 口径；是否改回中转待用户确认）', p.ok && p.plan.model === 'dashscope', p.ok ? p.plan.model : '');
   ok('标签 = 百炼万相 3.0（官方）', p.ok && p.plan.modelLabel === '百炼万相 3.0（官方）', p.ok ? p.plan.modelLabel : '');
   ok('30 段 × 10 秒', p.ok && p.plan.clipCount === 30 && p.plan.clipDurationSec === 10,
     p.ok ? `${p.plan.clipCount} × ${p.plan.clipDurationSec}s` : '');

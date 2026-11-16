@@ -160,30 +160,41 @@ async function main() {
     ok('redactTask 不修改原对象（只返回副本）', sample.runtimeConfig.imageApiKey === 'sk-image-should-clear');
   }
 
-  // ---------- [0b] 进程内：视频通道预检（中转不收首帧图 → 出图前就拒绝） ----------
-  // 实测（2026-11-16）：WhaleTV 中转把 multipart/base64 原样转发，上游 Alibaba 只收公网 URL → 400。
-  // 后端必须在**花钱之前**拒绝，而不是等图片都出完、到视频阶段才全段失败。
-  // 直接调 _generateClipImages（不建任务、不写库：该分支在就绪度/预算校验之前抛错）。
-  console.log('\n[0b] 进程内：中转通道 + 出图 → IMAGE_FIRST_MODEL_UNSUPPORTED（不出图）');
+  // ---------- [0b] 进程内：视频通道预检（2026-11-16 20:30 更新） ----------
+  // 旧结论「WhaleTV 中转不收首帧图 → 400」已被实测推翻（/video/generations + data URL 出片）。
+  // 现在只保留「能力表外通道」兜底：未登记 i2v 能力的模型仍要在花钱前拒绝。
+  console.log('\n[0b] 进程内：能力表外通道 + 出图 → IMAGE_FIRST_MODEL_UNSUPPORTED；中转不再被拦');
   {
     const pipeline = require(path.join(APP_DIR, 'src', 'pipeline'));
-    const fakeTask = {
-      taskId: 'gate_verify_image_first',
-      model: 'openai-video',
-      runtimeConfig: { imagePerClip: true },
-      clips: [{ index: 0, prompt: '测试画面', photoId: null }]
-    };
-    let err = null;
+
+    // 1) openai-video（中转）：不再走通道预检，继续到「出图就绪度」校验（本进程无图 Key → IMAGE_GEN_NOT_READY）
+    let errRelay = null;
     try {
-      await pipeline._generateClipImages(fakeTask.taskId, fakeTask);
-    } catch (e) {
-      err = e;
-    }
-    ok('中转通道（openai-video）被提前拒绝', !!err && err.code === 'IMAGE_FIRST_MODEL_UNSUPPORTED',
-      err && (err.code + ' / ' + String(err.message).slice(0, 60)));
-    ok('错误文案指向百炼官方（可执行）', !!err && /百炼/.test(err.message) && /万相/.test(err.message));
-    ok('错误文案说明「没有出图、没有产生图片费用」', !!err && /没有出图/.test(err.message) && /图片费用/.test(err.message));
-    // 允许通道不受影响：dashscope 会继续走到「就绪度」校验（本进程无图 Key → IMAGE_GEN_NOT_READY，而不是通道错误）
+      await pipeline._generateClipImages('gate_verify_image_first_relay', {
+        taskId: 'gate_verify_image_first_relay',
+        model: 'openai-video',
+        runtimeConfig: { imagePerClip: true },
+        clips: [{ index: 0, prompt: '测试画面', photoId: null }]
+      });
+    } catch (e) { errRelay = e; }
+    ok('中转通道（openai-video）不再被通道预检拦下（继续走到出图就绪度校验）',
+      !!errRelay && errRelay.code === 'IMAGE_GEN_NOT_READY', errRelay && errRelay.code);
+
+    // 2) 能力表外通道（siliconflow 未登记 i2v）→ 仍在花钱前拒绝
+    let errUnknown = null;
+    try {
+      await pipeline._generateClipImages('gate_verify_image_first_unknown', {
+        taskId: 'gate_verify_image_first_unknown',
+        model: 'siliconflow',
+        runtimeConfig: { imagePerClip: true },
+        clips: [{ index: 0, prompt: '测试画面', photoId: null }]
+      });
+    } catch (e) { errUnknown = e; }
+    ok('能力表外通道（siliconflow）被提前拒绝', !!errUnknown && errUnknown.code === 'IMAGE_FIRST_MODEL_UNSUPPORTED',
+      errUnknown && errUnknown.code);
+    ok('拒绝文案说明「没有出图、没有产生图片费用」', !!errUnknown && /没有出图/.test(errUnknown.message) && /图片费用/.test(errUnknown.message));
+
+    // 3) 百炼通道：同样继续走到就绪度校验
     let err2 = null;
     try {
       await pipeline._generateClipImages('gate_verify_image_first_ok', {
@@ -192,9 +203,7 @@ async function main() {
         runtimeConfig: { imagePerClip: true },
         clips: [{ index: 0, prompt: '测试画面', photoId: null }]
       });
-    } catch (e) {
-      err2 = e;
-    }
+    } catch (e) { err2 = e; }
     ok('百炼通道不被通道预检误拦（继续走到出图就绪度校验）',
       !!err2 && err2.code === 'IMAGE_GEN_NOT_READY', err2 && err2.code);
   }

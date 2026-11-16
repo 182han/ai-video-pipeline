@@ -128,14 +128,13 @@ function slice(src, startRe, endRe, maxLen) {
   check('服务端无 image 能力（旧进程）时 confirmPlan 拦截（不误跑纯文生视频）',
     /!imageBackendReady/.test(assist) && backendGuard.length > 0 && /return;/.test(backendGuard)
     && /重启 3001/.test(assist));
-  // 2026-11-16 实测：WhaleTV 中转（openai-video）不收首帧图（上游只收公网 URL → 400）。
-  // 出图必须走百炼；前端必须在确认前拦住，否则会先花 N 张图的钱再全段视频失败。
-  const relayGuard = slice(assist, /if \(imagePerClip && plan\.model === 'openai-video'\) \{/, /\n    \}/);
-  check('中转通道 + 出图 → confirmPlan 拦截（不收首帧图，实测 400）',
-    relayGuard.length > 0 && /return;/.test(relayGuard) && /不收首帧图/.test(relayGuard)
-    && /万相官方/.test(relayGuard));
-  check('PlanCard 显示中转通道的红色提示（plan.model === openai-video）',
-    /plan\.model === 'openai-video'/.test(plan) && /不收首帧图/.test(plan));
+  // 2026-11-16 20:30 实测更新：WhaleTV 中转图生视频已确认可用（/video/generations + data URL 出片），
+  // 因此「中转 + 出图」的前端拦截与红色提示必须已经删除（否则会挡住合法链路）。
+  check('中转通道 + 出图 → 不再被 confirmPlan 拦截（旧 400 结论已被推翻）',
+    !/if \(imagePerClip && plan\.model === 'openai-video'\)/.test(assist)
+    && !/不收首帧图/.test(assist));
+  check('PlanCard 不再显示「中转不收首帧图」红色提示',
+    !/plan\.model === 'openai-video'/.test(plan) && !/不收首帧图/.test(plan));
   const warnBlock = slice(assist, /if \(imagePerClip && !runtime\.imageApiKey\) \{/, /\n    \}/);
   check('图片 Key 为空 → 对话里警告（不拦截）', /设置里没有填「图片生成」的 Key/.test(warnBlock));
   check('该警告块内没有 return（确认流程不被拦）', warnBlock.length > 0 && !/return;/.test(warnBlock));

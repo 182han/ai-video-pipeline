@@ -15,7 +15,8 @@
 //
 // 实测（2026-11-16，同一中转，**图生视频**，NewAPI 形态）：
 //   提交：POST {baseUrl}/video/generations  JSON {model, prompt, image, duration}
-//         image = 公网图片 URL（**已实测通过**）或 Base64（官方文档称支持，**未实测**）
+//         image = 公网图片 URL（**2026-11-16 实测通过**）或 data URL `data:{mime};base64,...`
+//         （阿里云官方文档格式，**同日实测也出片**）
 //         → 200 {"created_at":…,"id":"task_…","model":"wan3.0-video","status":"queued","task_id":"task_…"}
 //   查询：GET  {baseUrl}/video/generations/{task_id}
 //         → 200 {"code":"success","data":{…,"status":"IN_PROGRESS|SUCCESS|FAILED",
@@ -137,7 +138,7 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
       imageKind = 'base64→dataUrl';
     }
     if (imageKind !== 'url') {
-      console.warn(`[openai-video] 图生视频无公网 URL，改用 ${imageKind}（按阿里云文档格式；中转透传未实测，失败会抛厂商原文）`);
+      console.warn(`[openai-video] 图生视频无公网 URL，改用 ${imageKind}（阿里云官方格式；2026-11-16 实测出片）`);
     }
     const body = {
       model: this.modelId,

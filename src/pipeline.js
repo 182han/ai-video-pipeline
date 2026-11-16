@@ -2451,26 +2451,24 @@ class Pipeline {
       };
     }
 
-    // 0) 视频通道预检（2026-11-16 实测，先于任何计费）：图生视频需要把首帧图送到上游。
-    //   · dashscope：getPolicy → 临时 OSS（48h 私有）+ X-DashScope-OssResourceResolve，已实现；
-    //   · kling：裸 base64；seedance：data-url；mock：不使用图（合成素材）；
-    //   · **openai-video（WhaleTV 中转）：实测 400** —— 中转把 multipart/base64 原样转给上游，
-    //     上游（Alibaba）只收公网 URL（`Alibaba requires image references to be URLs`）。
-    // 所以在这个通道上不能出图：否则会先花掉 N 张图的钱、到视频阶段才全段失败。
-    // 这里在花钱之前失败，并给出可执行的替换通道（与 create-smart 的「有图强制走百炼」同一口径）。
-    const I2V_IMAGE_INPUT_OK = new Set(['dashscope', 'kling', 'seedance', 'mock']);
-    if (!I2V_IMAGE_INPUT_OK.has(task.model)) {
+    // 0) 视频通道预检（2026-11-16 20:30 更新；先于任何计费）。
+    //   旧结论「WhaleTV 中转不收首帧图 → 400」已被实测推翻：
+    //   中转的 NewAPI 形态 `POST /video/generations` + `image` **两种形态都出片**
+    //   （公网 URL 与 data URL 各跑过一条 5 秒任务 → SUCCESS），因此旧的硬拒绝已删除。
+    //   保留一道**能力表兜底**：不在 i2vSupport 表里的通道不允许带图，
+    //   避免「图片被静默丢弃、按文生视频出片」这种更坏的结果。
+    {
       const i2v = require('./generators/i2vSupport').getI2VInfo(task.model);
-      const err = new Error(
-        `当前视频通道「${task.model}」不支持首帧图：图生视频需要把图片送到上游，`
-        + '而这个通道（中转）实测返回 400（Alibaba requires image references to be URLs）。'
-        + (i2v ? `（能力表标注：${i2v.note}）` : '')
-        + '请改成「百炼官方（万相 wan3.0）」通道后重试：在计划卡对话里说「用万相官方」，'
-        + '重启后的新计划卡默认就是百炼；或者关掉「逐段出图」走纯文生视频。'
-        + '本任务没有出图、也没有产生任何图片费用。'
-      );
-      err.code = 'IMAGE_FIRST_MODEL_UNSUPPORTED';
-      throw err;
+      if (!i2v) {
+        const err = new Error(
+          `当前视频通道「${task.model}」没有登记图生视频能力（i2vSupport 能力表），`
+          + '为避免「图片被静默丢弃、按文生视频出片」，这里在花钱之前失败。'
+          + '请改用已支持图生视频的通道（百炼官方 / 可灵 / Seedance / WhaleTV 中转），'
+          + '或关掉「逐段出图」走纯文生视频。本任务没有出图、也没有产生任何图片费用。'
+        );
+        err.code = 'IMAGE_FIRST_MODEL_UNSUPPORTED';
+        throw err;
+      }
     }
 
     // 1) 就绪度校验：不可用 → 抛错让任务失败，绝不静默降级成文生视频 / 返回占位图。

@@ -23,11 +23,11 @@ const MODELS = Object.freeze({
     note: '火山官方：content 追加 {type:"image_url", image_url:{url}, role:"first_frame"}；官方称支持 URL / Base64，具体编码形态未实测'
   },
   'openai-video': {
-    input: 'json-image-url-or-base64',
-    verified: 'real-url-2026-11-16',
+    input: 'json-image-url-or-dataurl',
+    verified: 'real-2026-11-16-url-and-dataurl',
     note: 'WhaleTV / new-api：POST /v1/video/generations JSON，image 支持 URL/Base64；'
-      + '**公网 URL 已实测通过**（wan3.0-video、5 秒 → SUCCESS，完成态给 result_url 签名直链 24h）；'
-      + 'base64 形态未实测（文档称支持，失败会抛厂商原文，不静默退回文生视频）'
+      + '**公网 URL 与 data URL（data:image/...;base64,...）两条 5 秒任务都已实测 SUCCESS**，'
+      + '完成态给 result_url 签名直链（24h）；本地图直接发 data URL，不需要公网图床/代理'
   },
   dashscope: {
     input: 'oss-temp-upload',

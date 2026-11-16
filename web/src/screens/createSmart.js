@@ -78,9 +78,10 @@ export function CreateSmartWizard() {
   const [imagePrompts, setImagePrompts] = useState(draft0 && Array.isArray(draft0.imagePrompts) ? draft0.imagePrompts : []);
   const [photos, setPhotos] = useState(draft0 && Array.isArray(draft0.photos) ? draft0.photos : []);   // [{id,url,status,paid}]
   const [res, setRes] = useState(draft0 && draft0.res ? draft0.res : '720p');
-  // 视频通道（2026-11-16 用户口径）：中转 openai-video / 百炼 dashscope。
-  // 实测：**有图时必须走百炼**（中转 400: Alibaba requires image references to be URLs）；
-  // 百炼的图生视频用「getPolicy → 临时 OSS 上传」拿 oss:// 私有地址，不需要用户公网存储。
+  // 视频通道（2026-11-16 20:30 实测更新）：中转 openai-video / 百炼 dashscope **都支持图生视频**。
+  //   · WhaleTV 中转：NewAPI 形态 POST /video/generations + image，data URL 已实测出片（5s → SUCCESS）；
+  //   · 百炼官方：getPolicy → 临时 OSS（48h 私有）+ X-DashScope-OssResourceResolve。
+  //   → 不再「有图强制走百炼」，也不再阻断「有图 + 中转」；通道完全按用户选择。
   const [model, setModel] = useState(draft0 && draft0.model ? draft0.model : 'openai-video');
   const [transition, setTransition] = useState(draft0 ? draft0.transition !== false : true);
   const [bgm, setBgm] = useState(draft0 ? draft0.bgm !== false : true);
@@ -114,13 +115,8 @@ export function CreateSmartWizard() {
   const pickedCount = photos.filter((p) => p.paid === false).length;
   const photoCountMismatch = photos.length > 0 && photos.length !== clips;
   const useImages = approved.length === prompts.length && prompts.length > 0;
-  // 2026-11-16 Lead（用户明确要求）：**不再「有图自动强制走百炼」**。
-  // 通道完全按用户选择（model）；只有用户选 WhaleTV + 有图时才显示明确阻断：
-  // 中转图生视频实测 400（Alibaba requires image references to be URLs），
-  // 上游只收公网 URL，中转没有把文件转成 URL。**不静默换通道、不静默扣费**。
-  // 想图生视频 → 用户自己点「百炼官方」；想只用 WhaleTV → 去掉图片走纯文生视频。
+  // 通道完全按用户选择（model），不静默换通道；两种通道均支持图生视频（2026-11-16 20:30 实测）。
   const effectiveModel = model;
-  const i2vUnsupported = useImages && model === 'openai-video';
   const MODEL_LABEL = { 'openai-video': 'WhaleTV 万相 3.0（中转）', dashscope: '百炼万相 3.0（官方）' };
 
   // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
@@ -219,12 +215,6 @@ export function CreateSmartWizard() {
     const cfg = readConfig();
     const rejected = photos.filter((p) => p.status === 'rejected').length;
     if (rejected > 0) { setErr(`有 ${rejected} 张图被打回：请改成「通过」或点「不出图/跳过」，否则图与段对不上。`); return; }
-    // 2026-11-16 Lead：有图 + WhaleTV → 明确阻断（不静默换百炼、不提交后才 400）。
-    if (i2vUnsupported) {
-      setErr('WhaleTV 中转不支持图生视频（上游要求公网图片 URL，实测 400）。请改用「百炼官方」，或回第 ③ 步「不出图」走纯文生视频。');
-      setStep(4);
-      return;
-    }
     if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频 · ' : '文生视频 · '}${MODEL_LABEL[effectiveModel] || effectiveModel}）\n视频约 ${yuan(videoCost)}${imageCost ? '，本次图片 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
     setErr(''); setBusy('submit');
     try {
@@ -374,24 +364,16 @@ export function CreateSmartWizard() {
               <button key=${k} onClick=${() => setModel(k)}
                 className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (effectiveModel === k ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
                 style=${{ cursor: 'pointer' }}
-                title=${k === 'openai-video' ? '中转通道实测不接受图片（400: Alibaba requires image references to be URLs）' : '图片走百炼临时 OSS（48h 私有），不需要你自己的公网存储'}
+                title=${k === 'openai-video'
+                  ? 'WhaleTV 中转：图生视频走 data URL（2026-11-16 实测出片）；纯文生视频走 /videos'
+                  : '百炼官方：图生视频走临时 OSS（48h 私有），不需要你自己的公网存储'}
               >${lab}</button>`)}
           </div>
-          ${i2vUnsupported && html`
-            <div className="mb-3 rounded-[6px] border border-danger/40 bg-danger/[.08] p-3">
-              <p className="text-[12px] text-danger m-0 mb-2">
-                当前通道不支持图生视频：WhaleTV 中转实测 400（<code>Alibaba requires image references to be URLs</code>）。
-                上游只收公网图片 URL，中转没有把图片转成 URL。**不会替你换通道**，请二选一：
-              </p>
-              <div className="flex gap-2 flex-wrap">
-                <${Btn} primary=${true} onClick=${() => setModel('dashscope')}>改用百炼官方（图生视频可用）</${Btn}>
-                <${Btn} onClick=${() => setStep(3)}>回第 ③ 步：不出图</${Btn}>
-              </div>
-              <p className="text-[11px] text-ink3 m-0 mt-2">
-                纯文生视频（无图）可以继续用 WhaleTV 中转；我们正在向 WhaleTV 确认它是否支持公网图片 URL。
-              </p>
-            </div>`}
-          ${useImages && !i2vUnsupported && html`<p className="text-[11px] text-ink3 mb-3">图生视频走 <b className="text-ink2">百炼官方</b>：图片先传到百炼临时 OSS（48h 私有），不需要你的公网存储。</p>`}
+          ${useImages && html`<p className="text-[11px] text-ink3 mb-3">
+            ${effectiveModel === 'openai-video'
+              ? html`图生视频走 <b className="text-ink2">WhaleTV 中转</b>：首帧图以 data URL 随请求发送（已实测，无需公网图床）。`
+              : html`图生视频走 <b className="text-ink2">百炼官方</b>：图片先传到百炼临时 OSS（48h 私有），不需要你的公网存储。`}
+          </p>`}
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="text-[12px] text-ink3">分辨率</label>
             ${RES.map((r) => html`<button key=${r.key} onClick=${() => setRes(r.key)}

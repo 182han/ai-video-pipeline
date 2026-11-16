@@ -512,20 +512,6 @@ export function Assistant({ page = false } = {}) {
       }]);
       return;
     }
-    // 视频通道预检（2026-11-16 实测）：WhaleTV 中转（openai-video）把图片转发给上游，
-    // 上游（Alibaba）只收公网 URL → 图生视频 400「Alibaba requires image references to be URLs」。
-    // 出图只能走百炼官方（dashscope，getPolicy→临时 OSS）。不拦的话会先花 N 张图的钱、
-    // 到视频阶段才全段失败。后端 pipeline 也有同样的硬校验（IMAGE_FIRST_MODEL_UNSUPPORTED）。
-    if (imagePerClip && plan.model === 'openai-video') {
-      setMsgs((m) => [...m, {
-        role: 'assistant',
-        content: '⛔ 当前计划走的是「WhaleTV 万相 3.0（中转）」，这个通道**不收首帧图**：'
-          + '实测 400（中转把图片原样转给上游，上游只收公网 URL）。出图链路必须走百炼官方。这次没有提交。请二选一：'
-          + '\n① 在对话里说「用万相官方」，重新出一张走百炼的计划卡再确认（服务重启后新计划卡默认就是百炼）；'
-          + '\n② 把计划卡上的「逐段出图」关掉，走纯文生视频（这条计划本身可以用）。'
-      }]);
-      return;
-    }
     setXbusy(true);
     try {
       const r = await fetch('/api/assistant/execute', {

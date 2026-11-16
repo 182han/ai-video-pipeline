@@ -781,10 +781,10 @@ export function CreateWizard({ onChanged }) {
                   : `当前模型 ${p.model} 没有已实现的图生视频通道（已实现：${i2vModels.join(' / ') || '暂无'}）。`}
               </p>
               ${i2vSupported && p.model === 'openai-video' && html`
-                <p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
-                  WhaleTV 走 new-api 的 Sora 格式（multipart <code className="font-num">input_reference</code>）。
-                  该中转是否已实现这个字段**未实测**：失败时任务里会显示厂商原文，且这次请求可能已经计费。
-                  建议先按 5 秒试一段。
+                <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
+                  WhaleTV 中转：图生视频走 NewAPI 的 <code className="font-num">POST /v1/video/generations</code>
+                  + <code className="font-num">image</code>（data URL）；2026-11-16 已实测出片（5 秒 → SUCCESS）。
+                  按次计费，建议先用 5 秒试一段。
                 </p>
               `}
               ${useImage && !i2vSupported && html`

@@ -39,7 +39,7 @@ console.log('================================================================');
     check(!!getI2VInfo('kling'), '能力表：kling 已实现');
     check(!!getI2VInfo('seedance'), '能力表：seedance 已实现');
     check(!!getI2VInfo('openai-video'), '能力表：openai-video 已接（NewAPI /video/generations，URL 已实测）');
-    check((getI2VInfo('openai-video') || {}).input === 'json-image-url-or-base64', 'openai-video 能力：JSON image（URL 或 Base64）');
+    check((getI2VInfo('openai-video') || {}).input === 'json-image-url-or-dataurl', 'openai-video 能力：JSON image（URL 或 data URL）');
     check(getI2VInfo('dashscope') && getI2VInfo('dashscope').input === 'oss-temp-upload',
       '能力表：dashscope 已接（官方临时上传 oss://，无需用户公网存储）');
     check(listI2VModels().includes('dashscope'), '能力表：dashscope 在 i2v 清单里');
@@ -113,7 +113,7 @@ console.log('================================================================');
     const oaB64 = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
     const oaB64Res = await oaB64.generate('雪山推近', { duration: 5, image: IMG_W });
     check(calls[0] && calls[0].body && calls[0].body.image === 'data:image/png;base64,QUJDRA==',
-      'WhaleTV：无 URL 时发 data URL（阿里云文档格式，中转透传未实测）', calls[0] && String(calls[0].body.image).slice(0, 40));
+      'WhaleTV：无 URL 时发 data URL（阿里云官方格式；2026-11-16 实测出片）', calls[0] && String(calls[0].body.image).slice(0, 40));
     check(oaB64Res.taskId === 'whale_i2v_2', 'WhaleTV：data URL 路径也返回 task_id');
 
     // 3) 查询：完成态（2026-11-16 实测结构 data.status=SUCCESS + data.result_url）
