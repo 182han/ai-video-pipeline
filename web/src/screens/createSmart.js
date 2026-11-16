@@ -113,9 +113,14 @@ export function CreateSmartWizard() {
   const approved = photos.filter((p) => p.status !== 'rejected');
   const pickedCount = photos.filter((p) => p.paid === false).length;
   const photoCountMismatch = photos.length > 0 && photos.length !== clips;
-  // 图生视频统一走百炼（中转通道实测不接受图片）；纯文生视频仍可用中转
   const useImages = approved.length === prompts.length && prompts.length > 0;
-  const effectiveModel = useImages ? 'dashscope' : model;
+  // 2026-11-16 Lead（用户明确要求）：**不再「有图自动强制走百炼」**。
+  // 通道完全按用户选择（model）；只有用户选 WhaleTV + 有图时才显示明确阻断：
+  // 中转图生视频实测 400（Alibaba requires image references to be URLs），
+  // 上游只收公网 URL，中转没有把文件转成 URL。**不静默换通道、不静默扣费**。
+  // 想图生视频 → 用户自己点「百炼官方」；想只用 WhaleTV → 去掉图片走纯文生视频。
+  const effectiveModel = model;
+  const i2vUnsupported = useImages && model === 'openai-video';
   const MODEL_LABEL = { 'openai-video': 'WhaleTV 万相 3.0（中转）', dashscope: '百炼万相 3.0（官方）' };
 
   // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
@@ -214,6 +219,12 @@ export function CreateSmartWizard() {
     const cfg = readConfig();
     const rejected = photos.filter((p) => p.status === 'rejected').length;
     if (rejected > 0) { setErr(`有 ${rejected} 张图被打回：请改成「通过」或点「不出图/跳过」，否则图与段对不上。`); return; }
+    // 2026-11-16 Lead：有图 + WhaleTV → 明确阻断（不静默换百炼、不提交后才 400）。
+    if (i2vUnsupported) {
+      setErr('WhaleTV 中转不支持图生视频（上游要求公网图片 URL，实测 400）。请改用「百炼官方」，或回第 ③ 步「不出图」走纯文生视频。');
+      setStep(4);
+      return;
+    }
     if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频 · ' : '文生视频 · '}${MODEL_LABEL[effectiveModel] || effectiveModel}）\n视频约 ${yuan(videoCost)}${imageCost ? '，本次图片 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
     setErr(''); setBusy('submit');
     try {
@@ -360,13 +371,27 @@ export function CreateSmartWizard() {
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="text-[12px] text-ink3">视频通道</label>
             ${[['openai-video', 'WhaleTV 中转'], ['dashscope', '百炼官方']].map(([k, lab]) => html`
-              <button key=${k} onClick=${() => setModel(k)} disabled=${useImages && k === 'openai-video'}
+              <button key=${k} onClick=${() => setModel(k)}
                 className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (effectiveModel === k ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
-                style=${{ opacity: (useImages && k === 'openai-video') ? .4 : 1, cursor: (useImages && k === 'openai-video') ? 'not-allowed' : 'pointer' }}
+                style=${{ cursor: 'pointer' }}
                 title=${k === 'openai-video' ? '中转通道实测不接受图片（400: Alibaba requires image references to be URLs）' : '图片走百炼临时 OSS（48h 私有），不需要你自己的公网存储'}
               >${lab}</button>`)}
           </div>
-          ${useImages && html`<p className="text-[11px] text-ink3 mb-3">已选图 → 自动走 <b className="text-ink2">百炼</b>：中转通道实测不接受图片（400 requires image references to be URLs），百炼会先把图传到临时 OSS（48h 私有），不需要你的公网存储。</p>`}
+          ${i2vUnsupported && html`
+            <div className="mb-3 rounded-[6px] border border-danger/40 bg-danger/[.08] p-3">
+              <p className="text-[12px] text-danger m-0 mb-2">
+                当前通道不支持图生视频：WhaleTV 中转实测 400（<code>Alibaba requires image references to be URLs</code>）。
+                上游只收公网图片 URL，中转没有把图片转成 URL。**不会替你换通道**，请二选一：
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                <${Btn} primary=${true} onClick=${() => setModel('dashscope')}>改用百炼官方（图生视频可用）</${Btn}>
+                <${Btn} onClick=${() => setStep(3)}>回第 ③ 步：不出图</${Btn}>
+              </div>
+              <p className="text-[11px] text-ink3 m-0 mt-2">
+                纯文生视频（无图）可以继续用 WhaleTV 中转；我们正在向 WhaleTV 确认它是否支持公网图片 URL。
+              </p>
+            </div>`}
+          ${useImages && !i2vUnsupported && html`<p className="text-[11px] text-ink3 mb-3">图生视频走 <b className="text-ink2">百炼官方</b>：图片先传到百炼临时 OSS（48h 私有），不需要你的公网存储。</p>`}
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="text-[12px] text-ink3">分辨率</label>
             ${RES.map((r) => html`<button key=${r.key} onClick=${() => setRes(r.key)}
@@ -388,7 +413,7 @@ export function CreateSmartWizard() {
           </div>
           <div className="mt-4 flex gap-2">
             <${Btn} onClick=${() => setStep(3)}>上一步</${Btn}>
-            <${Btn} primary=${true} onClick=${() => setStep(5)}>下一步：确认</${Btn}>
+            <${Btn} primary=${true} disabled=${i2vUnsupported} onClick=${() => setStep(5)}>下一步：确认</${Btn}>
           </div>
         </div>`}
 
@@ -404,7 +429,7 @@ export function CreateSmartWizard() {
           <p className="mt-3 text-[11px] text-ink3">提交后进入「生成中」：逐段生成 → 质检 → 转场拼接 → 无缝循环 → 配乐 → 转码。真实计费，确认后才开始。</p>
           <div className="mt-4 flex gap-2">
             <${Btn} onClick=${() => setStep(4)}>上一步</${Btn}>
-            <${Btn} primary=${true} disabled=${busy === 'submit'} onClick=${submit}>${busy === 'submit' ? '提交中…' : '确认提交（' + yuan(videoCost + imageCost) + '）'}</${Btn}>
+            <${Btn} primary=${true} disabled=${busy === 'submit' || i2vUnsupported} onClick=${submit}>${busy === 'submit' ? '提交中…' : '确认提交（' + yuan(videoCost + imageCost) + '）'}</${Btn}>
           </div>
         </div>`}
 
