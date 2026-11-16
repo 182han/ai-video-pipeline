@@ -2561,6 +2561,46 @@ app.get('/api/scene-cards', (req, res) => {
   }
 });
 
+// 场景卡预览（P2 创作向导 ①）：只读，不建任务、不持久化。
+// allocate() 只产出内存计划（不写卡库、不占卡），因此可安全用于「先看看抽到哪些场景」。
+// 返回每段的视频提示词 / 图片提示词 / 参数化调色，供「① 时长+场景卡 ② 提示词 ③ 出图」使用。
+app.get('/api/scene-cards/preview', (req, res) => {
+  const count = Math.max(1, Math.min(180, parseInt(req.query.count, 10) || 10));
+  try {
+    const promptComposer = require('./src/promptComposer');
+    const plan = sceneCardLibrary.allocate(count);
+    const cards = plan.used.map((entry, i) => {
+      const card = sceneCardLibrary.getCardById(entry.id);
+      if (!card) {
+        const e = new Error(`场景卡缺失：${entry.id}（卡库可能被替换）`);
+        e.code = 'SCENE_CARDS_MISSING_CARD';
+        throw e;
+      }
+      const patch = promptComposer.composeClipPatch(card, {});
+      return {
+        index: i,
+        id: card.id,
+        sceneKey: card.scene_key,
+        chapter: card.chapter,
+        sequence: card.sequence,
+        role: entry.role || card.role || 'feature',
+        durationSec: Number(card.durationSec) || 10,
+        paletteId: card.palette_id || null,
+        prompt: patch.prompt,
+        imagePrompt: patch.imagePrompt,
+        adjust: patch.adjust || null
+      };
+    });
+    res.json({ ok: true, count: cards.length, cards });
+  } catch (e) {
+    res.status(e && e.code === 'SCENE_CARDS_EXHAUSTED' ? 400 : 503).json({
+      ok: false,
+      code: (e && e.code) || 'SCENE_CARDS_ERROR',
+      error: e && e.message ? e.message : String(e)
+    });
+  }
+});
+
 // 获取质检项定义
 app.get('/api/qc-items', (req, res) => {
   res.json({
