@@ -3444,7 +3444,9 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - `node scripts/verify-scene-cards.js` → **57 / 0**。
 - `node scripts/verify-xiaozhi-home.js` → **44 / 0**。
 - `node scripts/verify-p6-offline.js` → **41 / 0**。
-- 运行中 3001（PID 25988）仍是旧后端：11:44 登录态探针发「30 分钟的雪山、星空和极光」→ `themeLabel='极光'`（旧逻辑）。
-  **src/ 改动需重启 3001；`web/` 刷新即生效。** 未重启前前端已是新文案，但计划卡措辞仍是旧后端。
+- 3001 已于 11:39:46 由用户重启为 **PID 17860**，但早于本轮 11:41 的 src 改动，仍是 11:30 版旧逻辑：
+  11:44 探针「10 分钟」→ `themeLabel=null`，但回复「我按「自然风光」排好了」+「没识别到主题」警告；
+  11:37（旧 PID 25988）探针「30 分钟的雪山、星空和极光」→ `themeLabel='极光'`。
+  **本轮 src 改动需再重启一次 3001 才生效；`web/` 刷新即生效。**
 - 未做：15 秒/段。场景卡按 10 秒/张设计（180 张 = 30 分钟），15 秒会被 `PLAN_SCENE_CARD_DURATION` 拒绝；
   是否开放需产品决定 + Mock/真实生成验证，不能只改校验。
