@@ -20,7 +20,12 @@ class MockGenerator extends BaseGenerator {
     this._tasks = {};
     this._outputDir = path.join(__dirname, '..', '..', 'clips');
     this._sampleDir = path.join(__dirname, '..', '..', 'clips', '_samples');
-    this._failRate = config.failRate || 0.1; // 10% 失败率（模拟）
+    // 模拟失败率：默认 10%。允许 MOCK_FAIL_RATE 覆盖（验收用途：临时实例里强制 0，
+    // 否则随机失败会让「Mock 全流程」偶发红；默认行为不变）。
+    const envRate = Number(process.env.MOCK_FAIL_RATE);
+    this._failRate = Number.isFinite(envRate) && envRate >= 0
+      ? Math.min(1, envRate)
+      : (config.failRate || 0.1); // 10% 失败率（模拟）
     this._genTime = config.genTime || 1500; // 生成耗时（毫秒）
     this._sampleCache = {}; // 缓存样片路径
   }
