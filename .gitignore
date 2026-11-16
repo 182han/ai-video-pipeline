@@ -15,6 +15,10 @@ clips/
 output/
 data/tasks/
 data/trash/
+# 统一回收站（片段/成片/图片/配乐，运行时产物）
+data/recycle/
+# 服务日志与清理审计清单（运行时产物）
+data/logs/
 data/spike/
 # 剪辑台工程（草稿）：编辑态，运行时数据，不进仓库
 data/projects/
@@ -25,6 +29,7 @@ data/library/
 data/waveforms/
 # 登录墙账号（存 scrypt 哈希；每台机器各自独立，绝不进仓库）
 data/users.json
+data/budget.json
 # 诊断报告（接缝分析等，含抽帧 PNG，体积大且属运行时产物）
 data/reports/
 *.mp4
@@ -64,6 +69,11 @@ tools/ffmpeg/*.exe
 #   tools/tailwind/tailwindcss.exe -c web/tailwind.config.js -i web/styles/src.css -o web/styles/app.css --minify
 # 注意：web/vendor/（React UMD + htm，约 150KB）刻意入库，新机器 clone 后直接可跑。
 tools/tailwind/*.exe
+
+# ASR（语音转文字）：sherpa-onnx 可执行文件 + SenseVoice 模型，约 330MB，不入库
+# 恢复方法见 app/tools/asr/README.md（2026-11-15 新增）
+tools/asr/*
+!tools/asr/README.md
 
 # ===== 本地临时文件 =====
 _e2e_*.js
