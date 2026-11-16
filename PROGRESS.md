@@ -1,5 +1,74 @@
 # PROGRESS — 补建基线完成（2026-11-02）
 
+## 🟡 收尾交接（2026-11-15，lead 窗口）
+
+> 本段只记录 v3.1 场景卡 / 图片库 / 视频库这一轮。**没有执行 git add/commit**：工作区同时存在其他窗口的未提交改动，尤其 `server.js` 有他人改动，禁止 `git add -A`。
+
+### 本轮完成
+1. **场景卡 v3.1**：`docs/scene-cards-v3.1.*` 已完成 200 张（180 正片 + 20 缓冲），校验：A；A 0、天文错位 0、静态+滑轨 0、季节硬冲突 0、前景=主角 0、连续 3 段同镜头 0；镜头 80/50/30/20/20，风格 140/60。
+2. **最终图片集**：14 张成功生成图全部保留；最终版 3 张（沙洲 V3、线形沙丘 V2、温带雨林 V3 裁切）。潮池/冰川/极光归档为淘汰，不删图。
+3. **图片库版本化**：`photoLibrary` 新增 `versionGroupId/version/isFinal/failureSummary/scienceStatus/scienceNotes`；`/api/photos?final=1` 只返回最终版；详情返回 `versions`；`setFinal` 拒绝科学未通过。
+4. **图片详情**：相邻版本 V1/V2、V2/V3 并排；淘汰/失败记录摘要；点击图片全屏放大；已移除“查看全部生成”按钮。
+5. **交付硬门槛**：视频生成要求 `status=approved + scienceStatus=passed + isFinal=true`；单图/批量都拦截。
+6. **视频库**：`library.ingestFinal()` 保存最终成片；主流水线、恢复执行、配乐重建三条路径已接；视频详情显示源图版本链。
+7. **科学字段**：`src/scienceCheck.js` + `docs/scene-cards-v3.2-science.json`（高风险 24 / 中 22 / 低 154）；页面不再展示审查状态。
+
+### 验证（2026-11-15）
+- `node --check`：`photoLibrary.js`、`library.js`、`pipeline.js`、`server.js`、`web/src/screens/inventory.js`、`scienceCheck.js` 全通过。
+- `node scripts/verify-photo-library.js`：**42 通过 / 0 失败**。
+- `node scripts/verify-i2v.js`：**36 通过 / 0 失败**。
+- 服务已按单实例重启；当前运行进程请以 `Get-NetTCPConnection -LocalPort 3001` 为准。
+- **未验证**：浏览器视觉/放大手感、真实视频成片入库、自动视觉科学审查。
+
+### 本轮新增/修改（未提交）
+- 新增：`scripts/audit-scene-cards-v31.js`、`build-scene-cards-v31.js`、`enrich-scene-science.js`、`generate-scene-cards-21-80.js`、`generate-scene-cards-81-200.js`、`review-photo-science.js`、`v31-six-image-test.js`、`v31-six-image-test-r2.js`、`v31-four-image-test-r3.js`、`src/scienceCheck.js`、`web/src/components/assistantOrb.js`（他人/前序）、`web/verify/`（他人/前序）。
+- 修改（本轮触及）：`server.js`、`src/photoLibrary.js`、`src/library.js`、`src/pipeline.js`、`web/src/screens/inventory.js`、`PROGRESS.md`。
+- **注意**：`server.js`、`web/src/components/assistant.js`、`web/verify/`、`assets/bgm/manifest.json` 等还有他人的未提交改动；不要 checkout/覆盖，不要 `git add -A`。
+- 产物：`app/output/v31-*`、`app/output/final-image-set-review/`、`app/clips/v31test_*.jpg`；均保留，不删除。
+
+### 下一步第一个动作
+1. 由改动所有者按路径审查 `git diff`（不要整库提交）。
+2. 浏览器打开 `/app`，验证：图片库只 3 张最终版；点开可放大；V1/V2/V3 并排；视频库“成片”标记。
+3. 视频真实任务跑完后，确认 `library.ingestFinal` 生成 `${taskId}_final` 条目。
+4. 若要全自动 100% 交付，再接视觉模型科学审查；当前 `passed` 是后台/CLI 标记，非自动判定。
+
+## ✅ 收尾断点（2026-11-11，lead 窗口）
+
+> 上一窗口的断点在下方保留未删。本段是本窗口收尾时的事实记录，**所有改动均未提交**。
+
+### 本轮完成
+1. **编辑器「关闭转场后无法导出」**：`src/editorExporter.js` 删掉「转场关闭暂不支持」闸门（mixer 的 concat 直拼分支早已实现）。证据：`verify-editor-export` **31/0**（关转场 done、时长=Σ、源 mtime/size 不变）；真实 360 段完整导出 **936.4s / 720p30 / 完整解码 0 错误 / 两次 sha256 相同**。
+2. **配乐测试隔离**：新增 `scripts/_bgm-guard.js`（真实 `assets/bgm` 快照断言）与 `scripts/_bgm-fixture.js`（临时 `BGM_DIR` + 自造 mp3），改 6 个 `verify-bgm-*`，全部绿且都断言真实目录未被触碰。
+3. **配乐页点击试听**：`web/src/screens/inventory.js` 的 `▶` 原来只是图标，未绑事件。现已接 `Audio` 播放/暂停/离页停止/错误提示；前端刷新即生效。
+4. **波形接口**（不是安全问题，是健壮性缺陷）：原来用管道读 ffmpeg 输出（沙箱 `spawn EPERM`），且缓存写死 `app/data/waveforms`。已改「落临时 pcm 文件再读」+ 缓存跟随 `DATA_DIR` + 文件指纹失效。隔离实测 **200 / 1600 峰值**。
+5. **环境音分类**：`assets/bgm/manifest.json` 给 `ethereal_03`/`ethereal_04` 加 `"category":"ambient"`，隔离实测 **轻音乐 7 + 环境音 2**。
+6. **红线**：`AGENTS.md` §5 增加第 9、10 条（归属不明文件禁止 checkout/覆盖；启动服务不得覆盖已有日志）。
+
+### 重启后才生效（重要）
+- `src/processors/waveform.js` 与 `assets/bgm/manifest.json` 是**启动时加载/缓存** → 必须**再重启一次 3001**；前端 `inventory.js` 刷新页面即生效。
+- `check-server-version` **只比对 `server.js`**，不能反映 `src/**` 改动（已知缺陷，本轮未修）。
+
+### 验证证据（2026-11-11）
+- 测试 2（真歌 + 隔离 BGM_DIR）：**10/0**（9 首、分类 7+2、波形 200、试听 URL 200、`calm_06` 混 35s 成功且时长一致、-17.7dB、真实目录未变）。
+- 测试 3（6 套配乐）：全绿；`verify-editor-audio` **22/0**。
+- 360 首跑 `fetch failed` 根因：轮询连接 **ECONNRESET**（服务存活、job done、产物完整），非导出失败；复现于 120 段 2s 轮询，加复跑即无。
+- **未验证**：真 Postgres 持久化、30 分钟真实素材性能、真实服务下的波形（需登录）。
+
+### 文件清单（均未提交；不许自行 checkout / 删除）
+- 修改：`AGENTS.md`、`assets/bgm/manifest.json`、`scripts/verify-bgm-{plan,suite,upload,tracks,mix,ducking}.js`、`scripts/verify-editor-export.js`、`src/editorExporter.js`、`src/processors/waveform.js`、`web/src/screens/inventory.js`
+- 新增：`scripts/_bgm-guard.js`、`scripts/_bgm-fixture.js`
+- 他人未提交（勿碰）：`server.js`、`web/src/components/assistant.js`、`assistantOrb.js`、`web/verify/`
+- 产物（gitignore，未删除）：`output/verify_tr_off/`、`output/verify_tr360/`（2×609MB，sha256 相同）、`data/spike/tr120/`
+
+### 事故（2026-11-10，已写入红线）
+- 对归属不明的 `assets/bgm/manifest.json` 执行过 `git checkout`，覆盖了用户自己的改动 → 红线第 9 条。
+- 重启服务时 `-RedirectStandardOutput` 截断真实 `console-3001.log` → 红线第 10 条。
+
+### 下一步（P0 → P2）
+- P0：提交/整理上述改动（**注意 `server.js` / `assistant.js` 是别的窗口的未提交改动，不要混入**）。
+- P1：`transitionMixer` 逐段重复探测（360 段 353s 中 **212s** 花在准备）；`check-server-version` 加 `src/**` 指纹。
+- P2：BGM 隔离推广到 `verify-editor-audio` 等；Postgres 隔离验证；30 分钟真实素材。
+
 ## 🔴 交接断点（2026-11-10 17:15，换窗口前）
 
 > 下面这段是**给下一个窗口**看的，读完再往下读历史。历史部分保留未删（都是证据）。

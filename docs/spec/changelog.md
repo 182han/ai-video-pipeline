@@ -2922,3 +2922,417 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 4. AGENTS.md 写 `public/index.html` 约 249 KB；实测 295,955 B。
 5. 新增了 `colorMatch`（拼接自动校色）、`colorContinuity` 质检项、`QC_VERSION=3` 等，
    AGENTS.md 的质检项清单（11 项）与验收脚本清单均未覆盖。
+
+---
+
+## 2026-11-15 统一回收站 / 全量入库 / 垃圾产物清理 / 本地 ASR
+
+### 背景（用户口径）
+- 库存里的删除必须是两步：先移入回收站（可恢复），再确认彻底删除；旧实现是直接 unlink。
+- “任何产物都要保留”：质检不通过、生成失败但文件仍在的片段，也要能在库里看到。
+- 历史记录/产出入口后续要下线；失败排查靠“库里的失败可见性”。
+- 场景卡（`docs/scene-cards-v3.3-final.json`）成为流水线唯一输入，后续接小智。
+- 语音输入要免费、离线、不买 Key。
+
+### 代码改动
+- 新增 `src/recycle.js`：统一回收站（clip/final/photo/bgm），文件+条目一起移走；白名单 + `path.resolve` 前缀校验；恢复/彻底删除/清空；不做自动过期。
+- `src/library.js`：`ingestClip` 不再要求 `status==='success'`（有文件即入库，写 `entry.status`）；`ingestMissing` 同步放宽；`ingestFinal` 增加 `status/origin`，费用取 `task.cost`，无快照时 `computed:false`（显示“费用未知”，不再伪装成 ¥0.00）；`remove` 改为回收站；新增 `restoreFromRecycle`；`LIBRARY_DIR`/`CLIPS_DIR` 支持环境变量覆盖。
+- `src/photoLibrary.js`：删除改为回收站；新增 `restoreFromRecycle`。
+- `src/processors/audioMixer.js`：`removeTrack` 改为回收站（内置轨只移清单）；新增 `restoreTrack`。
+- `src/pipeline.js`：`_finishClipFailure` 在有文件时也入库。
+- `server.js`：新增 `/api/recycle`（GET/恢复/彻底删/清空）；三个 DELETE 接口返回 `trashed`；旧 `/api/trash`（任务）保持不动。
+- 新增 `scripts/backfill-finals.js`：回填成片（每任务取最新导出，优先 `.bgm`；孤儿标 `origin=orphan`；剪辑导出 `origin=editor`；mock 成片跳过）。
+- 新增 `scripts/purge-artifacts.js`：清理验收目录/中间产物/孤儿片段/spike，默认 dry-run，`--apply` 移入 `data/trash/artifacts`，`--hard` 才真删。
+- 新增 `scripts/verify-recycle.js`（35 项）并注册进 `verify-all.js`。
+- `.gitignore`：忽略 `tools/asr/*`（保留 README）、`data/recycle/`、`data/logs/`。
+- 场景卡复制到 `app/assets/scene-cards/v3.3-final.json`（SHA256 `623DE0…8CE8`，与原文件一致）。
+- 安装离线 ASR：sherpa-onnx Windows 包 + SenseVoice int8（Apache-2.0），见 `app/tools/asr/README.md`。
+
+### 验收（本机实测）
+- `node scripts/verify-recycle.js` → **35 通过 / 0 失败**。
+- `verify-photo-library` 42/0；`verify-clip-library-detail` 18/0；`verify-recovery-fixes` 25/0（同步改了两处旧断言）；`verify-editor-media` 21/0；`verify-bgm-upload` 24/0；`verify-library` 36/0。
+- 成片回填：`--apply` 成功 **12 条**（6 个真实任务 + 4 个孤儿 + 2 个剪辑导出）；跳过 **8 条 mock 成片**；失败 0。
+  - 更正：此前估算“24 条”重复计了孤儿，实际去重后为 **20 个文件 → 12 条入库 + 8 条 mock 跳过**。
+- 清理：移出 **1247.3 MB**（验收目录 882.0 + 中间产物 141.5 + 孤儿片段 19.7 + spike 204.1），补充 5 个 `_bgm_n` 中间文件 60.3 MB；共 **1307.7 MB**，已彻底删除，清单保存在 `app/data/logs/purge-2026-11-15/`。
+  - 两次 `EPERM` 由 PowerShell 手工 `Move-Item` 完成（Node 进程重命名偶发被沙箱拦），不是脚本失败。
+- 清理后：`output/` 89.6 MB（只剩终片/剪辑导出）；`clips/` 101.5 MB；`data/spike/` 0；`app/` 合计 1363.6 MB。
+
+### 未验证 / 已知限制
+- **后端未重启验证**：检测到 3001 已有服务在跑（PID 98372，旧代码），按单实例规则没有另起实例，也没有重启它；`/api/recycle` 的真实 HTTP 行为未在运行态验证（仅模块级 + 语法级验证）。
+- `verify-image-batch` 因无可用样图跳过（0 通过 / 0 失败），不算通过。
+- 2 个 0.02MB 疑似损坏成片已入库并标 `suspectedDamage`（按用户确认保留）。
+- 历史任务没有费用快照，成片显示“费用未知”而不是金额（不得伪装成 0）。
+- ASR CLI 不认中文路径，生产接入需用 ASCII junction（已实测）；模型加载约 2.3 秒/次，后续可改常驻 websocket 降低延迟。
+- 场景卡尚未接进运行时（Phase 4）。
+
+---
+
+## 2026-11-15 P2：前端库 IA（成片 / 片段 / 图片 + 回收站 + 配乐并入剪辑台）
+
+### 背景（用户口径）
+- 库存收敛成一个「库」：三个 tab 固定顺序 **成片 / 片段 / 图片**；长视频就是“成片”，不再单独「产出」入口。
+- 条目操作只要：播放、下载、删除、收藏、重新生成（确认弹窗）；必须显示提示词与真实费用。
+- **不要**「调色 / 配乐 / 进剪辑台」快捷按钮；编辑一律去剪辑台。
+- 删除两步：页面删除只进回收站；彻底删除必须在回收站里再确认一次。
+- 配乐库（试听/上传/删除/默认曲目）并入剪辑台配乐面板；历史/产出入口先隐藏（路由保留）。
+
+### 代码改动（只动 `app/web/src/`，增量 edit）
+- `web/src/screens/inventory.js`：新增 `LibraryView`（三 tab + 回收站抽屉）、`FinalsPanel`、`RecycleDrawer`；
+  `ClipsView`/`PhotosView` 改为 `ClipsPanel`/`PhotosPanel` 并保留旧导出；成片行含缩略图/时长/来源（task|library|editor|orphan）/
+  QC 徽章/提示词/费用/播放/下载/删除；片段与图片补「下载」；删除按钮文案改为“移入回收站可恢复”；
+  图片列表显示张数与状态统计；库页底部留白 84px，避免右下角助手球压住末行操作。
+- `web/src/screens/shell.js`：导航改为 **创作 / 剪辑 / 库**（设置固定底部）；历史/产出隐藏但路由保留；
+  `/clips`、`/photos` 深链落到库页对应 tab；配乐入口从导航移除，`/music` 路由保留。
+- `web/src/components/audioPanel.js`：搬入配乐库（试听 / 上传 ≤20MB / 删除 / 设为默认），曲目行改两行避免窄栏曲名被挤没。
+- `web/src/screens/editor.js`：给 `AudioPanel` 传 `onReloadBgm`（仅 1 行）。
+- `scripts/verify-editor-nav.js`：同步改 2 条旧导航断言（库存/记录两段、7 项 → 素材一段、3 项 + `library` 路由）并补 `/clips`、`/photos` 落库断言。
+- 新增 `web/verify/p2-library-e2e.js`：headless Chrome + CDP 驱动运行中的 3001（不另起服务），
+  临时成片自建自删（`p2verify_` 前缀），凭据运行时从 config 读取、不落盘。
+
+### 验收（本机实测，2026-11-15 22:30）
+- `node web/verify/p2-library-e2e.js` → **45 通过 / 0 失败**（截图 7 张：`app/docs/交接/p2-screenshots/`）：
+  三 tab 顺序与计数、成片 12 行与 API 一致、费用“未知”不显示 ¥0.00、来源/QC 徽章、真实播放 `videoWidth>0`（1920×1080, readyState 4）、
+  片段/图片下载、回收站抽屉、删除→回收站目录→恢复→再删→彻底删除（确认共 3 次）、`/clips`→片段 tab、`/photos`→图片 tab、
+  剪辑台音频面板含配乐库（8 首可设默认）、无未捕获异常、无控制台非资源类报错。
+- 回归（逐个套件，本机无法用 verify-all）：`verify-recycle` 35/0、`verify-library` 36/0、`verify-editor-nav` 15/0、
+  `verify-editor-shell` 25/0、`verify-editor-audio` 22/0、`verify-bgm-upload` 24/0、`verify-clip-library-detail` 18/0、
+  `verify-photo-library` 42/0、`verify-create-draft` 49/0、`verify-image-gen` 100/0。
+- 接口 smoke：`/api/status` 200、`/api/library` 23（12 成片 + 11 片段）、`/api/recycle` 0、`/api/photos` 17、`/api/bgm` 9（默认 `calm_04`）。
+- 视觉人工核对截图：成片列表 / 片段卡片 / 图片（破图属数据缺失）/ 回收站空态 / 剪辑台配乐库，布局与 token 正常。
+
+### 未验证 / 已知限制
+- 图片库 17 张里 **6 张文件缺失**（`v31test_*`、`real_test_*_img_0`、`ui_img_*`），图片 tab 显示破图；属 P1 清理留下的历史数据，
+  P2 未改数据（未授权删用户数据），建议 P3/P6 做一次对账或占位图。
+- 本机 `verify-editor-audio` / `verify-bgm-upload` 需把 `TEMP/TMP` 指到工作区再跑：系统临时目录 ffmpeg 写入 `Permission denied`
+  （`doctor.js` 已警告，非本次引入）；重定向后 22/0、24/0。
+- 浏览器 E2E 需要 Chrome 可创建命名管道（本会话受限沙箱下会 `mojo FATAL 0x5`），需在非受限模式下运行；
+  REA 的 Windows PTY 进程捕获不可用，最后是在放宽权限的 shell 里跑通的（脚本本身不依赖权限模式）。
+- 后端未改动、服务未重启（前端静态文件刷新即生效）；`MusicView` 代码保留仅用于 `/music` 深链，导航已无入口。
+
+---
+
+## 2026-11-15 P3：剪辑台接成片（素材三来源 / 整段可裁 / 导出归成片）
+
+### 背景（用户口径）
+- 剪辑台素材栏要能选 **成片 / 片段 / 图片**；成片默认**整段载入**，保留“从成片重建工程”。
+- 条目必须可裁剪（入/出点），导出结果必须出现在「库 · 成片」。
+- 图片首版可后置（产品已定），但来源入口与“不能入轨”的说明必须显式，不得无声失败。
+
+### 代码改动
+- `web/src/screens/editor.js`（增量 edit，未整文件覆盖）：
+  - 素材栏新增来源切换 `片段 / 成片 / 图片`（`data-media-source`；片段=kind!=='final'，成片=kind==='final'）。
+  - 新增跨来源索引 `assetById`：时间线里的段落无论当前看哪个来源，裁剪上限、预览规格、拖拽落点都能找到素材
+    （旧代码用当前来源列表查找，切来源后裁剪会失去上限）。
+  - 成片点击 = **整段载入**（`outSec=durationSec`，提示“已整段载入成片”），入/出点随后可在时间线拖手柄裁剪。
+  - 图片只展示（审核状态 + 提示词），点击不加入时间线并给出说明；`/api/photos` 失败单独显示。
+  - 缩略图 404 时在缩略图上写「文件缺失」，不再只留空白（真实数据：图片库 17 张文件全缺）。
+  - 导出完成后自动刷新素材栏，并提示“导出完成，已归入「库 · 成片」”。
+- `web/styles/editor.css`：来源切换、来源计数、成片徽章、“首版后置”提示、文件缺失占位样式（新增段落）。
+- `src/editorExporter.js`（增量 edit）：导出成功后 `library.ingestFinal(editorTask, outputPath)`，`origin=editor`；
+  job 视图新增 `libraryEntryId`；费用口径 `¥0 / computed:true / label='剪辑导出（无生成费用）'`
+  （导出是本地 ffmpeg，不产生生成费用；源片段费用已记在各自片段条目）。
+- `src/library.js`（1 行）：`ingestFinal` 尊重调用方显式传入的 `cost.label`，不再无条件改写成“成片（含片段生成费用）”。
+- `src/processors/transitionMixer.js`（P3 修复，最小改动）：**单片段不再报错**。
+  旧代码 `list.length < 2` 直接 `转场拼接至少需要 2 个片段`，导致“只选一条成片 → 导出”这一最自然路径永远失败。
+  现：1 个片段按直拼（F=0）处理，视频走 `[v0]null[vout]`、音频走 `[a0]anull[aout]`；无接缝时 `transitions=0`、`type='none'`。
+- 新增 `scripts/verify-editor-final-source.js`（注册进 `verify-all.js`）：隔离临时实例（独立端口 + 临时
+  LIBRARY_DIR/OUTPUT_DIR/PROJECTS_DIR/DATA_DIR；真实库只读复制条目 JSON）跑真导出，ffprobe 实测 + 负向用例。
+- 新增 `web/verify/p3-editor-e2e.js`：headless Chrome + CDP 连**运行中的 3001**（不另起实例），真点击验收；
+  不触发导出（导出会写真实库/output），临时工程自建自删。
+- `scripts/verify-editor-export.js` / `scripts/verify-editor-audio.js`：P3 起导出会写库，给临时服务加独立
+  `LIBRARY_DIR`（只读复制真实库 JSON），否则每次跑套件都会往真实库写 `*_final` 条目。
+
+### 验收（本机实测，2026-11-15 22:53）
+- `node scripts/verify-editor-final-source.js` → **43 通过 / 0 失败**。关键 ffprobe 数值：
+  - 三段工程（成片整段 5.000s + 同一成片裁 1–3s + 片段裁 2s）：产物 `1280x720 @ 30fps h264 8.200s 5.67MB`，
+    期望 8.200s（Σ有效 −(3−1)×0.4）；`ffmpeg -f null` 可完整解码；源成片/片段 mtime+size 未变。
+  - 单片段工程（成片裁 2s）：产物 `2.000s`（修复前该用例直接失败）。
+  - 库新增条目 `${taskId}_final`：`kind=final`、`origin=editor`、`status=completed`、时长与导出一致、
+    `cost.amount=0 & computed=true`、job 返回 `libraryEntryId`；真实库条目数 23 → 23（隔离生效）。
+  - 负向：引用不存在的成片 → `failed · 第 1 段素材不存在`；0.05s 裁剪段 → `failed · 有效时长过短`（不产坏片）。
+- `node web/verify/p3-editor-e2e.js`（重启后重跑）→ **32 通过 / 0 失败**，截图 5 张 `app/docs/交接/p3-screenshots/`：
+  三来源顺序与计数（片段 11 / 成片 12 / 图片 17）、成片卡“成片”徽章 + 整段载入提示、点击后工程 `in=0/out=全长`、
+  右把手 −1.7s → out 3.3s、左把手 +1s → in 1s、右把手越界钳制回 5s、片段来源再入一段（混排）、
+  图片点不进去（仍 2 段）、刷新后 2 段与裁剪值保留、无未捕获异常。
+- 回归（逐个套件）：`verify-editor-export` 31/0、`verify-editor-audio` 22/0、`verify-editor-media` 21/0、
+  `verify-editor-rebuild` 19/0、`verify-editor-timeline` 29/0、`verify-editor-shell` 25/0、`verify-editor-ux-fixes` 18/0、
+  `verify-editor-adjust` 17/0、`verify-editor-preview` 28/0、`verify-editor-nav` 15/0、
+  `verify-editor-transition-controls` 16/0、`verify-transitions` 36/0、`verify-library` 36/0、`verify-recycle` 35/0、
+  `verify-clip-library-detail` 18/0、`verify-projects` 25/0。
+- `verify-transition-runtime` **11 通过 / 1 失败**：失败项 `取消在 15s 内生效 — 20.2s`（既有环境性超时）。
+  已做 A/B：把本次 transitionMixer 的 4 处改动反向后再跑，仍为 `20.8s` 失败（备份/恢复哈希一致），
+  说明与 P3 改动无关；根因是 30 段归一化在 ffmpeg 启动前约 19s，本机 15s 阈值不够。
+- 服务：停旧 PID 81344 → 起新 PID 99808（`startedAt 14:46:58Z` 晚于所有改动文件 mtime，确认新代码生效）；
+  登录态 smoke（不含密码）：`/api/library` 23（12 成片 + 11 片段）、`/api/photos` 17、`/api/bgm` 9、`/api/recycle` 0、工程 2。
+
+### 未验证 / 已知限制
+- **图片库 17 张文件实际全部缺失**（此前记录“6 张缺失”已过期；本次只读核对 `photoLibrary.listAll()` 逐条 `fs.existsSync` = 0/17）。
+  图片 tab 现会明确显示“文件缺失”，未删除/修改任何条目；需要对账或重新生成（需用户决定）。
+- 图片接入时间线（仍图 → 视频段）**未实现**：产品已定“首版可后置”；预览引擎基于 `<video>`，导出需新增静帧转视频路径。
+- 浏览器 E2E 不触发导出，因此 3001 上的“导出归成片”只有隔离实例证据（同一份 `src/editorExporter.js`/`src/library.js`）；
+  3001 上跑真导出会写真实库 + `output/` + 任务库，未在未获授权下执行。
+- `verify-all.js` 本机仍无法整体跑（`spawn EPERM`），只能逐套件。
+- 服务重启会全体登出（会话在内存），运行中任务会中断；本次重启前 3001 上无运行中任务。
+  启动日志 `reconcileInterruptedTasks` 回收 3 个**此前已中断**的僵尸任务（`task_mwde105h_jb87` /
+  `task_mwddz2gn_sgbd` / `task_mwaelng4_j8wd`）：均不在 `/api/tasks` 列表、库无新增产物，
+  属任何重启都会做的既有行为，不是 P3 引入。
+
+---
+
+## 2026-11-15 P3 补充：文件缺失的条目不显示（用户口径）
+
+### 背景
+- P3 验收时只读核对发现：**图片库 17 条记录的文件 17/17 全缺**（此前交接写“6 张缺失”已过期）。
+  图片 tab（库页 + 剪辑台素材栏）因此显示破图/占位。
+- 用户明确要求：**「有文件缺失的地方就不要显示出来」**（不是标提示，而是不列出来）。
+
+### 代码改动
+- `server.js` `GET /api/photos`：
+  - 默认**不返回**文件不存在的条目（`fs.existsSync(filePath)` 为假则隐藏）；数据一条不删，文件找回后自动重新出现。
+  - 新增 `?includeMissing=1`：返回全量，供排查/对账；响应新增 `hiddenMissing`（被隐藏条数）与 `includeMissing`。
+  - `totals` 改为与“可见性”同一口径（此前顶部汇总与列表会不一致：列 17 张、列表 0 张）。
+- `server.js` `GET /api/photos/:id`：响应新增 `fileMissing` 布尔（详情页可判断）。
+- `server.js` `GET /api/library`：同一口径——默认隐藏文件缺失的成片/片段；`?includeMissing=1` 取全量；
+  响应新增 `hiddenMissing` / `includeMissing`，条目带 `fileMissing` 字段（当前真实库 23 条全部存在，隐藏 0 条）。
+- `web/src/screens/editor.js` / `web/styles/editor.css`：撤回上一版的“文件缺失”角标方案，缩略图加载失败恢复为静默隐藏
+  （避免把“缩略图抽帧失败”误报成“文件缺失”）；缺失条目由接口直接不返回。
+- `web/verify/p3-editor-e2e.js`：新增 7 条断言（接口默认隐藏、`includeMissing=1` 全量、剪辑台图片空态、无破图 img、
+  库页图片 tab 空态与计数 0、成片/片段未受影响），截图增加 `p3-06-library-photo-empty.png`。
+
+### 验收（本机实测，2026-11-15 23:10）
+- `node web/verify/p3-editor-e2e.js` → **39 通过 / 0 失败**：素材栏计数 `片段11 / 成片12 / 图片0`；
+  `/api/photos` 返回 0 条、`hiddenMissing=17`；`?includeMissing=1` 返回 17 条；
+  剪辑台图片 tab 空态且 0 个不可用 `<img>`；库页图片 tab 显示“还没有照片”、tab 计数 `图片0`；成片/片段未受影响。
+- `node web/verify/p2-library-e2e.js` → **45 通过 / 0 失败**（图片 tab 走“明确空态”分支，其余不变）。
+- 回归：`verify-photo-library` 42/0、`verify-library` 36/0、`verify-clip-library-detail` 18/0、`verify-editor-media` 21/0、
+  `verify-editor-ux-fixes` 18/0、`verify-editor-final-source` 43/0、`verify-projects` 25/0、`verify-recycle` 35/0、
+  `verify-editor-export` 31/0。
+- 服务已重启加载新路由：PID 112612（`startedAt 15:08:22Z`）。登录态 smoke：
+  `/api/photos` → `visible=0, hiddenMissing=17, totals={all:0,...}`；`?includeMissing=1` → `17`（待审 4 / 通过 6 / 打回 7）；
+  `/api/library` → 23（12 成片 + 11 片段，`hiddenMissing=0`）；`/api/recycle` 0；`/api/bgm` 9。
+
+### 未验证 / 已知限制
+- “文件找回后自动重新出现”只有逻辑证据（每次请求都按 `existsSync` 判定，未造一个文件恢复场景实测）。
+- 被隐藏的图片条目无法从界面删除/恢复（列表里看不到）；需要时用 `?includeMissing=1` 或脚本处理，留 P6 数据对账。
+- 隐藏是展示层口径，不改变 `photoLibrary` 模块语义（`listAll/query` 仍返回全量，内部链路不受影响）。
+
+---
+
+## 2026-11-15 P4：场景卡接入运行时（读取 / 不放回 / buffer 替换 / promptComposer）
+
+### 背景与已定决策
+- 30 分钟长片 = 180 张正片卡 × 10s；**v3.3 为唯一输入**（`app/assets/scene-cards/v3.3-final.json`，
+  200 张 = 180 feature + 20 buffer，正片 `scene_key` 唯一 180）。
+- 按 `chapter + sequence` 顺序取、**同一轮内不放回**；buffer 只在生成失败时替换；
+  耗尽后**报错并提示扩卡库**，不静默复用。
+- `promptComposer` 运行时拼 image/video 提示词，**不写回卡**；`palette_id` 用参数化调色
+  （adjustChain 的参数对象），**不引入 LUT 资源**。
+- P4 只动后端、不改 UI。场景卡是**显式开关**：`POST /api/tasks` 传 `sceneCards: true`
+  （或 `{ enabled: true }`）；不传 = 既有提示词任务，行为零变化。
+
+### 新增
+- `src/sceneCards.js`
+  - 只读卡库（mtime+size 缓存，换文件自动重读）；加载时严格校验 schema、200 张、
+    180 唯一 `scene_key`、`chapter+sequence` 严格递增、composer 必填字段。
+  - `allocate(count)`：按序取一轮正片，不放回；超过 180 抛 `SCENE_CARDS_EXHAUSTED`（带扩卡库提示）；
+    buffer 不参与初始分配。
+  - `replaceWithBuffer(plan, index, reason)`：只替换该段、保留 `replacedFrom` 审计、同一任务 buffer 不复用、
+    用尽返回 `null`。
+  - `statusOf(plan)` 报告 `used / remaining / exhausted / bufferUsed / bufferRemaining`；
+    `checkCapacity(count)` 供 HTTP 层预检。
+  - **「一轮」= 一条任务的一次取卡批次**：30 分钟不重复是单条成片内的约束；不做跨任务全局游标
+    （否则跑满 180 后所有后续任务都会失败，且与「不静默复用」冲突）。
+- `src/promptComposer.js`
+  - `composeClipPatch(card, { theme, userPrompt })`：产出 video/image 提示词、负向词
+    （「无人物/不含人物」归一化成「人物」，避免把否定句当画面元素）、审计字段与 `adjust`；
+    确定性、不修改卡。
+  - 3 个 `palette_id`（cold-minimal / warm-dense / dark-cosmos）映射到 adjustChain 的合法参数
+    （-50..50），未知 palette_id 返回 `null`，不臆造。
+- `scripts/verify-scene-cards.js`（已注册进 `scripts/verify-all.js` 的 `scene-cards`）：
+  57 项，含 180 张顺序/唯一/buffer 未误用、181 拒绝、buffer 替换与用尽、坏卡库负向、
+  promptComposer（冻结卡不写回/确定性/调色参数可被 adjustChain 接受）、Mock 任务端到端。
+- `scripts/verify-scene-cards-http.js`（手动套件，需运行中的 3001；不注册进门禁）：
+  登录 → `GET /api/scene-cards` → 三条 `POST /api/tasks` 校验分支（不建任务）→ 1 片段 Mock 成功链路 → 自清理。
+
+### 改动
+- `src/taskManager.js`
+  - `createTask` 支持 `options.sceneCards.enabled`：取一轮卡 → 逐片段写入
+    `prompt / imagePrompt / negativePrompt / promptSource / sceneCardId / sceneKey / sceneCardRole /
+    sceneCard / adjust`；任务新增 `sceneCards` 取卡计划与 `promptSource`。
+  - 新增 `setSceneCards(taskId, plan)`，供 pipeline 补取卡/替换后持久化。
+- `src/pipeline.js`
+  - 场景卡任务在 `prompt_optimize` 阶段用 `promptComposer` 拼提示词并做提示词质检，
+    `qcDetails` 记录 `promptSource=scene-card / roundId / sceneKeys`；
+    `storyboard` 标记合法跳过（场景顺序已由 chapter+sequence 定死，LLM 分镜会打乱卡序）。
+  - `_batchGenerate` 前幂等补取卡 + 拼提示词（覆盖任务恢复/直接 createTask 的路径）。
+  - 生成失败且**还有重试预算**时用 buffer 替换下一次尝试的卡；不额外增加付费调用，
+    `autoRetry=false` 时不替换。
+  - 拼接输入按片段带 palette `adjust`：仅「转场重编码」路径生效，`qcDetails.sceneCardGrading`
+    如实记录实际执行数；`quick` 档/转场关闭时 `concatenateSegments` 忽略该字段，不冒充已调色。
+- `server.js`
+  - `POST /api/tasks` 接受 `sceneCards`；拒绝 `prompts` 并传（场景内容由卡库提供）、
+    拒绝图生视频组合；数量 > 180 → 400 `SCENE_CARDS_EXHAUSTED`；每段必须 10s → 400；
+    卡库缺失/结构异常 → 503。
+  - 新增只读探针 `GET /api/scene-cards`（卡库统计 + 取卡规则）。
+  - `GET /api/tasks/:id/clips` 增加 `sceneKey / sceneCardId / sceneCardRole / sceneCardReplacement`。
+  - **HTTP 冒烟抓到并修复**：`POST /api/tasks` 里解构出的请求体字段 `sceneCards` 遮蔽了同名模块，
+    导致 `sceneCards.checkCapacity is not a function` → 500；模块改为别名 `sceneCardLibrary` 后通过。
+    证据：`data/logs/server-2026-11-15.log` 的 `TypeError: sceneCards.checkCapacity is not a function`（修复前）。
+
+### 验收（本机实测，2026-11-15 23:46）
+- `node scripts/verify-scene-cards.js` → **57 通过 / 0 失败**：
+  - 180 张：`scene_key` 唯一 180、全部 `role=feature`、顺序 `1:1 → 6:30`；
+    `status = used:180 / remaining:0 / exhausted:true`；181 张 → `SCENE_CARDS_EXHAUSTED`。
+  - buffer：替换保留 `replacedFrom`、同一段不二次替换、20 张用尽后返回 `null`。
+  - promptComposer：冻结卡不写回、同输入同输出、video 196 / image 200 字符；
+    3 个 palette 的 adjust 均通过 `adjustChain.hasAdjust/normalizeParams`，提示词无 `.cube/.lut`。
+  - Mock 任务（`model=mock`、3×10s、`clips_only`、零计费、真实流水线）：
+    `task.sceneCards` 记录 3 个 `scene_key`；`prompt_optimize` completed 且
+    `promptSource=scene-card`；`storyboard` skipped + `legitimateSkip=true`；
+    3 个片段 success 且文件存在；`bufferUsed=0`；测试任务已清理（内存/JSON/数据库）。
+- `node scripts/verify-scene-cards-http.js`（连运行中的 3001）→ **24 通过 / 0 失败**：
+  - `GET /api/scene-cards` 200（200/180/20/10s + 取卡规则）；
+  - `POST /api/tasks` 校验：非 10s → 400 `SCENE_CARDS_DURATION`、181 段 → 400 `SCENE_CARDS_EXHAUSTED`（提示扩卡库）、
+    同传 prompts → 400 `SCENE_CARDS_WITH_PROMPTS`；三条均未创建任务；
+  - 1 片段 Mock 任务（`clips_only`、零计费）：`sceneCards` 计划 1 张、clip `promptSource=scene-card` 且
+    与本地 promptComposer 输出逐字符一致、prompt_optimize completed、storyboard skipped、bufferUsed=0、
+    `/api/tasks/:id/clips` 暴露 sceneKey；任务经 HTTP 删除 + 永久删 JSON + DB 软删（`getAllTasks` 不再返回），
+    本次新增 mock 片段与临时样片已清理。
+  - 清理补了「迟到写入」重试：`taskManager._saveTask` 是异步不 await 的，最后一次保存在删除后落库过；
+    脚本等待后幂等重删，并新增断言「DB 软删后任务不再出现在 `getAllTasks`」（24 项里的最后一项）。
+- `node scripts/check-server-version.js` → **exit 0**：运行中的 3001 就是当前磁盘代码
+  （PID 103480，`startedAt 15:49:19Z`，serverMtime 与磁盘一致）。
+- 回归 13 套件全绿：stages 45、pipeline-fixes 28、mock-vqc 14、continue 19、stage-pipeline 37、
+  frontend-contract 49、library 36、qc-report-mode 14、clip-library-detail 18、transitions 36、
+  editor-final-source 43、editor-media 21、editor-export 31。
+- `verify-recovery-fixes` 依赖写死的运行态文件 `clips/mock_mvgy1dd6_4tbe09.mp4`
+  （当前工作区已缺失，**非 P4 改动**）；用等价 mock 样片临时补齐后 **25/0**，跑完删除，未改该脚本。
+
+### 未验证 / 已知限制
+- ~~3001 上仍是旧代码 / HTTP 未验证~~ —— 已解决：用户三次重启（112612 → 113164 → 63456 → 103480），
+  第一次重启暴露上述遮蔽 500，修复后第二次重启 HTTP 冒烟通过；清理注释造成 mtime 漂移后第三次重启，
+  `node scripts/check-server-version.js` **exit 0**，HTTP 冒烟复跑 **24/0**（PID 103480，`startedAt 15:49:19Z`）。
+- 逐段 palette 调色只在转场重编码路径生效；`quick` 档 / 转场关闭时不会调色（不冒充已调色）。
+- buffer 替换只在还有重试预算时发生；`autoRetry=false` 时保留失败结果，不新增付费调用。
+- 场景卡不足 180 张时加载即拒绝，不做“部分卡可用”的降级。
+- 未在 3001 上跑真实计费任务（需用户同意）；P4 验收全部零计费（Mock + 模块测试 + 本地 stub）。
+- `node scripts/doctor.js`：2 个 ERROR 为**既有环境性假错**（ffmpeg/ffprobe 经 `execFileSync` 管道报 EPERM，
+  直接执行正常；P1 交接 §6 已记录），其余 6 条提醒为既有；P4 未引入新的 doctor 项。
+- 本机 `verify-all.js` 仍无法整体跑（`spawn EPERM`），只能逐套件。
+
+## 2026-11-16 小智（P5）：计划卡 + 状态机 + 记忆 + 离线语音 + 首页气泡
+
+> 依据：`docs/交接/2026-11-15-handoff.md` §7 已定产品决策（不重新讨论）。
+> 全部验收零计费：计划卡/状态机/记忆是纯函数；语音用本地 sherpa-onnx；任务用 `model=mock`。
+> **没有发生任何真实计费调用**；「2 段真实任务」验收项按要求跳过，标记「未验证 / 待用户同意」。
+
+### 新增（后端）
+- `src/assistant/planCard.js`：中文口语 → 计划卡（总时长/每段/段数/主题/模型/分辨率/场景卡），
+  校验 60 分钟 / 400 段 / 场景卡 180×10s / 每段范围按模型（dashscope 2–30、kling 3–15、seedance ≤15）；
+  预算用 `pricing` 出人民币估值、用 `budget` 出美元闸门；重试上限 = 总预算 10% 且最多 2 次；
+  补位上限 = min(10, floor(段数×5%))。**无总时长不做默认值**，返回 `PLAN_NEED_DURATION` + 一句追问。
+- `src/assistant/stateMachine.js`：确定性状态机 `planned → confirmed → submitted → running →
+  (retrying|filling) → done|failed|needs_user`；闸门在 `transition()` 内：付费未确认（`STATE_PAYMENT_NOT_APPROVED`）、
+  重试次数/重试预算、补位额度；非法转移抛 `STATE_ILLEGAL_TRANSITION`；`observe()` 只记流水线观察值，不参与闸门。
+- `src/assistant/memory.js`：会话记忆落盘 `data/assistant/sessions/<id>.json`（`ASSISTANT_DIR` 可覆盖）；
+  消息/计划卡/状态机快照读写；确定性意图分类（greeting/status/last/create）+ 任务检索：
+  「上一次的视频」只挑**有产物或已完成**的记录，可按主题过滤。
+- `src/assistant/asr.js` + `src/assistant/proc.js`：离线语音。sherpa-onnx **不认非 ASCII 路径**，
+  用 ASCII junction 暴露工具目录与临时目录；本机「pipe 捕获 stdout」EPERM，统一用 fd 重定向到文件再读；
+  ffprobe 探时长（上限 60s）、ffmpeg 转 16k 单声道 wav、sherpa 出 JSON；上限 12MB，错误码明确。
+- `src/assistant/fillFromLibrary.js`：补位选择。真实 ffmpeg 抽边界帧，按 SSIM + ΔE76（与接缝质检同口径）
+  打分选最像的候选；候选必须文件存在、时长足够、不同任务、默认排除 status=failed；
+  只取中间一段裁剪（不循环不慢放）；`assembleSegments` 有缺口即拒绝出片。
+- `src/assistant/supervisor.js`：对话/确认/执行/监控/重试/补位编排。
+  小智任务用 `autoRetry:false` 创建（流水线一次只试一次、有失败停在拼接前，不会先产缺段成片）；
+  自动重试由调度器按计划上限重跑 `startTask`（流水线 `_batchGenerate` 复用已成功片段，只重生成失败片段）。
+  真实模型必须 `approved=true` + 预算够 + 5 分钟去重；Mock 跳过预算。
+- `server.js`（增量 edit，未整文件覆盖）：新增 `GET /api/assistant/info`、`POST /api/assistant/message`、
+  `POST /api/assistant/execute`、`GET /api/assistant/state`、`GET /api/assistant/memory`、
+  `POST /api/assistant/asr`（单独 24MB JSON limit，只收 base64、不收文件路径）、
+  `POST /api/assistant/understand`（可选 LLM 填槽，**必须 consent=true** 且无 Key 不发请求）。
+
+### 新增（前端）
+- `web/src/components/xiaozhiPlan.js`（新）：计划卡、状态条、首页气泡、按住说话按钮（MediaRecorder → base64 → ASR；
+  失败提示「请改用打字」）。
+- `web/src/components/assistant.js`（增量 edit，保留原提示词助手能力）：显示名改「小智」；
+  对话优先走 `/api/assistant/message`（不需要 LLM Key）；计划卡确认后轮询 `/api/assistant/state`；
+  `/api/assistant/info` 404 时（旧服务端）**自动回退**旧对话并提示「服务端还是旧进程」；首页气泡只在创作页出现。
+- 未新增 npm 依赖（前端仍零构建、后端仍 4 个运行时依赖）。
+- `src/generators/mock.js`（1 处增量）：Mock 随机失败率支持 `MOCK_FAIL_RATE` 环境变量覆盖（默认仍是 10%），
+  供**临时隔离实例**把「Mock 全流程」验收变确定性；默认行为不变，正常任务不会设置该变量。
+
+### 验收（本机实测，全部零计费）
+- `node scripts/verify-assistant.js` → **94 通过 / 0 失败**（约 2 分钟）：
+  计划卡 21 项（含 90 分钟/401 段/31 分钟场景卡/场景卡 20s/kling 20s 等负向）；
+  状态机 10 项（付费闸门、重试次数、重试预算、补位额度、非法转移、observe）；
+  记忆 9 项（落盘、计划、状态、意图、主题检索、finals）；
+  语音 8 项（真实中文样例两次一致、坏音频/过短/超大/无音频负向）；
+  补位 12 项（真实 ffmpeg 相似度、排除短/缺失/失败/同任务、额度 0、缺口拒出片、监督器补位分支）；
+  **Mock 全流程 11 项**（2 段成片 19.11s、ffmpeg 完整解码、scene_key、零计费）；
+  **自动重试 5 项**（首轮强制失败 → RETRY → 重跑成功、成片存在）；
+  付费闸门 5 项；前端静态接线 7 项（浏览器交互未验证）。
+- `node scripts/verify-assistant-http.js` → **33 通过 / 0 失败**：
+  临时隔离实例（3093、`AUTH_ENABLED=false`、全部数据目录指向临时目录，**不碰 3001**），
+  覆盖 info / message / execute / state / memory / asr / understand + 1 段 Mock 成片（任务 completed、成片文件存在、
+  `/api/budget` spent=$0）+ 付费未确认拦截 + 缺 sessionId / 空文本负向。
+- 回归：`verify-frontend-contract` **49/0**、`verify-auth` **40/0**、`verify-scene-cards` **57/0**、
+  `verify-stages` **45/0**、`verify-assistant-diagnostics` **103/0**。
+- `node scripts/doctor.js`：仍是**既有 2 个 ERROR**（ffmpeg/ffprobe 经 `execFileSync` 管道 EPERM；本次新模块全部用
+  fd 重定向，实际 ffmpeg/ASR 均跑通），6 个既有提醒；P5 未引入新 doctor 项。
+
+### 未验证 / 已知限制
+- **3001 未重启**：本窗口对用户进程无权限（`Get-Process 103480`/`tasklist` 均 Access denied），
+  且按红线不另起实例。`check-server-version` 现在 **exit 1**（disk server.js 16:10:42Z 晚于运行中 15:46:23Z）。
+  新接口已用**临时隔离实例**验证；3001 上待用户重启后复跑 `node scripts/verify-assistant-http.js` 同款断言。
+- **浏览器交互未验证**：本会话 headless Chrome 因沙箱无法创建命名管道（`mojo FATAL ... 拒绝访问`），
+  `dsh_browser_*` 不可用。计划卡/语音/首页气泡的点击与视觉只做了静态接线断言，需人工过一遍。
+- **2 段真实任务未做**（需真实计费，遵守 AGENTS §4.9）：保留为「未验证 / 待用户同意」。
+- 补位成片的**端到端出片**未跑（20 段成片耗时）：补位选择/组装已在真实片段上验证，
+  监督器补位分支用 monkey-patch 验证状态流转；真实「补位 → 新任务 → 成片」待人工用失败任务实测。
+- 可选 LLM 填槽 `/api/assistant/understand` 未实跑（无用户 Key 且会产生费用）；未同意时拒绝、无 Key 不发请求的逻辑已测。
+- 状态机对「流水线内部重试」只做观察记录（`observed`），闸门只管小智自己触发的重试；因为小智任务用
+  `autoRetry:false` 创建，流水线内部不会自动重试。
+
+## 2026-11-16 P6：下线历史 / 产出入口 + 收尾（前端 + 文档）
+
+**依据**（产品口径，2026-11-15 handoff §7）：「历史记录 / 产出入口最终下线；失败任务靠
+『库里失败可见 + 成片未完成卡片』，不再靠历史页。」P2 只做了「导航隐藏、路由保留」，P6 收尾。
+
+### 改动（全部前端增量 edit；未整文件覆盖 `qualityChecker.js` / `pipeline.js` / `server.js`；未改后端）
+
+| 文件 | 改动 |
+|---|---|
+| `web/src/screens/shell.js` | 移除 `HistoryView` / `OutputScreen` 的 import 与渲染；`routeOf` 去掉 history/output；`/history`、`/output` 深链落 `library`（库 · 成片）；把 `/api/tasks` 轮询结果传给 `LibraryView` |
+| `web/src/screens/gen.js` | 生成页「去历史记录」→「去库看成片」（`/library`） |
+| `web/src/screens/inventory.js` | 新增 `UnfinishedPanel`（成片 tab 顶部「未完成 N 条」：`failed/partial`、排除 `mock` / `clips_only` / 已产成片；点开复用 `TaskDrawer` 重试 / 补跑）；片段卡新增「生成失败」徽章（`entry.status='failed'`） |
+| `web/src/screens/history.js` / `output.js` | 文件保留（删除死代码需用户同意，AGENTS §6），头部标注「P6 已下线、入口与路由已移除、失败任务改由库页承接」 |
+| `web/src/components/assistant.js` | 小智提交成功文案不再指向「历史/任务列表」，改「库 · 成片」 |
+| `scripts/verify-p6-offline.js`（新，已注册 `verify-all.js`，group=fast） | P6 只读验收：前端静态 29 项 + 交接文档 6 项 + 运行中 3001 静态文件只读 6 项 |
+| `scripts/verify-all.js` | 注册 `p6-offline` |
+
+### 验收（本机实测，零计费）
+
+- `node scripts/verify-p6-offline.js` → **41 通过 / 0 失败**（静态 29、交接文档 6、3001 只读 6）。
+- 运行中 3001（PID 103480）只读证据：`GET /app/src/screens/shell.js` 200 / 5617 bytes，
+  已无 `HistoryView` / `OutputScreen`，`/history` 深链已落库；`inventory.js` 已含 `UnfinishedPanel`；
+  `gen.js` 已改「去库看成片」。
+  → **P6 是纯前端改动：`web/**` 由 `express.static` 下发，刷新即生效，不需要重启 3001**
+  （与 P5 的后端接口不同；3001 仍待用户重启才具备 `/api/assistant/*`）。
+- 回归 9 套件全绿：editor-nav 15、editor-shell 25、clip-library-detail 18、photo-library 42、
+  create-draft 49、bgm-upload 24、image-gen 100、frontend-contract 49、assistant 94。
+
+### 未验证 / 已知限制
+
+- **浏览器交互未验证**：本会话 headless Chrome 在沙箱内无法启动
+  （`crashpad_client_win.cc:431 OpenProcess: 拒绝访问 (0x5)` → `crash server failed to launch, self-terminating`；
+  加 `--disable-crash-reporter --disable-breakpad` 仍失败），`dsh_browser_*` 不可用。
+  导航 / 未完成卡片 / 「去库看成片」的视觉与点击**未验证**，需人工过一遍。
+- `verify-assistant` 的 ASR 用例**不能**把 `TEMP/TMP` 指到工作区：`asr.js` 的 ASCII junction 建在
+  `os.tmpdir()` 下，指到工作区后 sherpa 进程非零退出 → `ASR_FAILED`（实测 92/2）；用默认 TEMP 复跑 **94/0**。
+  这是脚本调用方式的环境约束，不是 P6 改动（P6 未动 `src/assistant/**`）。
+- `history.js` / `output.js` 仍未删除（死代码），删除需用户同意（AGENTS §6）。
+
+
+
+
