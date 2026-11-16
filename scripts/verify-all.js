@@ -336,6 +336,12 @@ const SUITES = [
     script: 'verify-p6-offline.js',
     group: 'fast',
     desc: 'P6 下线历史/产出入口：壳层不再渲染 History/Output、深链落库、库页未完成卡片与失败徽章、旧页面标注（静态 + 3001 静态文件只读校验）'
+  },
+  {
+    name: 'xiaozhi-home',
+    script: 'verify-xiaozhi-home.js',
+    group: 'fast',
+    desc: '小智首页：/ 整页对话（大球/介绍卡/底部输入/可收起导航）+ /create 六步向导（静态 + 3001 只读）'
   }
 ];
 
