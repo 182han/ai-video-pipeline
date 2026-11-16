@@ -29,6 +29,7 @@
 const taskManager = require('../taskManager');
 const pipeline = require('../pipeline');
 const library = require('../library');
+const photoLibrary = require('../photoLibrary');
 const budget = require('../budget');
 const submitGuard = require('../submitGuard');
 const memory = require('./memory');
@@ -75,6 +76,32 @@ function briefPlan(plan) {
   };
 }
 
+// 出图审图摘要（契约 2026-11-16 §2.7）：三个计数按图片库当前状态**现算**。
+// 取不到条目算 pending（图可能已被删除/回收，不能当成已通过）。
+function imageReviewView(task) {
+  const r = task && task.imageReview;
+  if (!r) return null;
+  let pendingPhotos = 0;
+  let approvedPhotos = 0;
+  let rejectedPhotos = 0;
+  for (const id of (Array.isArray(r.photoIds) ? r.photoIds : [])) {
+    const photo = photoLibrary.get(id);
+    const status = photo ? photo.status : 'pending';
+    if (status === 'approved') approvedPhotos += 1;
+    else if (status === 'rejected') rejectedPhotos += 1;
+    else pendingPhotos += 1;
+  }
+  return {
+    total: r.total,
+    generated: r.generated,
+    failed: r.failed,
+    reviewedAt: r.reviewedAt || null,
+    pendingPhotos,
+    approvedPhotos,
+    rejectedPhotos
+  };
+}
+
 function taskView(task) {
   if (!task) return null;
   return {
@@ -87,6 +114,9 @@ function taskView(task) {
     outputPath: task.outputPath || null,
     error: task.error || null,
     fragmentOnly: !!task.fragmentOnly,
+    // 出图审图（契约 2026-11-16 §2.7）：暂停等审图时为 true；imageReview 为摘要
+    awaitingImageReview: !!task.awaitingImageReview,
+    imageReview: imageReviewView(task),
     sceneCards: task.sceneCards ? { roundId: task.sceneCards.roundId, used: task.sceneCards.used.length, bufferUsed: task.sceneCards.status ? task.sceneCards.status.bufferUsed : 0 } : null
   };
 }
@@ -626,6 +656,21 @@ async function tick(m) {
       cur = saveState(stateMachine.transition(cur, 'RUNNING', { reason: '任务运行中' }));
     }
     if (ACTIVE_STATUS.has(task.status)) {
+      // 出图审图暂停（契约 2026-11-16 §2.7）：每个计划只追加一次会话消息，不刷屏。
+      // 用户点「继续生成」由 unpause/continue 处理，这里只做提醒。
+      if (task.status === 'paused' && task.awaitingImageReview && !m.imageReviewNotified) {
+        m.imageReviewNotified = true;
+        const n = Number(task.imageReview && task.imageReview.generated) || 0;
+        try {
+          memory.appendMessage(m.sessionId, {
+            role: 'assistant',
+            kind: 'state',
+            text: `图出好了（${n} 张）。到「库 · 图片」抽看/通过/打回，然后点「继续生成」我再开始生成视频。`
+          });
+        } catch (e) {
+          console.error('[assistant] 审图提醒写入失败:', e && e.message ? e.message : e);
+        }
+      }
       cur = stateMachine.observe(cur, { pipelineStatus: task.status, currentStep: task.currentStep || null, retries: observedRetries(task) });
       saveState(cur);
       return;

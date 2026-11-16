@@ -13,6 +13,9 @@ const SENSITIVE_FIELDS = [
   'apiKey',
   'llmApiKey',
   'multimodalApiKey',
+  // 2026-11-16：小智「逐段出图」链路会带图片生成 Key（task.runtimeConfig.imageApiKey）。
+  // 漏在这里 = Key 明文落进 data/tasks/*.json 与数据库行，并随 GET /api/tasks/:id 回给前端。
+  'imageApiKey',
   'klingAccessKey',
   'klingSecretKey',
   'accessKey',

@@ -17,8 +17,11 @@ const promptComposer = require('./promptComposer');
 const { resolveResume } = require('./pipelineStages');
 const llmService = require('./services/llmService');
 const pricing = require('./pricing');
+const budget = require('./budget');
 const library = require('./library');
 const photoLibrary = require('./photoLibrary');
+// 出图（2026-11-16）：逐段出首帧图 → 图生视频 + 审图暂停（契约 §1/§2）
+const imageGen = require('./generators/imageGen');
 const objectStore = require('./storage/objectStore');
 const dashscopeUpload = require('./generators/dashscopeUpload');
 const { getI2VInfo } = require('./generators/i2vSupport');
@@ -161,6 +164,20 @@ class Pipeline {
     console.log(`[${taskId}] 重新生成片段 ${index + 1}`);
 
     // 图生视频：重生成单片段也要带首帧图，否则片段级 i2v 任务会退化成纯文生视频。
+    // 出图 → 图生视频任务同样受「缺首帧图禁止降级」约束（契约 §2.5 的同一原则；
+    // 单片段重生成是另一条视频生成入口，绕过 _batchGenerate 的守卫会静默退化成文生视频）。
+    if (this._imageFirstEnabled(task)) {
+      const frame = this._approvedClipPhoto(task.clips[index]);
+      if (!frame.ok) {
+        this._finishClipFailure(taskId, index, 0, frame.reason, { genStartedAt: new Date().toISOString() });
+        taskManager.updateTaskStatus(taskId, 'failed', {
+          error: frame.reason,
+          failureCode: 'missing_first_frame'
+        });
+        console.error(`[${taskId}] ⛔ 片段 ${index + 1} ${frame.reason}（未发起视频请求）`);
+        return;
+      }
+    }
     const i2vImage = await this._i2vPayload(task, task.clips[index]);
     await this._processSingleClip(taskId, index, generator, i2vImage);
 
@@ -633,6 +650,9 @@ class Pipeline {
       'apiKey', 'apiBaseUrl', 'modelId', 'klingAccessKey', 'klingSecretKey',
       'llmApiKey', 'llmBaseUrl', 'llmModel',
       'multimodalApiKey', 'multimodalBaseUrl', 'multimodalModel',
+      // 出图运行时配置（2026-11-16 契约 §1）：补跑/重生成要带 Key，否则重启后出图必失败。
+      'imageApiKey', 'imageBaseUrl', 'imageProvider', 'imageModel', 'imageSize',
+      'imagePerClip',
       'strictQcItems', 'visualQC'
     ];
     const next = { ...(task.runtimeConfig || {}) };
@@ -908,6 +928,21 @@ class Pipeline {
     return out;
   }
 
+  // 任务是否「确实已经开始过」（契约 §2.6 收窄版的 startedAlready）。
+  // 用于区分「补跑一个跑过一半的任务」与「对从未启动的 pristine 任务点补跑」：
+  // 后者应保持原报错（请先跑完到拼接步骤），不能被当成补跑直接启动。
+  _taskStartedAlready(task, completed) {
+    if (!task) return false;
+    if (Array.isArray(completed) && completed.length > 0) return true;
+    if (task.imageReview) return true;
+    const steps = task.steps || {};
+    if (Object.values(steps).some(v => v && ['completed', 'reused', 'failed', 'partial'].includes(v.status))) {
+      return true;
+    }
+    if (Array.isArray(task.clips) && task.clips.some(c => (Number(c && c.attempts) || 0) > 0)) return true;
+    return false;
+  }
+
   // 定位某一步已产出的视频文件。
   // 返回 null 表示「没有可复用的产物」，调用方必须据此回退到重新执行，
   // 不能假设文件一定在——任务产物可能被手动清理或磁盘清理过。
@@ -1128,11 +1163,29 @@ class Pipeline {
     // 产物可能被手动删除或磁盘清理，此时应明确报错，而不是跑到一半才失败。
     const needsConcat = resume.pending.some(s => ['concatenation', 'loop_processing', 'transcoding', 'audio_mix', 'final_qc'].includes(s));
     if (needsConcat && !completed.includes('concatenation')) {
-      return {
-        success: false,
-        error: '补跑需要拼接产物，但拼接尚未完成；请先跑完到拼接步骤',
-        resume
-      };
+      // 契约 §2.6（2026-11-16 14:20 收窄版）：本次会跑 clip_generation 的任务不该被这道
+      // 「需要拼接产物」的闸门拦住（片还没生成时永远补跑不了）。
+      // 但**从未启动过的 pristine 任务**仍保持原报错——那不是补跑，是直接启动。
+      const startedAlready = this._taskStartedAlready(task, completed);
+      const willGenerateClips = resume.pending.includes('clip_generation');
+      if (!(willGenerateClips && startedAlready)) {
+        return {
+          success: false,
+          error: '补跑需要拼接产物，但拼接尚未完成；请先跑完到拼接步骤',
+          resume
+        };
+      }
+      console.log(
+        `[${taskId}] 补跑闸门放行：本次 pending 含 clip_generation 且任务已启动过`
+        + '（不再要求已有拼接产物）'
+      );
+    }
+
+    // 审图结算（契约 §2.4）：用户点「补跑」= 视为通过未单独审核的图；
+    // 被打回的图 → 对应片段直接 failed。幂等（reviewedAt 已存在则直接返回）。
+    const settled = this._settleImageReview(taskId, 'continue');
+    if (settled.settled && settled.rejectedClips.length) {
+      console.warn(`[${taskId}] 补跑前审图结算：${settled.rejectedClips.length} 段图片被打回，这些片段不会生成视频`);
     }
 
     // 把 stageSet 设为「本次待跑」
@@ -1155,12 +1208,15 @@ class Pipeline {
     console.log(`[${taskId}] 补跑到「${targetPreset}」：复用 ${proposedReused.length} 步，待跑 ${resume.pending.join(',')}`);
     const started = this.startTask(taskId, { resumeInfo: resume });
     if (started && started.error) return { success: false, error: started.error, resume };
+    const fresh = taskManager.getTask(taskId);
     return {
       success: true,
       taskId,
       resume,
       reused: proposedReused,
       pending: resume.pending,
+      // 契约 §3.4：成功响应可带 imageReview 摘要（出图链路任务）
+      imageReview: (fresh && fresh.imageReview) || null,
       message: `正在补跑 ${resume.pending.length} 个环节`
     };
   }
@@ -1567,6 +1623,14 @@ class Pipeline {
     if (isLibraryTask) {
       this._markStageSkipped(taskId, 'clip_generation', task.preset, '片段库成片：直接使用库中已有片段，不重新生成');
     } else {
+    // ===== 出图 → 图生视频前置步骤（2026-11-16 契约 §2.1/§2.3）=====
+    // 位置：必须在 recordStepStart('clip_generation') 之前 —— 出图失败/审图没过时
+    // 不能进入片段生成（那会真的花视频的钱）。出图本身不写 task.steps（契约要求），
+    // 只记 task.imageReview + 日志；pipelineStages.ALL_STAGES 不动。
+    if (this._imageFirstEnabled(task)) {
+      const preStep = await this._runImageFirstPreStep(taskId, task);
+      if (preStep) return preStep;
+    }
     taskManager.recordStepStart(taskId, 'clip_generation');
     taskManager.updateTaskStatus(taskId, 'generating', { currentStep: '视频片段生成' });
     console.log(`[${taskId}] 步骤3: 批量生成 ${task.totalClips} 个片段 + 片段质检`);
@@ -2117,9 +2181,16 @@ class Pipeline {
     if (!task) return { success: false, error: '任务不存在' };
     if (!this.pausedTasks.has(taskId)) return { success: false, error: '任务未处于暂停状态' };
     this.pausedTasks.delete(taskId);
+    // 审图暂停后点「继续」：pending 图视为通过，被打回的图让对应片段失败（契约 §2.4）。
+    // 幂等：不是出图暂停（无 imageReview）或被重复调用时自动跳过，不影响普通暂停。
+    const settled = this._settleImageReview(taskId, 'unpause');
     taskManager.updateTaskStatus(taskId, 'generating', { currentStep: '视频片段生成' });
     console.log(`[${taskId}] 已继续`);
-    return { success: true };
+    return {
+      success: true,
+      approvedPhotos: settled.approvedPhotos,
+      rejectedClips: settled.rejectedClips
+    };
   }
 
   isPaused(taskId) {
@@ -2223,6 +2294,459 @@ class Pipeline {
     };
   }
 
+  // ===== 出图 → 图生视频 + 审图暂停（2026-11-16 契约 §1/§2）=====
+  // 契约：docs/交接/2026-11-16-出图审图-接口契约.md
+  //
+  // 触发（全部满足才走新链路；未开启时旧链路行为零变化）：
+  //   1) task.runtimeConfig.imagePerClip === true；
+  //   2) 不是 source==='library' / 'regenerate'（那两条链路片段已存在，不出图）；
+  //   3) 该次运行确实还有「没有可用首帧图」的片段（由 _generateClipImages 自己判断，
+  //      全部已有可用图 → generated=0 → 立刻返回，不重复计费、不要求出图配置可用）。
+  //
+  // 硬约束：出图不可用/余额不足 → 任务失败并写清原因；**绝不降级成文生视频**、绝不返回占位图。
+  _imageFirstEnabled(task) {
+    if (!task) return false;
+    const rc = task.runtimeConfig || {};
+    if (rc.imagePerClip !== true) return false;
+    if (task.source === 'library' || task.source === 'regenerate') return false;
+    return true;
+  }
+
+  // 审图等待上限：默认 24 小时（真实 API 不能自动确认，必须给用户这个停点）。
+  _imageReviewMaxWaitMs() {
+    const raw = Number(process.env.IMAGE_REVIEW_MAX_WAIT_MS);
+    if (Number.isFinite(raw) && raw > 0) return raw;
+    return 24 * 60 * 60 * 1000;
+  }
+
+  // 并发出图：默认 3，IMAGE_GEN_CONCURRENCY 可覆盖，上限 6（契约 §2.2）。
+  _imageGenConcurrency() {
+    const raw = Number(process.env.IMAGE_GEN_CONCURRENCY);
+    const n = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 3;
+    return Math.min(6, Math.max(1, n));
+  }
+
+  // runtimeConfig 的 5 个图片字段 → IMAGE_GEN_* 覆盖键（未传的键回落到 .env）。
+  _imageOverrides(task) {
+    return imageGen.overridesFromRuntimeConfig((task && task.runtimeConfig) || {});
+  }
+
+  // 「可用首帧图」：照片条目存在 + 文件存在 + 未被真正打回（pending/approved 都算已有图）。
+  // 任意一条不满足 → 需要（重新）出图。
+  _usableClipPhoto(clip) {
+    if (!clip || !clip.photoId) return null;
+    const photo = photoLibrary.get(clip.photoId);
+    if (!photo) return null;
+    if (photo.status === 'rejected') return null;
+    try {
+      if (!photo.filePath || !fs.existsSync(photo.filePath)) return null;
+    } catch (e) {
+      return null;
+    }
+    return photo;
+  }
+
+  // 图生视频前置校验：缺首帧图一律判失败，绝不降级成文生视频（契约 §2.5）。
+  _approvedClipPhoto(clip) {
+    const photo = this._usableClipPhoto(clip);
+    if (!photo) {
+      // 把出图失败原因一并带出来，否则排障只能看到「缺图」看不出为什么。
+      const detail = clip && clip.imageError ? `（出图失败原因：${String(clip.imageError).slice(0, 200)}）` : '';
+      return {
+        ok: false,
+        reason: `缺少首帧图，拒绝降级为文生视频：该片段没有可用的首帧图片${detail}（请先出图并通过审核）`
+      };
+    }
+    if (photo.status !== 'approved') {
+      return {
+        ok: false,
+        reason: `缺少首帧图，拒绝降级为文生视频：首帧图 ${photo.id} 当前状态为 ${photo.status}（需 approved）`
+      };
+    }
+    return { ok: true, photo };
+  }
+
+  // 出图 id：首次出图用契约约定的 <taskId>_img_<index>；
+  // 该 id 已有记录（例如被打回后重出图）时改用 _vN 后缀新建条目，
+  // 否则 photoLibrary.ingest 的幂等规则会保留旧条目（旧文件/旧审核状态），新图等于白出。
+  // _vN 后缀会被 photoLibrary.inferGroupId 归到同一 versionGroupId，图片库仍按同一次创作归组。
+  _nextImageId(taskId, index) {
+    const base = photoLibrary.makeId(taskId, index);
+    if (!photoLibrary.get(base)) return base;
+    for (let v = 2; v < 100; v++) {
+      const id = `${base}_v${v}`;
+      if (!photoLibrary.get(id)) return id;
+    }
+    return `${base}_v${Date.now()}`;
+  }
+
+  // 用户明确打回（rejected）的片段：本次**不自动重出图**。
+  // 理由（契约 §2.2 与 §2.4 的交界）：重出图 = 新的真实计费，必须由用户显式发起。
+  // 若这里自动重出，接着 resumeTask 的「pending 视为通过」结算会把新图自动 approve，
+  // 用户刚打回的画面就绕过了审图门 —— 与 §2.4「被打回 → 对应片段 failed」相反。
+  // 判定用 _settleImageReview 写入的标记（不会被后续缺图守卫的 error 覆盖）。
+  _isUserRejectedClip(clip) {
+    return !!(clip && clip.imageStatus === 'failed'
+      && /^图片被打回/.test(String(clip.imageError || '')));
+  }
+
+  /**
+   * 逐段出首帧图（幂等）。
+   * 返回 { total, generated, reused, failed, failedIndices, photoIds, pendingCount, rejectedSkipped }；
+   * 就绪度不足 / 余额不足等**抛错**（调用方让任务失败，不降级）。
+   */
+  async _generateClipImages(taskId, task) {
+    const clips = Array.isArray(task && task.clips) ? task.clips : [];
+    const total = clips.length;
+
+    // 幂等：已有可用图的片段计入 reused，不重复计费。
+    // 被用户打回的片段单独计数（不自动重出，交给缺图守卫判失败）。
+    // 片段已成功且视频还在的（补跑从拼接开始）本次不会重新生成视频，不需要为它出图。
+    const need = [];
+    const rejectedExisting = [];
+    let videoDone = 0;
+    for (const clip of clips) {
+      if (this._usableClipPhoto(clip)) continue;
+      if (this._isUserRejectedClip(clip)) {
+        rejectedExisting.push(clip);
+        continue;
+      }
+      if (clip && clip.status === 'success' && this._resolveClipPath(clip.videoPath)) {
+        videoDone += 1;
+        continue;
+      }
+      need.push(clip);
+    }
+    if (need.length === 0) {
+      const reusedClips = clips.filter(c => this._usableClipPhoto(c));
+      const photoIds = clips.map(c => c.photoId).filter(Boolean);
+      let pendingCount = 0;
+      for (const id of photoIds) {
+        const p = photoLibrary.get(id);
+        if (p && p.status === 'pending') pendingCount += 1;
+      }
+      console.log(
+        `[${taskId}] 出图前置：${reusedClips.length} 段已有可用首帧图`
+        + (rejectedExisting.length ? `、${rejectedExisting.length} 段图片被用户打回（不自动重出图）` : '')
+        + (videoDone ? `、${videoDone} 段视频已成功（无需出图）` : '')
+        + '；跳过出图（不重复计费）'
+      );
+      return {
+        total, generated: 0, reused: reusedClips.length, failed: rejectedExisting.length,
+        failedIndices: rejectedExisting.map(c => (Number.isInteger(c.index) ? c.index : clips.indexOf(c))),
+        photoIds, pendingCount, rejectedSkipped: rejectedExisting.length, videoDone
+      };
+    }
+
+    // 1) 就绪度校验：不可用 → 抛错让任务失败，绝不静默降级成文生视频 / 返回占位图。
+    const overrides = this._imageOverrides(task);
+    const status = imageGen.getImageGenStatus(overrides);
+    if (status.usable !== true) {
+      const provider = (status.imageGen && status.imageGen.provider) || '（空）';
+      const registered = (status.registeredProviders || []).join(', ') || '（无）';
+      const missing = (status.missing || []).join(', ');
+      const err = new Error(
+        '出图未就绪：'
+        + (missing ? `缺少 ${missing}` : '出图配置不完整')
+        + (status.providerImplemented ? '' : `；厂商标识「${provider}」未注册适配器（已注册：${registered}）`)
+        + '。请在「设置 → 图片生成」填写出图 Key / 地址 / 模型（或 .env 的 IMAGE_GEN_*）后重试；'
+        + '本任务不会降级为文生视频，也不会用占位图。'
+      );
+      err.code = 'IMAGE_GEN_NOT_READY';
+      throw err;
+    }
+
+    // 2) 预算闸门：按「要出的张数」整体预估，避免出一半卡住。
+    const needCount = need.length;
+    const estUsd = budget.estimateImage(needCount);
+    if (!budget.canAfford(estUsd)) {
+      const st = budget.status();
+      const err = new Error(
+        `余额不足：本次出图 ${needCount} 张需 $${Number(estUsd).toFixed(2)}，`
+        + `剩余 $${Number(st.balanceUsd).toFixed(2)}。请先充值或减少段数后重试。`
+      );
+      err.code = 'INSUFFICIENT_BUDGET';
+      throw err;
+    }
+
+    // 3) 并发出图（默认 3，上限 6）。单张失败只记该片段失败，**不自动重试**（重试 = 额外真实计费）。
+    let generator;
+    try {
+      generator = new imageGen.ImageGenerator(overrides);
+    } catch (e) {
+      const err = new Error('出图未就绪：无法创建出图生成器（' + (e && e.message ? e.message : e) + '）');
+      err.code = 'IMAGE_GEN_NOT_READY';
+      throw err;
+    }
+    const size = overrides.IMAGE_GEN_SIZE || config.IMAGE_GEN_SIZE || null;
+    const outDir = config.STORAGE.clipsDir;
+    const results = [];
+    let cursor = 0;
+    const workerCount = Math.min(this._imageGenConcurrency(), needCount);
+
+    const worker = async () => {
+      for (;;) {
+        const slot = cursor++;
+        if (slot >= need.length) return;
+        // 任务被取消/结束：不再继续出图（出图也是真实计费）。
+        if (!this.runningTasks.has(taskId)) return;
+        const clip = need[slot];
+        const index = Number.isInteger(clip.index) ? clip.index : slot;
+        const prompt = (clip.imagePrompt || clip.prompt || '').trim();
+        if (!prompt) {
+          taskManager.updateClip(taskId, index, {
+            imageStatus: 'failed',
+            imageError: '缺少出图提示词（imagePrompt / prompt 均为空）'
+          });
+          results.push({ index, ok: false, error: '缺少出图提示词' });
+          continue;
+        }
+        try {
+          const out = await generator.generateImage(prompt, {
+            taskId,
+            index,
+            size,
+            negativePrompt: clip.negativePrompt,
+            outDir
+          });
+          const photoId = this._nextImageId(taskId, index);
+          const photo = photoLibrary.ingest({
+            id: photoId,
+            taskId,
+            index,
+            filePath: out.imagePath,
+            url: '/clips/' + encodeURIComponent(path.basename(out.imagePath)),
+            prompt,
+            negativePrompt: typeof clip.negativePrompt === 'string' ? clip.negativePrompt : '',
+            provider: out.provider || null,
+            model: out.model || null,
+            size,
+            width: out.width,
+            height: out.height,
+            // 待审（不是 approved）：_i2vPayload 只认 approved，必须由审图结算改成 approved。
+            status: 'pending',
+            source: 'generation'
+          });
+          taskManager.updateClip(taskId, index, {
+            photoId: photo.id,
+            imageStatus: 'generated',
+            imageError: null
+          });
+          // 每张成功后再计费（失败不扣费）；计费异常不丢已出的图，只记错误。
+          try {
+            budget.reserve({
+              usd: budget.estimateImage(1),
+              kind: 'image',
+              taskId,
+              meta: { source: 'pipeline-image-first', index }
+            });
+          } catch (e) {
+            console.error(`[${taskId}] 图片计费预留失败（图已保留）: ${e.message}`);
+          }
+          console.log(`[${taskId}] 首帧图 ${index + 1}/${total} 出图成功: ${path.basename(out.imagePath)}`);
+          results.push({ index, ok: true, photoId: photo.id });
+        } catch (e) {
+          const msg = String((e && e.message) || e).slice(0, 500);
+          taskManager.updateClip(taskId, index, { imageStatus: 'failed', imageError: msg });
+          console.error(`[${taskId}] 首帧图 ${index + 1}/${total} 出图失败: ${msg}`);
+          results.push({ index, ok: false, error: msg });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    // 4) 汇总 + 写 task.imageReview（§1 结构）。
+    const resultByIndex = new Map(results.map(r => [r.index, r]));
+    const photoIds = [];
+    const failedIndices = [];
+    let generated = 0;
+    let failed = 0;
+    let reused = 0;
+    for (const clip of clips) {
+      const index = Number.isInteger(clip.index) ? clip.index : clips.indexOf(clip);
+      const r = resultByIndex.get(index);
+      if (r && r.ok) { generated += 1; photoIds.push(r.photoId); continue; }
+      if (r && !r.ok) { failed += 1; failedIndices.push(index); continue; }
+      // 没有本轮结果：要么是复用（已有可用图），要么是用户打回（不自动重出），
+      // 要么是视频已成功的片段（本次不需要图）。
+      if (this._usableClipPhoto(clip)) {
+        reused += 1;
+        if (clip.photoId) photoIds.push(clip.photoId);
+      } else if (clip && clip.status === 'success' && this._resolveClipPath(clip.videoPath)) {
+        // 视频已成功，本次不生成视频，也不出图
+      } else {
+        failed += 1;
+        failedIndices.push(index);
+        if (clip.photoId) photoIds.push(clip.photoId);
+      }
+    }
+    let pendingCount = 0;
+    for (const id of photoIds) {
+      const p = photoLibrary.get(id);
+      if (p && p.status === 'pending') pendingCount += 1;
+    }
+    const imageReview = {
+      required: true,
+      total,
+      generated,
+      reused,
+      failed,
+      failedIndices,
+      photoIds,
+      generatedAt: new Date().toISOString(),
+      reviewedAt: null,
+      autoApproved: 0,
+      rejectedClips: [],
+      settledBy: null
+    };
+    const cur = taskManager.getTask(taskId) || task;
+    taskManager.updateTaskStatus(taskId, cur.status || 'pending', {
+      imageReview,
+      awaitingImageReview: false
+    });
+    console.log(
+      `[${taskId}] 出图完成：${generated} 张新出 / ${reused} 张复用 / ${failed} 张失败`
+      + (failedIndices.length ? `（失败段：${failedIndices.map(i => i + 1).join(',')}）` : '')
+    );
+    return { total, generated, reused, failed, failedIndices, photoIds, pendingCount };
+  }
+
+  // 审图暂停（一次性）：置 paused + awaitingImageReview，等用户点「继续/补跑」。
+  // 返回 'resumed' | 'timeout' | 'interrupted'。
+  async _pauseForImageReview(taskId, summary) {
+    this.pausedTasks.add(taskId);
+    taskManager.updateTaskStatus(taskId, 'paused', {
+      currentStep: `等待审图：已出 ${summary.generated} 张（待审 ${summary.pendingCount} / 失败 ${summary.failed}）`,
+      awaitingImageReview: true
+    });
+    console.log(
+      `[${taskId}] ⏸ 等待审图：已出 ${summary.generated} 张（待审 ${summary.pendingCount} / 失败 ${summary.failed}）`
+      + '；暂停期间不启动片段生成、不花视频的钱'
+    );
+    const maxWaitMs = this._imageReviewMaxWaitMs();
+    const ok = await this._waitIfPaused(taskId, maxWaitMs);
+    if (ok) return 'resumed';
+
+    const cur = taskManager.getTask(taskId);
+    // _waitIfPaused 返回 false 有两种：暂停超时（已写 failureCode=pause_timeout）或任务被结束/取消。
+    // 只有超时才改写成本步骤专属的 failureCode；其它情况保持原状态，不伪造失败。
+    if (!cur || cur.failureCode !== 'pause_timeout') {
+      if (cur) console.warn(`[${taskId}] 审图等待被中断（状态 ${cur.status}），不改写任务状态`);
+      return 'interrupted';
+    }
+    const limitText = maxWaitMs >= 3600000
+      ? `${Math.round(maxWaitMs / 3600000)} 小时`
+      : (maxWaitMs >= 60000
+        ? `${Math.round(maxWaitMs / 60000)} 分钟`
+        : `${Math.max(1, Math.round(maxWaitMs / 1000))} 秒`);
+    taskManager.updateTaskStatus(taskId, 'failed', {
+      error: `等待审图超过 ${limitText}，已中止任务（已出的图和任务都保留，可点「补跑」继续；`
+        + '已出的图不会重复出图，也不会重复计费）。（这是审图等待超时，不是生成失败。）',
+      failureCode: 'image_review_timeout',
+      awaitingImageReview: false,
+      currentStep: '审图等待超时',
+      reviewTimedOutAt: new Date().toISOString(),
+      recoverable: true
+    });
+    console.error(`[${taskId}] ⏸ 审图等待超过 ${limitText}，中止流水线（failureCode=image_review_timeout）`);
+    return 'timeout';
+  }
+
+  /**
+   * 审图结算（幂等）：pending → approved（用户点「继续/补跑」即视为通过未单独审核的图）；
+   * rejected → 该片段直接 failed（不会用被打回的图生成视频）。
+   * 不做任何真实计费调用。
+   */
+  _settleImageReview(taskId, settledBy = 'unpause') {
+    const task = taskManager.getTask(taskId);
+    if (!task) return { settled: false, approvedPhotos: 0, rejectedClips: [] };
+    const review = task.imageReview;
+    if (!review || review.reviewedAt) {
+      return { settled: false, approvedPhotos: 0, rejectedClips: [] };
+    }
+    let approvedPhotos = 0;
+    const rejectedClips = [];
+    const clips = Array.isArray(task.clips) ? task.clips : [];
+    for (const clip of clips) {
+      const photoId = clip && clip.photoId;
+      if (!photoId) continue;
+      const photo = photoLibrary.get(photoId);
+      if (!photo) continue;
+      if (photo.status === 'pending') {
+        try {
+          photoLibrary.markReviewed(photoId, 'approved', '审图暂停后继续，未单独审核视为通过');
+          approvedPhotos += 1;
+        } catch (e) {
+          console.warn(`[${taskId}] 审图结算：图片 ${photoId} 置为通过失败: ${e.message}`);
+        }
+      } else if (photo.status === 'rejected') {
+        const index = Number.isInteger(clip.index) ? clip.index : clips.indexOf(clip);
+        taskManager.updateClip(taskId, index, {
+          status: 'failed',
+          error: `图片被打回（第 ${index + 1} 段），不会用这张图生成视频；请重出图或改选图后再补跑`,
+          imageStatus: 'failed',
+          imageError: '图片被打回（rejected）'
+        });
+        rejectedClips.push(index);
+      }
+    }
+    // 状态不在这里强行改成 generating：resumeTask 已经改过；被 continueTask 调用时由它接管。
+    const nextStatus = task.status === 'paused' ? 'generating' : task.status;
+    taskManager.updateTaskStatus(taskId, nextStatus, {
+      imageReview: {
+        ...review,
+        reviewedAt: new Date().toISOString(),
+        autoApproved: approvedPhotos,
+        rejectedClips,
+        settledBy
+      },
+      awaitingImageReview: false,
+      currentStep: '视频片段生成'
+    });
+    console.log(
+      `[${taskId}] 审图结算（${settledBy}）：自动通过 ${approvedPhotos} 张`
+      + (rejectedClips.length ? `，被打回 ${rejectedClips.length} 段（第 ${rejectedClips.map(i => i + 1).join(',')} 段）` : '')
+    );
+    return { settled: true, approvedPhotos, rejectedClips };
+  }
+
+  // _runPipeline 的出图前置步骤：出图 → 必要时暂停审图 → 兜底结算。
+  // 返回 null = 继续主流程；返回对象 = 已中止（由 _runPipeline 直接 return）。
+  async _runImageFirstPreStep(taskId, task) {
+    let summary;
+    try {
+      summary = await this._generateClipImages(taskId, task);
+    } catch (e) {
+      // 就绪度 / 余额 / 出图异常：任务失败并写清原因，绝不降级成文生视频。
+      const code = (e && e.code) || 'image_gen_failed';
+      const message = (e && e.message) ? e.message : String(e);
+      taskManager.updateTaskStatus(taskId, 'failed', {
+        error: message,
+        failureCode: code,
+        recoverable: true,
+        awaitingImageReview: false,
+        currentStep: '出图中止'
+      });
+      console.error(`[${taskId}] ❌ 出图前置失败（${code}）：${message}`);
+      return { success: false, failureCode: code, error: message };
+    }
+
+    const review = (taskManager.getTask(taskId) || task).imageReview;
+    const needsReview = summary.generated > 0 && (!review || review.reviewedAt == null);
+    if (needsReview) {
+      const wait = await this._pauseForImageReview(taskId, summary);
+      if (wait === 'timeout') {
+        return { success: false, aborted: true, failureCode: 'image_review_timeout' };
+      }
+      if (wait === 'interrupted') {
+        return { success: false, aborted: true, cancelled: true };
+      }
+    }
+    // 兜底结算（幂等）：正常路径由 resumeTask/continueTask 触发，这里覆盖「暂停标记被清掉」的情形。
+    this._settleImageReview(taskId, 'unpause');
+    return null;
+  }
+
   async _batchGenerate(taskId, generator) {
     const task = taskManager.getTask(taskId);
     if (!task) return; // 任务已删除，直接结束批量生成
@@ -2286,6 +2810,24 @@ class Pipeline {
               continue;
             }
             const clip = task.clips[index];
+            // 出图 → 图生视频任务的硬守卫（2026-11-16 契约 §2.5）：
+            // 缺 approved 首帧图 → 该片段直接失败，不发视频请求、不计费。
+            // 出图失败、图片被打回、审核未通过都走这里，绝不悄悄退化成文生视频。
+            const liveTask = taskManager.getTask(taskId);
+            if (liveTask && this._imageFirstEnabled(liveTask)) {
+              const liveClip = (liveTask.clips || [])[index] || clip;
+              const frame = this._approvedClipPhoto(liveClip);
+              if (!frame.ok) {
+                this._finishClipFailure(taskId, index, 0, frame.reason, {
+                  genStartedAt: new Date().toISOString()
+                });
+                console.error(`[${taskId}] ⛔ 片段 ${index + 1} ${frame.reason}`);
+                // 与 _processSingleClip 失败同口径计入 generated（本轮确实处理过该片段）：
+                // 不计数会让上层把「部分失败」误判成 allReused，从而给 clip_generation 标 pass。
+                generated += 1;
+                continue;
+              }
+            }
             const photoId = (clip && clip.photoId) || task.sourcePhotoId;
             let clipImage = null;
             if (photoId) {

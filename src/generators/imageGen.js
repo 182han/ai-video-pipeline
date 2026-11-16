@@ -214,11 +214,39 @@ class ImageGenerator {
   }
 }
 
+// 运行时配置 → 出图覆盖键（契约 2026-11-16 §1，追加导出，不改既有逻辑）。
+//
+// rc 形状（task.runtimeConfig 里的 5 个图片字段）：
+//   { imageApiKey, imageBaseUrl, imageProvider, imageModel, imageSize }
+// 映射到 getImageGenStatus / ImageGenerator 认识的 IMAGE_GEN_* 覆盖键。
+// 未传 / 空串 / 非字符串 → 不放进 overrides，由 getImageGenStatus 回落到 .env 的 IMAGE_GEN_*
+// （与 /api/images/* 的既有口径一致）。Key 只在内存里用，绝不写日志/落盘。
+function overridesFromRuntimeConfig(rc) {
+  const src = (rc && typeof rc === 'object') ? rc : {};
+  const map = {
+    IMAGE_GEN_API_KEY: 'imageApiKey',
+    IMAGE_GEN_BASE_URL: 'imageBaseUrl',
+    IMAGE_GEN_PROVIDER: 'imageProvider',
+    IMAGE_GEN_MODEL: 'imageModel',
+    IMAGE_GEN_SIZE: 'imageSize'
+  };
+  const out = {};
+  for (const [target, from] of Object.entries(map)) {
+    const raw = src[from];
+    // 契约 §1：这 5 个字段全部是字符串；非字符串一律不产生覆盖（回落到 .env）。
+    if (typeof raw !== 'string') continue;
+    const v = raw.trim();
+    if (v) out[target] = v;
+  }
+  return out;
+}
+
 module.exports = {
   ImageGenerator,
   getImageGenStatus,
   resolveI2VConfig,
   IMAGE_INPUT_CAPABILITY,
   registerImageProvider,
-  listImageProviders
+  listImageProviders,
+  overridesFromRuntimeConfig
 };
