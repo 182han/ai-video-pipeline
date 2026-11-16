@@ -394,22 +394,29 @@ async function main() {
   // 2026-11-16 Lead 收口：配乐意图不能抢「时长 + 音乐」的创建句；指代式换卡要接住。
   ok('意图不抢：带时长的「配点轻音乐 / 配乐随意」仍走 create',
     assistantMemory.classify('10 分钟，配点轻音乐').intent === 'create'
-    && assistantMemory.classify('来一条 10 分钟的视频，配乐随意').intent === 'create');
-  ok('配乐意图仍识别：配乐有哪些 / 用第 3 首 / 不要配乐',
-    assistantMemory.classify('配乐有哪些').intent === 'bgm'
-    && assistantMemory.classify('用第 3 首').intent === 'bgm'
-    && assistantMemory.classify('不要配乐').intent === 'bgm');
+    && assistantMemory.classify('来一条 10 分钟的视频，配乐随意').intent === 'create'
+    && assistantMemory.classify('30 分钟，背景音乐随便来点').intent === 'create'
+    && assistantMemory.classify('帮我做个 10 分钟的视频，配乐轻一点').intent === 'create');
+  ok('配乐意图仍识别：显式动作清单全部走 bgm（有哪些/有什么/换成/改成/关掉/设为默认/换一首/用第 N 首）',
+    ['配乐有哪些', '有什么配乐', '配乐换成晨雾', '配乐改成第 2 首', '关掉配乐',
+      '把第 3 首设为默认配乐', '换一首', '用第 3 首']
+      .every((t) => assistantMemory.classify(t).intent === 'bgm'));
   ok('指代式换卡：「这个地方的换一个」→ plan_edit（不是 create/unknown）',
-    assistantMemory.classify('不想要这个地方的换一个可以吗').intent === 'plan_edit');
+    assistantMemory.classify('不想要这个地方的换一个可以吗').intent === 'plan_edit'
+    && ['这张卡不满意，换一张', '这一段不想要', '这个场景换一个', '这里不满意，换一个']
+      .every((t) => assistantMemory.classify(t).intent === 'plan_edit'));
   ok('「这里换成1080p」不被当成按段编辑（仍走分辨率续问）',
     assistantMemory.classify('这里换成1080p').intent !== 'plan_edit');
   const vagueEdit = supervisor.handleMessage({ sessionId: sidScene, text: '不想要这个地方的换一个可以吗' });
-  ok('指代式换卡：回复问「第几段」、不重排计划、不建任务',
-    vagueEdit.ok === true && vagueEdit.intent === 'plan_edit' && vagueEdit.plan === null
-    && /第几段/.test(String(vagueEdit.reply || ''))
+  ok('指代式换卡：回复「要换第几段？说『第 2 段换一个』」、回传同一计划、不建任务',
+    vagueEdit.ok === true && vagueEdit.intent === 'plan_edit'
+    && /要换第几段/.test(String(vagueEdit.reply || ''))
+    && /第 2 段换一个/.test(String(vagueEdit.reply || ''))
+    && !/做多长|总时长/.test(String(vagueEdit.reply || ''))
+    && !!vagueEdit.plan && vagueEdit.plan.planId === planIdBeforeScene
     && assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene
     && taskManager.getAllTasks().length === tasksBeforeScene,
-    String(vagueEdit.reply || '').slice(0, 50));
+    String(vagueEdit.reply || '').slice(0, 60));
   ok('finals 参与检索并标 kind=final', (() => {
     const r = assistantMemory.retrieveTasks({ query: '上一次的视频', tasks: [], finals: [{ id: 'fin_1', kind: 'final', prompt: '成片 A', filePath: 'output/a.mp4', createdAt: new Date().toISOString() }] });
     return r.refs.length === 1 && r.refs[0].kind === 'final';
@@ -458,6 +465,10 @@ async function main() {
     && planAfterSwap.sceneCardIds[2] === editIdsBefore[2]
     && taskManager.getAllTasks().length === tasksBeforeEdit,
     `planId=${planAfterSwap.planId} ids=${planAfterSwap.sceneCardIds.join(',')}`);
+  ok('plan_edit 回传更新后的计划（planId 不变、sceneCardIds 与 lastPlan 一致 → 前端可刷新卡片）',
+    !!swapMsg.plan && swapMsg.plan.planId === editPlanBefore.planId
+    && Array.isArray(swapMsg.plan.sceneCardIds)
+    && swapMsg.plan.sceneCardIds.join(',') === planAfterSwap.sceneCardIds.join(','));
   ok('换卡回复写清「第 N 段：旧 → 新（第 X 章-Y）」并列出当前 3 张卡', (() => {
     const oldCard = sceneCardLibrary.getCardById(editIdsBefore[1]);
     const newCard = sceneCardLibrary.getCardById(planAfterSwap.sceneCardIds[1]);
@@ -555,6 +566,9 @@ async function main() {
     && planAfterPick.bgm.enabled === true && planAfterPick.bgm.mode === 'manual'
     && planAfterPick.bgm.trackId === track3Id,
     planAfterPick.bgm ? planAfterPick.bgm.trackId : '');
+  ok('bgm 回传更新后的计划（planId 不变、bgm.trackId 已更新 → 前端可刷新卡片）',
+    !!pickMsg.plan && pickMsg.plan.planId === bgmPlanMsg.plan.planId
+    && !!pickMsg.plan.bgm && pickMsg.plan.bgm.trackId === track3Id);
   ok('选曲回复带曲名 + 计划摘要显示「配乐：手动」',
     pickMsg.reply.includes(track3.title) && /配乐：手动/.test(pickMsg.reply));
   const nextMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '换一首' });

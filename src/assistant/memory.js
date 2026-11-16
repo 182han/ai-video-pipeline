@@ -239,7 +239,9 @@ const RE_BGM_SWAP = /换一首|换首|换一曲|再来一首/;
 const RE_TIME_WORD = /(?:分钟|小时|秒|段)/;
 // 2026-11-16 Lead 收口：用户指着卡片说「不想要这个地方的换一个」时没有「第 N 段」。
 // 这类指代 + 换卡动作 → plan_edit（supervisor 回「要换第几段？」），不要再掉进"问时长"。
-const RE_SEGMENT_VAGUE = /这个地方|这里|这块|这个场景|这张卡|这张|这段|那个场景|那条/;
+// 2026-11-16 Lead 复核补充：同时覆盖「这一段/这一张/那一段」等常见口语（原来只认「这段」，
+// 「这一段不想要」会因含「段」被 RE_CREATE 抢成 create）。
+const RE_SEGMENT_VAGUE = /(?:这|那)(?:个地方|里|块|张卡|张|个场景|段|一段|一张)|那条/;
 const RE_SEGMENT_SWAP_WORD = /换一个|换一张|换个|换掉|换成别的|换别的|不想要|不满意|不要这个/;
 
 function classify(text) {

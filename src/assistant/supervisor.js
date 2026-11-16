@@ -470,7 +470,9 @@ function replyForPlanEdit(sessionId, text) {
   }
   const m = String(text || '').match(RE_SEGMENT_INDEX);
   if (!m) {
-    return '我没听清要改第几段。可以说「第 2 段换一个」或「第 2 段提示词改成：……」。';
+    // 2026-11-16 Lead 复核：用户指代卡片（「这个地方的换一个」/「这一段不想要」）时没有段号，
+    // 直接告诉他怎么补段号；不要掉回「这条视频要做多长」。
+    return '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」。';
   }
   const n = planCard.parseCnNumber(m[1]);
   if (!Number.isInteger(n) || n < 1 || n > plan.clipCount) {
@@ -665,9 +667,15 @@ function handleMessage(opts = {}) {
   } else if (intent.intent === 'plan_edit') {
     // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
     reply = replyForPlanEdit(sessionId, text);
+    // 2026-11-16 Lead 复核：把更新后的计划一并回传（planId 不变）。
+    // 前端 sendXiaozhi 里的 `if (j.plan) setPlan(j.plan)` 依赖它刷新手上的计划卡；
+    // 只回 null 时卡片仍是旧对象，用户会觉得「换了但没反应」。
+    plan = memory.lastPlan(sessionId);
   } else if (intent.intent === 'bgm') {
     // 2026-11-16 P7-A：配乐 —— 列库 / 选曲 / 关掉 / 设默认。
     reply = replyForBgm(sessionId, text);
+    // 同上：选曲/关掉配乐后回传更新后的计划（planId 不变；无计划时仍是 null）。
+    plan = memory.lastPlan(sessionId);
   } else if (intent.intent === 'last') {
     const res = retrieveRefs(text, 3);
     refs = res.refs;
