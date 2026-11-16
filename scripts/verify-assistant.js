@@ -940,9 +940,9 @@ async function main() {
   const tasksBefore = taskManager.getAllTasks().length;
   const msgPay = supervisor.handleMessage({ text: '1段极光，每段10秒' });
   const planPay = msgPay.plan;
-  ok('对话生成的是真实计费模型计划（默认百炼官方 dashscope，2026-11-16 14:0x 口径）',
-    !!planPay && planPay.model === 'dashscope'
-    && planPay.modelLabel === '百炼万相 3.0（官方）'
+  ok('对话生成的是真实计费模型计划（默认 WhaleTV 中转 openai-video，2026-11-16 20:4x 用户口径）',
+    !!planPay && planPay.model === 'openai-video'
+    && planPay.modelLabel === 'WhaleTV 万相 3.0（中转）'
     && planPay.requiresPaymentApproval === true,
     planPay && (planPay.model + ' / ' + planPay.modelLabel));
   ok('默认模型按秒计价非 0（付费闸门不能被 ¥0 绕过）',

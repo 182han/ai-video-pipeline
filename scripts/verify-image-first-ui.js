@@ -98,17 +98,17 @@ function slice(src, startRe, endRe, maxLen) {
   check('Key 不打印：store.js 无 console.log', !/console\.log/.test(store));
 
   // ------------------------------------------------------------
-  section('[2] 开关：默认开启 + localStorage 键 vs_image_per_clip（契约 §0）');
+  section('[2] 开关：默认关闭（用户可手动打开）+ localStorage 键 vs_image_per_clip（2026-11-16 20:4x 用户决定）');
   check("assistant.js 键名 vs_image_per_clip", /IMAGE_PER_CLIP_KEY = 'vs_image_per_clip'/.test(assist));
   const readFn = slice(assist, /function readImagePerClip\(\)/, /\n\}/);
-  check('readImagePerClip：只有 "0" 是关（缺省=开）', /!== '0'/.test(readFn), readFn.trim().slice(0, 90));
-  check('readImagePerClip：localStorage 取不到时也算开（catch 返回 true）', /catch \(e\) \{ return true; \}/.test(readFn));
+  check('readImagePerClip：只有 "1" 是开（缺省=关）', /=== '1'/.test(readFn), readFn.trim().slice(0, 90));
+  check('readImagePerClip：localStorage 取不到时也算关（catch 返回 false）', /catch \(e\) \{ return false; \}/.test(readFn));
   const writeFn = slice(assist, /function writeImagePerClip\(on\)/, /\n\}/);
   check("writeImagePerClip：写 '1' / '0'", /setItem\(IMAGE_PER_CLIP_KEY, on \? '1' : '0'\)/.test(writeFn));
   check('React 状态默认取 readImagePerClip', /const \[imagePerClip, setImagePerClip\] = useState\(readImagePerClip\)/.test(assist));
   check('切换函数 toggleImagePerClip 同时更新状态与 localStorage',
     /function toggleImagePerClip\(on\)/.test(assist) && /writeImagePerClip\(next\)/.test(assist));
-  check('计划卡默认开启：imagePerClip !== false', /const imgOn = imagePerClip !== false;/.test(plan));
+  check('计划卡默认关闭：imagePerClip === true', /const imgOn = imagePerClip === true;/.test(plan));
   check('开关是受控 checkbox 且可点（checked + onChange）',
     /type="checkbox"[\s\S]{0,160}checked=\$\{imgOn\}[\s\S]{0,160}onChange=\$\{\(e\) => onToggleImage && onToggleImage\(e\.target\.checked\)\}/.test(plan));
   check('两处 PlanCard 都接收开关（页面模式 + 浮窗模式）',

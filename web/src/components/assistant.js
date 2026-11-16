@@ -21,11 +21,11 @@ const { useEffect, useRef, useState } = React;
 
 const POS_KEY = 'vs_assistant_pos';
 
-// 逐段出图开关（2026-11-16 契约 §0/§1）：默认开启 = 用户口径「全自动」。
-// 只存一个标记在 localStorage：'0' = 关；缺失或其它 = 开（老用户升级后默认开）。
+// 逐段出图开关（2026-11-16 20:4x 用户决定）：**默认关闭**，用户可在计划卡手动打开。
+// localStorage：'1' = 开；'0' 或缺失 = 关（缺失=关，避免一提交就先把图片钱花掉）。
 const IMAGE_PER_CLIP_KEY = 'vs_image_per_clip';
 function readImagePerClip() {
-  try { return localStorage.getItem(IMAGE_PER_CLIP_KEY) !== '0'; } catch (e) { return true; }
+  try { return localStorage.getItem(IMAGE_PER_CLIP_KEY) === '1'; } catch (e) { return false; }
 }
 function writeImagePerClip(on) {
   try { localStorage.setItem(IMAGE_PER_CLIP_KEY, on ? '1' : '0'); } catch (e) { /* 隐私模式忽略 */ }

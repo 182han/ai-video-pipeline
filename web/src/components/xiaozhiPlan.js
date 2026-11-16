@@ -38,7 +38,7 @@ function imageBillingText(plan, unitCny) {
 export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution }) {
   if (!plan) return null;
   const est = plan.estimate || {};
-  const imgOn = imagePerClip !== false;
+  const imgOn = imagePerClip === true;
   const totalSec = Math.round(Number(plan.totalSec) || 0);
   const mins = Number(plan.totalMinutes);
   // 不到 1 分钟按秒显示（2026-11-16 支持「30 秒」这类短视频/快速验证）
