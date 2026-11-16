@@ -3381,7 +3381,7 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
   另含板块页左栏「小智 · 对话首页」入口样式 `.rail-home`。
 - `web/src/components/assistant.js`：新增 `page` 模式，整页复用同一套状态与接口
   （记忆恢复 / 计划卡 / 状态机轮询 / `/api/assistant/message|execute|state|memory|asr` / 语音）；
-  介绍卡 1–2 句 + 3 个 chips（10 分钟的极光 / 上一次的视频 / 现在进度怎样）；有消息后大球缩小、介绍卡收起；
+  介绍卡 1–2 句 + 3 个 chips（30 分钟的雪山、星空和极光 / 上一次的视频 / 现在进度怎样）；有消息后大球缩小、介绍卡收起；
   输入框随内容长高、Enter 发送；`navigate('/')` 改 `/create`（填入提示词回向导）。
 - `web/src/screens/shell.js`：`/` → home（渲染 AssistantPage，无全局左栏/任务条/悬浮球）；`/create` → 六步向导；
   导航「创作」→ `/create`。`gen/inventory/templates/editor` 里的 `navigate('/')` 一并改 `/create`（原意都是回向导）。
@@ -3394,7 +3394,7 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - CDP 9222 浏览器实操 **22/0**：1440×900 / 1280×800 截图；`.xz-page`、4 导航项、大球、介绍卡 + 3 chips、
   底部输入框贴底；**默认 64px → 点三个点 212px → 再点 64px → 刷新仍 64px**；`/create` 打开六步向导（有提示词/下一步）；
   **`/create`、`/library` 左栏「小智 · 对话首页」可见，点击回 `/`**；
-  发「10 分钟的极光」→ 用户消息 + 小智回复 + 计划卡出现（未点确认执行，零计费）；is-compact 生效；无 console 错误。
+  发「30 分钟的雪山、星空和极光」→ 用户消息 + 小智回复 + 计划卡出现（未点确认执行，零计费）；is-compact 生效；无 console 错误。
   截图：`.scratch/auto_chain/xiaozhi-home/`（6 张）与 `app/docs/交接/xiaozhi-screenshots/`（6 张，已入库）。
 - `node scripts/verify-xiaozhi-home.js` → **42 通过 / 0 失败**（静态 36 + 3001 只读 6；已注册 verify-all 的 fast 组）。
 - 回归：`verify-editor-nav` 15/0、`verify-p6-offline` 41/0、`verify-editor-shell` 25/0。
@@ -3404,3 +3404,14 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - 未点击计划卡「确认执行」（真实模型会产生计费；Mock 也会建任务）；语音按钮未实际录音（ASR 接口已由 P5 验收）。
 - 首页默认收起/可展开；板块页仍是 212px 固定左栏（顶部有「小智」退出入口）。如要全局统一可收起，需再改 shell.js 的 Rail。
 - 浏览器证据来自 CDP 9222（本机 Chrome），非人工手感验收；1440/1280 之外的分辨率未截图。
+
+### 用户反馈修订（2026-11-16 11:30）
+
+- **示例不再用「10 分钟全是极光」**：长视频是一次多主题混合，首页介绍卡 / 输入框 / 面板默认话术 / 首页气泡统一改为
+  「30 分钟的雪山、星空和极光」，并明确「长片可以一次说多个主题」。
+- **planCard 支持多主题**：`findThemes()` 按原文出现顺序识别并去重；`theme` 仍取第一个（作为 promptComposer 的氛围参数），
+  `themeLabel` 展示全部（如「雪山冰川、星空银河、极光」）。单主题行为不变（`verify-assistant` 95/0）。
+  **注意：这是后端改动，需重启 3001 才生效；本窗口按约束未重启，当前运行进程仍显示单个主题。**
+- **板块页「小智 · 对话首页」小球改为与首页大球同源的绿色渐变**（原为蓝色）；WebGL 不可用时的兜底球也改为绿色，
+  保持「小智 = 绿色液态球」的一致形态。
+- 验收：`verify-assistant` **95/0**、`verify-xiaozhi-home` **43/0**、CDP 9222 **22/0**（示例/配色已刷新截图）。
