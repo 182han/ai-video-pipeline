@@ -54,7 +54,7 @@ const { getAvailableModels } = require('./src/generators');
 // 注册出图厂商适配器（当前：dashscope / wan2.7-image）。
 // 必须在任何 getImageGenStatus()/generateImage 之前执行一次。
 require('./src/generators/imageProviders');
-const { getImageGenStatus, listImageProviders, ImageGenerator } = require('./src/generators/imageGen');
+const { getImageGenStatus, listImageProviders, ImageGenerator, overridesFromRuntimeConfig } = require('./src/generators/imageGen');
 const { generateBatch: generateImageBatch } = require('./src/processors/imageBatch');
 const dashscopeUpload = require('./src/generators/dashscopeUpload');
 const KlingGenerator = require('./src/generators/kling');
@@ -942,6 +942,115 @@ app.put('/api/photos/:id', (req, res) => {
   if (Object.keys(patch).length) photo = photoLibrary.update(req.params.id, patch);
   if (!photo) return res.status(404).json({ error: '图片不存在' });
   res.json({ ok: true, photo, versions: photoLibrary.versions(photo.versionGroupId) });
+});
+
+// ===== 图片手动调色（2026-11-16 用户口径）=====
+// 图片审核页每张图给「亮度 / 对比度 / 饱和度 / 色温」四条滑杆，应用后把参数烘进 PNG。
+// 语义（契约 docs/交接/2026-11-16-出图审图-接口契约.md §3.5）：
+//   · 参数是**绝对值**（-100..100），每次都从原图重渲染，不在上一次结果上叠加（避免反复掉画质）；
+//   · 保留原图：首次调色时记下 originalPath/url，之后 versions 只追加、绝不覆盖旧文件；
+//   · reset=true 回退到原图（版本历史保留，不删文件）；
+//   · 本地派生不产生费用：photo.cost / source 不改写（不是「又生成了一张新图」）。
+// 状态码：400 参数非法 / 404 图片不存在 / 409 原图文件缺失 / 502 渲染失败。
+app.post('/api/photos/:id/adjust', async (req, res) => {
+  const body = req.body || {};
+  const photo = photoLibrary.get(req.params.id);
+  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  // 延迟 require：模块缺失时只让这个接口报错，不影响整个服务的其它路由。
+  const photoAdjust = require('./src/processors/photoAdjust');
+  const prev = (photo.adjust && typeof photo.adjust === 'object') ? photo.adjust : null;
+  const originalPath = (prev && prev.originalPath) || photo.filePath;
+  const originalUrl = (prev && prev.originalUrl) || photo.url;
+  if (!originalPath || !fs.existsSync(originalPath)) {
+    return res.status(409).json({ error: '原图文件不存在，无法调色（' + (originalPath || '(空路径)') + '）' });
+  }
+  const outDir = config.STORAGE.clipsDir;
+  try {
+    if (body.reset === true) {
+      const r = await photoAdjust.revertToOriginal({
+        photo, originalPath, outDir, ffmpegPath: config.FFMPEG_PATH
+      });
+      if (!r || r.ok !== true) {
+        return res.status(502).json({ error: '回退原图失败：' + ((r && r.error) || '未知原因') });
+      }
+      const versions = Array.isArray(prev && prev.versions) ? prev.versions.slice(-20) : [];
+      const originalWidth = (prev && prev.originalWidth) || photo.width;
+      const originalHeight = (prev && prev.originalHeight) || photo.height;
+      const originalSizeBytes = (prev && prev.originalSizeBytes) || photo.sizeBytes;
+      const updated = photoLibrary.update(photo.id, {
+        filePath: r.filePath,
+        url: originalUrl || ('/clips/' + encodeURIComponent(path.basename(r.filePath))),
+        width: originalWidth,
+        height: originalHeight,
+        sizeBytes: originalSizeBytes,
+        adjust: {
+          params: null,
+          revertedAt: new Date().toISOString(),
+          originalPath,
+          originalUrl,
+          originalWidth,
+          originalHeight,
+          originalSizeBytes,
+          // current 始终指向「当前显示的文件」：回退后就是原图；version 用最后一次调色的版本号
+          // （不递增：它不是一次新的渲染，UI 据此显示「已回退到原图（曾调色 vN）」）。
+          current: {
+            filePath: r.filePath,
+            url: originalUrl || ('/clips/' + encodeURIComponent(path.basename(r.filePath))),
+            width: originalWidth,
+            height: originalHeight,
+            sizeBytes: originalSizeBytes,
+            version: (prev && prev.current && Number(prev.current.version)) || versions.length || 0,
+            reverted: true
+          },
+          versions
+        }
+      });
+      if (!updated) return res.status(404).json({ error: '图片不存在' });
+      return res.json({ ok: true, adjusted: false, reverted: true, filter: null, url: updated.url, photo: updated });
+    }
+
+    const params = photoAdjust.normalizeParams(body);   // 非法 → throw code=E_BAD_PARAM
+    const noop = !params.brightness && !params.contrast && !params.saturation && !params.temperature;
+    if (noop) {
+      return res.status(400).json({ error: '四个参数都为 0，没有可应用的调色（要恢复原图请传 reset:true）' });
+    }
+    const r = await photoAdjust.applyToPhoto({
+      photo, params, outDir, ffmpegPath: config.FFMPEG_PATH, originalPath
+    });
+    if (!r || r.ok !== true) {
+      return res.status(502).json({ error: '调色失败：' + ((r && r.error) || '未知原因') });
+    }
+    const url = r.url || ('/clips/' + encodeURIComponent(path.basename(r.filePath)));
+    const versions = (Array.isArray(prev && prev.versions) ? prev.versions.slice() : [])
+      .concat([{ version: r.version, params, filePath: r.filePath, url, appliedAt: new Date().toISOString() }])
+      .slice(-20);
+    const updated = photoLibrary.update(photo.id, {
+      filePath: r.filePath,
+      url,
+      width: r.width || photo.width,
+      height: r.height || photo.height,
+      sizeBytes: r.sizeBytes || 0,
+      adjust: {
+        params,
+        appliedAt: new Date().toISOString(),
+        originalPath,
+        originalUrl,
+        originalWidth: (prev && prev.originalWidth) || photo.width,
+        originalHeight: (prev && prev.originalHeight) || photo.height,
+        originalSizeBytes: (prev && prev.originalSizeBytes) || photo.sizeBytes,
+        current: { filePath: r.filePath, url, width: r.width, height: r.height, sizeBytes: r.sizeBytes, version: r.version },
+        versions
+      }
+    });
+    if (!updated) return res.status(404).json({ error: '图片不存在' });
+    return res.json({ ok: true, adjusted: true, reverted: false, filter: r.filter || null, url, photo: updated });
+  } catch (e) {
+    const code = e && e.code;
+    if (code === 'E_BAD_PARAM') return res.status(400).json({ error: e.message });
+    if (code === 'E_MISSING_FILE') return res.status(409).json({ error: e.message });
+    console.error('[photo-adjust] 调色失败:', e && e.message ? e.message : e);
+    return res.status(502).json({ error: '调色失败：' + (e && e.message ? e.message : String(e)) });
+  }
 });
 
 app.delete('/api/photos/:id', (req, res) => {
@@ -2022,6 +2131,22 @@ app.get('/api/assistant/info', (req, res) => {
     },
     asr: assistantAsr.status(),
     memory: { maxMessages: assistantMemory.MAX_MESSAGES },
+    // 出图（图生视频首帧）就绪度与单价（2026-11-16）：
+    // 计划卡的「逐段出图」开关要用真实单价显示预估费用，**不许前端硬编码 ¥0.20**
+    // （换模型/换价目表时会谎报）。这里只报服务端 .env 口径；浏览器 Key 由前端自己判断。
+    image: (() => {
+      const st = getImageGenStatus({});
+      const unit = pricing.computeImageCost({ model: st.imageGen.model || '' });
+      return {
+        usable: st.usable,
+        provider: st.imageGen.provider,
+        model: st.imageGen.model,
+        size: st.imageGen.size,
+        unitCny: unit.computed ? unit.unitPrice : null,
+        unitLabel: unit.computed ? unit.label : '未配置图片单价',
+        hasServerKey: st.imageGen.hasApiKey
+      };
+    })(),
     endpoints: [
       '/api/assistant/info', '/api/assistant/message', '/api/assistant/execute',
       '/api/assistant/state', '/api/assistant/memory', '/api/assistant/understand',
@@ -2050,6 +2175,34 @@ app.post('/api/assistant/message', (req, res) => {
 // runtimeConfig 只透传白名单字段（Key 不落任务文件，与 /api/tasks 同口径）。
 app.post('/api/assistant/execute', (req, res) => {
   const body = req.body || {};
+  // 逐段出图就绪度前置校验（2026-11-16 用户口径：场景卡 → 逐段出图 → 图生视频）。
+  // 出图是真实计费调用；配置不全时**先拒绝**，而不是先建任务、跑到出图那一步再失败
+  // （建了任务还得让用户去删，且会误导成「生成失败」）。
+  // 只要 imagePerClip 不是 true，这段完全不生效 —— 纯文生视频链路行为零变化。
+  if (body.imagePerClip === true) {
+    const overrides = (typeof overridesFromRuntimeConfig === 'function')
+      ? overridesFromRuntimeConfig({
+        imageApiKey: body.imageApiKey,
+        imageBaseUrl: body.imageBaseUrl,
+        imageProvider: body.imageProvider,
+        imageModel: body.imageModel,
+        imageSize: body.imageSize
+      })
+      : {};
+    const st = getImageGenStatus(overrides);
+    if (!st.usable) {
+      const why = st.missing.length
+        ? '缺少 ' + st.missing.join(', ')
+        : `所选出图厂商「${st.imageGen.provider || '(空)'}」未注册适配器`;
+      return res.json({
+        ok: false,
+        code: 'IMAGE_GEN_NOT_READY',
+        error: '出图未就绪：' + why
+          + '。请在「设置 → 图片生成」填 Key/地址/模型，或写 app/.env 的 IMAGE_GEN_API_KEY 后重启服务；'
+          + '也可以关掉「逐段出图」改用纯文生视频。'
+      });
+    }
+  }
   try {
     const out = assistantSupervisor.execute({
       sessionId: body.sessionId ? String(body.sessionId) : '',
@@ -2068,7 +2221,15 @@ app.post('/api/assistant/execute', (req, res) => {
           llmModel: body.llmModel || '',
           multimodalApiKey: body.multimodalApiKey || '',
           multimodalBaseUrl: body.multimodalBaseUrl || '',
-          multimodalModel: body.multimodalModel || ''
+          multimodalModel: body.multimodalModel || '',
+          // 出图（图生视频首帧）：只在内存态；落盘时由 src/utils/redact 清空 *_key 字段。
+          // pipeline._mergeRuntimeConfig 的白名单与此处保持同一套键（补跑/重生成会带上）。
+          imageApiKey: body.imageApiKey || '',
+          imageBaseUrl: body.imageBaseUrl || '',
+          imageProvider: body.imageProvider || '',
+          imageModel: body.imageModel || '',
+          imageSize: body.imageSize || '',
+          imagePerClip: body.imagePerClip === true
         },
         bgm: (body.bgm && typeof body.bgm === 'object') ? body.bgm : undefined,
         transition: (body.transition && typeof body.transition === 'object') ? body.transition : undefined
@@ -2259,12 +2420,10 @@ app.post('/api/tasks', (req, res) => {
     if (sourcePhoto.status !== 'approved') {
       return res.status(400).json({ error: '图生视频的源图片还没通过审核（请到「照片」页点通过）' });
     }
-    if (sourcePhoto.scienceStatus !== 'passed') {
-      return res.status(400).json({ error: '图生视频的源图片未通过科学/物理审查，不能生成视频' });
-    }
-    if (sourcePhoto.isFinal !== true) {
-      return res.status(400).json({ error: '图生视频只能使用最终确认图；请先设为最终版' });
-    }
+    // 2026-11-16 用户口径（明确指令）：**人工点「通过」即可用于图生视频**，
+    // 科学/物理审查与「最终版」不再是硬闸门（原实现要求 scienceStatus=passed + isFinal=true，
+    // 而新出图两者都不满足、且设为最终版又要求 scienceStatus=passed → 结构性死锁，永远无法生成）。
+    // 审查与版本选择仍在 UI 保留，作为建议/管理用途，不再 400 拦截。
     if (!getI2VInfo(modelId)) {
       return res.status(400).json({
         error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
@@ -2302,12 +2461,7 @@ app.post('/api/tasks', (req, res) => {
       if (p.status !== 'approved') {
         return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过审核（批量链路请用 status=approved 的图）` });
       }
-      if (p.scienceStatus !== 'passed') {
-        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过科学/物理审查，不能生成视频` });
-      }
-      if (p.isFinal !== true) {
-        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片不是最终确认图，不能生成视频` });
-      }
+      // 2026-11-16 用户口径：批量出图的「已通过」即放行（不再要求科学审查/最终版，原因同上方注释）。
       photoIdList.push(p.id);
     }
   }
