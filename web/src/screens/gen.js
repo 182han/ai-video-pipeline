@@ -56,7 +56,7 @@ export function GenView({ tasks }) {
         <div className="text-center">
           <p className="font-display text-[20px] text-ink3">当前没有进行中的任务</p>
           <button
-            onClick=${() => navigate('/create')}
+            onClick=${() => navigate('/create-smart')}
             className="mt-3 h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px]"
           >去创作</button>
         </div>

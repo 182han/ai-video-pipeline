@@ -19,10 +19,10 @@ const { useEffect, useState } = React;
 
 const RAIL_KEY = 'vs_rail_collapsed';
 
-// 4 项：创作（/create 六步向导）/ 剪辑 / 库 / 设置（底部）
-// 首页 = 小智，不占导航项；用户草图里的「库存」沿用现有文案「库」。
+// 4 项：创作（2026-11-16 起默认 /create-smart 智能向导）/ 剪辑 / 库 / 设置（底部）
+// 首页 = 小智，不占导航项；用户草图里的「库存」沿用现有文案「库」。旧六步向导仍在 /create 可回退。
 const NAV = [
-  { route: '/create', label: '创作', icon: '◆', title: '六步创作向导' },
+  { route: '/create-smart', label: '创作', icon: '◆', title: '智能创作向导（场景卡 → 出图 → 视频）' },
   { route: '/edit', label: '剪辑', icon: '✂', title: '剪辑台' },
   { route: '/library', label: '库', icon: '▤', title: '成片 / 片段 / 图片' }
 ];

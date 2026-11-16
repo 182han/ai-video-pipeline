@@ -41,14 +41,16 @@ const { useEffect } = React;
 // 历史记录与产出已于 P6 下线（不再有视图/路由项）；失败任务改由「库 · 成片」的未完成卡片承接。
 // 配乐入口并入剪辑台。
 const NAV = [
-  { key: 'create', route: '/create', label: '创作', icon: '◆' },
+  // 2026-11-16 用户验收后切换：默认创作入口 = 智能向导 /create-smart；
+  // 旧六步向导保留在 /create（新向导页内有「用旧版六步向导」入口可回退）。
+  { key: 'create', route: '/create-smart', label: '创作', icon: '◆' },
   { key: 'edit', route: '/edit', label: '剪辑', icon: '✂' },
   { section: '素材' },
   { key: 'library', route: '/library', label: '库', icon: '▤' }
 ];
 
 function viewOf(route) {
-  // 2026-11-16：登录后的 `/` = 整页「小智」对话页；六步向导保留在 /create。
+  // 2026-11-16：登录后的 `/` = 整页「小智」对话页；默认创作 = /create-smart（旧六步向导 /create 仍可按 URL 打开）。
   if (route === '/' || route === '') return 'home';
   if (route.startsWith('/create-smart')) return 'createSmart';
   if (route.startsWith('/create')) return 'create';
@@ -64,7 +66,7 @@ function viewOf(route) {
   if (route.startsWith('/templates')) return 'templates';
   if (route.startsWith('/gen')) return 'gen';
   if (route.startsWith('/settings')) return 'settings';
-  return 'create';
+  return 'createSmart';
 }
 
 function RailItem({ item, active }) {
@@ -88,7 +90,7 @@ function RailItem({ item, active }) {
 
 function Rail({ view }) {
   const routeOf = {
-    create: '/create', edit: '/edit', library: '/library', music: '/music'
+    create: '/create-smart', createSmart: '/create-smart', edit: '/edit', library: '/library', music: '/music'
   };
   // 2026-11-16 用户问「进入板块后怎么退出」：左栏顶部固定「小智 · 对话首页」入口，点击回 /。
   return html`
