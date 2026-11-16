@@ -124,9 +124,9 @@ export function GenView({ tasks }) {
         </span>
         <span className="flex-1"></span>
         <button
-          onClick=${() => navigate('/history')}
+          onClick=${() => navigate('/library')}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
-        >去历史记录</button>
+        >去库看成片</button>
       </div>
 
       ${task.outputPath && html`

@@ -56,6 +56,9 @@ const QC_OPTS = [
 
 const ALL_STAGE_KEYS = STAGE_OPTS.map((s) => s.key);
 const ALL_QC_KEYS = QC_OPTS.map((q) => q.key);
+// 默认「要紧项」只留硬闸门：黑帧 / 时长 / NSFW（NSFW 永远要紧）。
+// 模糊、重复帧、内容匹配对 AI 风光片容易误判，默认只警告、不触发重生成。
+const HARD_QC_KEYS = ['blackFrame', 'duration', 'nsfw'];
 
 // 从 localStorage.vs_config 取运行时配置（与旧版同键，共用一份 Key）
 function collectRuntime(model) {
@@ -70,7 +73,12 @@ function collectRuntime(model) {
     return { ...base, apiKey: cfg.seedanceKey || '', apiBaseUrl: cfg.seedanceBaseUrl || '', modelId: cfg.seedanceModel || '' };
   }
   if (model === 'dashscope') {
-    return { ...base, apiKey: cfg.dashScopeKey || '', modelId: 'wan3.0-video' };
+    // 官方 API 根地址 = https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1
+    // 设置页只存了 WorkspaceId/区域，早前这里没拼 apiBaseUrl，导致 dashscope 永远「Base URL 未配置」。
+    const dsBase = (cfg.dashScopeWorkspaceId && cfg.dashScopeRegion)
+      ? `https://${cfg.dashScopeWorkspaceId}.${cfg.dashScopeRegion}.maas.aliyuncs.com/api/v1`
+      : (cfg.dashScopeBaseUrl || '');
+    return { ...base, apiKey: cfg.dashScopeKey || '', apiBaseUrl: dsBase, modelId: 'wan3.0-video' };
   }
   if (model === 'kling') {
     return { ...base, klingAccessKey: cfg.klingAk || '', klingSecretKey: cfg.klingSk || '' };
@@ -184,7 +192,7 @@ export function CreateWizard({ onChanged }) {
   const [customStages, setCustomStages] = useState(() => (restored && Array.isArray(restored.customStages)
     ? restored.customStages : ALL_STAGE_KEYS.slice()));
   const [strictQc, setStrictQc] = useState(() => (restored && Array.isArray(restored.strictQc)
-    ? restored.strictQc : ALL_QC_KEYS.slice()));
+    ? restored.strictQc : HARD_QC_KEYS.slice()));
   // 图生视频（2026-11-11 用户口径）：第③步通过的图默认拿去生成视频
   const [useImage, setUseImage] = useState(() => (restored && typeof restored.useImage === 'boolean'
     ? restored.useImage : true));
@@ -312,7 +320,7 @@ export function CreateWizard({ onChanged }) {
     setVprompt('');
     setP(defaultParams(web));
     setCustomStages(ALL_STAGE_KEYS.slice());
-    setStrictQc(ALL_QC_KEYS.slice());
+    setStrictQc(HARD_QC_KEYS.slice());
     setImgErrLocal('');
     setOptErr('');
     setErr('');
@@ -419,6 +427,8 @@ export function CreateWizard({ onChanged }) {
         // 自定义档才发送 stages；其它档位沿用预设（后端 resolveStages 负责补依赖/强制核心）
         ...(p.preset === 'custom' ? { stages: customStages.filter((k) => ALL_STAGE_KEYS.includes(k)) } : {}),
         strictQcItems: strictQc.filter((k) => ALL_QC_KEYS.includes(k)),
+        // 用户口径（2026-11-12）：不许质检逼模型自动重生成；失败只报清单，由用户决定。
+        autoRetry: false,
         clipCount: effectiveClips,
         totalClips: effectiveClips,
         clipDuration: p.clipDuration,
@@ -438,12 +448,24 @@ export function CreateWizard({ onChanged }) {
         },
         ...rt
       };
-      const r = await fetch('/api/tasks', {
+      let r = await fetch('/api/tasks', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const j = await r.json().catch(() => ({}));
+      let j = await r.json().catch(() => ({}));
+      // 重复提交拦截（服务端 409）：给一次显式确认，确认后带 force 再发一次。
+      // 默认不自动重发——账单事故就是「点一次落多个任务」，这里必须由人确认。
+      if (!r.ok && j.code === 'DUPLICATE_TASK'
+        && window.confirm(j.error + '\n\n确认要再创建一次吗？（会真实计费）')) {
+        body.force = true;
+        r = await fetch('/api/tasks', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        j = await r.json().catch(() => ({}));
+      }
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       if (onChanged) onChanged();
       // 提交成功后草稿回到第①步：回「创作」不会停在第⑥步被误当新任务再提交一次
@@ -853,9 +875,11 @@ export function CreateWizard({ onChanged }) {
                 ${est
                   ? (est.estimate > 0 ? '约 ¥' + Number(est.estimate).toFixed(2) : '免费（mock，不产生费用）')
                   : '计算中…'}
+                ${est && est.usd > 0 ? '（$' + Number(est.usd).toFixed(2) + '）' : ''}
                 ${Number.isFinite(readBalance()) && readBalance() > 0
                   ? '｜余额 ¥' + readBalance().toFixed(2)
                   : ''}
+                ${est && est.budget ? '｜服务端余额 $' + Number(est.budget.balanceUsd).toFixed(2) : ''}
               </dd>
               <dt className="text-ink3">配乐</dt>
               <dd className="text-ink">
@@ -874,6 +898,11 @@ export function CreateWizard({ onChanged }) {
             ${Number.isFinite(readBalance()) && readBalance() > 0 && est && est.estimate > readBalance() && html`
               <p className="mt-2 text-[12px] text-danger">
                 预计花费 ¥${Number(est.estimate).toFixed(2)} 超过余额 ¥${readBalance().toFixed(2)}，提交会被拦截。
+              </p>
+            `}
+            ${est && est.budget && est.budget.affordable === false && html`
+              <p className="mt-2 text-[12px] text-danger">
+                服务端预算不足：本次约 $${Number(est.usd).toFixed(2)}，剩余 $${Number(est.budget.balanceUsd).toFixed(2)}，提交会被拦截。
               </p>
             `}
             ${err && html`<p className="mt-2 text-[12px] text-danger">${err}</p>`}

@@ -315,6 +315,40 @@ a.ed-btn.ed-link {
 .ed-card-meta { display: block; padding: 2px 6px 5px; font-size: 9.5px; color: var(--ink3, #7B8781); }
 .ed-card[draggable="true"] { user-select: none; }
 
+/* ---------- 素材来源切换（P3：片段 / 成片 / 图片） ---------- */
+.ed-sources { display: flex; gap: 4px; }
+.ed-source {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  height: 26px; padding: 0 4px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(244, 247, 245, .10);
+  background: var(--s2, #121815); color: var(--ink2, #A7B3AD);
+  font: inherit; font-size: 11px;
+}
+.ed-source:hover { border-color: rgba(214, 179, 106, .45); }
+.ed-source.on {
+  background: rgba(214, 179, 106, .13); border-color: rgba(214, 179, 106, .55);
+  color: var(--accent, #D6B36A);
+}
+.ed-source-count {
+  min-width: 16px; padding: 0 3px; border-radius: 8px;
+  background: rgba(244, 247, 245, .10); color: inherit;
+  font-size: 9px; line-height: 14px; text-align: center;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.ed-note {
+  margin: 0; padding: 5px 7px; border-radius: 6px;
+  background: rgba(214, 179, 106, .08); border: 1px dashed rgba(214, 179, 106, .30);
+  color: var(--ink3, #7B8781); font-size: 10px; line-height: 1.4;
+}
+.ed-card-final { border-color: rgba(214, 179, 106, .28); }
+.ed-card-badge {
+  position: absolute; left: 4px; top: 3px; padding: 0 4px; border-radius: 3px;
+  background: rgba(214, 179, 106, .88); color: #11170F; font-size: 9px; line-height: 13px;
+}
+.ed-card-badge.ghost { background: rgba(0, 0, 0, .55); color: var(--ink2, #A7B3AD); }
+.ed-card-photo { cursor: default; opacity: .82; }
+.ed-card-photo:hover { border-color: rgba(244, 247, 245, .10); }
+
 /* ---------- 时间线片段（F03/F04） ---------- */
 .ed-clip { display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; }
 .ed-clip.sel { border-color: var(--accent, #D6B36A); box-shadow: 0 0 0 1px rgba(214, 179, 106, .45); }

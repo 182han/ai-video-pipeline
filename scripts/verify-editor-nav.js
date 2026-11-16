@@ -1,7 +1,9 @@
 // ============================================================
-// F11 导航重组验收
+// F11 导航重组验收（2026-11-15 P2 更新：库存→库、记录隐藏；2026-11-16 P6：历史/产出已下线）
 // ------------------------------------------------------------
-// 1) 静态：去掉「配乐编辑器」入口；/bgm 旧链接落到剪辑台；四段式导航
+// 1) 静态：去掉「配乐编辑器」入口；/bgm 旧链接落到剪辑台；
+//          P2 起导航 = 创作 / 剪辑 / 库（+ 底部设置）；P6 起历史/产出入口与路由已下线
+//          （/history、/output 深链落「库 · 成片」，由 verify-p6-offline.js 覆盖）
 // 2) 运行时：/app/bgm 返回 SPA；browser 取到的 shell.js 已是新路由
 //
 // 用法：node scripts/verify-editor-nav.js
@@ -53,9 +55,13 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/route\.startsWith\('\/bgm'\)\) return 'edit'/.test(shell), '/bgm 落到剪辑台');
   check(!/BgmEditorView/.test(shell), '不再加载独立配乐编辑器');
   check(!/bgm: '\/bgm'/.test(shell), 'routeOf 移除 bgm');
-  check(/section: '库存'/.test(shell) && /section: '记录'/.test(shell), '库存/记录两段');
+  check(/section: '素材'/.test(shell) && !/section: '记录'/.test(shell), '导航只剩「素材 · 库」一段（历史/产出已下线）');
+  check(/key: 'library', route: '\/library'/.test(shell), '库入口指向 /library');
+  // 旧深链：/clips 与 /photos 仍应落到库页（P2 合并后不再单列导航）
+  check(/route\.startsWith\('\/clips'\)\) return 'library'/.test(shell), '/clips 旧深链落到库');
+  check(/route\.startsWith\('\/photos'\)\) return 'library'/.test(shell), '/photos 旧深链落到库');
   const navItems = (shell.match(/\{ key: '/g) || []).length;
-  check(navItems === 7, '导航项数量（创作/剪辑 + 库存3 + 记录2）', String(navItems));
+  check(navItems === 3, '导航项数量（创作 / 剪辑 / 库；设置固定底部单独渲染）', String(navItems));
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh_nav_'));
   let child = null;

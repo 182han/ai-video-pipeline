@@ -7,7 +7,11 @@
 //   - 输出到 output/<projectId>_edit_<stamp>.mp4，原片不动
 //   - 异步 job：POST 立即返回 exportId，前端轮询状态
 //
-// 限制（M1）：转场关闭暂不支持（F09 再做）；BGM 混音 F07 接入。
+// 转场关闭：2026-11-10 起支持（走 transitionMixer 的 concat 直拼分支：
+//   逐段裁剪/调节照常烘焙，时长 = Σ有效时长；不再抛「暂不支持」）。
+// BGM 混音 F07 接入。
+// 2026-11-15 P3：导出成功后调用 library.ingestFinal（origin=editor），
+//   成片直接出现在「库 · 成片」；job 返回 libraryEntryId。
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -48,6 +52,8 @@ function jobView(job) {
     outputPath: job.outputPath,
     outputUrl: job.outputPath ? '/output/' + encodeURIComponent(path.basename(job.outputPath)) : null,
     taskId: job.taskId || null,
+    // P3：导出成功后归入「库 · 成片」的条目 id（origin=editor）；失败/未归库时为 null
+    libraryEntryId: job.libraryEntryId || null,
     durationSec: job.durationSec || null,
     encoder: job.encoder || null,
     audio: job.audio || null,
@@ -130,9 +136,8 @@ async function runJob(job, project) {
   try {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     const clips = resolveSegments(project);
-    if (project.transition && project.transition.enabled === false) {
-      throw new Error('转场关闭暂不支持（F09 接入后再导出）');
-    }
+    // 关闭转场：交给 transitionMixer 的 concat 直拼分支（F09 已接入）。
+    // 时长 = Σ有效时长（不叠化、不缩短），逐段调节/裁剪照常生效。
     const name = `${project.id}_edit_${Date.now().toString(36)}.mp4`;
     const outputPath = path.join(OUTPUT_DIR, name);
     silentPath = outputPath.replace(/\.mp4$/i, '.silent.mp4');
@@ -204,8 +209,21 @@ async function runJob(job, project) {
         resolution: res.target && res.target.label ? String(res.target.label).toUpperCase() : undefined
       });
       job.taskId = editorTask.taskId;
+
+      // P3：剪辑导出的成片必须出现在「库 · 成片」（origin=editor），
+      // 否则导出后只能靠回填脚本才看得到（旧行为）。
+      // 费用口径：导出本身是本地 ffmpeg，不产生生成费用；源片段费用已记在各片段条目上。
+      editorTask.cost = {
+        amount: 0,
+        currency: 'CNY',
+        basis: 'final',
+        computed: true,
+        label: '剪辑导出（无生成费用）'
+      };
+      const entry = library.ingestFinal(editorTask, outputPath);
+      if (entry) job.libraryEntryId = entry.id;
     } catch (e) {
-      console.warn('[editor] 登记导出任务失败: ' + (e && e.message));
+      console.warn('[editor] 登记导出任务/成片入库失败: ' + (e && e.message));
     }
 
     projectStore.appendExport(project.id, {
@@ -246,6 +264,7 @@ function startExport(projectId) {
     durationSec: null,
     encoder: null,
     taskId: null,
+    libraryEntryId: null,
     error: null,
     cancelled: false,
     controller: new AbortController()

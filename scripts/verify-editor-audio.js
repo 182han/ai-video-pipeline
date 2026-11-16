@@ -65,6 +65,20 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/\.ed-wave/.test(css) && /\.ed-audio-clip/.test(css), '音频 CSS');
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh_audio_'));
+  // P3 起导出会写「库 · 成片」：临时服务用独立 LIBRARY_DIR，真实库只读复制条目 JSON。
+  const tmpLib = path.join(tmp, 'library');
+  fs.mkdirSync(tmpLib, { recursive: true });
+  const realLib = path.join(ROOT, 'data', 'library');
+  if (fs.existsSync(realLib)) {
+    for (const n of fs.readdirSync(realLib)) {
+      if (!n.endsWith('.json')) continue;
+      try {
+        const e = JSON.parse(fs.readFileSync(path.join(realLib, n), 'utf8'));
+        if (!e || !e.filePath || !fs.existsSync(e.filePath)) continue;
+        fs.copyFileSync(path.join(realLib, n), path.join(tmpLib, n));
+      } catch (err) { /* 坏 JSON / 缺文件跳过 */ }
+    }
+  }
   let child = null;
   let base = null;
   try {
@@ -82,7 +96,8 @@ async function waitReady(base, timeoutMs = 25000) {
           DATA_DIR: path.join(tmp, 'tasks'),
           OUTPUT_DIR: path.join(tmp, 'output'),
           PROJECTS_DIR: path.join(tmp, 'projects'),
-          THUMBS_DIR: path.join(tmp, 'thumbs')
+          THUMBS_DIR: path.join(tmp, 'thumbs'),
+          LIBRARY_DIR: tmpLib
         },
         stdio: 'ignore',
         windowsHide: true

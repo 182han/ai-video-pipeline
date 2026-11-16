@@ -1,16 +1,18 @@
 // ============================================================
-// 应用外壳：左侧导航 + 右侧视图（2026-10-31 重构）
+// 应用外壳：左侧导航 + 右侧视图（2026-10-31 重构；2026-11-15 P2 库 IA；2026-11-16 P6 下线记录/产出）
 // ------------------------------------------------------------
 // 路由（/app 前缀，见 router.js）：
 //   /            创作（六步向导）
 //   /edit        剪辑台（调节滑杆；2026-11-02 落地）
-//   /clips       库存 · 视频片段
-//   /photos      库存 · 照片
-//   /music       库存 · 配乐
+//   /library     库（2026-11-15 P2：成片 / 片段 / 图片 三 tab + 回收站；
+//                2026-11-16 P6：成片 tab 增加「未完成」失败任务卡片，见 inventory.js UnfinishedPanel）
+//   /clips       旧深链 → 库 · 片段 tab（保留兼容，导航不再单列）
+//   /photos      旧深链 → 库 · 图片 tab（保留兼容，导航不再单列）
+//   /music       配乐（入口已移除，面板并入剪辑台；深链保留）
 //   /bgm         已并入剪辑台：落到 /edit 新建/续用工程（2026-11-04 F11）
 //   /bgm/:id     同上（旧深链兼容，不再有独立配乐编辑器入口）
-//   /history     记录 · 历史 + 垃圾箱
-//   /output      记录 · 产出
+//   /history     已下线（P6）：旧深链 / 书签一律落到「库 · 成片」，不再有历史页视图
+//   /output      已下线（P6）：同上（产出并入「库 · 成片」）
 //   /templates   模板库（入口在向导第 1 步的小提示里）
 //   /gen         生成中
 //   /settings    设置
@@ -21,37 +23,35 @@ import { Assistant } from '../components/assistant.js';
 import { Boundary } from '../components/boundary.js';
 import { CreateWizard } from './create.js';
 import { GenView } from './gen.js';
-import { ClipsView, PhotosView, MusicView } from './inventory.js';
-import { HistoryView } from './history.js';
+import { LibraryView, MusicView } from './inventory.js';
 import { TemplatesView } from './templates.js';
 import { SettingsView } from './settingsPage.js';
-import { OutputScreen } from './output.js';
 import { EditorView } from './editor.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect } = React;
 
+// 气泡导航 4 项：创作 / 剪辑 / 库 / 设置（设置固定在底部）。
+// 历史记录与产出已于 P6 下线（不再有视图/路由项）；失败任务改由「库 · 成片」的未完成卡片承接。
+// 配乐入口并入剪辑台。
 const NAV = [
   { key: 'create', route: '/', label: '创作', icon: '◆' },
   { key: 'edit', route: '/edit', label: '剪辑', icon: '✂' },
-  { section: '库存' },
-  { key: 'clips', route: '/clips', label: '视频片段', icon: '▤', sub: true },
-  { key: 'photos', route: '/photos', label: '照片', icon: '◫', sub: true },
-  { key: 'music', route: '/music', label: '配乐', icon: '♪', sub: true },
-  { section: '记录' },
-  { key: 'history', route: '/history', label: '历史记录', icon: '≣' },
-  { key: 'output', route: '/output', label: '产出', icon: '▶' }
+  { section: '素材' },
+  { key: 'library', route: '/library', label: '库', icon: '▤' }
 ];
 
 function viewOf(route) {
   if (route.startsWith('/edit')) return 'edit';
-  if (route.startsWith('/clips')) return 'clips';
-  if (route.startsWith('/photos')) return 'photos';
+  if (route.startsWith('/clips')) return 'library';
+  if (route.startsWith('/photos')) return 'library';
+  if (route.startsWith('/library')) return 'library';
   if (route.startsWith('/music')) return 'music';
   if (route.startsWith('/bgm')) return 'edit'; // F11：旧配乐入口落剪辑台
-  if (route.startsWith('/history')) return 'history';
-  if (route.startsWith('/output')) return 'output';
+  // P6：历史 / 产出已下线，旧深链与书签落「库 · 成片」（失败任务在成片 tab 的未完成卡片里可见）
+  if (route.startsWith('/history')) return 'library';
+  if (route.startsWith('/output')) return 'library';
   if (route.startsWith('/templates')) return 'templates';
   if (route.startsWith('/gen')) return 'gen';
   if (route.startsWith('/settings')) return 'settings';
@@ -79,8 +79,7 @@ function RailItem({ item, active }) {
 
 function Rail({ view }) {
   const routeOf = {
-    create: '/', edit: '/edit', clips: '/clips', photos: '/photos',
-    music: '/music', history: '/history', output: '/output'
+    create: '/', edit: '/edit', library: '/library', music: '/music'
   };
   return html`
     <aside className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
@@ -122,11 +121,11 @@ export function AppShell({ route }) {
         <div className="flex-1 min-h-0 overflow-auto">
           ${view === 'create' && html`<${Boundary}><${CreateWizard} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
           ${view === 'gen' && html`<${Boundary}><${GenView} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
-          ${view === 'clips' && html`<${Boundary}><${ClipsView} /></${Boundary}>`}
-          ${view === 'photos' && html`<${Boundary}><${PhotosView} /></${Boundary}>`}
+          ${view === 'library' && html`<${Boundary}><${LibraryView}
+            tasks=${tasks}
+            initialTab=${route.startsWith('/photos') ? 'photos' : (route.startsWith('/clips') ? 'clips' : 'finals')}
+          /></${Boundary}>`}
           ${view === 'music' && html`<${Boundary}><${MusicView} /></${Boundary}>`}
-          ${view === 'history' && html`<${Boundary}><${HistoryView} tasks=${tasks} onChanged=${refreshTasks} /></${Boundary}>`}
-          ${view === 'output' && html`<${Boundary}><${OutputScreen} /></${Boundary}>`}
           ${view === 'templates' && html`<${Boundary}><${TemplatesView} /></${Boundary}>`}
           ${view === 'settings' && html`<${Boundary}><${SettingsView} /></${Boundary}>`}
         </div>

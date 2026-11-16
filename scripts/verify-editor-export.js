@@ -59,12 +59,29 @@ function probeDuration(file) {
   check(/startExport/.test(exporter) && /getJob/.test(exporter), '导出器含 start/getJob');
   check(/ignoreAudio:\s*true/.test(exporter), '导出忽略源音轨');
   check(/appendExport/.test(exporter), '导出写入 project.exports');
+  check(!/转场关闭暂不支持/.test(exporter), '导出器不再拒绝关闭转场');
   check(/\/api\/projects\/:id\/export/.test(server), '服务端导出路由');
   check(/onExport/.test(editor) && /pollExport/.test(editor), '前端导出与轮询');
   check(/outputUrl/.test(editor), '前端显示成片地址');
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh_exp_'));
   const outDir = path.join(tmp, 'output');
+  // P3 起导出成功会写「库 · 成片」（origin=editor）。
+  // 临时服务必须用独立 LIBRARY_DIR，否则套件每次运行都会往用户真实库写条目。
+  // 这里只读复制真实库的条目 JSON（filePath 仍指向真实素材，只读不改）。
+  const tmpLib = path.join(tmp, 'library');
+  fs.mkdirSync(tmpLib, { recursive: true });
+  const realLib = path.join(ROOT, 'data', 'library');
+  if (fs.existsSync(realLib)) {
+    for (const n of fs.readdirSync(realLib)) {
+      if (!n.endsWith('.json')) continue;
+      try {
+        const e = JSON.parse(fs.readFileSync(path.join(realLib, n), 'utf8'));
+        if (!e || !e.filePath || !fs.existsSync(e.filePath)) continue;
+        fs.copyFileSync(path.join(realLib, n), path.join(tmpLib, n));
+      } catch (err) { /* 坏 JSON / 缺文件跳过 */ }
+    }
+  }
   let child = null;
   let base = null;
   try {
@@ -81,7 +98,8 @@ function probeDuration(file) {
           DATABASE_TYPE: 'json',
           DATA_DIR: path.join(tmp, 'tasks'),
           OUTPUT_DIR: outDir,
-          PROJECTS_DIR: path.join(tmp, 'projects')
+          PROJECTS_DIR: path.join(tmp, 'projects'),
+          LIBRARY_DIR: tmpLib
         },
         stdio: 'ignore',
         windowsHide: true
@@ -178,6 +196,53 @@ function probeDuration(file) {
     check(Array.isArray(fresh.project.exports) && fresh.project.exports.length === 1, '工程记录导出');
     check(fresh.project.exports[0].exportId === expId, '导出记录 id 一致');
     check(fresh.project.exports[0].taskId === job.taskId, '导出记录关联任务');
+
+    // ---- 关闭转场导出（2026-11-10 缺陷回归）----
+    // 根因曾是 editorExporter 直接抛「转场关闭暂不支持」；必须走真实导出链路验证。
+    const offSpecs = chosen.slice(0, 3).map((it, i) => {
+      const d = Number(it.durationSec) || 5;
+      return { id: 'o' + (i + 1), assetId: it.id, inSec: 0, outSec: Math.min(3, Math.round(d * 1000) / 1000) };
+    });
+    const offSum = offSpecs.reduce((s, x) => s + (x.outSec - x.inSec), 0);
+    const offSrc = offSpecs.map((s) => {
+      const it = chosen.find((c) => c.id === s.assetId);
+      return { file: it.filePath, stat: fs.statSync(it.filePath) };
+    });
+    r = await fetch(base + '/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '关闭转场导出', transition: { enabled: false }, segments: offSpecs })
+    });
+    const offProject = (await r.json()).project;
+    check(r.status === 200 && offProject.transition && offProject.transition.enabled === false,
+      '工程保存 transition.enabled=false');
+
+    r = await fetch(base + `/api/projects/${offProject.id}/export`, { method: 'POST' });
+    const offStarted = await r.json();
+    check(r.status === 200 && offStarted.export && offStarted.export.id, '关闭转场导出启动');
+    let offJob = null;
+    const t1 = Date.now();
+    while (Date.now() - t1 < 120000) {
+      const jr = await fetch(base + `/api/projects/${offProject.id}/export/${offStarted.export.id}`);
+      offJob = (await jr.json()).export;
+      if (!offJob || ['done', 'failed', 'cancelled'].includes(offJob.status)) break;
+      await sleep(800);
+    }
+    check(!!offJob && offJob.status === 'done', '关闭转场导出完成（修复前此处必失败）',
+      offJob ? offJob.status + (offJob.error ? ' ' + offJob.error : '') : '无 job');
+    if (offJob && offJob.status === 'done') {
+      const offFile = path.join(outDir, path.basename(offJob.outputPath));
+      check(fs.existsSync(offFile), '关闭转场产物存在', path.basename(offFile));
+      const offActual = Number(offJob.durationSec) || probeDuration(offFile);
+      check(Math.abs(offActual - offSum) <= 0.3, '关闭转场时长 = Σ（不叠减、不缩短）',
+        `实测 ${Number(offActual).toFixed(2)}s，期望 ${offSum.toFixed(2)}s（叠减口径会少 ${((offSpecs.length - 1) * 0.4).toFixed(1)}s）`);
+      let offUntouched = true;
+      for (const s of offSrc) {
+        const now = fs.statSync(s.file);
+        if (now.mtimeMs !== s.stat.mtimeMs || now.size !== s.stat.size) offUntouched = false;
+      }
+      check(offUntouched, '关闭转场导出后原素材 mtime/size 未变', offSrc.length + ' 个源文件');
+    }
 
     return finish(tmp);
   } catch (e) {

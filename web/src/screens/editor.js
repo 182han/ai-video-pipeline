@@ -5,6 +5,11 @@
 // 布局：顶栏 / 左素材·音频 / 中预览 / 右调节 / 下时间线。
 // 工程：读 ?project=<id> → 上次工程 → 自动新建；改名自动保存（revision 乐观锁）。
 //
+// 2026-11-15 P3：素材栏三来源（片段 / 成片 / 图片）。
+//   · 成片来自 /api/library 的 kind=final 条目，点击默认**整段载入**时间线，可拖手柄裁入/出点；
+//   · 图片首版后置（产品已定）：只展示，不入时间线；
+//   · 导出成功由后端 editorExporter 归入「库 · 成片」（origin=editor）。
+//
 // 仍是零构建：React 18 UMD + htm，无 JSX、无 npm。样式见 styles/editor.css。
 // 后续：F03 素材面板、F04 时间线、F05 每段调节、F08 导出。
 // ============================================================
@@ -112,6 +117,10 @@ export function EditorView() {
   const [lib, setLib] = useState(null);
   const [libErr, setLibErr] = useState('');
   const [libQuery, setLibQuery] = useState('');
+  // 素材栏来源（P3）：片段 / 成片 / 图片。图片首版后置（产品已定），只展示、不入时间线。
+  const [mediaSource, setMediaSource] = useState('clip');
+  const [photos, setPhotos] = useState(null);
+  const [photoErr, setPhotoErr] = useState('');
   const [bgm, setBgm] = useState(null);
   const [pps, setPps] = useState(26);
   const [dragOver, setDragOver] = useState(false);
@@ -145,18 +154,52 @@ export function EditorView() {
   const nameRef = useRef('');
   const timerRef = useRef(null);
 
-  // 素材列表（搜索过滤）：必须在引用它的 effect 之前初始化，否则 deps 求值会撞 TDZ
-  const libItems = useMemo(() => {
+  // 素材索引：/api/library 同时返回片段与成片（P1 起），素材栏按来源分开取。
+  // 必须在引用它的 effect 之前初始化，否则 deps 求值会撞 TDZ。
+  const libAll = useMemo(() => {
     const groups = (lib && lib.groups) || [];
     const all = [];
     for (const g of groups) for (const it of (g.items || [])) all.push({ ...it, groupLabel: g.label });
+    return all;
+  }, [lib]);
+
+  // 跨来源索引：时间线里的段落可能来自「成片」来源，切到「片段」来源后
+  // 裁剪上限 / 预览分辨率 / 拖拽落点仍要能找到它（否则裁剪会失去上限）。
+  const assetById = useMemo(() => {
+    const map = new Map();
+    for (const it of libAll) map.set(it.id, it);
+    return map;
+  }, [libAll]);
+
+  function matchQuery(it) {
     const q = libQuery.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((it) =>
-      String(it.prompt || '').toLowerCase().includes(q) ||
+    if (!q) return true;
+    return String(it.prompt || '').toLowerCase().includes(q) ||
       String(it.resolution || '').toLowerCase().includes(q) ||
-      String(it.model || '').toLowerCase().includes(q));
-  }, [lib, libQuery]);
+      String(it.model || '').toLowerCase().includes(q) ||
+      String(it.origin || '').toLowerCase().includes(q) ||
+      String(it.id || '').toLowerCase().includes(q);
+  }
+
+  const clipItems = useMemo(() => libAll.filter((it) => it.kind !== 'final' && matchQuery(it)), [libAll, libQuery]);
+  const finalItems = useMemo(() => libAll.filter((it) => it.kind === 'final' && matchQuery(it)), [libAll, libQuery]);
+  const photoItems = useMemo(() => {
+    const list = Array.isArray(photos) ? photos : [];
+    const q = libQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) => String(p.prompt || p.imagePrompt || '').toLowerCase().includes(q) ||
+      String(p.id || '').toLowerCase().includes(q));
+  }, [photos, libQuery]);
+
+  // 当前来源的列表（搜索同时作用于三个来源）
+  const libItems = mediaSource === 'final' ? finalItems : (mediaSource === 'clip' ? clipItems : []);
+  const MEDIA_SOURCES = [
+    { key: 'clip', label: '片段', count: clipItems.length },
+    { key: 'final', label: '成片', count: finalItems.length },
+    { key: 'photo', label: '图片', count: photoItems.length }
+  ];
+  const ORIGIN_TEXT = { task: '任务', library: '片段库', editor: '剪辑台导出', orphan: '孤儿成片' };
+  const PHOTO_STATUS_TEXT = { pending: '待审', approved: '通过', rejected: '打回' };
 
   function adopt(p) {
     projectRef.current = p;
@@ -203,6 +246,7 @@ export function EditorView() {
       adopt(p);
       loadLibrary();
       loadBgm();
+      loadPhotos();
     })().catch((e) => setLoadErr(e.message || '工程加载失败'));
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
@@ -318,6 +362,17 @@ export function EditorView() {
     } catch (e) { /* 音频库失败不影响剪辑 */ }
   }
 
+  // 图片库（P3 素材栏第三来源）。首版只展示，不加入时间线（产品已定可后置）。
+  async function loadPhotos() {
+    try {
+      const j = await api('/api/photos');
+      setPhotos(Array.isArray(j.photos) ? j.photos : []);
+      setPhotoErr('');
+    } catch (e) {
+      setPhotoErr(e.message || '图片加载失败');
+    }
+  }
+
   function savePatch(patch) {
     const cur = projectRef.current;
     if (!cur) return Promise.resolve(null);
@@ -344,7 +399,7 @@ export function EditorView() {
   }
 
   function assetMaxDur(assetId) {
-    const hit = libItems.find((x) => x.id === assetId);
+    const hit = assetById.get(assetId);
     return hit ? (Number(hit.durationSec) || 0) : 0;
   }
 
@@ -437,6 +492,12 @@ export function EditorView() {
 
   function addClip(item) {
     if (!item || !item.id) return;
+    if (item.kind === 'photo') {
+      setToast('图片素材首版暂不能加入时间线（产品已定后置）');
+      return;
+    }
+    // 成片默认整段载入：outSec = 成片全长；入/出点随后可在时间线拖动裁剪。
+    const whole = item.kind === 'final';
     const dur = Number(item.durationSec) || 0;
     const seg = {
       id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
@@ -447,7 +508,7 @@ export function EditorView() {
     };
     commitSegments([...segmentsRef.current, seg]);
     setSelectedId(seg.id);
-    setToast('已加入时间线：' + (item.prompt || item.id).slice(0, 24));
+    setToast((whole ? '已整段载入成片：' : '已加入时间线：') + (item.prompt || item.id).slice(0, 24));
   }
 
   function splitSelected() {
@@ -647,7 +708,7 @@ export function EditorView() {
       return;
     }
 
-    const item = libItems.find((x) => x.id === data);
+    const item = assetById.get(data);
     if (item) addClip(item);
   }
 
@@ -677,7 +738,8 @@ export function EditorView() {
         const j = await api('/api/projects/' + encodeURIComponent(pid) + '/export/' + encodeURIComponent(exportId));
         setExportJob(j.export);
         if (j.export.status === 'done') {
-          setToast('导出完成：' + (j.export.outputUrl || ''));
+          setToast('导出完成，已归入「库 · 成片」');
+          try { loadLibrary(); } catch (e) { /* ignore */ }
           try {
             const fresh = await loadProjectById(pid);
             projectRef.current = fresh;
@@ -846,7 +908,7 @@ export function EditorView() {
   const selectedSeg = segments.find((s) => s.id === selectedId) || null;
   const transition = project.transition || { enabled: true, duration: 0.4, type: 'fade' };
   const sourceItems = segments
-    .map((s) => libItems.find((it) => it.id === s.assetId))
+    .map((s) => assetById.get(s.assetId))
     .filter(Boolean);
   let previewRes = '—';
   let previewRatio = '—';
@@ -904,49 +966,104 @@ export function EditorView() {
             <div className="ed-panel-head">
               <b>${tab === 'media' ? '素材' : '音频'}</b>
               <span className="ed-sub">${tab === 'media'
-                ? libItems.length + ' / ' + ((lib && lib.totals && lib.totals.count) || 0) + ' 段'
+                ? (mediaSource === 'photo'
+                  ? photoItems.length + ' 张'
+                  : libItems.length + ' / ' + (mediaSource === 'final' ? finalItems.length : clipItems.length) + ' 段')
                 : '音乐 / 环境音'}</span>
             </div>
             <div className="ed-panel-body">
               ${tab === 'media'
                 ? html`<div className="ed-media">
+                    <div className="ed-sources" role="tablist" aria-label="素材来源">
+                      ${MEDIA_SOURCES.map((s) => html`
+                        <button
+                          key=${s.key}
+                          data-media-source=${s.key}
+                          className=${'ed-source' + (mediaSource === s.key ? ' on' : '')}
+                          onClick=${() => setMediaSource(s.key)}
+                        >${s.label}<span className="ed-source-count">${s.count}</span></button>
+                      `)}
+                    </div>
                     <input
                       className="ed-search"
                       placeholder="搜索提示词 / 模型 / 分辨率"
                       value=${libQuery}
                       onInput=${(e) => setLibQuery(e.target.value)}
                     />
-                    ${libErr && html`<p className="ed-sub ed-err">${libErr}</p>`}
-                    ${!lib && !libErr && html`<p className="ed-sub">素材加载中…</p>`}
-                    <div className="ed-grid">
-                      ${libItems.slice(0, 120).map((it) => html`
-                        <button
-                          key=${it.id}
-                          className="ed-card"
-                          draggable=${true}
-                          onDragStart=${(e) => { try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }}
-                          onClick=${() => addClip(it)}
-                          title=${(it.prompt || it.id) + ' · 点击加入时间线'}
-                        >
-                          <span className="ed-card-thumb">
-                            <img
-                              className="ed-card-img"
-                              src=${thumbUrl(it.id)}
-                              alt=""
-                              loading="lazy"
-                              onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
-                            />
-                            <span className="ed-card-dur">${fmtDur(it.durationSec)}</span>
-                            <span className="ed-card-plus">＋</span>
-                          </span>
-                          <span className="ed-card-prompt">${it.prompt || it.id}</span>
-                          <span className="ed-card-meta">${it.resolution || '-'} · ${it.model || '-'}</span>
-                        </button>
-                      `)}
-                    </div>
-                    ${libItems.length > 120 && html`<p className="ed-sub">只显示前 120 条，用搜索缩小范围</p>`}
+                    ${mediaSource !== 'photo' && libErr && html`<p className="ed-sub ed-err">${libErr}</p>`}
+                    ${mediaSource === 'photo' && photoErr && html`<p className="ed-sub ed-err">${photoErr}</p>`}
+                    ${mediaSource !== 'photo' && !lib && !libErr && html`<p className="ed-sub">素材加载中…</p>`}
+                    ${mediaSource === 'photo' && !photos && !photoErr && html`<p className="ed-sub">图片加载中…</p>`}
+
+                    ${mediaSource === 'photo' && html`
+                      <p className="ed-note">图片素材首版后置：暂不能加入时间线（产品已定）。</p>
+                      <div className="ed-grid">
+                        ${photoItems.slice(0, 120).map((p) => html`
+                          <div
+                            key=${p.id}
+                            data-photo-id=${p.id}
+                            className="ed-card ed-card-photo"
+                            title=${(p.prompt || p.id) + ' · 图片（首版后置）'}
+                          >
+                            <span className="ed-card-thumb">
+                              <img
+                                className="ed-card-img"
+                                src=${p.url || ''}
+                                alt=""
+                                loading="lazy"
+                                onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                              />
+                              <span className="ed-card-dur">${PHOTO_STATUS_TEXT[p.status] || '待审'}</span>
+                              <span className="ed-card-badge ghost">图片</span>
+                            </span>
+                            <span className="ed-card-prompt">${p.prompt || p.imagePrompt || p.id}</span>
+                            <span className="ed-card-meta">${p.model || '-'} · 图片</span>
+                          </div>
+                        `)}
+                      </div>
+                      ${photoItems.length === 0 && !photoErr && html`<p className="ed-sub">图片库为空</p>`}
+                    `}
+
+                    ${mediaSource !== 'photo' && html`
+                      ${mediaSource === 'final' && html`<p className="ed-note">成片默认整段载入，可在时间线拖手柄裁入/出点。</p>`}
+                      <div className="ed-grid">
+                        ${libItems.slice(0, 120).map((it) => html`
+                          <button
+                            key=${it.id}
+                            data-asset-id=${it.id}
+                            data-kind=${it.kind === 'final' ? 'final' : 'clip'}
+                            className=${'ed-card' + (it.kind === 'final' ? ' ed-card-final' : '')}
+                            draggable=${true}
+                            onDragStart=${(e) => { try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }}
+                            onClick=${() => addClip(it)}
+                            title=${(it.prompt || it.id) + (it.kind === 'final' ? ' · 点击整段载入成片' : ' · 点击加入时间线')}
+                          >
+                            <span className="ed-card-thumb">
+                              <img
+                                className="ed-card-img"
+                                src=${thumbUrl(it.id)}
+                                alt=""
+                                loading="lazy"
+                                onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+                              />
+                              <span className="ed-card-dur">${fmtDur(it.durationSec)}</span>
+                              ${it.kind === 'final' && html`<span className="ed-card-badge">成片</span>`}
+                              <span className="ed-card-plus">＋</span>
+                            </span>
+                            <span className="ed-card-prompt">${it.prompt || it.id}</span>
+                            <span className="ed-card-meta">${it.kind === 'final'
+                              ? (ORIGIN_TEXT[it.origin] || '成片') + ' · ' + (it.resolution || '-')
+                              : (it.resolution || '-') + ' · ' + (it.model || '-')}</span>
+                          </button>
+                        `)}
+                      </div>
+                      ${libItems.length === 0 && !libErr && html`<p className="ed-sub">${mediaSource === 'final'
+                        ? '成片库为空（导出一次后出现在这里）'
+                        : '片段库为空'}</p>`}
+                      ${libItems.length > 120 && html`<p className="ed-sub">只显示前 120 条，用搜索缩小范围</p>`}
+                    `}
                   </div>`
-                : html`<${AudioPanel} project=${project} bgm=${bgm} duration=${duration} onCommit=${commitAudio} />`}
+                : html`<${AudioPanel} project=${project} bgm=${bgm} duration=${duration} onCommit=${commitAudio} onReloadBgm=${loadBgm} />`}
             </div>
           </div>
         </section>
@@ -1228,7 +1345,7 @@ export function EditorView() {
             </div>
             <video className="ed-viewer-video" src=${viewerUrl} controls autoplay playsInline></video>
             <div className="ed-viewer-foot">
-              <span className="ed-sub">成片已保存在 output/，关闭后仍在工程里</span>
+              <span className="ed-sub">成片已保存在 output/ 并归入「库 · 成片」</span>
               <a className="ed-sub ed-link" href=${viewerUrl} target="_blank" rel="noreferrer">新标签打开</a>
             </div>
           </div>

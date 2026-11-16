@@ -488,9 +488,13 @@ function buildColorLut(ref, cur, maxGain) {
 // options: { duration=0.5, type='fade', resolution|width/height, fps }
 async function concatWithTransitions(clips, outputPath, options = {}) {
   const list = normalizeInputs(clips);
-  if (list.length < 2) {
-    return { success: false, error: '转场拼接至少需要 2 个片段' };
+  if (list.length < 1) {
+    return { success: false, error: '没有可拼接的片段' };
   }
+  // 单片段：没有接缝可叠化，按直拼（F=0）处理。
+  // 剪辑台「选一条成片 → 整段/裁剪 → 导出」会走到这里（P3）；
+  // 此前直接报「至少需要 2 个片段」，单片段工程永远导不出。
+  const singleClip = list.length === 1;
 
   // 1) 探测源（调用方传了 detail 就复用，省掉逐段 ffprobe）
   const details = [];
@@ -522,7 +526,8 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
 
   // 4) 淡化时长：不能超过最短片段的一半（否则 xfade 没有足够内容可融合）
   //    enabled=false：走 concat 直拼，不做任何叠化（F=0），但每段调节/裁剪照常生效。
-  const transitionEnabled = options.enabled !== false;
+  //    单片段：没有接缝，等价直拼。
+  const transitionEnabled = options.enabled !== false && !singleClip;
   const requestedF = Number(options.duration) > 0 ? Number(options.duration) : 0.5;
   const minDur = Math.min(...durs);
   let F = 0;
@@ -713,9 +718,13 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
       parts.push(`[${i}:v]trim=start=0:end=${actualDurs[i].toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p${adjPart}${lutPart}[v${i}]`);
     }
     if (!transitionEnabled) {
-      const labels = [];
-      for (let i = 0; i < prepared.length; i++) labels.push(`[v${i}]`);
-      parts.push(`${labels.join('')}concat=n=${prepared.length}:v=1:a=0[vout]`);
+      if (prepared.length === 1) {
+        parts.push('[v0]null[vout]');
+      } else {
+        const labels = [];
+        for (let i = 0; i < prepared.length; i++) labels.push(`[v${i}]`);
+        parts.push(`${labels.join('')}concat=n=${prepared.length}:v=1:a=0[vout]`);
+      }
     } else {
       let vPrev = 'v0';
       let acc = actualDurs[0];
@@ -742,8 +751,12 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
           + `aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
       }
       if (!transitionEnabled) {
-        const labels = prepared.map((_, i) => `[a${i}]`);
-        parts.push(`${labels.join('')}concat=n=${prepared.length}:v=0:a=1[aout]`);
+        if (prepared.length === 1) {
+          parts.push('[a0]anull[aout]');
+        } else {
+          const labels = prepared.map((_, i) => `[a${i}]`);
+          parts.push(`${labels.join('')}concat=n=${prepared.length}:v=0:a=1[aout]`);
+        }
       } else {
         aPrev = 'a0';
         for (let i = 1; i < prepared.length; i++) {

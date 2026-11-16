@@ -118,6 +118,31 @@ function toOutputUrl(p) {
   return name ? '/output/' + encodeURIComponent(name) : null;
 }
 
+// 单片段重生成要带运行时 Key：旧任务落盘时 Key 被脱敏，不带就会降级 Mock。
+// 与创作页 collectRuntime 同一份 localStorage；这里按任务模型映射。
+function buildRuntimeConfig(task) {
+  let cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { cfg = {}; }
+  const base = {
+    llmApiKey: cfg.llmKey || '', llmBaseUrl: cfg.llmUrl || '', llmModel: cfg.llmModel || '',
+    multimodalApiKey: cfg.multimodalKey || '', multimodalBaseUrl: cfg.multimodalUrl || '',
+    multimodalModel: cfg.multimodalModel || '',
+    strictQcItems: (task && task.runtimeConfig && task.runtimeConfig.strictQcItems) || null
+  };
+  const model = task && task.model;
+  if (model === 'dashscope') {
+    const dsBase = (cfg.dashScopeWorkspaceId && cfg.dashScopeRegion)
+      ? `https://${cfg.dashScopeWorkspaceId}.${cfg.dashScopeRegion}.maas.aliyuncs.com/api/v1`
+      : (cfg.dashScopeBaseUrl || '');
+    return { ...base, apiKey: cfg.dashScopeKey || '', apiBaseUrl: dsBase, modelId: 'wan3.0-video' };
+  }
+  if (model === 'seedance') return { ...base, apiKey: cfg.seedanceKey || '', apiBaseUrl: cfg.seedanceBaseUrl || '', modelId: cfg.seedanceModel || '' };
+  if (model === 'kling') return { ...base, klingAccessKey: cfg.klingAk || '', klingSecretKey: cfg.klingSk || '' };
+  if (model === 'openai-video') return { ...base, apiKey: cfg.whaletvKey || '', baseUrl: cfg.whaletvBaseUrl || '', modelId: cfg.whaletvVideoModel || 'wan3.0-video' };
+  if (model === 'siliconflow') return { ...base, apiKey: cfg.siliconflowKey || '', apiBaseUrl: cfg.siliconflowBaseUrl || '', modelId: cfg.siliconflowModel || '' };
+  return base;
+}
+
 function Row({ label, children }) {
   return html`
     <div className="flex gap-3 py-[7px] border-b border-white/[.04] last:border-0">
@@ -148,6 +173,29 @@ export function TaskDrawer({ taskId, onClose }) {
       setTick((v) => v + 1);
     } catch (e) {
       setActErr(e.message || '操作失败');
+    } finally {
+      setBusyAct('');
+    }
+  }
+
+  // 只重生成用户点的那一条失败片段；不会自动重跑其它片段。
+  async function regenerateOne(index) {
+    setActErr('');
+    setBusyAct('clip-' + index);
+    try {
+      const r = await fetch(
+        '/api/tasks/' + encodeURIComponent(taskId) + '/clips/' + index + '/regenerate',
+        {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ runtimeConfig: buildRuntimeConfig(state.task) })
+        }
+      );
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+      setTick((v) => v + 1);
+    } catch (e) {
+      setActErr(e.message || '重生成失败');
     } finally {
       setBusyAct('');
     }
@@ -289,6 +337,35 @@ export function TaskDrawer({ taskId, onClose }) {
               `}
               ${actErr && html`<span className="text-[11px] text-danger">${actErr}</span>`}
             </div>
+
+            ${(() => {
+              const failed = (t.clips || []).filter((c) => c && c.status === 'failed');
+              if (!failed.length) return null;
+              return html`
+                <div className="mt-4">
+                  <h4 className="mb-1 text-[12px] font-medium text-ink">失败片段（${failed.length}）</h4>
+                  <p className="mb-2 text-[10px] leading-[1.6] text-ink3">
+                    只重生成你点的那一条；不会自动重跑其它片段。
+                  </p>
+                  <ul className="divide-y divide-white/[.05] rounded-[8px] border border-white/[.07] bg-s3 px-2.5">
+                    ${failed.map((c) => html`
+                      <li key=${c.index} className="flex items-center gap-2 py-2">
+                        <span className="shrink-0 text-[11px] font-num text-ink2">#${c.index + 1}</span>
+                        <span className="min-w-0 flex-1 text-[11px] leading-[1.6] text-ink3 break-words">
+                          ${c.error || (c.qcResult && c.qcResult.reason) || '生成/质检未通过'}
+                        </span>
+                        <button
+                          onClick=${() => regenerateOne(c.index)}
+                          disabled=${!!busyAct}
+                          className="h-6 px-2 rounded-[4px] border border-white/[.10] text-[11px] text-ink2
+                                     hover:bg-white/[.06] disabled:opacity-40"
+                        >${busyAct === 'clip-' + c.index ? '重生成中…' : '重新生成'}</button>
+                      </li>
+                    `)}
+                  </ul>
+                </div>
+              `;
+            })()}
 
             ${(() => {
               const cm = pickColorMatch(t);

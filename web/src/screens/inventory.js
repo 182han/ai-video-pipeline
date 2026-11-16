@@ -1,15 +1,23 @@
 // ============================================================
-// 库存：视频片段 / 照片 / 配乐
+// 库（2026-11-15 P2：合并片段 + 照片，新增成片与回收站）
 // ------------------------------------------------------------
-// 视频片段：GET /api/library?favorite=&q=&resolution=&model=
-//           PUT /api/library/:id {favorite} · DELETE /api/library/:id
-//           POST /api/library/:id/regenerate {prompt}
-// 配乐：    GET /api/bgm · PUT /api/bgm/prefs {defaultTrackId}
-//           POST /api/bgm · DELETE /api/bgm/:id
-// 照片：    依赖出图厂商（未接入）→ 只给说明，不装样子
+// 页面结构：一个「库」页，三个 tab（固定顺序）成片 / 片段 / 图片。
+//   成片：GET /api/library 里 kind=final 的条目（含 origin=task|library|editor|orphan）
+//   片段：GET /api/library?favorite=&q=&resolution=&model=
+//         PUT /api/library/:id {favorite} · DELETE /api/library/:id（进回收站）
+//         POST /api/library/:id/regenerate {prompt}
+//   图片：GET /api/photos?final=1 · PUT/DELETE /api/photos/:id
+// 回收站：GET /api/recycle · POST /api/recycle/:type/:id/restore
+//         DELETE /api/recycle/:type/:id · POST /api/recycle/:type/purge
+// 删除分两步：页面删除只移入回收站；彻底删除必须在回收站抽屉里再确认一次。
+// 2026-11-16 P6：历史记录页下线后，失败/未完成的成片任务在「成片」tab 顶部的
+//   未完成卡片里可见（数据取 /api/tasks，排除 mock 与 clips_only），点开可补跑/重试。
+// 配乐：仍保留 MusicView（导航入口已移除，配乐面板搬到剪辑台），深链 /music 兼容。
 // ============================================================
 import { navigate } from '../router.js';
 import { setSeedPhoto } from '../createDraft.js';
+import { TaskDrawer } from '../components/taskDrawer.js';
+import { statusMeta } from '../components/pauseControl.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -47,6 +55,8 @@ function Empty({ children }) {
 // ---------------- 视频片段 ----------------
 function costText(cost) {
   if (!cost) return '';
+  // 未知模型不能显示成 ¥0.00（会误导成免费）；如实标“未配置”。
+  if (cost.computed === false) return '未配置';
   const n = Number(cost.amount);
   return Number.isFinite(n) ? '¥' + n.toFixed(2) : '';
 }
@@ -57,7 +67,59 @@ function qcText(qc) {
   return 'QC ' + (qc.level || '未通过');
 }
 
-export function ClipsView() {
+// ---------------- 库：公共小工具 ----------------
+function fmtDurSec(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return '--:--';
+  const s = Math.round(n);
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  if (mm >= 60) {
+    const hh = Math.floor(mm / 60);
+    return hh + ':' + String(mm % 60).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  }
+  return String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+
+const ORIGIN_TEXT = { task: '任务', library: '片段库', editor: '剪辑导出', orphan: '孤儿' };
+
+// 费用：没有快照就显示“未知”，绝不写 ¥0.00（2026-11-15 口径）。
+function costLabel(cost) {
+  if (!cost) return '未知';
+  if (cost.computed === false) return '未知';
+  const n = Number(cost.amount);
+  return Number.isFinite(n) ? '¥' + n.toFixed(2) : '未知';
+}
+
+function qcBadge(qc) {
+  if (!qc) return html`<span className="text-[10px] text-ink3">未质检</span>`;
+  if (qc.passed) return html`<span className="text-[10px] text-accent">QC 通过</span>`;
+  if (qc.unverified) return html`<span className="text-[10px] text-warn">QC 未验证</span>`;
+  return html`<span className="text-[10px] text-danger">QC 不通过</span>`;
+}
+
+// 缩略图：走 /api/library/:id/thumb（服务端抽帧缓存）；失败就显示占位，不装样子。
+function Thumb({ id }) {
+  const [bad, setBad] = useState(false);
+  const box = { width: '86px', height: '48px', flex: '0 0 auto' };
+  if (bad || !id) {
+    return html`<span className="grid place-items-center bg-black rounded-[4px] text-[9px] text-ink3"
+      style=${box}>无图</span>`;
+  }
+  return html`<img src=${'/api/library/' + encodeURIComponent(id) + '/thumb'} alt=""
+    loading="lazy" onError=${() => setBad(true)}
+    className="bg-black object-cover rounded-[4px]" style=${box} />`;
+}
+
+// 下载：直接给静态地址（媒体目录与页面同源，已登录即可）；文件名用库里的真实文件名。
+function DownloadLink({ url, fileName, label }) {
+  if (!url) return null;
+  return html`<a href=${url} download=${fileName || ''}
+    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06] inline-flex items-center"
+  >${label || '下载'}</a>`;
+}
+
+export function ClipsPanel({ onChanged }) {
   const [fav, setFav] = useState(false);
   const [q, setQ] = useState('');
   const [res, setRes] = useState('');
@@ -86,6 +148,11 @@ export function ClipsView() {
   const groups = (s.data && s.data.groups) || [];
   const facets = (s.data && s.data.facets) || {};
   const totals = (s.data && s.data.totals) || {};
+  // /api/library 同时返回片段与成片；这个 tab 只显示片段（成片在「成片」tab）。
+  const clipGroups = groups
+    .map((g) => ({ ...g, items: (g.items || []).filter((it) => it.kind !== 'final') }))
+    .filter((g) => g.items.length > 0);
+  const clipCount = clipGroups.reduce((n, g) => n + g.items.length, 0);
 
   async function toggleFav(id, cur) {
     setErr('');
@@ -101,13 +168,14 @@ export function ClipsView() {
   }
 
   async function remove(id) {
-    if (!window.confirm('删除这条片段？会同时删除磁盘文件，不可恢复。')) return;
+    if (!window.confirm('删除这条片段？会先移入回收站，可在回收站恢复。')) return;
     setErr('');
     try {
       const r = await fetch('/api/library/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       reload();
+      if (onChanged) onChanged();
     } catch (e) { setErr('删除失败：' + e.message); }
   }
 
@@ -127,15 +195,12 @@ export function ClipsView() {
   }
 
   return html`
-    <div className="px-6 py-5">
-      <${Head} title="视频片段" sub=${(totals.count || 0) + ' 条'}>
+    <div>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
         <button onClick=${() => setFav((v) => !v)}
           className=${'h-8 px-3 rounded-[6px] text-[12px] border ' +
             (fav ? 'border-accent/50 text-accent' : 'border-white/[.10] text-ink2 hover:bg-white/[.05]')}
         >只看收藏</button>
-      </${Head}>
-
-      <div className="flex items-center gap-2 flex-wrap mb-3">
         <select value=${res} onChange=${(e) => setRes(e.target.value)}
           className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
           <option value="">全部分辨率</option>
@@ -144,15 +209,15 @@ export function ClipsView() {
         <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="搜索提示词…"
           className="h-8 w-[190px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
         <span className="flex-1"></span>
-        <span className="text-[11px] text-ink3">${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
+        <span className="text-[11px] text-ink3">${clipCount} 条 · ${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
       </div>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
       ${s.error && html`<p className="mb-2 text-[12px] text-danger">${s.error}</p>`}
 
-      ${groups.length === 0 && !s.loading && html`<${Empty}>没有匹配的片段</${Empty}>`}
+      ${clipGroups.length === 0 && !s.loading && html`<${Empty}>没有匹配的片段</${Empty}>`}
 
-      ${groups.map((g) => html`
+      ${clipGroups.map((g) => html`
         <div key=${g.label} className="mb-4">
           <div className="flex items-baseline gap-2 border-b border-white/[.08] pb-1 mb-2">
             <span className="text-[12px] font-medium text-ink">${g.label}</span>
@@ -167,8 +232,13 @@ export function ClipsView() {
                   <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">
                     ${(it.prompt || '').slice(0, 80)}
                   </p>
-                  <p className="text-[10px] text-ink3 font-num">
-                    ${qcText(it.qc)}${costText(it.cost) ? ' · ' + costText(it.cost) : ''}
+                  <p className="text-[10px] text-ink3 font-num flex items-center gap-1.5 flex-wrap">
+                    <span>${fmtDurSec(it.durationSec)}</span>
+                    <span className="opacity-40">·</span>
+                    ${qcBadge(it.qc)}
+                    ${it.status === 'failed' ? html`<span className="text-[10px] text-danger">生成失败</span>` : null}
+                    <span className="opacity-40">·</span>
+                    <span>费用 ${costLabel(it.cost)}</span>
                   </p>
                   <div className="mt-1 flex items-center gap-2">
                     <button onClick=${() => toggleFav(it.id, it.favorite)}
@@ -181,6 +251,7 @@ export function ClipsView() {
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">详情</button>
                     <button onClick=${() => regen(it)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">重新生成</button>
+                    <${DownloadLink} url=${it.url} fileName=${it.fileName} />
                     <button onClick=${() => remove(it.id)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
                   </div>
@@ -259,7 +330,7 @@ export function ClipsView() {
 // 审核通过 = 这张图可以用作下一步「图生视频」的输入（厂商通道按确认后接入）。
 const PHOTO_STATUS_TEXT = { pending: '待审', approved: '已通过', rejected: '已打回' };
 
-export function PhotosView() {
+export function PhotosPanel({ onChanged }) {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
@@ -343,7 +414,7 @@ export function PhotosView() {
   }
 
   async function remove(id) {
-    if (!window.confirm('删除这张图片？（同时删除 clips/ 里的文件，不可恢复）')) return;
+    if (!window.confirm('删除这张图片？会先移入回收站，可在回收站恢复。')) return;
     setErr('');
     try {
       const r = await fetch('/api/photos/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
@@ -351,6 +422,7 @@ export function PhotosView() {
       if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
       setDetail(null);
       reload();
+      if (onChanged) onChanged();
     } catch (e) { setErr('删除失败：' + e.message); }
   }
 
@@ -394,16 +466,43 @@ export function PhotosView() {
 
   const promptText = (p) => ((p.imagePrompt || p.prompt) || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
 
-  return html`
-    <div className="px-6 py-5">
-      <${Head} title="照片" sub=${(totals.all || 0) + ' 张'}>
-        <span className="text-[11px] text-ink3 font-num">
-          待审 ${totals.pending || 0} · 通过 ${totals.approved || 0} · 打回 ${totals.rejected || 0}
-        </span>
-      </${Head}>
+  // 2026-11-14 用户要求：调色前/后是同一张图的两个版本，列表里并列成一张卡，
+  // 不再拆成两个独立卡片；同时显示生成费与使用状态。
+  const pairKey = (p) => String(p.id || '').endsWith('_original')
+    ? String(p.id).slice(0, -'_original'.length)
+    : String(p.id || '');
+  const photoGroups = [];
+  const groupMap = new Map();
+  for (const p of photos) {
+    const key = pairKey(p);
+    let g = groupMap.get(key);
+    if (!g) {
+      g = { key, before: null, after: null, singles: [] };
+      groupMap.set(key, g);
+      photoGroups.push(g);
+    }
+    if (String(p.id).endsWith('_original') || p.label === '调色前') g.before = p;
+    else if (p.label === '调色后') g.after = p;
+    else g.singles.push(p);
+  }
+  // 用户要求：列表页不再并排展示调色前/后；只在详情页看版本链。
+  for (const g of photoGroups) {
+    if (g.before || g.after) {
+      g.singles = [g.after, g.before].filter(Boolean);
+      g.before = null;
+      g.after = null;
+    }
+  }
+  const usedText = (p) => (Array.isArray(p.usedIn) && p.usedIn.length ? '已用于生成视频' : '尚未用于视频');
+  const cleanPrompt = (p) => promptText(p).replace(/^【(调色前|调色后)】/, '');
+  const detailPair = detail
+    ? photoGroups.find((g) => g.key === pairKey(detail) && g.before && g.after)
+    : null;
 
+  return html`
+    <div>
       <p className="mb-3 text-[11px] leading-[1.7] text-ink3">
-        生成的图片会自动入库并保留提示词（不再只留一个 clips 文件）。点「通过」表示这张图可以作为下一步图生视频的输入。
+        生成的图片会自动入库并保留提示词（不再只留一个 clips 文件）。点「通过」表示这张图可以作为下一步图生视频的输入。调色前/后并列展示；生成费用按价目表估算，调色是本地派生、不重复计费。
       </p>
 
       <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -417,6 +516,9 @@ export function PhotosView() {
         <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="搜索提示词…"
           className="h-8 w-[190px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
         <span className="flex-1"></span>
+        <span className="text-[11px] text-ink3 font-num">
+          ${totals.all || 0} 张 · 待审 ${totals.pending || 0} · 通过 ${totals.approved || 0} · 打回 ${totals.rejected || 0}
+        </span>
         <span className="text-[11px] text-ink3">${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
       </div>
 
@@ -461,6 +563,7 @@ export function PhotosView() {
                     <span className="flex-1"></span>
                     <button onClick=${() => openDetail(g.after)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">查看对比</button>
+                    <${DownloadLink} url=${g.after.url} fileName=${g.after.fileName} />
                     <button onClick=${() => useInCreation(g.after)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
                   </div>
@@ -492,6 +595,7 @@ export function PhotosView() {
                   ${p.status !== 'rejected' && html`
                     <button onClick=${() => review(p.id, 'rejected')}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">打回</button>`}
+                  <${DownloadLink} url=${p.url} fileName=${p.fileName} />
                   <button onClick=${() => remove(p.id)}
                     className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
                 </div>
@@ -603,6 +707,7 @@ export function PhotosView() {
               ${detail.status !== 'rejected' && html`
                 <button onClick=${() => review(detail.id, 'rejected')}
                   style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>打回</button>`}
+              <${DownloadLink} url=${detail.url} fileName=${detail.fileName} />
               <button onClick=${() => remove(detail.id)}
                 style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>删除</button>
             </div>
@@ -619,6 +724,323 @@ export function PhotosView() {
   `;
 }
 
+
+// ---------------- 成片 · 未完成（P6） ----------------
+// 历史记录页下线后（P6），失败/未完成的成片任务在这里可见并可补跑（产品口径 §7）：
+//   「失败任务靠『库里失败可见 + 成片未完成卡片』，不再靠历史页。」
+// 数据来自 AppShell 的 /api/tasks 轮询（5s），不新建接口、不改后端。
+// 排除项（避免把本来就不产成片的任务报成失败）：
+//   · mock：开发/验收用的合成任务，正式库口径不入库；
+//   · fragmentOnly：clips_only 档只产片段，本来就没有成片；
+//   · 已在该任务下产出成片（Library 里已有 kind=final 且 taskId 相同）。
+function UnfinishedPanel({ tasks, finals, onChanged }) {
+  const [openId, setOpenId] = useState(null);
+  const finalTaskIds = new Set((finals || []).map((it) => it.taskId).filter(Boolean));
+  const rows = (tasks || [])
+    .filter((t) => t
+      && (t.status === 'failed' || t.status === 'partial')
+      && t.model !== 'mock'
+      && !t.fragmentOnly
+      && !finalTaskIds.has(t.taskId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  if (!rows.length) return null;
+
+  return html`
+    <div className="mb-4 rounded-[8px] border border-warn/30 bg-warn/[.05] px-3 py-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[12px] text-warn">未完成 ${rows.length} 条</span>
+        <span className="text-[10px] text-ink3">失败任务仍可补跑；成片齐全后会自动从这里消失。</span>
+      </div>
+      <div className="mt-1">
+        ${rows.map((t) => {
+          const st = statusMeta(t.status, t);
+          return html`
+            <div key=${t.taskId} className="flex items-center gap-2.5 py-1.5 border-t border-white/[.05]">
+              <span className=${'w-[6px] h-[6px] rounded-full shrink-0 ' + st.dot}></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12px] text-ink truncate">${(t.prompt || '(无提示词)').slice(0, 80)}</span>
+                <span className="block text-[10px] text-ink3 font-num">
+                  ${t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-'}
+                  ${' · ' + st.text}
+                  ${t.failedClips ? ' · 失败片段 ' + t.failedClips : ''}
+                  ${t.recoverable ? ' · 可补跑' : ''}
+                </span>
+              </span>
+              <button onClick=${() => setOpenId(t.taskId)}
+                className="h-6 px-2 rounded-[4px] text-[10px] text-ink2 hover:bg-white/[.06] shrink-0"
+              >详情 / 补跑</button>
+            </div>
+          `;
+        })}
+      </div>
+      ${openId && html`<${TaskDrawer} taskId=${openId}
+        onClose=${() => { setOpenId(null); if (onChanged) onChanged(); }} />`}
+    </div>
+  `;
+}
+
+
+// ---------------- 成片 ----------------
+// 列表行：缩略图 / 时长 / 来源 / 质检 / 提示词 / 真实费用 / 播放 / 下载 / 删除。
+// 成片 = 长视频（整条任务产物），不再单独「产出」入口。
+function FinalsPanel({ items, tasks, loading, error, onChanged }) {
+  const [err, setErr] = useState('');
+  const [play, setPlay] = useState(null);
+  const [busy, setBusy] = useState('');
+
+  async function remove(it) {
+    if (!window.confirm('删除这条成片？会先移入回收站，可在回收站恢复。')) return;
+    setErr('');
+    setBusy(it.id);
+    try {
+      const r = await fetch('/api/library/' + encodeURIComponent(it.id), { method: 'DELETE', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      if (onChanged) onChanged();
+    } catch (e) { setErr('删除失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  return html`
+    <div>
+      ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
+      ${error && html`<p className="mb-2 text-[12px] text-danger">${error}</p>`}
+      <${UnfinishedPanel} tasks=${tasks} finals=${items} onChanged=${onChanged} />
+      ${(items || []).length === 0 && !loading && html`<${Empty}>还没有成片。创作完成或剪辑台导出后会出现在这里。</${Empty}>`}
+      <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
+        ${(items || []).map((it) => html`
+          <div key=${it.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-white/[.05] last:border-0">
+            <${Thumb} id=${it.id} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[12.5px] text-ink truncate">${it.prompt || it.fileName || it.id}</span>
+                ${it.suspectedDamage ? html`<span className="text-[10px] text-warn">疑似损坏</span>` : null}
+              </div>
+              <p className="text-[10px] text-ink3 font-num flex items-center gap-1.5 flex-wrap mt-0.5">
+                <span>${fmtDurSec(it.durationSec)}</span>
+                <span className="opacity-40">·</span>
+                <span>${it.resolution || '-'}</span>
+                <span className="opacity-40">·</span>
+                <span>来源 ${ORIGIN_TEXT[it.origin] || it.origin || '未知'}</span>
+                <span className="opacity-40">·</span>
+                <span>费用 ${costLabel(it.cost)}</span>
+                <span className="opacity-40">·</span>
+                ${qcBadge(it.qc)}
+              </p>
+            </div>
+            <button onClick=${() => setPlay(it)}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-accent hover:bg-white/[.06]">播放</button>
+            <${DownloadLink} url=${it.url} fileName=${it.fileName} label="下载" />
+            <button onClick=${() => remove(it)} disabled=${busy === it.id}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+          </div>
+        `)}
+      </div>
+
+      ${play && html`
+        <div style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.78)', display: 'grid', placeItems: 'center' }}
+          onClick=${(e) => { if (e.target === e.currentTarget) setPlay(null); }}>
+          <div style=${{ width: 'min(880px, 94vw)', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '12px' }}>
+            <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              <b style=${{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>${play.fileName || play.id}</b>
+              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${fmtDurSec(play.durationSec)} · ${play.resolution || '-'} · 来源 ${ORIGIN_TEXT[play.origin] || play.origin || '未知'}</span>
+              <span style=${{ flex: 1 }}></span>
+              <button onClick=${() => setPlay(null)}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+            </div>
+            <video src=${play.url} controls autoPlay playsInline
+              style=${{ width: '100%', maxHeight: '68vh', background: '#000', borderRadius: '6px' }}></video>
+            <p style=${{ marginTop: '8px', fontSize: '11px', lineHeight: 1.7, color: 'var(--ink3)', whiteSpace: 'pre-wrap' }}>${play.prompt || '（无提示词）'}</p>
+          </div>
+        </div>`}
+    </div>
+  `;
+}
+
+// ---------------- 回收站抽屉 ----------------
+// 删除只进这里；彻底删除必须在这里再确认一次（两次确认的口径见交接 §7）。
+const RECYCLE_TYPE_TEXT = { clip: '片段', final: '成片', photo: '图片', bgm: '配乐' };
+const RECYCLE_TABS = [
+  { key: 'all', label: '全部' },
+  { key: 'clip', label: '片段' },
+  { key: 'final', label: '成片' },
+  { key: 'photo', label: '图片' },
+  { key: 'bgm', label: '配乐' }
+];
+
+function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
+  const [openType, setOpenType] = useState('all');
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const list = (items || []).filter((it) => openType === 'all' || it.type === openType);
+  const btn = (primary) => ({
+    height: '26px', padding: '0 10px', borderRadius: '6px', background: 'transparent',
+    fontSize: '11px', cursor: 'pointer',
+    border: primary ? '1px solid rgba(214,179,106,.45)' : '1px solid rgba(240,138,132,.35)',
+    color: primary ? 'var(--accent)' : 'var(--danger)'
+  });
+
+  async function restore(it) {
+    setMsg(''); setBusy(it.type + '/' + it.id);
+    try {
+      const r = await fetch('/api/recycle/' + encodeURIComponent(it.type) + '/' + encodeURIComponent(it.id) + '/restore',
+        { method: 'POST', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      setMsg('已恢复：' + ((it.entry && it.entry.fileName) || it.id)
+        + (j.conflicts && j.conflicts.length ? '（目标位置已有同名文件，恢复为 .restored-*）' : ''));
+      if (onChanged) onChanged();
+    } catch (e) { setMsg('恢复失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  async function purge(it) {
+    if (!window.confirm('彻底删除「' + ((it.entry && it.entry.fileName) || it.id) + '」？\n删除后无法恢复。')) return;
+    setMsg(''); setBusy(it.type + '/' + it.id);
+    try {
+      const r = await fetch('/api/recycle/' + encodeURIComponent(it.type) + '/' + encodeURIComponent(it.id),
+        { method: 'DELETE', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      setMsg('已彻底删除');
+      if (onChanged) onChanged();
+    } catch (e) { setMsg('彻底删除失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  async function purgeAll() {
+    if (!window.confirm('清空全部回收站条目？\n删除后无法恢复。')) return;
+    setMsg(''); setBusy('all');
+    try {
+      const r = await fetch('/api/recycle/all/purge', { method: 'POST', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      setMsg('已清空回收站（' + (j.removed || 0) + ' 项）');
+      if (onChanged) onChanged();
+    } catch (e) { setMsg('清空失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  if (!open) return null;
+  return html`
+    <div style=${{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,5,.55)' }}
+      onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
+          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>回收站</b>
+          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${(items || []).length} 项 · 不自动过期</span>
+          <span style=${{ flex: 1 }}></span>
+          <button onClick=${purgeAll} disabled=${busy === 'all' || (items || []).length === 0}
+            style=${{ ...btn(false), opacity: (items || []).length ? 1 : .4 }}>清空回收站</button>
+          <button onClick=${onClose}
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+        </div>
+        <div style=${{ display: 'flex', gap: '6px', padding: '0 14px 10px', flexWrap: 'wrap' }}>
+          ${RECYCLE_TABS.map((t) => html`
+            <button key=${t.key} onClick=${() => setOpenType(t.key)}
+              style=${{
+                height: '26px', padding: '0 9px', borderRadius: '13px', fontSize: '11px', cursor: 'pointer',
+                border: '1px solid ' + (openType === t.key ? 'rgba(214,179,106,.5)' : 'rgba(244,247,245,.10)'),
+                background: openType === t.key ? 'rgba(214,179,106,.13)' : 'transparent',
+                color: openType === t.key ? 'var(--accent)' : 'var(--ink3)'
+              }}
+            >${t.label}</button>
+          `)}
+        </div>
+        ${msg && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--ink2)' }}>${msg}</p>`}
+        ${error && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--danger)' }}>${error}</p>`}
+        <div style=${{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 14px 14px' }}>
+          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>加载中…</p>`}
+          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${openType === 'all' ? '回收站是空的' : '这个类型下没有条目'}</p>`}
+          ${list.map((it) => html`
+            <div key=${it.type + '/' + it.id} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style=${{ fontSize: '10px', color: 'var(--onaccent)', background: 'var(--accent)', borderRadius: '3px', padding: '1px 6px', flex: '0 0 auto' }}>${RECYCLE_TYPE_TEXT[it.type] || it.type}</span>
+                <span style=${{ fontSize: '11.5px', color: 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${(it.entry && (it.entry.fileName || it.entry.prompt)) || it.id}</span>
+              </div>
+              <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
+                ${it.id} · ${String(it.trashedAt || '').slice(0, 19).replace('T', ' ')} · ${it.fileCount || 0} 个文件 · ${((it.sizeBytes || 0) / 1048576).toFixed(2)} MB
+              </div>
+              <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+                <button onClick=${() => restore(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(true)}>恢复</button>
+                <button onClick=${() => purge(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(false)}>彻底删除</button>
+              </div>
+            </div>
+          `)}
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+// ---------------- 库（三 tab + 回收站入口） ----------------
+// tasks：AppShell 的 /api/tasks 轮询结果，只给「成片」tab 的未完成卡片用（P6）。
+export function LibraryView({ initialTab = 'finals', tasks = [] }) {
+  const [tab, setTab] = useState(initialTab);
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const [libS, reloadLib] = useJson('/api/library');
+  const [photoS, reloadPhotos] = useJson('/api/photos?final=1');
+  const [recS, reloadRec] = useJson('/api/recycle');
+
+  // 旧深链 /clips、/photos 进同一页，路由变化时切到对应 tab。
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
+
+  const allItems = [];
+  for (const g of ((libS.data && libS.data.groups) || [])) {
+    for (const it of (g.items || [])) allItems.push(it);
+  }
+  const finals = allItems.filter((it) => it.kind === 'final');
+  const clipCount = allItems.filter((it) => it.kind !== 'final').length;
+  const photos = (photoS.data && photoS.data.photos) || [];
+  const recycleItems = (recS.data && recS.data.items) || [];
+
+  const refreshAll = () => { reloadLib(); reloadPhotos(); reloadRec(); };
+  const TABS = [
+    { key: 'finals', label: '成片', count: finals.length },
+    { key: 'clips', label: '片段', count: clipCount },
+    { key: 'photos', label: '图片', count: photos.length }
+  ];
+
+  return html`
+    <div className="px-6 py-5" style=${{ paddingBottom: '84px' }}>
+      <div className="flex items-center gap-3 mb-3.5">
+        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">库</h1>
+        <span className="text-[11px] text-ink3 font-num">成片 ${finals.length} · 片段 ${clipCount} · 图片 ${photos.length}</span>
+        <span className="flex-1"></span>
+        <button onClick=${() => setRecycleOpen(true)}
+          className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
+        >回收站${recycleItems.length ? ' · ' + recycleItems.length : ''}</button>
+      </div>
+
+      <div className="flex items-center gap-1 border-b border-white/[.08] mb-3">
+        ${TABS.map((t) => html`
+          <button key=${t.key} onClick=${() => setTab(t.key)}
+            className=${'h-8 px-3 text-[12px] ' + (tab === t.key ? 'text-accent' : 'text-ink3 hover:text-ink2')}
+            style=${{ borderBottom: tab === t.key ? '2px solid var(--accent)' : '2px solid transparent' }}
+          >${t.label}<span className="ml-1.5 text-[10px] font-num" style=${{ opacity: .7 }}>${t.count}</span></button>
+        `)}
+      </div>
+
+      ${tab === 'finals' && html`<${FinalsPanel} items=${finals} tasks=${tasks} loading=${libS.loading}
+        error=${libS.error ? '读取失败：' + libS.error : ''} onChanged=${refreshAll} />`}
+      ${tab === 'clips' && html`<${ClipsPanel} onChanged=${refreshAll} />`}
+      ${tab === 'photos' && html`<${PhotosPanel} onChanged=${refreshAll} />`}
+
+      <${RecycleDrawer} open=${recycleOpen} items=${recycleItems} loading=${recS.loading}
+        error=${recS.error ? '读取回收站失败：' + recS.error : ''}
+        onClose=${() => setRecycleOpen(false)} onChanged=${refreshAll} />
+    </div>
+  `;
+}
+
+// 旧导出兼容（shell 旧版本或深链还在引用时不会崩）：清单一律落到新库页。
+export function ClipsView() {
+  return html`<${LibraryView} initialTab="clips" />`;
+}
+export function PhotosView() {
+  return html`<${LibraryView} initialTab="photos" />`;
+}
 
 // ---------------- 配乐 ----------------
 const MUSIC_FIELDS = [
