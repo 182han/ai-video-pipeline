@@ -3540,3 +3540,32 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
   `verify-all --only mic-permission,xiaozhi-home` → **82 / 0**。
 - 未改 Windows 站点设置；未起第二实例；端口仍 3001；重启是后端 header 生效的必要操作。
 - 用户侧：刷新小智页（`/`）→ 按住麦克风；如果页面还是旧提示，按 Ctrl+F5 强刷。
+
+## 2026-11-16 17:40 语音交互修正：「一个点儿」不是权限错误
+
+用户反馈：按住说话后「只显示了一个点儿」。复核：
+- 按钮上的 `●` 是录音中标记；同时 UIA 读到输入框里有一个 `.`。
+- 用 3 秒**静音 WAV** 直接跑 `src/assistant/asr.js`：SenseVoice 返回
+  `{"ok":true,"text":"그.","lang":"ko"}` —— 静音/噪声会产出标点/杂字；
+  旧前端把 `j.text` 原样塞进输入框，于是用户看到「一个点儿」，其实没听到人声。
+- 旧界面在 `getUserMedia` 约 0.9 秒的启动期间没有提示，用户容易松手；
+  松手早于 stream ready 时只会反复提示「请再按住」，也会让人以为坏了。
+
+改（纯前端，静态文件刷新即生效；**本轮不需要再重启后端**）：
+- `web/src/components/xiaozhiPlan.js`：
+  - 新增 `starting` 状态 + `.xz-mic-status` 状态条（portal）：
+    「正在打开麦克风… 请继续按住」→「正在录音 N 秒 · 请说话，松开结束」→「正在识别语音…」；
+  - WebAudio `AnalyserNode` 监控录音 RMS；录音 < 600ms 或峰值 < 0.005 时**不送 ASR**，
+    直接提示「录音太短 / 没听到声音」；
+  - ASR 结果去掉标点/符号后为空（如 "."）→ 提示「没听清：只识别到标点/杂音」，不写输入框。
+- `web/styles/assistant-home.css`：`.xz-mic-status` 胶囊、红点脉冲、识别 spinner、窄屏。
+- `scripts/verify-mic-permission.js`：新增 4 项（状态条/电平兜底/标点过滤/CSS），共 **41 项**。
+
+验收：
+- 真 Chrome CDP 9222（同源 `login.html`；注入 React 渲染 `VoiceButton`；合成 440Hz 音轨 +
+  假 ASR 返回 "."）：按住 1.3s → 按钮 `●`、状态条「正在录音 1 秒 · 请说话，松开结束」；
+  松开 → 状态条消失、`__micText=null`、提示「没听清：只识别到标点/杂音…」；
+  截图 `.scratch/mic-diag/mic-ux-test.png`。
+- `verify-mic-permission` **41/0**；`verify-xiaozhi-home` **45/0**；`verify-assistant` **105/0**；
+  `verify-all --only mic-permission,xiaozhi-home` **86/0**。
+- 用户侧：Ctrl+F5 后再按住，**说话**（不要只按住不动）；状态条会提示正在录音/识别。

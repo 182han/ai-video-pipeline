@@ -458,10 +458,12 @@ function MicPermissionModal({ modal, onClose, onRetry, onCopy, copied }) {
 // 任何失败都回退打字（不阻塞输入框），但先把原因和修法放进权限卡，而不是只写一行报错。
 export function VoiceButton({ onText, onHint, disabled }) {
   const [recording, setRecording] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [perm, setPerm] = useState('unknown');
   const [modal, setModal] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
   const recRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
@@ -469,6 +471,12 @@ export function VoiceButton({ onText, onHint, disabled }) {
   const startingRef = useRef(false);
   const autoStopRef = useRef(null);
   const mountedRef = useRef(true);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const levelTimerRef = useRef(null);
+  const levelMonitorRef = useRef(false);
+  const maxLevelRef = useRef(0);
+  const startedAtRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -487,6 +495,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
     return () => {
       mountedRef.current = false;
       clearTimeout(autoStopRef.current);
+      stopLevelMonitor();
       if (statusObj && onChange && statusObj.removeEventListener) statusObj.removeEventListener('change', onChange);
       const rec = recRef.current;
       if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch (e) { /* ignore */ } }
@@ -522,6 +531,55 @@ export function VoiceButton({ onText, onHint, disabled }) {
       + '。已打开排查卡；也可以先打字。');
   }
 
+  function startLevelMonitor(stream) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.65;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      levelMonitorRef.current = true;
+      maxLevelRef.current = 0;
+      if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); }
+      const buf = new Float32Array(analyser.fftSize);
+      clearInterval(levelTimerRef.current);
+      levelTimerRef.current = setInterval(() => {
+        try {
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+          const rms = Math.sqrt(sum / buf.length);
+          if (rms > maxLevelRef.current) maxLevelRef.current = rms;
+          if (mountedRef.current) {
+            setRecSeconds(Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000)));
+          }
+        } catch (e) { /* ignore */ }
+      }, 100);
+    } catch (e) {
+      // WebAudio 不可用也不要阻塞录音；最低时长仍会兜底。
+      stopLevelMonitor();
+      levelMonitorRef.current = false;
+    }
+  }
+
+  function stopLevelMonitor() {
+    clearInterval(levelTimerRef.current);
+    levelTimerRef.current = null;
+    try { if (analyserRef.current) analyserRef.current.disconnect(); } catch (e) { /* ignore */ }
+    analyserRef.current = null;
+    try {
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') audioCtxRef.current.close();
+    } catch (e) { /* ignore */ }
+    audioCtxRef.current = null;
+    levelMonitorRef.current = false;
+    if (mountedRef.current) setRecSeconds(0);
+  }
+
   async function start() {
     if (disabled || busy || startingRef.current) return;
     const support = micSupport();
@@ -534,6 +592,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
     }
     startingRef.current = true;
     pressedRef.current = true;
+    if (mountedRef.current) setStarting(true);
 
     // 查询权限状态要在 getUserMedia 之前：Chrome 已「阻止」时不会再弹授权框，
     // 直接请求只会得到 Permission denied，用户看不到任何可点的「允许」。
@@ -541,6 +600,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
     if (mountedRef.current) setPerm(p);
     if (p === 'denied') {
       startingRef.current = false;
+      if (mountedRef.current) setStarting(false);
       fail({ name: 'NotAllowedError', message: 'Permission denied' }, 'denied');
       return;
     }
@@ -553,6 +613,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
       startingRef.current = false;
+      if (mountedRef.current) setStarting(false);
       setRecording(false);
       fail(e, p);
       return;
@@ -565,6 +626,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
       try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
       streamRef.current = null;
       startingRef.current = false;
+      if (mountedRef.current) setStarting(false);
       showModal('granted', null, 'granted');
       onHint && onHint('麦克风已允许，请再按住麦克风说一次。');
       return;
@@ -580,6 +642,10 @@ export function VoiceButton({ onText, onHint, disabled }) {
         try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
         streamRef.current = null;
         recRef.current = null;
+        const durationMs = startedAtRef.current ? (Date.now() - startedAtRef.current) : 0;
+        const maxLevel = maxLevelRef.current;
+        const hadLevelMonitor = levelMonitorRef.current;
+        stopLevelMonitor();
         if (!mountedRef.current) return;
         setRecording(false);
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
@@ -587,6 +653,16 @@ export function VoiceButton({ onText, onHint, disabled }) {
         if (!blob.size) {
           setBusy(false);
           onHint && onHint('没录到声音，再按住说一次试试。');
+          return;
+        }
+        if (durationMs > 0 && durationMs < 600) {
+          setBusy(false);
+          onHint && onHint('录音太短：按住后对着麦克风说，说完再松开。');
+          return;
+        }
+        if (hadLevelMonitor && maxLevel < 0.005) {
+          setBusy(false);
+          onHint && onHint('没听到声音：按住后对着麦克风说话（离麦克风近一点），说完再松开。');
           return;
         }
         setBusy(true);
@@ -607,10 +683,15 @@ export function VoiceButton({ onText, onHint, disabled }) {
           const j = await r.json().catch(() => null);
           if (!j || j.ok !== true) {
             onHint && onHint('语音识别失败：' + ((j && (j.error || j.code)) || ('HTTP ' + r.status)) + '，请改用打字。');
-          } else if (!j.text) {
-            onHint && onHint('没听清，再按一次试试。');
           } else {
-            onText && onText(j.text);
+            const text = String(j.text || '').trim();
+            // 静音/噪声时 SenseVoice 会吐出 ".", "그." 这类标点/杂字；不要塞进输入框。
+            const meaningful = text.replace(/[^\p{L}\p{N}]/gu, '');
+            if (!meaningful) {
+              onHint && onHint('没听清：只识别到标点/杂音。按住后对着麦克风说清楚，说完再松开。');
+            } else {
+              onText && onText(text);
+            }
           }
         } catch (e) {
           onHint && onHint('语音上传异常：' + (e && e.message ? e.message : e) + '，请改用打字。');
@@ -619,13 +700,19 @@ export function VoiceButton({ onText, onHint, disabled }) {
         }
       };
       recRef.current = rec;
+      startedAtRef.current = Date.now();
+      maxLevelRef.current = 0;
       rec.start();
       setRecording(true);
+      if (mountedRef.current) setStarting(false);
+      startLevelMonitor(stream);
       clearTimeout(autoStopRef.current);
       autoStopRef.current = setTimeout(() => {
         if (mountedRef.current) stop();
       }, 60000);
     } catch (e) {
+      stopLevelMonitor();
+      if (mountedRef.current) setStarting(false);
       try { stream.getTracks().forEach((t) => t.stop()); } catch (e2) { /* ignore */ }
       streamRef.current = null;
       setRecording(false);
@@ -637,6 +724,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
 
   function stop() {
     pressedRef.current = false;
+    if (mountedRef.current) setStarting(false);
     clearTimeout(autoStopRef.current);
     if (!recRef.current) {
       // 还在等授权弹窗：只记下「已松手」，start() 成功后会自己停掉流，不开始录音。
@@ -690,6 +778,25 @@ export function VoiceButton({ onText, onHint, disabled }) {
     }
   }
 
+  const statusToast = (starting || recording || busy) ? html`
+    <div
+      key="mic-status"
+      className="xz-mic-status"
+      data-mic-status=${busy ? 'transcribing' : (starting ? 'starting' : 'recording')}
+      role="status"
+      aria-live="polite"
+    >
+      <span className=${(busy || starting) ? 'xz-mic-status-spinner' : 'xz-mic-status-dot'} aria-hidden="true"></span>
+      <span>${busy ? '正在识别语音…'
+        : (starting ? '正在打开麦克风… 请继续按住'
+          : ('正在录音 ' + recSeconds + ' 秒 · 请说话，松开结束'))}</span>
+    </div>
+  ` : null;
+  const statusPortal = statusToast && typeof document !== 'undefined' && window.ReactDOM
+    && typeof window.ReactDOM.createPortal === 'function'
+    ? window.ReactDOM.createPortal(statusToast, document.body)
+    : statusToast;
+
   return [
     html`
       <button
@@ -723,6 +830,7 @@ export function VoiceButton({ onText, onHint, disabled }) {
         onRetry=${retryPermission}
         onCopy=${copyHelp}
       />
-    `
+    `,
+    statusPortal
   ];
 }

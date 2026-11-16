@@ -100,6 +100,15 @@ async function httpGet(url) {
   check('整页与悬浮面板两处都复用 VoiceButton',
     (assistant.match(/<\$\{VoiceButton\}/g) || []).length === 2,
     String((assistant.match(/<\$\{VoiceButton\}/g) || []).length) + ' 处');
+  check('录音时显示状态条（正在打开 / 正在录音 / 正在识别）',
+    /xz-mic-status/.test(plan) && /正在打开麦克风/.test(plan)
+    && /正在录音/.test(plan) && /正在识别语音/.test(plan));
+  check('录音电平监控 + 最短 600ms 兜底',
+    /startLevelMonitor/.test(plan) && /durationMs < 600/.test(plan) && /maxLevel < 0\.005/.test(plan));
+  check('静音/纯标点 ASR 结果不塞进输入框',
+    /meaningful/.test(plan) && /只识别到标点\/杂音/.test(plan));
+  check('CSS：录音状态条固定显示',
+    /\.xz-mic-status[\s\S]{0,120}position: fixed/.test(css));
 
   console.log('\n[7] 服务端 Permissions-Policy 必须放行 microphone(self)');
   check('server.js 含 microphone=(self)', /microphone=\(self\)/.test(serverCode));
