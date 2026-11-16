@@ -16,13 +16,29 @@ import { navigate } from '../router.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
-const { useState } = React;
+const { useState, useEffect } = React;
 
 const RES = [
   { key: '720p', label: '720P', rate: 0.6 },
   { key: '1080p', label: '1080P', rate: 1.2 }
 ];
 const IMAGE_UNIT = 0.2; // wan2.7-image ¥0.20/张（与 src/pricing.js 一致）
+
+// 草稿：2026-11-16 用户要求「切页/刷新别丢进度」（此前离开向导去小智首页再回来，2 张已付费图就挂不回去了）。
+// 只存本向导的内存态（不含 Key），提交成功或点「重新开始」时清空。
+const DRAFT_KEY = 'vs_create_smart_draft_v1';
+function loadDraft() {
+  try {
+    const j = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    return (j && typeof j === 'object') ? j : null;
+  } catch (e) { return null; }
+}
+function saveDraft(d) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) { /* 隐私模式/配额忽略 */ }
+}
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* ignore */ }
+}
 
 function readConfig() {
   try { return JSON.parse(localStorage.getItem('vs_config') || '{}') || {}; } catch (e) { return {}; }
@@ -48,28 +64,76 @@ function StepBar({ step }) {
 }
 
 export function CreateSmartWizard() {
-  const [step, setStep] = useState(1);
-  const [minutes, setMinutes] = useState('5');
-  const [clipDur, setClipDur] = useState(10);
-  const [cards, setCards] = useState(null);
+  const [draft0] = useState(() => loadDraft());
+  const [step, setStep] = useState(draft0 && draft0.step ? draft0.step : 1);
+  const [minutes, setMinutes] = useState(draft0 && draft0.minutes ? draft0.minutes : '5');
+  const [clipDur, setClipDur] = useState(draft0 && draft0.clipDur ? draft0.clipDur : 10);
+  const [cards, setCards] = useState(draft0 && Array.isArray(draft0.cards) ? draft0.cards : null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
-  const [prompts, setPrompts] = useState([]);
-  const [imagePrompts, setImagePrompts] = useState([]);
-  const [photos, setPhotos] = useState([]);   // [{id,url,status}]
-  const [res, setRes] = useState('720p');
-  const [transition, setTransition] = useState(true);
-  const [bgm, setBgm] = useState(true);
+  const [prompts, setPrompts] = useState(draft0 && Array.isArray(draft0.prompts) ? draft0.prompts : []);
+  const [imagePrompts, setImagePrompts] = useState(draft0 && Array.isArray(draft0.imagePrompts) ? draft0.imagePrompts : []);
+  const [photos, setPhotos] = useState(draft0 && Array.isArray(draft0.photos) ? draft0.photos : []);   // [{id,url,status,paid}]
+  const [res, setRes] = useState(draft0 && draft0.res ? draft0.res : '720p');
+  const [transition, setTransition] = useState(draft0 ? draft0.transition !== false : true);
+  const [bgm, setBgm] = useState(draft0 ? draft0.bgm !== false : true);
+  const [restored, setRestored] = useState(!!(draft0 && draft0.step > 1)); // 仅「开局就是从草稿恢复」时提示
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [libPhotos, setLibPhotos] = useState([]);
+  const [libBusy, setLibBusy] = useState('');
   const [showAll, setShowAll] = useState(false);
+
+  // 真的动过才落盘（避免一进来就写空草稿，害得下次永远显示「已恢复」）
+  useEffect(() => {
+    if (step <= 1 && prompts.length === 0 && photos.length === 0) return;
+    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, at: new Date().toISOString() });
+  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm]);
+
+  function restart() {
+    if (!window.confirm('清空当前进度，从第 ① 步重新开始？（已出的图仍在图片库里，不会丢）')) return;
+    clearDraft();
+    setStep(1); setMinutes('5'); setClipDur(10); setCards(null);
+    setPrompts([]); setImagePrompts([]); setPhotos([]); setRes('720p');
+    setTransition(true); setBgm(true); setRestored(false); setErr(''); setInfo(''); setShowAll(false);
+  }
 
   const totalSec = Math.max(1, Math.round((parseFloat(minutes) || 0) * 60));
   const clips = Math.max(1, Math.ceil(totalSec / clipDur - 1e-9));
   const tooMany = clips > 180;
   const rate = (RES.find((r) => r.key === res) || RES[0]).rate;
   const videoCost = clips * clipDur * rate;
-  const imageCost = photos.length * IMAGE_UNIT;
+  const imageCost = photos.filter((p) => p.paid !== false).length * IMAGE_UNIT; // 从库选的图已付过费，不重复计
   const approved = photos.filter((p) => p.status !== 'rejected');
+  const pickedCount = photos.filter((p) => p.paid === false).length;
+  const photoCountMismatch = photos.length > 0 && photos.length !== clips;
+
+  // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
+  async function openPicker() {
+    setErr(''); setLibBusy('open');
+    try {
+      const r = await fetch('/api/photos?includeMissing=1', { credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      const list = (Array.isArray(j.photos) ? j.photos : [])
+        .filter((p) => p.status === 'approved' && p.url && !p.fileMissing);
+      setLibPhotos(list);
+      setPickerOpen(true);
+    } catch (e) { setErr('读取图片库失败：' + e.message); }
+    finally { setLibBusy(''); }
+  }
+
+  function togglePick(p) {
+    if (photos.some((x) => x.id === p.id)) {
+      setPhotos((ps) => ps.filter((x) => x.id !== p.id));
+      return;
+    }
+    if (photos.length >= clips) {
+      setErr(`最多选 ${clips} 张（当前已选 ${photos.length} 张）。先移除一张再选。`);
+      return;
+    }
+    setErr('');
+    setPhotos((ps) => [...ps, { id: p.id, url: p.url, status: 'approved', paid: false, label: p.label || '' }]);
+  }
 
   async function loadCards() {
     if (tooMany) { setErr(`场景卡正片只有 180 张，本次 ${clips} 段超了；请缩短时长或改成 15 秒/段。`); return; }
@@ -119,7 +183,7 @@ export function CreateSmartWizard() {
       const all = (pj && pj.photos) || [];
       setPhotos(ids.map((id) => {
         const it = all.find((p) => p.id === id) || {};
-        return { id, url: it.url || '', status: it.status || 'unchecked' };
+        return { id, url: it.url || '', status: it.status || 'unchecked', paid: true };
       }).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)));
       setInfo(`已出图 ${ids.length} 张（${yuan(ids.length * IMAGE_UNIT)}）。请逐张看，打回不满意的；确认后点下一步。`);
     } catch (e) { setErr('出图失败：' + e.message); }
@@ -161,6 +225,7 @@ export function CreateSmartWizard() {
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.taskId) throw new Error((j && j.error) || ('HTTP ' + r.status));
+      clearDraft(); setRestored(false);   // 任务已建：草稿作废，避免下次进来「恢复」出个重复任务
       navigate('/gen');
     } catch (e) { setErr('提交失败：' + e.message); }
     finally { setBusy(''); }
@@ -182,6 +247,8 @@ export function CreateSmartWizard() {
         <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">创作</h1>
         <span className="text-[11px] text-ink3">场景卡 → 提示词 → 出图（可选）→ 视频 → 拼接 → 配乐</span>
         <span className="flex-1"></span>
+        ${restored && html`<span className="text-[11px] text-accent">已恢复上次进度</span>`}
+        <${Btn} onClick=${restart}>重新开始</${Btn}>
         <${Btn} onClick=${() => navigate('/create')}>用旧版六步向导</${Btn}>
       </div>
       <${StepBar} step=${step} />
@@ -243,29 +310,37 @@ export function CreateSmartWizard() {
       ${step === 3 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <p className="text-[12px] text-ink2 mb-1">这一步是<b className="text-ink">可选</b>的：出图后走图生视频（画面更可控），跳过就是纯文生视频。</p>
-          <p className="text-[11px] text-ink3 mb-3">出图真实计费 ${yuan(IMAGE_UNIT)}/张，本次 ${imagePrompts.length} 张 ≈ ${yuan(imagePrompts.length * IMAGE_UNIT)}。出完会停在这里让你抽看。</p>
-          <div className="flex gap-2 mb-4">
+          <p className="text-[11px] text-ink3 mb-3">新出图真实计费 ${yuan(IMAGE_UNIT)}/张，本次 ${imagePrompts.length} 张 ≈ ${yuan(imagePrompts.length * IMAGE_UNIT)}；<b className="text-ink2">已付费的图可直接从图片库选，不重复计费</b>。</p>
+          <div className="flex gap-2 mb-3 flex-wrap">
             <${Btn} primary=${true} disabled=${busy === 'images'} onClick=${genImages}>
               ${busy === 'images' ? '出图中…' : '出图 ' + imagePrompts.length + ' 张'}
             </${Btn}>
+            <${Btn} disabled=${libBusy === 'open'} onClick=${openPicker}>${libBusy === 'open' ? '读取图片库…' : '从图片库选图'}</${Btn}>
             <${Btn} onClick=${() => { setPhotos([]); setStep(4); }}>不出图，直接下一步</${Btn}>
           </div>
+          <p className="text-[11px] text-ink3 mb-3">
+            已选 <b className=${photoCountMismatch ? 'text-danger' : 'text-ink2'}>${photos.length}</b> / ${clips} 张${pickedCount ? `（其中 ${pickedCount} 张来自图片库，不重复计费）` : ''}
+          </p>
+          ${photoCountMismatch && html`<p className="text-[12px] text-danger mb-2">数量必须等于段数（${clips} 张）：要么补齐，要么全部移除改走文生视频。</p>`}
           ${photos.length > 0 && html`
             <div className="grid grid-cols-4 gap-2">
-              ${photos.map((p) => html`
+              ${photos.map((p, i) => html`
                 <div key=${p.id} className="rounded-[6px] border border-white/[.10] overflow-hidden bg-s2">
                   ${p.url ? html`<img src=${p.url} alt="出图" className="w-full h-[110px] object-cover" />` : html`<div className="w-full h-[110px] grid place-items-center text-[10px] text-ink3">无预览</div>`}
                   <div className="flex items-center gap-1 p-1.5">
-                    <span className=${'text-[10px] ' + (p.status === 'rejected' ? 'text-danger' : 'text-ink3')}>${p.status === 'rejected' ? '已打回' : (p.status === 'approved' ? '已通过' : '待看')}</span>
+                    <span className="text-[10px] text-ink3 font-num">${i + 1}</span>
+                    <span className=${'text-[10px] ' + (p.status === 'rejected' ? 'text-danger' : 'text-ink3')}>${p.paid === false ? '库选' : (p.status === 'rejected' ? '已打回' : (p.status === 'approved' ? '已通过' : '待看'))}</span>
                     <span className="flex-1"></span>
-                    <button onClick=${() => review(p.id, 'approved')} className="h-5 px-1 rounded-[3px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>
-                    <button onClick=${() => review(p.id, 'rejected')} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">打回</button>
+                    ${p.paid === false
+                      ? html`<button onClick=${() => togglePick({ id: p.id })} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">移除</button>`
+                      : html`<button onClick=${() => review(p.id, 'approved')} className="h-5 px-1 rounded-[3px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>
+                             <button onClick=${() => review(p.id, 'rejected')} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">打回</button>`}
                   </div>
                 </div>`)}
             </div>`}
           <div className="mt-4 flex gap-2">
             <${Btn} onClick=${() => setStep(2)}>上一步</${Btn}>
-            <${Btn} primary=${true} onClick=${() => setStep(4)}>下一步：生成设置</${Btn}>
+            <${Btn} primary=${true} disabled=${photoCountMismatch} onClick=${() => setStep(4)}>下一步：生成设置</${Btn}>
           </div>
         </div>`}
 
@@ -287,7 +362,7 @@ export function CreateSmartWizard() {
           </label>
           <div className="text-[12px] text-ink2 leading-[1.9]">
             片段：${clips} 段 × ${clipDur} 秒<br/>
-            视频：${yuan(videoCost)}（${res} ¥${rate}/s）${photos.length ? html`<br/>图片：${yuan(imageCost)}（已生成 ${photos.length} 张）` : ''}<br/>
+            视频：${yuan(videoCost)}（${res} ¥${rate}/s）${photos.length ? html`<br/>图片：${yuan(imageCost)}（本次出图 ${photos.length - pickedCount} 张${pickedCount ? ` · 从库选 ${pickedCount} 张已付费` : ''}）` : ''}<br/>
             <b className="text-ink">合计：${yuan(videoCost + imageCost)}</b>
           </div>
           <div className="mt-4 flex gap-2">
@@ -303,12 +378,41 @@ export function CreateSmartWizard() {
             时长：${clips} 段 × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟<br/>
             画面：${approved.length === prompts.length && prompts.length ? '图生视频（' + approved.length + ' 张首帧）' : '文生视频（场景卡提示词）'}<br/>
             转场：${transition ? '0.4s 淡化' : '关闭'} · 配乐：${bgm ? '自动' : '关闭'}<br/>
-            费用：视频 ${yuan(videoCost)}${photos.length ? ' + 图片 ' + yuan(imageCost) : ''} = <b className="text-ink">${yuan(videoCost + imageCost)}</b>
+            费用：视频 ${yuan(videoCost)}${imageCost ? ' + 图片 ' + yuan(imageCost) : ''}${pickedCount ? `（另用库图 ${pickedCount} 张，已付费不再计）` : ''} = <b className="text-ink">${yuan(videoCost + imageCost)}</b>
           </div>
           <p className="mt-3 text-[11px] text-ink3">提交后进入「生成中」：逐段生成 → 质检 → 转场拼接 → 无缝循环 → 配乐 → 转码。真实计费，确认后才开始。</p>
           <div className="mt-4 flex gap-2">
             <${Btn} onClick=${() => setStep(4)}>上一步</${Btn}>
             <${Btn} primary=${true} disabled=${busy === 'submit'} onClick=${submit}>${busy === 'submit' ? '提交中…' : '确认提交（' + yuan(videoCost + imageCost) + '）'}</${Btn}>
+          </div>
+        </div>`}
+
+      ${pickerOpen && html`
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
+          style=${{ background: 'rgba(0,0,0,.72)' }} onClick=${() => setPickerOpen(false)}>
+          <div className="w-full max-w-[920px] overflow-auto rounded-[8px] border border-white/[.12] bg-s1 p-4"
+            style=${{ maxHeight: '80vh' }}
+            onClick=${(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <span className="text-[13px] text-ink">从图片库选图（仅列已通过审核的）</span>
+              <span className="text-[11px] text-ink3">按点击顺序作为第 1…${clips} 段首帧 · 需要 ${clips} 张</span>
+              <span className="flex-1"></span>
+              <span className="text-[12px] text-accent">已选 ${photos.length} / ${clips}</span>
+              <${Btn} primary=${true} onClick=${() => setPickerOpen(false)}>完成</${Btn}>
+            </div>
+            ${libPhotos.length === 0 && html`<p className="text-[12px] text-ink3 py-6">图片库里还没有「已通过」的图。</p>`}
+            <div className="grid gap-2" style=${{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
+              ${libPhotos.map((p) => {
+                const idx = photos.findIndex((x) => x.id === p.id);
+                return html`<button key=${p.id} onClick=${() => togglePick(p)}
+                  className=${'rounded-[6px] overflow-hidden border text-left ' + (idx >= 0 ? 'border-accent' : 'border-white/[.10]')}
+                  style=${{ position: 'relative', background: '#0f1712' }}>
+                  ${p.url ? html`<img src=${p.url} alt="" className="w-full h-[86px] object-cover" />` : html`<div className="w-full h-[86px] grid place-items-center text-[10px] text-ink3">无预览</div>`}
+                  ${idx >= 0 && html`<span style=${{ position: 'absolute', top: '4px', left: '4px', height: '16px', minWidth: '16px', padding: '0 4px', borderRadius: '3px', background: 'var(--accent)', color: '#0b100d', fontSize: '10px', lineHeight: '16px', textAlign: 'center' }}>${idx + 1}</span>`}
+                  <div className="px-1.5 py-1 text-[10px] text-ink3 truncate">${p.label || ''}${p.isFinal ? ' · 最终版' : ''}</div>
+                </button>`;
+              })}
+            </div>
           </div>
         </div>`}
     </div>

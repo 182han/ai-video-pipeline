@@ -212,7 +212,9 @@ async function runWizard() {
   const invSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'inventory.js'), 'utf8');
   check(/setSeedPhoto/.test(draftSrc) && /takeSeedPhoto/.test(draftSrc), '草稿模块支持照片库 seed（setSeedPhoto / takeSeedPhoto）');
   check(/adoptPhoto/.test(createSrc), '向导支持 adoptPhoto（把照片库的图变成当前图）');
-  check(/setSeedPhoto/.test(invSrc) && /navigate\('\/'\)/.test(invSrc), '照片页「用它生成视频」写 seed 并跳回创作');
+  // 2026-11-16 Lead：仓库现状（含 HEAD）是 seed 后跳旧六步向导 /create（seed 消费方在 create.js），
+  // 旧断言写的是 navigate('/')，属过期断言；按现状同步，不删检查项。
+  check(/setSeedPhoto/.test(invSrc) && /navigate\('\/create'\)/.test(invSrc), '照片页「用它生成视频」写 seed 并跳 /create（旧六步向导，seed 消费方）');
   check(/findPromptConflict/.test(createSrc), '提交前会检查画面基准与运动描述的冲突');
   check(/imageBase/.test(createSrc) && /sourcePhotoMotionPrompt/.test(createSrc), '图生视频自动拼「画面基准 + 运动描述」并单独上报运动提示词');
 

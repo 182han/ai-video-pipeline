@@ -131,3 +131,53 @@ PUT 两张 {isFinal:true}                                      → 200
 同 §6：`server.js` 含 C 窗口在途改动，我的 2 处删改**未单独提交**，将随 C 的 `server.js` 提交一起入库。
 **请 C 在提交信息里注明「含 Lead 的 2026-11-16 图生视频闸门放宽（按用户口径：人工通过即放行）」**，
 并确认其 `verify-image-first-*` 套件里没有断言这两个 400 文案（若有，需改成新的口径断言）。
+
+## 8. 补功能：从图片库按段选图 + 草稿持久化（2026-11-16 13:4x，用户指定「走 C」）
+
+### 8.1 为什么必须补
+
+用户已付 ¥0.40 出的 2 张图，因为「离开向导 → 向导状态丢失」而挂不回去；重走流程要再花 ¥0.40。
+现有向导只认本次会话内出的图，旧向导只支持单张 seed（`sourcePhotoId`），做不了逐段首帧。
+
+### 8.2 改动（全部在 `web/src/screens/createSmart.js`，我的文件、无他人改动）
+
+1. **从图片库选图**：③ 新增按钮 → 弹窗列 `GET /api/photos?includeMissing=1` 里 **status=approved 且有 url** 的图；
+   按点击顺序作为第 1…N 段首帧；显示序号、`调色前/调色后 · 最终版`；已选 N/clips；选中项卡片显示「库选」+「移除」。
+2. **数量硬约束**：`0 < 已选 < 段数` 时红字提示并**禁用「下一步」**（避免静默退化成文生视频）。
+3. **不重复计费**：照片条目加 `paid` 标记；出图 `paid:true`、库选 `paid:false`；
+   `imageCost` 只累加 `paid` 的图 → ④ 显示「图片：¥0.00（本次出图 0 张 · 从库选 2 张已付费）」，合计只算视频费。
+4. **草稿持久化**：`localStorage['vs_create_smart_draft_v1']` 存 step/minutes/clipDur/cards/prompts/imagePrompts/photos/res/transition/bgm
+   （**不含任何 Key**）；仅在「动过」时落盘；开局若从草稿恢复则显示「已恢复上次进度」，提交成功或点「重新开始」即清空。
+5. 顶部新增「重新开始」按钮（二次确认）。
+
+### 8.3 验收（零计费，真浏览器）
+
+脚本 `.scratch/auto_chain/e2e_create_smart_picker.js`（不在 git）：**CDP 9222 独立 incognito 上下文**
+（本会话 headless Chrome 沙箱起不来；不碰用户标签页/不写用户 localStorage），连接**运行中的 3001 单实例**。
+
+```
+结果: 22 通过 / 0 失败
+  OK 0.34 分钟 → 2 段 / ② 2 段提示词 / ③ 弹窗 11 张库图
+  OK 选中 img_0 + img_1（调色后）→ 「已选 2 / 2 张」
+  OK ③ 卡片显示「库选」、下一步可用
+  OK ④ 图片 ¥0.00（本次出图 0 张 · 从库选 2 张已付费）、合计 ¥12.00
+  OK 刷新后「已恢复上次进度」+ 仍在 ④ + 库选 2 张仍在
+  OK 流程中不误报「已恢复」 / 无页面 JS 异常 / 未创建任何任务（before=40 after=40）
+```
+
+截图：`docs/交接/create-smart-picker/{01-picker-selected-2,02-step4-cost,03-after-reload-draft}.png`。
+
+回归（本机实跑）：`verify-xiaozhi-home` **45/0**、`verify-p6-offline` **41/0**、
+`verify-photo-library` **42/0**、`verify-editor-nav` **15/0**、`verify-create-draft` **49/0**。
+
+### 8.4 同步改的断言（按契约改断言，不删检查项）
+
+- `scripts/verify-xiaozhi-home.js`：3 处旧断言（导航「创作」、Rail 高亮、小智首页导航、gen.js 去创作）改为 `/create-smart`；
+  新增 1 条「旧六步向导仍可按 /create 打开（回退保留）」→ 44 → **45 项全绿**。
+- `scripts/verify-create-draft.js`：**既有过期断言**（写 `navigate('/')`，而 HEAD 代码一直是 `navigate('/create')`，与本轮无关）
+  按仓库现状同步为 `/create` → **49/0**。
+
+### 8.5 未验证 / 待用户
+
+- **真实提交（付费）未由我执行**：④→⑤ 的「确认提交」按红线留给用户点。本次 E2E 只验证到 ④，未建任务（40→40）。
+- 重启后 §7 的闸门放宽才生效；在那之前选中**非最终版**的库图仍会被旧进程拦（本次 2 张已被标为最终版+审查通过）。

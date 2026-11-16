@@ -41,8 +41,9 @@ async function httpGet(url) {
   check(/if \(route === '\/' \|\| route === ''\) return 'home'/.test(shell), 'shell.js：/ 映射 home');
   check(/if \(route\.startsWith\('\/create'\)\) return 'create'/.test(shell), 'shell.js：/create 映射 create');
   check(/if \(view === 'home'\)[\s\S]{0,160}AssistantPage/.test(shell), 'shell.js：home 渲染 AssistantPage（不套全局左栏）');
-  check(/key: 'create', route: '\/create'/.test(shell), '导航「创作」指向 /create');
-  check(/create: '\/create'/.test(shell), 'Rail 高亮映射 create → /create');
+  check(/key: 'create', route: '\/create-smart'/.test(shell), '导航「创作」指向 /create-smart（2026-11-16 默认入口切换）');
+  check(/create: '\/create-smart'/.test(shell), 'Rail 高亮映射 create → /create-smart');
+  check(/if \(route\.startsWith\('\/create'\)\) return 'create'/.test(shell), '旧六步向导仍可按 /create 打开（回退保留）');
   const navKeys = (shell.match(/\{ key: '/g) || []).length;
   check(navKeys === 3, '导航仍为 3 项（创作 / 剪辑 / 库；设置固定底部）', String(navKeys));
 
@@ -54,7 +55,7 @@ async function httpGet(url) {
   check(/•••/.test(page), '按钮文案为三个点');
   check(/data-route=\$\{item\.route\}/.test(page), '导航项带 data-route（可点进对应界面）');
   check(!/label: '退出'/.test(page), '导航不含「退出」项（三个点不是退出）');
-  check(/route: '\/create'/.test(page) && /route: '\/edit'/.test(page)
+  check(/route: '\/create-smart'/.test(page) && /route: '\/edit'/.test(page)
     && /route: '\/library'/.test(page) && /route: '\/settings'/.test(page), '4 个导航目标：创作/剪辑/库/设置');
 
   console.log('\n[2.1] 板块页「回小智」退出入口');
@@ -84,7 +85,7 @@ async function httpGet(url) {
   for (const f of ['inventory.js', 'templates.js']) {
     check(!/navigate\('\/'\)/.test(read(path.join(WEB, 'src', 'screens', f))), `${f} 仍回 /create（不回 /）`);
   }
-  check(/navigate\('\/create'\)/.test(read(path.join(WEB, 'src', 'screens', 'gen.js'))), 'gen.js「去创作」仍回 /create');
+  check(/navigate\('\/create-smart'\)/.test(read(path.join(WEB, 'src', 'screens', 'gen.js'))), 'gen.js「去创作」→ /create-smart（2026-11-16 切默认入口）');
   check(/assistant-home\.css/.test(indexHtml), 'index.html 引入 assistant-home.css');
   check(/\.xz-root[\s\S]{0,400}radial-gradient/.test(css), '整页绿色渐变/光晕样式');
   check(/\.xz-rail\.is-collapsed/.test(css) && /flex-basis: 64px/.test(css), '导航收起 64px 样式');
