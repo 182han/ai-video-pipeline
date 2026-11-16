@@ -28,6 +28,9 @@ const PLAN_VERSION = 'assistant-plan.v1';
 // mock 只在验收/演示里用，本身不计费；范围放宽到 1–60s（与流水线允许值一致）。
 const MODELS = Object.freeze({
   dashscope: { id: 'dashscope', label: '万相 3.0（DashScope）', minSec: 2, maxSec: 30 },
+  // 2026-11-16 用户口径：长片默认走 WhaleTV 中转（openai-video），标签用「WhaleTV 万相 3.0（中转）」。
+  // 中转发 POST {baseUrl}/videos {model,prompt,seconds}，与官方万相同一模型，按秒计费。
+  'openai-video': { id: 'openai-video', label: 'WhaleTV 万相 3.0（中转）', minSec: 2, maxSec: 30 },
   kling: { id: 'kling', label: '可灵（Kling）', minSec: 3, maxSec: 15 },
   seedance: { id: 'seedance', label: '即梦（Seedance）', minSec: 2, maxSec: 15 },
   mock: { id: 'mock', label: 'Mock（零计费验收）', minSec: 1, maxSec: 60 }
@@ -168,6 +171,8 @@ function findResolution(text) {
 
 function findModel(text) {
   const lower = text.toLowerCase();
+  // 中转优先于「万相」：用户说「WhaleTV / 中转 / agglm」时是 openai-video，不是官方 dashscope。
+  if (/whaletv|whale\s*tv|agglm|中转|openai-video|openai视频/.test(lower)) return 'openai-video';
   if (/dashscope|万相|wan3|wan\b|通义/.test(lower)) return 'dashscope';
   if (/kling|可灵/.test(lower)) return 'kling';
   if (/seedance|即梦|doubao|豆包/.test(lower)) return 'seedance';
@@ -305,7 +310,8 @@ function buildPlan(input = {}) {
   const parsed = parseUtterance(input.text || '');
   const pick = (v, fallback) => (v === undefined || v === null || v === '' ? fallback : v);
 
-  const modelId = String(pick(input.model, pick(parsed.model, 'dashscope')));
+  // 默认模型 = WhaleTV 中转（openai-video，2026-11-16 用户口径）；用户明确说 dashscope/可灵/即梦时按说的来。
+  const modelId = String(pick(input.model, pick(parsed.model, 'openai-video')));
   const model = MODELS[modelId];
   if (!model) {
     return fail('PLAN_UNKNOWN_MODEL', `不认识的视频模型：${modelId}（可用：${Object.keys(MODELS).join(' / ')}）`);

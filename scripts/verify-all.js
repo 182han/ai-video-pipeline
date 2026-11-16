@@ -332,6 +332,12 @@ const SUITES = [
     desc: '小智 HTTP 层：临时隔离实例跑 /api/assistant/*（info/message/execute/state/memory/asr/understand + 1 段 Mock 成片）'
   },
   {
+    name: 'whaletv-video',
+    script: 'verify-whaletv-video.js',
+    group: 'fast',
+    desc: 'P5 默认走 WhaleTV 中转（openai-video）：计划卡 ¥180/$30、按秒价目、POST /videos body(model/prompt/seconds)、seconds 边界、图生视频 multipart（stub fetch 零花费）'
+  },
+  {
     name: 'p6-offline',
     script: 'verify-p6-offline.js',
     group: 'fast',

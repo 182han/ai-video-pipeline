@@ -550,8 +550,14 @@ async function main() {
   const tasksBefore = taskManager.getAllTasks().length;
   const msgPay = supervisor.handleMessage({ text: '1段极光，每段10秒' });
   const planPay = msgPay.plan;
-  ok('对话生成的是真实计费模型计划（dashscope）', !!planPay && planPay.model === 'dashscope'
-    && planPay.requiresPaymentApproval === true, planPay && planPay.model);
+  ok('对话生成的是真实计费模型计划（默认 WhaleTV 中转 openai-video）',
+    !!planPay && planPay.model === 'openai-video'
+    && planPay.modelLabel === 'WhaleTV 万相 3.0（中转）'
+    && planPay.requiresPaymentApproval === true,
+    planPay && (planPay.model + ' / ' + planPay.modelLabel));
+  ok('默认模型按秒计价非 0（付费闸门不能被 ¥0 绕过）',
+    !!planPay && planPay.estimate.totalCny > 0 && planPay.estimate.budget.usd > 0,
+    planPay && (`¥${planPay.estimate.totalCny} / $${planPay.estimate.budget.usd}`));
   const payExec = supervisor.execute({
     sessionId: msgPay.sessionId,
     planId: planPay.planId,

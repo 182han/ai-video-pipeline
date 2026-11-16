@@ -46,6 +46,14 @@ const PER_SECOND = {
     prices: { '1080p': 1.2, '720p': 0.6, '480p': 0.3 },
     fallback: 1.2,
     label: '按秒计价：720P ¥0.6/s · 1080P ¥1.2/s · 480P ¥0.3/s'
+  },
+  // WhaleTV 中转（openai-video）：底层就是 wan3.0-video，按秒计费口径与官方万相一致。
+  // 2026-11-16 用户确认长片默认走这条中转。漏掉这条会让计划卡算成 ¥0 →
+  // planCard 的 requiresPaymentApproval 变 false（付费闸门失效），所以必须显式登记。
+  'openai-video': {
+    prices: { '1080p': 1.2, '720p': 0.6, '480p': 0.3 },
+    fallback: 1.2,
+    label: '按秒计价（WhaleTV 中转）：720P ¥0.6/s · 1080P ¥1.2/s · 480P ¥0.3/s'
   }
 };
 
