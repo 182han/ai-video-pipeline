@@ -123,6 +123,7 @@ const SUITES = [
   { name: 'editor-adjust', script: 'verify-editor-adjust.js', group: 'real', desc: '剪辑台逐段调节（17 项）' },
   { name: 'editor-audio', script: 'verify-editor-audio.js', group: 'real', desc: '剪辑台音频两轨（22 项）' },
   { name: 'editor-export', script: 'verify-editor-export.js', group: 'real', desc: '剪辑台导出（24 项）' },
+  { name: 'editor-final-source', script: 'verify-editor-final-source.js', group: 'real', desc: '剪辑台接成片：素材三来源/整段载入/导出归成片（P3，真 ffmpeg + ffprobe）' },
   { name: 'editor-media', script: 'verify-editor-media.js', group: 'real', desc: '剪辑台素材面板（21 项）' },
   { name: 'editor-nav', script: 'verify-editor-nav.js', group: 'real', desc: '剪辑台导航（12 项）' },
   { name: 'editor-preview', script: 'verify-editor-preview.js', group: 'real', desc: '剪辑台实时预览（28 项）' },
@@ -217,6 +218,12 @@ const SUITES = [
     desc: '片段库：价目表/费用口径/分组/跨规格拼接归一化'
   },
   {
+    name: 'recycle',
+    script: 'verify-recycle.js',
+    group: 'fast',
+    desc: '统一回收站 + 入库策略（删除可恢复/白名单防越界/失败片段入库/mock 不入库/费用未知不伪装成 0）'
+  },
+  {
     name: 'skill-prompt',
     script: 'verify-skill-prompt.js',
     group: 'fast',
@@ -269,6 +276,66 @@ const SUITES = [
     script: 'verify-bgm-suite.js',
     group: 'real',
     desc: '配乐 API/负向/端到端三套件（隔离 DATA_DIR/OUTPUT_DIR 起独立服务）'
+  },
+  {
+    name: 'qc-report-mode',
+    script: 'verify-qc-report-mode.js',
+    group: 'real',
+    desc: '质检分级（软项只警告）+ autoRetry=false 不自动重跑 + 失败清单停在拼接前'
+  },
+  {
+    name: 'concat-normalize',
+    script: 'verify-concat-normalize.js',
+    group: 'real',
+    desc: '转场关闭时混合分辨率拼接先归一化（只重编码不匹配段 + 完整解码校验）'
+  },
+  {
+    name: 'i2v-dashscope-url',
+    script: 'verify-i2v-dashscope-url.js',
+    group: 'fast',
+    desc: 'wan3.0 图生视频：百炼临时上传 oss:// + X-DashScope-OssResourceResolve 请求头（stub，零计费）'
+  },
+  {
+    name: 'auto-grade',
+    script: 'verify-auto-grade.js',
+    group: 'real',
+    desc: '逐图自适应调色：高饱和压回区间、低饱和不反向调艳（真 ffmpeg）'
+  },
+  {
+    name: 'image-batch',
+    script: 'verify-image-batch.js',
+    group: 'real',
+    desc: '批量出图→逐图调色→自动通过→photoId 顺序对应（stub 出图，零计费）'
+  },
+  {
+    name: 'image-first-e2e',
+    script: 'verify-image-first-e2e.js',
+    group: 'real',
+    desc: '图片优先全链路：photoId→first_frame URL→本地 DashScope stub→下载→质检→拼接（零计费）'
+  },
+  {
+    name: 'scene-cards',
+    script: 'verify-scene-cards.js',
+    group: 'real',
+    desc: '场景卡接入运行时：180 张顺序无重复/buffer 仅在失败时替换/promptComposer/参数化调色/Mock 任务记录 scene_key'
+  },
+  {
+    name: 'assistant',
+    script: 'verify-assistant.js',
+    group: 'real',
+    desc: '小智：计划卡/状态机/记忆/离线语音/ΔE76+SSIM 补位/Mock 全流程 + 自动重试（零计费）'
+  },
+  {
+    name: 'assistant-http',
+    script: 'verify-assistant-http.js',
+    group: 'real',
+    desc: '小智 HTTP 层：临时隔离实例跑 /api/assistant/*（info/message/execute/state/memory/asr/understand + 1 段 Mock 成片）'
+  },
+  {
+    name: 'p6-offline',
+    script: 'verify-p6-offline.js',
+    group: 'fast',
+    desc: 'P6 下线历史/产出入口：壳层不再渲染 History/Output、深链落库、库页未完成卡片与失败徽章、旧页面标注（静态 + 3001 静态文件只读校验）'
   }
 ];
 
