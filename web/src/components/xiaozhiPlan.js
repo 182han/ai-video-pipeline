@@ -129,7 +129,7 @@ export function GreetingBubble({ onPick, onClose, bottom = 136 }) {
         <div className="flex-1">
           <p className="text-[12px] text-ink font-medium">我是小智</p>
           <p className="mt-1 text-[11px] leading-[1.65] text-ink3">
-            说个总时长，我来排计划，比如「10 分钟」。场景从场景卡库里按顺序自动抽取，长片也是几十个不同场景，不用指定主题。
+            说个总时长，我来排计划，比如「10 分钟」。
           </p>
         </div>
         <button

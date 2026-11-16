@@ -674,10 +674,7 @@ export function Assistant({ page = false } = {}) {
             ${!chatting && html`
               <section className="xz-intro" aria-label="小智介绍">
                 <p className="xz-intro-kicker">你的视频管家</p>
-                <h2 className="xz-intro-title">我是小智，告诉我视频多长，我从场景卡库里自动挑不同场景、排好计划并完成。</h2>
-                <p className="xz-intro-sub">
-                  比如「10 分钟」：每段 10 秒，10 分钟就是 60 个不同场景，不用指定主题。我会先给你一张计划卡，确认后才开始执行；涉及付费的调用一定先问你。
-                </p>
+                <h2 className="xz-intro-title">我是小智，告诉我你想要多长的视频吧</h2>
                 <div className="xz-chips">
                   ${PAGE_CHIPS.map((c) => html`
                     <button key=${c} type="button" className="xz-chip" onClick=${() => pickGreeting(c)}>${c}</button>
@@ -875,7 +872,7 @@ export function Assistant({ page = false } = {}) {
             </div>
           `}
           ${msgs.length === 0 && backend.ok && html`
-            <${Msg} role="assistant" text=${'我是小智。说个总时长就能排计划，比如「10 分钟」——场景从场景卡库按顺序自动抽取，不需要指定主题；也可以问「上一次的视频」或「现在进度怎样」。'} />
+            <${Msg} role="assistant" text=${'我是小智。说个总时长就能排计划，比如「10 分钟」；也可以问「上一次的视频」或「现在进度怎样」。'} />
           `}
           ${msgs.length === 0 && !backend.ok && hasKey && html`
             <${Msg} role="assistant" text="说说你想拍什么？比如「极光」「喀斯特晨雾」。单条就一次问一个问题；也可以在上面直接批量生成 N 条不同地貌。" />

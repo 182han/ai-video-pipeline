@@ -72,8 +72,8 @@ async function httpGet(url) {
   check(/data-page="xiaozhi"/.test(assistant), '整页容器 data-page=xiaozhi');
   check(/PAGE_CHIPS = \['10 分钟的长视频', '上一次的视频', '现在进度怎样'\]/.test(assistant), '介绍卡 3 个建议 chips（时长优先，不是主题示例）');
   check(!/30 分钟的雪山|10 分钟的极光/.test(assistant), '不再用主题式长片示例');
-  check(/xz-intro-title[\s\S]{0,160}我是小智，告诉我视频多长/.test(assistant), '介绍卡开场白：说时长 → 自动抽场景');
-  check(/场景卡库/.test(assistant) && /60 个不同场景/.test(assistant), '介绍卡说明「场景卡库自动抽取 60 个不同场景」');
+  check(/xz-intro-title">我是小智，告诉我你想要多长的视频吧</.test(assistant), '介绍卡只留一句「我是小智，告诉我你想要多长的视频吧」');
+  check(!/xz-intro-sub/.test(assistant), '介绍卡不再写长副文案（细节交给计划卡）');
   check(/xz-composer-wrap/.test(assistant) && /xz-inputbar/.test(assistant), '底部微信式输入框');
   check(/VoiceButton/.test(assistant), '语音按钮复用（ASR → 失败回退打字）');
   check(/is-compact/.test(assistant), '有消息后大球缩小（is-compact）');
