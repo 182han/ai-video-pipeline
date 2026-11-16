@@ -735,6 +735,9 @@ export function PhotosPanel({ onChanged }) {
 //   · 已在该任务下产出成片（Library 里已有 kind=final 且 taskId 相同）。
 function UnfinishedPanel({ tasks, finals, onChanged }) {
   const [openId, setOpenId] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [fileCounts, setFileCounts] = useState({});
   const finalTaskIds = new Set((finals || []).map((it) => it.taskId).filter(Boolean));
   const rows = (tasks || [])
     .filter((t) => t
@@ -743,6 +746,68 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
       && !t.fragmentOnly
       && !finalTaskIds.has(t.taskId))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const rowsKey = rows.map((t) => t.taskId).join(',');
+
+  // 2026-11-16 P3：未完成卡片加删除入口。
+  // 后端 DELETE /api/tasks/:id → taskManager.moveToTrash **只移走任务 JSON**，
+  // 片段文件留在 clips/ 不动（见 src/taskManager.js moveToTrash）。
+  // /api/tasks 列表不带 clips（只有 totalClips），所以这里按任务逐个读详情，
+  // 拿到「真实存在文件的片段数」——有文件的任务必须单独再确认一次。
+  useEffect(() => {
+    if (!rowsKey) { setFileCounts({}); return undefined; }
+    let alive = true;
+    (async () => {
+      const next = {};
+      for (const id of rowsKey.split(',')) {
+        try {
+          const r = await fetch('/api/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' });
+          const j = await r.json().catch(() => null);
+          const task = (j && (j.task || j)) || {};
+          const clips = Array.isArray(task.clips) ? task.clips : [];
+          next[id] = clips.filter((c) => c && c.videoPath).length;
+        } catch (e) { next[id] = null; } // 读不到 → null（按「可能有文件」保守处理）
+      }
+      if (alive) setFileCounts(next);
+    })();
+    return () => { alive = false; };
+  }, [rowsKey]);
+
+  async function removeTask(t) {
+    let files = fileCounts[t.taskId];
+    if (files === undefined) {
+      // 详情还没读回来：现场读一次，别猜。
+      try {
+        const r = await fetch('/api/tasks/' + encodeURIComponent(t.taskId), { credentials: 'same-origin' });
+        const j = await r.json().catch(() => null);
+        const task = (j && (j.task || j)) || {};
+        files = (Array.isArray(task.clips) ? task.clips : []).filter((c) => c && c.videoPath).length;
+      } catch (e) { files = null; }
+    }
+    const label = String(t.prompt || '(无提示词)').slice(0, 42);
+    const first = (files === null)
+      ? `读不到这条任务的片段详情，无法确认它是否还有片段文件。\n\n`
+        + `删除只会移走任务记录（片段文件不会被删），但请你自己确认。\n\n`
+        + `确定删除任务记录「${label}」？`
+      : (files > 0
+        ? `这条任务还有 ${files} 个片段文件（clips/，不会被删除）。\n\n`
+          + `删除只会把任务记录移入「任务回收站」，片段文件仍留在磁盘上。\n`
+          + `要彻底清掉片段，请到「片段」tab 单独处理。\n\n`
+          + `确定删除任务记录「${label}」？`
+        : `删除任务记录「${label}」？\n会移到「任务回收站」（库页右上角），可恢复。`);
+    if (!window.confirm(first)) return;
+    if (files !== 0 && !window.confirm(
+      (files > 0 ? `再次确认：这条任务有 ${files} 个片段文件，` : '再次确认：片段数未知，')
+      + '删除后记录进任务回收站、文件仍在磁盘。继续？')) return;
+    setErr(''); setBusy(t.taskId);
+    try {
+      const r = await fetch('/api/tasks/' + encodeURIComponent(t.taskId), { method: 'DELETE', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      // 该路由总是 HTTP 200，错误在 body.error 里（taskManager.moveToTrash 的返回）
+      if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+      if (onChanged) onChanged();
+    } catch (e) { setErr('删除失败：' + e.message); }
+    finally { setBusy(''); }
+  }
   if (!rows.length) return null;
 
   return html`
@@ -750,7 +815,10 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[12px] text-warn">未完成 ${rows.length} 条</span>
         <span className="text-[10px] text-ink3">失败任务仍可补跑；成片齐全后会自动从这里消失。</span>
+        <span className="flex-1"></span>
+        <span className="text-[10px] text-ink3">删除只移任务记录，不动片段文件</span>
       </div>
+      ${err && html`<p className="mt-1 text-[11px] text-danger">${err}</p>`}
       <div className="mt-1">
         ${rows.map((t) => {
           const st = statusMeta(t.status, t);
@@ -769,12 +837,96 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
               <button onClick=${() => setOpenId(t.taskId)}
                 className="h-6 px-2 rounded-[4px] text-[10px] text-ink2 hover:bg-white/[.06] shrink-0"
               >详情 / 补跑</button>
+              <button onClick=${() => removeTask(t)} disabled=${busy === t.taskId}
+                className="h-6 px-2 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06] shrink-0"
+                style=${{ opacity: busy === t.taskId ? .5 : 1 }}
+              >${fileCounts[t.taskId] > 0 ? `删除（${fileCounts[t.taskId]} 个片段）` : '删除'}</button>
             </div>
           `;
         })}
       </div>
       ${openId && html`<${TaskDrawer} taskId=${openId}
         onClose=${() => { setOpenId(null); if (onChanged) onChanged(); }} />`}
+    </div>
+  `;
+}
+
+
+// ---------------- 任务回收站抽屉（2026-11-16 P3） ----------------
+// DELETE /api/tasks/:id 只是把任务 JSON 移进 data/trash（片段文件不动）。
+// 没有这个入口，「软删除」就等于不可恢复 —— 这是 P3 要求的另一半。
+// 数据来自 GET /api/trash（数组），恢复 POST /api/trash/:id/restore，彻底删除 DELETE /api/trash/:id。
+function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const list = items || [];
+  const btn = (primary) => ({
+    height: '26px', padding: '0 10px', borderRadius: '6px', background: 'transparent',
+    fontSize: '11px', cursor: 'pointer',
+    border: primary ? '1px solid rgba(214,179,106,.45)' : '1px solid rgba(240,138,132,.35)',
+    color: primary ? 'var(--accent)' : 'var(--danger)'
+  });
+
+  async function restore(it) {
+    setMsg(''); setBusy(it.taskId);
+    try {
+      const r = await fetch('/api/trash/' + encodeURIComponent(it.taskId) + '/restore',
+        { method: 'POST', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      setMsg('已恢复任务 ' + it.taskId + '（回到「库 · 成片」未完成列表 / 任务详情）');
+      if (onChanged) onChanged();
+    } catch (e) { setMsg('恢复失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  async function purge(it) {
+    if (!window.confirm('彻底删除任务记录 ' + it.taskId + '？\n任务 JSON 会被删除，无法恢复；片段文件不受影响。')) return;
+    setMsg(''); setBusy(it.taskId);
+    try {
+      const r = await fetch('/api/trash/' + encodeURIComponent(it.taskId), { method: 'DELETE', credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
+      setMsg('已彻底删除任务记录');
+      if (onChanged) onChanged();
+    } catch (e) { setMsg('彻底删除失败：' + e.message); }
+    finally { setBusy(''); }
+  }
+
+  if (!open) return null;
+  return html`
+    <div style=${{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,5,.55)' }}
+      onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(520px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
+          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>任务回收站</b>
+          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${list.length} 条 · 删除的任务记录在这里</span>
+          <span style=${{ flex: 1 }}></span>
+          <button onClick=${onClose}
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+        </div>
+        <p style=${{ margin: '0 14px 8px', fontSize: '10.5px', color: 'var(--ink3)', lineHeight: 1.6 }}>
+          删除任务只移走任务记录，<b style=${{ color: 'var(--ink2)' }}>片段文件仍留在 clips/</b>；恢复会把任务记录放回。
+        </p>
+        ${msg && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--ink2)' }}>${msg}</p>`}
+        ${error && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--danger)' }}>${error}</p>`}
+        <div style=${{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 14px 14px' }}>
+          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>加载中…</p>`}
+          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>任务回收站是空的</p>`}
+          ${list.map((it) => html`
+            <div key=${it.taskId} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
+              <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${it.prompt || '(无提示词)'}</div>
+              <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
+                ${it.taskId} · ${it.model || '-'} · ${it.totalClips || 0} 段 · 删除于 ${String(it.deletedAt || '').slice(0, 19).replace('T', ' ')}
+              </div>
+              <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+                <button onClick=${() => restore(it)} disabled=${busy === it.taskId} style=${btn(true)}>恢复</button>
+                <button onClick=${() => purge(it)} disabled=${busy === it.taskId} style=${btn(false)}>彻底删除记录</button>
+              </div>
+            </div>
+          `)}
+        </div>
+      </aside>
     </div>
   `;
 }
@@ -979,9 +1131,11 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
 export function LibraryView({ initialTab = 'finals', tasks = [] }) {
   const [tab, setTab] = useState(initialTab);
   const [recycleOpen, setRecycleOpen] = useState(false);
+  const [taskTrashOpen, setTaskTrashOpen] = useState(false);
   const [libS, reloadLib] = useJson('/api/library');
   const [photoS, reloadPhotos] = useJson('/api/photos?final=1');
   const [recS, reloadRec] = useJson('/api/recycle');
+  const [trashS, reloadTrash] = useJson('/api/trash');
 
   // 旧深链 /clips、/photos 进同一页，路由变化时切到对应 tab。
   useEffect(() => { setTab(initialTab); }, [initialTab]);
@@ -994,8 +1148,9 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
   const clipCount = allItems.filter((it) => it.kind !== 'final').length;
   const photos = (photoS.data && photoS.data.photos) || [];
   const recycleItems = (recS.data && recS.data.items) || [];
+  const trashItems = Array.isArray(trashS.data) ? trashS.data : ((trashS.data && trashS.data.items) || []);
 
-  const refreshAll = () => { reloadLib(); reloadPhotos(); reloadRec(); };
+  const refreshAll = () => { reloadLib(); reloadPhotos(); reloadRec(); reloadTrash(); };
   const TABS = [
     { key: 'finals', label: '成片', count: finals.length },
     { key: 'clips', label: '片段', count: clipCount },
@@ -1008,6 +1163,9 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
         <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">库</h1>
         <span className="text-[11px] text-ink3 font-num">成片 ${finals.length} · 片段 ${clipCount} · 图片 ${photos.length}</span>
         <span className="flex-1"></span>
+        <button onClick=${() => setTaskTrashOpen(true)}
+          className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
+        >任务回收站${trashItems.length ? ' · ' + trashItems.length : ''}</button>
         <button onClick=${() => setRecycleOpen(true)}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
         >回收站${recycleItems.length ? ' · ' + recycleItems.length : ''}</button>
@@ -1030,6 +1188,10 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
       <${RecycleDrawer} open=${recycleOpen} items=${recycleItems} loading=${recS.loading}
         error=${recS.error ? '读取回收站失败：' + recS.error : ''}
         onClose=${() => setRecycleOpen(false)} onChanged=${refreshAll} />
+
+      <${TaskTrashDrawer} open=${taskTrashOpen} items=${trashItems} loading=${trashS.loading}
+        error=${trashS.error ? '读取任务回收站失败：' + trashS.error : ''}
+        onClose=${() => setTaskTrashOpen(false)} onChanged=${refreshAll} />
     </div>
   `;
 }

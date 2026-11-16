@@ -5,7 +5,8 @@
 //   · 方案 C：模型只负责「听懂 + 填计划卡」；执行/失败处理由确定性状态机做，不问模型。
 //   · 时长：用户给总时长（无默认）+ 每段时长；上限 60 分钟或 400 段取先到者；
 //     每段范围按模型（dashscope 2–30、kling 3–15、seedance ≤15）。
-//   · 场景卡 v3.3 为唯一输入；30 分钟上限（180 × 10s）超过必须先扩卡库。
+//   · 场景卡 v3.3 为唯一输入；每段 10 或 15 秒（默认 10）→ 180 张 = 30 / 45 分钟，
+//     超过必须先扩卡库；总时长上限 60 分钟、片段上限 400 段取先到者。
 //   · 单任务重试费用 ≤ 总预算 10%；质检最多自动重试 2 次。
 //   · 补位率 ≤ 5% 且 ≤ 10 段。
 //
@@ -36,9 +37,10 @@ const LIMITS = Object.freeze({
   // §7：上限 60 分钟或 400 段取先到者
   maxMinutes: 60,
   maxClips: 400,
-  // §7：卡库只有 180 张正片（10s/张），超过 30 分钟必须扩卡库
+  // §7：卡库只有 180 张正片；每段 10 或 15 秒（2026-11-16 用户批准一次跑 15 秒，默认仍是 10）
   sceneCardMaxClips: 180,
   sceneCardClipSec: 10,
+  sceneCardClipSecAllowed: Object.freeze([10, 15]),
   // §7：单任务重试费用 ≤ 总预算 10%
   retryBudgetRatio: 0.10,
   // §7：质检最多自动重试 2 次
@@ -321,13 +323,17 @@ function buildPlan(input = {}) {
   // ---- 段数 / 时长 ----
   let clipDurationSec = pick(input.clipDurationSec, parsed.clipDurationSec);
   if (sceneCardEnabled) {
-    // 场景卡按 10 秒/张设计；用户显式给了别的值 → 明确拒绝，不静默改。
-    if (clipDurationSec !== null && clipDurationSec !== undefined && Number(clipDurationSec) !== LIMITS.sceneCardClipSec) {
+    // 场景卡支持 10 或 15 秒/段（2026-11-16 用户批准 15 秒；默认仍 10 秒）。
+    // 用户显式给了别的值 → 明确拒绝，不静默改。
+    if (clipDurationSec !== null && clipDurationSec !== undefined
+      && !LIMITS.sceneCardClipSecAllowed.includes(Number(clipDurationSec))) {
       return fail('PLAN_SCENE_CARD_DURATION',
-        `场景卡按 ${LIMITS.sceneCardClipSec} 秒/段设计（180 张 = 30 分钟）；本次给的是 ${clipDurationSec} 秒。`
-        + `请改成 ${LIMITS.sceneCardClipSec} 秒，或说「不用场景卡」。`);
+        `场景卡只支持 ${LIMITS.sceneCardClipSecAllowed.join(' 或 ')} 秒/段（默认 ${LIMITS.sceneCardClipSec} 秒）；`
+        + `本次给的是 ${clipDurationSec} 秒。`
+        + `请改成 ${LIMITS.sceneCardClipSec} 秒或 ${LIMITS.sceneCardClipSecAllowed[LIMITS.sceneCardClipSecAllowed.length - 1]} 秒，`
+        + '或说「不用场景卡」。');
     }
-    clipDurationSec = LIMITS.sceneCardClipSec;
+    if (clipDurationSec === null || clipDurationSec === undefined) clipDurationSec = LIMITS.sceneCardClipSec;
   }
   if (clipDurationSec === null || clipDurationSec === undefined) clipDurationSec = 10;
   clipDurationSec = Number(clipDurationSec);
@@ -381,7 +387,8 @@ function buildPlan(input = {}) {
   if (sceneCardEnabled) {
     if (clipCount > LIMITS.sceneCardMaxClips) {
       return fail('PLAN_SCENE_CARDS_EXHAUSTED',
-        `场景卡正片只有 ${LIMITS.sceneCardMaxClips} 张（${LIMITS.sceneCardMaxClips * LIMITS.sceneCardClipSec / 60} 分钟）。`
+        `场景卡正片只有 ${LIMITS.sceneCardMaxClips} 张（按 ${clipDurationSec} 秒/段 = `
+        + `${(LIMITS.sceneCardMaxClips * clipDurationSec / 60).toFixed(0)} 分钟）。`
         + `本次要 ${clipCount} 段，需要先扩卡库；或说「不用场景卡」。`);
     }
     const cap = sceneCards.checkCapacity(clipCount);

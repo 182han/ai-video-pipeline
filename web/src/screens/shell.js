@@ -19,7 +19,9 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { JobBar, useTasksPoll } from '../components/jobBar.js';
-import { Assistant } from '../components/assistant.js';
+// 2026-11-16 用户口径（P4）：全局悬浮小助手下线 —— 小智只保留两处：
+// ① 首页 `/` 的整页小智（AssistantPage）② 左栏「小智 · 对话首页」入口。
+// 因此这里不再 import / 挂载 <Assistant />。
 import { Boundary } from '../components/boundary.js';
 import { AssistantPage } from './assistantPage.js';
 import { CreateWizard } from './create.js';
@@ -154,8 +156,6 @@ export function AppShell({ route }) {
           ${view === 'settings' && html`<${Boundary}><${SettingsView} /></${Boundary}>`}
         </div>
       </div>
-
-      <${Assistant} />
     </div>
   `;
 }

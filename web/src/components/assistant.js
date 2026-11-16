@@ -10,7 +10,7 @@
 // ready 只在「模型说完成」且「真的给了非空 prompt」时为真（后端保证）。
 // 生成的提示词通过 promptBus 送回创作屏，不直接操作 DOM。
 // ============================================================
-import { promptBus, readLLMConfig } from '../store.js';
+import { promptBus, readLLMConfig, readRuntimeConfig } from '../store.js';
 import { navigate, currentRoute } from '../router.js';
 import { createOrb } from './assistantOrb.js';
 import { PlanCard, StateStrip, GreetingBubble, VoiceButton } from './xiaozhiPlan.js';
@@ -443,15 +443,32 @@ export function Assistant({ page = false } = {}) {
 
   // 确认执行计划卡：真实模型必须这里点确认（approved=true）；
   // Mock 计划同样走这里，但后端不扣费。
+  //
+  // 2026-11-16 修 P0：这里必须把「设置」里的运行时 Key 一起发。
+  // 服务端 .env 没有 DASHSCOPE_API_KEY 时 src/generators/index.js:79 会**静默降级 Mock**，
+  // 用户点了确认却拿到合成画面；补上 runtimeConfig 才会真的走所选模型。
+  // 只从 localStorage 读、随请求发送，不打印、不写日志。
   async function confirmPlan() {
     if (!plan || xbusy) return;
+    const runtime = readRuntimeConfig(plan.model);
+    const hasGenKey = !!(runtime.apiKey || (runtime.klingAccessKey && runtime.klingSecretKey));
+    if (plan.model !== 'mock' && !hasGenKey) {
+      // 不拦（服务端 .env 也可能配了 Key），但绝不能让「降级 Mock」再无声发生。
+      setMsgs((m) => [...m, {
+        role: 'assistant',
+        content: '⚠ 设置里没有填「' + (plan.modelLabel || plan.model) + '」的 Key。'
+          + '服务端 .env 若也没有，这条计划会降级成 Mock 合成画面（不扣费，但不是真实模型）。'
+          + '要真实生成，请先到「设置」填 Key 再点确认。'
+      }]);
+    }
     setXbusy(true);
     try {
       const r = await fetch('/api/assistant/execute', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true })
+        // service 端白名单：apiKey/apiBaseUrl/modelId/kling*/llm*/multimodal*（server.js:2051）。
+        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true, ...runtime })
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {

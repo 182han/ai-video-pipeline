@@ -238,6 +238,20 @@ async function main() {
     && /卡库/.test(planCard.buildPlan({ text: '31分钟极光' }).error));
   ok('场景卡模式每段 20 秒 → PLAN_SCENE_CARD_DURATION',
     planCard.buildPlan({ text: '10分钟极光，每段20秒' }).code === 'PLAN_SCENE_CARD_DURATION');
+  // 2026-11-16 用户批准：场景卡允许 10 或 15 秒/段，默认仍是 10 秒。
+  {
+    const p15 = planCard.buildPlan({ text: '10分钟极光，每段15秒' });
+    ok('场景卡模式每段 15 秒 → 通过（40 段 × 15 秒 = 10 分钟）',
+      p15.ok === true && p15.plan.clipDurationSec === 15 && p15.plan.clipCount === 40,
+      p15.ok ? `${p15.plan.clipCount}段 × ${p15.plan.clipDurationSec}秒` : p15.code);
+    const pDef = planCard.buildPlan({ text: '10分钟极光' });
+    ok('场景卡默认仍是 10 秒/段（未改默认值）', pDef.ok === true && pDef.plan.clipDurationSec === 10,
+      pDef.ok ? pDef.plan.clipDurationSec + '秒' : pDef.code);
+    const p15m = planCard.buildPlan({ text: '15分钟极光，每段15秒' });
+    ok('15 秒/段 15 分钟 = 60 段，成本按秒不变（¥180×1.5 的口径由价目表给）',
+      p15m.ok === true && p15m.plan.clipCount === 60 && p15m.plan.totalSec === 900,
+      p15m.ok ? `${p15m.plan.clipCount}段 / ¥${p15m.plan.estimate.totalCny}` : p15m.code);
+  }
   ok('kling 每段 20 秒（关闭场景卡）→ PLAN_BAD_CLIP_DURATION',
     planCard.buildPlan({ text: '10分钟极光，每段20秒', model: 'kling', sceneCards: false }).code === 'PLAN_BAD_CLIP_DURATION');
   ok('kling 每段 10 秒（关闭场景卡）→ 通过', planCard.buildPlan({ text: '10分钟极光，每段10秒', model: 'kling', sceneCards: false }).ok === true);
@@ -570,7 +584,14 @@ async function main() {
     /<span className="text-\[12px\] font-medium text-ink">小智<\/span>/.test(assistantJs));
   ok('首页气泡只在创作页出现（currentRoute() === \'/\'）',
     /currentRoute\(\) === '\/'/.test(assistantJs));
-  ok('shell.js 仍挂载 <Assistant />（小智是全局悬浮球）', /<\$\{Assistant\} \/>/.test(shellJs));
+  ok('shell.js 不再挂载 <Assistant />（2026-11-16 P4：悬浮小助手已下线）',
+    !/<\$\{Assistant\} \/>/.test(shellJs) && !/components\/assistant\.js/.test(shellJs));
+  ok('整页小智仍在（shell.js 渲染 <AssistantPage /> 承接 /）',
+    /<\$\{AssistantPage\} \/>/.test(shellJs) && /from '\.\/assistantPage\.js'/.test(shellJs));
+  // 2026-11-16 P0：计划卡确认执行必须把设置里的 Key 带上，否则服务端会静默降级 Mock。
+  ok('确认执行带上运行 Key（readRuntimeConfig + ...runtime）',
+    /readRuntimeConfig/.test(assistantJs) && /\.\.\.runtime/.test(assistantJs)
+    && /planId: plan\.planId, approved: true, \.\.\.runtime/.test(assistantJs));
   ok('首页示例改为「时长优先」（不再出现主题式长片示例）',
     /PAGE_CHIPS = \['10 分钟的长视频'/.test(assistantJs)
     && !/30 分钟的雪山/.test(assistantJs)
