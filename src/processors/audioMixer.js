@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile, execSync } = require('child_process');
 const config = require('../../config');
+const recycle = require('../recycle');
 
 // 配乐目录：支持环境变量覆盖（测试隔离用；默认仍是 assets/bgm）。
 // 与 jsonfile 驱动的 DATA_DIR / USERS_FILE 覆盖同一套思路——测试不许往真实素材目录写文件。
@@ -738,13 +739,29 @@ function removeTrack(id) {
   const tracks = getManifest();
   const t = tracks.find(x => x.id === id);
   if (!t) return { success: false, error: '音轨不存在' };
-  // 仅删除自定义上传文件，内置音轨保留磁盘文件
-  if (String(t.file).startsWith('custom/')) {
-    const abs = path.join(BGM_DIR, t.file);
-    if (fs.existsSync(abs)) { try { fs.unlinkSync(abs); } catch (e) {} }
-  }
+  // 2026-11-15：删除改为移入回收站；内置音轨只移清单（磁盘文件是项目素材，不动）
+  const isCustom = String(t.file).startsWith('custom/');
+  const abs = isCustom ? path.join(BGM_DIR, t.file) : null;
+  const mv = recycle.moveToRecycle({
+    type: 'bgm',
+    id: t.id,
+    files: abs ? [{ file: abs }] : [],
+    entry: t,
+    meta: { reason: 'bgm-remove', custom: isCustom }
+  });
+  if (!mv.ok) return { success: false, error: '移入回收站失败：' + mv.error };
   _saveManifest(tracks.filter(x => x.id !== id));
-  return { success: true };
+  return { success: true, trashed: true, recycleDir: mv.dir };
+}
+
+// 从回收站恢复音轨：文件已由 recycle.restore 放回，这里把清单条目写回
+function restoreTrack(track) {
+  if (!track || !track.id) return { success: false, error: '缺少音轨对象' };
+  const tracks = getManifest();
+  if (tracks.some(x => x.id === track.id)) return { success: true, track, existed: true };
+  tracks.push(track);
+  _saveManifest(tracks);
+  return { success: true, track };
 }
 
 // ===== 音轨顺序与默认开场曲（用户自定义，存本地配置文件）=====
@@ -795,7 +812,7 @@ function listTracksInOrder(category) {
 
 module.exports = {
   getManifest, listTracks, listTracksInOrder, toPublicTracks, findTrack, resolveTrack, pickRandomMusicTrack,
-  getTrackById, addTrack, updateTrack, removeTrack,
+  getTrackById, addTrack, updateTrack, removeTrack, restoreTrack,
   probeDuration, probeMeanVolume, validateMixedOutput, validateMixDuration,
   mixBgm, mixBgmPlan, buildMixArgs, resolvePlanPaths, buildAutoPlan, runFfmpeg,
   getPrefs, savePrefs,

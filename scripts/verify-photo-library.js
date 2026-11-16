@@ -13,6 +13,7 @@ const APP = path.join(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-lib-'));
 process.env.PHOTOS_DIR = path.join(tmp, 'photos');
 process.env.CLIPS_DIR = path.join(tmp, 'clips');
+process.env.RECYCLE_DIR = path.join(tmp, 'recycle');
 fs.mkdirSync(process.env.CLIPS_DIR, { recursive: true });
 
 let pass = 0;
@@ -96,10 +97,10 @@ check(photoLibrary.get(rec.id).videoPrompt === '镜头缓慢推进，蒸汽上�
 check(photoLibrary.get(rec.id).imagePrompt === '手动补录的画面提示词', '视频提示词不覆盖画面提示词');
 check(photoLibrary.query({ q: '手动补录的画面提示词' }).length === 1, '搜索能命中画面提示词');
 
-// ---- 7. 删除（记录 + 源文件） ----
+// ---- 7. 删除（记录 + 源文件 → 2026-11-15 起改为移入回收站） ----
 const r = photoLibrary.remove(rec.id);
-check(r.success === true && r.fileDeleted === true, 'remove 同时删除库记录与源文件');
-check(!fs.existsSync(imgPath), '源文件确实被删掉');
+check(r.success === true && r.trashed === true, 'remove 把记录与源文件移入回收站');
+check(!fs.existsSync(imgPath), '源文件确实已离开原目录');
 check(photoLibrary.get(rec.id) === null, '删除后查询不到');
 
 // ---- 7. 防越界：不在 clips 目录里的文件不许删 ----
@@ -125,7 +126,7 @@ check(serverSrc.includes('sourcePhotoId'), '/api/tasks 接受 sourcePhotoId');
 check(serverSrc.includes('需要提供 status / imagePrompt / videoPrompt'), 'PUT /api/photos 支持画面/视频提示词分开改');
 check(serverSrc.includes('sourcePhotoMotionPrompt'), '提交图生视频时单独上报运动提示词');
 check(serverSrc.includes('videoPrompt: motion'), '视频提示词写入 videoPrompt，不覆盖画面提示词');
-check(pipelineSrc.includes('_i2vPayload(task)'), 'pipeline 有图生视频取图逻辑');
+check(/_i2vPayload\(task(?:,\s*clip)?\)/.test(pipelineSrc), 'pipeline 有图生视频取图逻辑');
 check(pipelineSrc.includes('image: i2vImage'), 'pipeline 把源图传给视频适配器');
 check(createSrc.includes('sourcePhotoId: imgResult.photoId'), '创作向导提交 sourcePhotoId');
 check(invSrc.includes('/api/photos'), '照片页接的是 /api/photos（不再是占位）');

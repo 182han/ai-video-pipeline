@@ -17,10 +17,16 @@
 const fs = require('fs');
 const path = require('path');
 const pricing = require('./pricing');
+const recycle = require('./recycle');
 
 const APP_DIR = path.join(__dirname, '..');
-const LIB_DIR = path.join(APP_DIR, 'data', 'library');
-const CLIPS_DIR = path.join(APP_DIR, 'clips');
+// 允许验收脚本用 LIBRARY_DIR / CLIPS_DIR 指向临时目录，避免污染真实库（与 photoLibrary 同一做法）
+const LIB_DIR = process.env.LIBRARY_DIR
+  ? path.resolve(process.env.LIBRARY_DIR)
+  : path.join(APP_DIR, 'data', 'library');
+const CLIPS_DIR = process.env.CLIPS_DIR
+  ? path.resolve(process.env.CLIPS_DIR)
+  : path.join(APP_DIR, 'clips');
 
 let cache = null;
 let cacheSignature = '';
@@ -114,25 +120,36 @@ function update(id, patch) {
 function remove(id) {
   const entry = get(id);
   if (!entry) return { success: false, error: '片段不存在' };
-  let fileDeleted = false;
-  try {
-    const resolved = path.resolve(entry.filePath || '');
-    const clipsRoot = path.resolve(CLIPS_DIR) + path.sep;
-    if (resolved.startsWith(clipsRoot) && fs.existsSync(resolved)) {
-      fs.unlinkSync(resolved);
-      fileDeleted = true;
-    }
-  } catch (e) {
-    console.warn(`[library] 删除源文件失败 ${entry.filePath}: ${e.message}`);
-  }
+  const type = entry.kind === 'final' ? 'final' : 'clip';
+  // 先移入回收站（文件 + 条目对象）；成功后才删库记录，避免“条目没了文件还在”的半状态
+  const mv = recycle.moveToRecycle({
+    type,
+    id: entry.id,
+    files: entry.filePath ? [{ file: entry.filePath }] : [],
+    entry,
+    meta: { reason: 'library-remove' }
+  });
+  if (!mv.ok) return { success: false, error: '移入回收站失败：' + mv.error };
   try {
     const p = entryPath(entry.id);
     if (fs.existsSync(p)) fs.unlinkSync(p);
   } catch (e) {
+    // 库记录删不掉：把文件放回去，保持一致
+    try { recycle.restore(type, entry.id); } catch (e2) { /* ignore */ }
     return { success: false, error: '删除库记录失败: ' + e.message };
   }
   loadAll(true);
-  return { success: true, fileDeleted, entry };
+  return { success: true, fileDeleted: false, trashed: true, recycleDir: mv.dir, entry };
+}
+
+// 从回收站恢复后，把原条目写回库（文件由 recycle.restore 已经放回原位）
+function restoreFromRecycle(entry) {
+  if (!entry || !entry.id) return null;
+  const p = entryPath(entry.id);
+  entry.updatedAt = new Date().toISOString();
+  saveEntry(entry);
+  loadAll(true);
+  return entry;
 }
 
 // ---------- 元数据 ----------
@@ -227,6 +244,10 @@ function buildEntry(task, clip, filePath, probe) {
     taskId: task.taskId,
     clipIndex: clip.index,
     kind: 'clip',
+    // 片段状态：success / failed（生成失败但文件仍在时也入库，供用户看到失败产物）
+    status: clip.status || 'success',
+    // 来源：task=正常任务；regenerate=片段库单条重新生成
+    origin: task.source === 'regenerate' ? 'regenerate' : 'task',
     prompt: clip.prompt || originalPrompt || '',
     originalPrompt: originalPrompt || '',
     // 图生视频：记录这条视频用的是图片库里哪张图（追溯用，不复制文件）
@@ -283,7 +304,9 @@ function ingestClip(task, clip, probeOverride) {
   try {
     if (!task || !clip) return null;
     if (task.model === 'mock') return null;
-    if (clip.status !== 'success') return null;
+    // 2026-11-15：不再要求 status==='success'。
+    // 用户要求“任何产物都要保留”，质检不通过的片段只要文件还在就必须能在库里看到；
+    // 片段状态写进 entry.status，前端据此区分“可用/未通过”。
     const filePath = resolveClipFile(clip.videoPath);
     if (!filePath) return null;
 
@@ -353,6 +376,10 @@ function ingestFinal(task, finalPath, probeOverride) {
     const entry = {
       id,
       kind: 'final',
+      // 成片状态：completed / partial / failed；孤儿成片由回填脚本标 orphan
+      status: task.status || 'completed',
+      // 来源：task=正常任务；library=片段库成片；editor=剪辑台导出；orphan=任务已丢失
+      origin: task.__origin || (task.model === 'editor' ? 'editor' : (task.source === 'library' ? 'library' : 'task')),
       fileName: path.basename(finalPath),
       filePath: finalPath,
       url: '/output/' + encodeURIComponent(path.basename(finalPath)),
@@ -370,7 +397,23 @@ function ingestFinal(task, finalPath, probeOverride) {
       durationSec: info && Number.isFinite(info.duration) ? Math.round(info.duration * 1000) / 1000 : (task.totalDuration || null),
       sizeBytes: (() => { try { return fs.statSync(finalPath).size; } catch (e) { return null; } })(),
       hasAudio: info && info.hasAudio !== undefined ? !!info.hasAudio : null,
-      cost: { amount: 0, basis: 'final', label: '成片（费用已计入片段）', computed: true },
+      // 费用：成片总费用取任务费用快照。旧实现写死 amount:0，页面显示 ¥0.00，
+      // 与用户“每条必须显示真实金额”的要求冲突（2026-11-15 修正）。
+      // 历史任务没有费用快照时，必须显示“未知”，不能伪装成 0 元。
+      cost: (() => {
+        const c = task.cost && typeof task.cost === 'object' ? task.cost : null;
+        const amount = c && Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0;
+        const computed = c && c.computed !== undefined ? !!c.computed : amount > 0;
+        return {
+          ...(c || {}),
+          amount,
+          currency: (c && c.currency) || 'CNY',
+          basis: 'final',
+          computed,
+          // 调用方有明确口径时优先用它（如剪辑台导出「无生成费用」），否则按有无快照区分
+          label: (c && c.label) || (computed ? '成片（含片段生成费用）' : '费用未知（历史任务无费用快照）')
+        };
+      })(),
       timing: { startedAt: task.createdAt || null, completedAt: new Date().toISOString(), totalMs: null, genMs: null, qcMs: null, splitAvailable: false, historical: true },
       qc: task.finalQC ? { passed: !!task.finalQC.passed, unverified: false, level: task.finalQC.passed ? 'pass' : 'fail', reason: task.finalQC.reason || '', qcVersion: task.finalQC.qcVersion || null } : { passed: false, unverified: true, level: 'unknown', reason: '无终检记录', qcVersion: null },
       theme: task.theme || null,
@@ -395,7 +438,8 @@ function ingestMissing(task) {
   const added = [];
   if (!task || !Array.isArray(task.clips)) return added;
   for (const clip of task.clips) {
-    if (!clip || clip.status !== 'success') continue;
+    // 2026-11-15：含质检失败但文件仍在的片段（ingestClip 自己会判断文件是否存在）
+    if (!clip || !clip.videoPath) continue;
     const id = `${task.taskId}_c${clip.index + 1}`;
     if (get(id)) continue;
     const entry = ingestClip(task, clip);
@@ -479,6 +523,7 @@ module.exports = {
   listAll,
   update,
   remove,
+  restoreFromRecycle,
   ingestClip,
   ingestFinal,
   ingestMissing,

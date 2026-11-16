@@ -22,6 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const pricing = require('./pricing');
+const recycle = require('./recycle');
 
 const APP_DIR = path.join(__dirname, '..');
 // 允许测试用 PHOTOS_DIR / CLIPS_DIR 指向临时目录，避免验收脚本污染真实库
@@ -241,31 +242,37 @@ function attachUsage(id, taskId) {
   return saveEntry(entry);
 }
 
-// 删除库条目。默认同时删源文件（仅当文件确实在 clips/ 内，防越界删别的文件）
+// 删除库条目：2026-11-15 起改为移入回收站（文件 + 条目），不再直接 unlink。
+// 恢复时由 restoreFromRecycle 写回条目，文件由 recycle.restore 放回原位。
 function remove(id, { deleteFile = true } = {}) {
   const entry = get(id);
   if (!entry) return { success: false, error: '图片不存在' };
-  let fileDeleted = false;
-  if (deleteFile && entry.filePath) {
-    try {
-      const resolved = path.resolve(entry.filePath);
-      const root = path.resolve(CLIPS_DIR) + path.sep;
-      if (resolved.startsWith(root) && fs.existsSync(resolved)) {
-        fs.unlinkSync(resolved);
-        fileDeleted = true;
-      }
-    } catch (e) {
-      console.warn(`[photoLibrary] 删除源文件失败 ${entry.filePath}: ${e.message}`);
-    }
-  }
+  const mv = recycle.moveToRecycle({
+    type: 'photo',
+    id: entry.id,
+    files: deleteFile && entry.filePath ? [{ file: entry.filePath }] : [],
+    entry,
+    meta: { reason: 'photo-remove' }
+  });
+  if (!mv.ok) return { success: false, error: '移入回收站失败：' + mv.error };
   try {
     const p = entryPath(entry.id);
     if (fs.existsSync(p)) fs.unlinkSync(p);
   } catch (e) {
+    try { recycle.restore('photo', entry.id); } catch (e2) { /* ignore */ }
     return { success: false, error: '删除库记录失败: ' + e.message };
   }
   loadAll(true);
-  return { success: true, fileDeleted, entry };
+  return { success: true, fileDeleted: false, trashed: true, recycleDir: mv.dir, entry };
+}
+
+// 从回收站恢复：文件已由 recycle.restore 放回原位，这里把条目写回库
+function restoreFromRecycle(entry) {
+  if (!entry || !entry.id) return null;
+  entry.updatedAt = new Date().toISOString();
+  saveEntry(entry);
+  loadAll(true);
+  return entry;
 }
 
 // 同一 group 的全部成功版本（按 version 排序）
@@ -369,5 +376,6 @@ module.exports = {
   markReviewed,
   attachUsage,
   remove,
+  restoreFromRecycle,
   listUnregisteredImages
 };

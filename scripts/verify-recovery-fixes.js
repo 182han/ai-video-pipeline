@@ -181,7 +181,7 @@ const config = require('../config');
   // ---------- 5. 已成功片段补入库（片段库缺档案） ----------
   // 事故：task_mvgw4hbo_ajuc 两个已付费片段被手工恢复成 success，
   // 但入库只挂在「生成成功 / 重检转成功」两条路径上，片段库一条都没有。
-  check('ingestMissing 补齐缺失条目、跳过非 success、可重复执行', () => {
+  check('ingestMissing 补齐缺失条目（含质检失败但文件仍在）、可重复执行', () => {
     const library = require('../src/library');
     const sample = path.join(APP, 'clips', 'mock_mvgy1dd6_4tbe09.mp4');
     assert.ok(fs.existsSync(sample), '样例片段不存在: ' + sample);
@@ -200,8 +200,11 @@ const config = require('../config');
         ]
       };
       const added = library.ingestMissing(task);
-      assert.deepStrictEqual(added, [`${taskId}_c1`]);
+      // 2026-11-15：failed 但文件仍在的片段也要补进库（用户要求所有产物可见）
+      assert.deepStrictEqual(added, [`${taskId}_c1`, `${taskId}_c2`]);
       assert.ok(fs.existsSync(entryFiles[0]), '库条目文件未生成');
+      assert.ok(fs.existsSync(entryFiles[1]), '失败片段库条目文件未生成');
+      assert.strictEqual(library.get(`${taskId}_c2`).status, 'failed');
 
       const entry = library.get(`${taskId}_c1`);
       assert.ok(entry, '读不到库条目');
