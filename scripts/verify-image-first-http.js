@@ -160,6 +160,45 @@ async function main() {
     ok('redactTask 不修改原对象（只返回副本）', sample.runtimeConfig.imageApiKey === 'sk-image-should-clear');
   }
 
+  // ---------- [0b] 进程内：视频通道预检（中转不收首帧图 → 出图前就拒绝） ----------
+  // 实测（2026-11-16）：WhaleTV 中转把 multipart/base64 原样转发，上游 Alibaba 只收公网 URL → 400。
+  // 后端必须在**花钱之前**拒绝，而不是等图片都出完、到视频阶段才全段失败。
+  // 直接调 _generateClipImages（不建任务、不写库：该分支在就绪度/预算校验之前抛错）。
+  console.log('\n[0b] 进程内：中转通道 + 出图 → IMAGE_FIRST_MODEL_UNSUPPORTED（不出图）');
+  {
+    const pipeline = require(path.join(APP_DIR, 'src', 'pipeline'));
+    const fakeTask = {
+      taskId: 'gate_verify_image_first',
+      model: 'openai-video',
+      runtimeConfig: { imagePerClip: true },
+      clips: [{ index: 0, prompt: '测试画面', photoId: null }]
+    };
+    let err = null;
+    try {
+      await pipeline._generateClipImages(fakeTask.taskId, fakeTask);
+    } catch (e) {
+      err = e;
+    }
+    ok('中转通道（openai-video）被提前拒绝', !!err && err.code === 'IMAGE_FIRST_MODEL_UNSUPPORTED',
+      err && (err.code + ' / ' + String(err.message).slice(0, 60)));
+    ok('错误文案指向百炼官方（可执行）', !!err && /百炼/.test(err.message) && /万相/.test(err.message));
+    ok('错误文案说明「没有出图、没有产生图片费用」', !!err && /没有出图/.test(err.message) && /图片费用/.test(err.message));
+    // 允许通道不受影响：dashscope 会继续走到「就绪度」校验（本进程无图 Key → IMAGE_GEN_NOT_READY，而不是通道错误）
+    let err2 = null;
+    try {
+      await pipeline._generateClipImages('gate_verify_image_first_ok', {
+        taskId: 'gate_verify_image_first_ok',
+        model: 'dashscope',
+        runtimeConfig: { imagePerClip: true },
+        clips: [{ index: 0, prompt: '测试画面', photoId: null }]
+      });
+    } catch (e) {
+      err2 = e;
+    }
+    ok('百炼通道不被通道预检误拦（继续走到出图就绪度校验）',
+      !!err2 && err2.code === 'IMAGE_GEN_NOT_READY', err2 && err2.code);
+  }
+
   const picked = await pickFreePort(3093);
   if (!picked) { console.log('❌ 3093–3132 没有空闲端口'); process.exit(1); }
   BASE = `http://127.0.0.1:${picked}`;
