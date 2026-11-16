@@ -3496,9 +3496,8 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
   - 权限 `prompt` + 注入 pending `getUserMedia`：点按 → 「正在请求麦克风」卡（截图
     `mic-c-requesting.png`）；松手后 resolve → 「✓ 麦克风已允许」卡（截图 `mic-d-granted.png`），
     未进入录音；
-  - 真 `getUserMedia` 在 DSH 浏览器 profile 里仍被 Chrome 拒绝（该 Chrome 窗口/标签在后台，
-    不是页面代码问题），所以「授权后真录音→ASR」只做了代码审查 + 旧链路回归，**未在本机
-    DSH 浏览器取得录音证据**；正常 Chrome 可见标签页需用户点一次「允许」。
+  - （17:15 更正）当时真 `getUserMedia` 仍被拒绝，**不是窗口在后台**，而是 `server.js` 的
+    `Permissions-Policy: microphone=()`；详见下一节。修复后真 Chrome 已实测拿到 live track。
 - **未改** 3001 进程/端口，未重启服务，未建任务，未产生计费调用；`web/` 静态文件刷新即生效。
 - 本机正常 Chrome（用户截图所在窗口，PID 123808）的站点权限已从「询问（默认）」改为
   **「允许」**，实测落盘：
@@ -3507,3 +3506,37 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
   `chrome://settings/content/microphone` → 把 `http://localhost:3001` 改回「询问」。
 - 用户侧操作：刷新 `/` → 按住麦克风即可；若之后换机器/换 profile，权限卡仍会按上面的步骤引导。
 - Windows 隐私两处开关均已 Allow（本轮只读确认）。
+
+## 2026-11-16 17:15 根因补齐：server.js 的 Permissions-Policy 把 microphone 禁了
+
+用户 17:06 再次反馈「麦克风权限还是打不开」。复核结果：
+- Chrome 站点权限仍是 Allow（`Preferences` 里 `["http://localhost:3001,*"].setting = 1`），
+  Windows `ConsentStore\microphone` 仍是 Allow，设备也在；但小智页仍报 `NotAllowedError`。
+- `GET /app` 响应头实测：
+  `Permissions-Policy: geolocation=(), microphone=(), camera=()` —— 来自 `server.js:98`
+  （2026-11-12 安全加固时加的响应头）。
+  **浏览器文档级 Permissions-Policy 高于站点权限：Chrome 站点设成「允许」也压不过它。**
+- 这解释了为什么 13:52 只修前端权限卡 / Chrome 站点权限没有效果。
+
+修复：
+- `server.js:101`：`Permissions-Policy` 改为
+  `geolocation=(), microphone=(self), camera=()`；只放行同源页面的麦克风，
+  camera / geolocation 继续禁用。这是后端代码，**必须重启**才生效。
+- `web/src/components/xiaozhiPlan.js`：新增「站点已允许但页面仍被禁止」分支，
+  直接提示检查 Permissions-Policy / Windows 桌面应用麦克风权限，避免再次误判成站点权限。
+- `scripts/verify-mic-permission.js`（37 项）：新增 `server.js` 与 `GET /app`、`GET /`
+  响应头的 `microphone=(self)` 断言。
+- 重启记录：旧 PID 10860（17:03 启动）→ 新 PID 46424（17:13:54）；
+  `node scripts/check-server-version.js` → **0**（运行中就是磁盘代码）；
+  响应头实测 `microphone=(self)`。
+  重启清空了内存会话，日志显示 17:14:04 admin 重新登录成功。
+
+验收（本机实测）：
+- 真 Chrome（CDP 9222，`Browser.setPermission` granted，页面 `http://localhost:3001/login.html`）：
+  `getUserMedia` **成功**，894ms，track `默认 - 阵列麦克风 (AMD Audio Device)`，
+  `readyState=live`；测试后关闭 track。**浏览器层/响应头层已通**。
+- `node scripts/verify-mic-permission.js` → **37 / 0**；
+  `verify-xiaozhi-home` → **45 / 0**；`verify-assistant` → **105 / 0**；
+  `verify-all --only mic-permission,xiaozhi-home` → **82 / 0**。
+- 未改 Windows 站点设置；未起第二实例；端口仍 3001；重启是后端 header 生效的必要操作。
+- 用户侧：刷新小智页（`/`）→ 按住麦克风；如果页面还是旧提示，按 Ctrl+F5 强刷。

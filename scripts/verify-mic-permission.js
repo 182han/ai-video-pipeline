@@ -32,7 +32,7 @@ function check(name, cond, detail) {
 function read(p) { return fs.readFileSync(p, 'utf8'); }
 async function httpGet(url) {
   const r = await fetch(url);
-  return { status: r.status, body: await r.text() };
+  return { status: r.status, headers: r.headers, body: await r.text() };
 }
 
 (async () => {
@@ -43,6 +43,7 @@ async function httpGet(url) {
   const plan = read(path.join(WEB, 'src', 'components', 'xiaozhiPlan.js'));
   const css = read(path.join(WEB, 'styles', 'assistant-home.css'));
   const assistant = read(path.join(WEB, 'src', 'components', 'assistant.js'));
+  const serverCode = read(path.join(APP, 'server.js'));
 
   console.log('\n[1] 请求前先查权限状态，不再盲调 getUserMedia');
   check('Permissions API 查询 microphone',
@@ -80,6 +81,8 @@ async function httpGet(url) {
   check('NotReadableError → 被其他程序占用', /NotReadableError[\s\S]{0,120}被其他程序占用/.test(plan));
   check('非 secure context → 明确提示 localhost/https', /INSECURE_CONTEXT[\s\S]{0,120}不是安全来源/.test(plan));
   check('缺 getUserMedia → 浏览器不支持', /NO_GETUSERMEDIA[\s\S]{0,120}不支持录音/.test(plan));
+  check('站点已允许但仍 NotAllowed → 提示检查 Permissions-Policy',
+    /Permissions-Policy/.test(plan) && /microphone=\(self\)/.test(plan));
 
   console.log('\n[5] 遮罩挂 body + 样式');
   check('createPortal 到 document.body（否则 fixed 会被输入条的 backdrop-filter 限制）',
@@ -98,7 +101,21 @@ async function httpGet(url) {
     (assistant.match(/<\$\{VoiceButton\}/g) || []).length === 2,
     String((assistant.match(/<\$\{VoiceButton\}/g) || []).length) + ' 处');
 
-  console.log('\n[7] 运行中 3001 只读（web/ 刷新即生效，未重启服务）');
+  console.log('\n[7] 服务端 Permissions-Policy 必须放行 microphone(self)');
+  check('server.js 含 microphone=(self)', /microphone=\(self\)/.test(serverCode));
+  check('server.js 不再有 microphone 空允许列表', !/microphone=\(\)/.test(serverCode));
+  try {
+    const appPage = await httpGet(BASE + '/app');
+    const pp = appPage.headers.get('permissions-policy') || '';
+    check('GET /app Permissions-Policy 放行 microphone(self)', /microphone=\(self\)/i.test(pp), pp);
+    const rootPage = await httpGet(BASE + '/');
+    const pp2 = rootPage.headers.get('permissions-policy') || '';
+    check('GET / Permissions-Policy 放行 microphone(self)', /microphone=\(self\)/i.test(pp2), pp2);
+  } catch (e) {
+    check('Permissions-Policy 响应头检查异常: ' + (e && e.message ? e.message : e), false);
+  }
+
+  console.log('\n[8] 运行中 3001 只读（web/ 刷新即生效，未重启服务）');
   try {
     const js = await httpGet(BASE + '/app/src/components/xiaozhiPlan.js');
     check('GET xiaozhiPlan.js 200', js.status === 200, 'HTTP ' + js.status);

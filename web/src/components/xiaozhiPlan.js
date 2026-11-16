@@ -355,6 +355,18 @@ function micErrorInfo(err, perm) {
       retry: true
     };
   }
+  if ((name === 'NotAllowedError' || name === 'PermissionDeniedError') && perm === 'granted') {
+    return {
+      title: '站点已允许，但页面仍被禁止',
+      body: 'Chrome 站点权限已经是「允许」，但本页面的 Permissions-Policy 或系统隐私仍在拦截麦克风。',
+      steps: [
+        '确认服务端没有把该页面的 Permissions-Policy 设成 microphone=()；本仓库 server.js 应为 microphone=(self)。',
+        'Windows：设置 → 隐私和安全性 → 麦克风 → 打开「允许桌面应用访问麦克风」。',
+        '改完刷新页面，再按住麦克风。'
+      ],
+      retry: true
+    };
+  }
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || perm === 'denied') {
     return {
       title: '麦克风被浏览器拒绝了',

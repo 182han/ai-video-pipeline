@@ -95,7 +95,10 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // 2026-11-16 实测：小智「按住说话」报 NotAllowedError，根因是这里的 microphone 空允许列表。
+  // 浏览器文档的 Permissions-Policy 优先级高于站点权限：Chrome 站点设成「允许」也压不过它。
+  // 小智语音需要同源页面访问麦克风，所以只放行 microphone(self)；camera / geolocation 继续禁用。
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
   next();
 });
 
