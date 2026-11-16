@@ -599,7 +599,8 @@ async function main() {
     /readRuntimeConfig/.test(assistantJs) && /\.\.\.runtime/.test(assistantJs)
     && /planId: plan\.planId, approved: true, \.\.\.runtime/.test(assistantJs));
   ok('首页示例改为「时长优先」（不再出现主题式长片示例）',
-    /PAGE_CHIPS = \['10 分钟的长视频'/.test(assistantJs)
+    // 2026-11-16 用户反馈「30 秒」：chips 前面加了「30 秒（快速试）」，断言改成「包含 10 分钟长片示例」
+    /PAGE_CHIPS = \[[^\]]*'10 分钟的长视频'/.test(assistantJs)
     && !/30 分钟的雪山/.test(assistantJs)
     && /场景卡库/.test(assistantJs));
 

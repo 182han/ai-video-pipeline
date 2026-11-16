@@ -401,6 +401,10 @@ async function main() {
     // info 是挂载后异步发的：不能只查一次（会偶发 0），等它计数 > 0
     const infoStubOk = await waitFor('window.__e2e.infoStubCount > 0', 'info 拦截计数', 8000).catch(() => false);
     check(infoStubOk === true, 'info 补字段拦截已生效（组件挂载时就能拿到 image.unitCny）');
+    // 首页建议 chips（发送消息后介绍卡会收起，所以必须在发消息前查）
+    const tHome = await bodyText();
+    check(/30 秒（快速试）/.test(tHome), '首页示例里有「30 秒（快速试）」（短视频/省钱验证入口）',
+      (tHome.match(/30 秒[^\n]{0,20}/) || [''])[0]);
 
     await js(`(() => {
       const ta = document.querySelector('textarea.xz-input');
@@ -432,7 +436,22 @@ async function main() {
       return box ? { checked: box.checked, disabled: box.disabled } : null;
     })()`);
     check(toggleState && toggleState.checked === true, '出图开关默认开启（用户口径全自动）', JSON.stringify(toggleState));
+    // 2026-11-16 用户反馈「计划卡里改不了分辨率」：现在计划卡有 480P/720P/1080P 三个按钮。
+    const resBtns = await js(`[...document.querySelectorAll('button')].map(b=>(b.textContent||'').trim()).filter(t=>/^(480P|720P|1080P)$/.test(t))`);
+    check(Array.isArray(resBtns) && resBtns.length === 3, '计划卡有 480P/720P/1080P 三个分辨率按钮', JSON.stringify(resBtns));
+    check(t3.includes('分辨率'), '计划卡显示「分辨率」行');
     await shot('p4-01-plan-card-image-toggle');
+
+    // 点 1080P → 后端重新出计划卡（不建任务、不计费），分辨率与费用同步变化
+    await clickExact('1080P', 'button');
+    await waitFor('document.body.innerText.includes("1080p（下面可改）")', '计划卡切到 1080p', 15000);
+    const t1080 = await bodyText();
+    check(/1080p（下面可改）/.test(t1080), '点 1080P → 计划卡分辨率变成 1080p');
+    check(/¥\s*720\.00/.test(t1080), '1080p 预估 = ¥720（10 分钟 × ¥1.2/s，重算正确）',
+      (t1080.match(/预估费用[^\n]{0,40}/) || [''])[0]);
+    await clickExact('720P', 'button');
+    await waitFor('document.body.innerText.includes("720p（下面可改）")', '计划卡切回 720p', 15000);
+    check(true, '点 720P → 切回 720p（来回切不产生任务）');
 
     console.log('\n[4] 确认执行 → 拦截请求体');
     await clickByText('确认执行', 'button');
@@ -657,6 +676,40 @@ async function main() {
     // 注意：这里已经是 /app/library 文档，window.__e2e 是新的；info 单价拦截在首页断言过（[3]）。
     // 这里只确认 stub 在换页后仍自动装好（addScriptToEvaluateOnNewDocument 生效）。
     check(await js('!!(window.__e2e && window.__e2e.installed)'), '换页后 stub 仍自动装好（新 document 生效）');
+
+    // ---------- 13. 创作入口（/app/create-smart）：分辨率 480P/720P/1080P 可选 ----------
+    // 用户反馈「创作入口里选不了 720/1080/480」：这里全用零计费路径走一遍，
+    // 只点「看场景卡」「下一步」「不出图，直接下一步」，绝不点「出图」「确认提交」。
+    console.log('\n[13] 创作入口：④ 生成设置 的分辨率可选（480P/720P/1080P，零计费）');
+    await send('Page.navigate', { url: BASE + '/app/create-smart' });
+    await waitFor('!!document.querySelector("input[type=number]")', '创作向导 ①', 20000);
+    const t13a = await bodyText();
+    check(/① 时长 \+ 场景卡/.test(t13a) && /看场景卡/.test(t13a), '创作向导渲染第 ① 步（时长 + 场景卡）');
+    check(/分辨率（480P \/ 720P \/ 1080P）在下一步/.test(t13a), '第 ① 步明确提示分辨率在 ④ 生成设置里选');
+    const clickBtnRet = async (re) => {
+      const hit = await js(`(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => ${re}.test((x.textContent || '').trim()) && !x.disabled);
+        if (!b) return false; b.click(); return true;
+      })()`);
+      if (!hit) throw new Error('找不到按钮 ' + re);
+    };
+    await clickBtnRet('/^看场景卡/');
+    await waitFor('document.body.innerText.includes("下一步：出图")', '第 ② 步（提示词）', 20000);
+    check(true, '看场景卡 → 进入第 ② 步提示词（GET /api/scene-cards，零计费）');
+    await clickBtnRet('/^下一步：出图/');
+    await waitFor('document.body.innerText.includes("不出图，直接下一步")', '第 ③ 步（出图可选）', 20000);
+    check(true, '进入第 ③ 步（出图可选，不点「出图」）');
+    await clickBtnRet('/^不出图，直接下一步/');
+    await waitFor('document.body.innerText.includes("④ 生成设置") || document.body.innerText.includes("视频通道")', '第 ④ 步（生成设置）', 20000);
+    const t13b = await bodyText();
+    check(/视频通道/.test(t13b) && /分辨率/.test(t13b), '第 ④ 步有「视频通道」和「分辨率」');
+    const res13 = await js(`[...document.querySelectorAll('button')].map(b=>(b.textContent||'').trim()).filter(t=>/^(480P|720P|1080P)$/.test(t))`);
+    check(Array.isArray(res13) && res13.length === 3, '分辨率三档齐全：480P / 720P / 1080P', JSON.stringify(res13));
+    await clickExact('480P', 'button');
+    await sleep(300);
+    const t13c = await bodyText();
+    check(/480p ¥0\.3\/s/.test(t13c), '选 480P → 费用行按 ¥0.3/s 重算', (t13c.match(/视频：[^\n]{0,40}/) || [''])[0]);
+    await shot('p4-09-create-smart-480p');
   } catch (err) {
     // 不能把异常吞掉：脚本体抛错时也要在结果里看见真实原因（否则只剩"失败 1"无从排查）
     thrown = err;

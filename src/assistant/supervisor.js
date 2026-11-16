@@ -189,8 +189,10 @@ function describeReply(plan) {
 function replyForPlan(plan) {
   // 2026-11-16 用户口径：长片按「总时长」排，场景从场景卡库自动抽取，不再说「我按某个主题排好了」。
   const mins = Number(plan.totalSec || 0) / 60;
-  const durLabel = mins >= 10 ? mins.toFixed(1) : mins.toFixed(2);
-  return `我按 ${durLabel} 分钟排好了：\n${describeReply(plan)}\n`
+  // 不到 1 分钟按秒说（支持「30 秒」这类短视频/快速验证）。
+  const durLabel = mins >= 10 ? `${mins.toFixed(1)} 分钟`
+    : (mins >= 1 ? `${mins.toFixed(2)} 分钟` : `${Math.round(Number(plan.totalSec) || 0)} 秒`);
+  return `我按 ${durLabel}排好了：\n${describeReply(plan)}\n`
     + (plan.requiresPaymentApproval
       ? '这是付费任务：你确认后我才开始，不会自动扣费。要改哪里直接说。'
       : '这是零计费任务（Mock）：你确认后我就开始。要改哪里直接说。');
@@ -283,7 +285,11 @@ function handleMessage(opts = {}) {
     const last = memory.lastPlan(sessionId);
     const parsed = planCard.parseUtterance(text);
     let input = { text, sessionId };
-    const follow = last && (isFollowUp(text) || isRepeat(text));
+    // 只给了「槽位词」也算续问：例如单独说「1080p」「720p」「15 秒/段」——
+    // 用户直觉是「改上次那个」，不该被当成"没说时长"再问一遍（2026-11-16 用户反馈）。
+    const slotOnly = parsed.totalMinutes === null && parsed.clipCount === null
+      && (parsed.resolution !== null || parsed.clipDurationSec !== null || parsed.model !== null);
+    const follow = last && (isFollowUp(text) || isRepeat(text) || slotOnly);
     if (follow) input = { ...inputFromLast(last, parsed, text), sessionId };
     else {
       input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;

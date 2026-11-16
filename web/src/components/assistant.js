@@ -104,7 +104,7 @@ export function Assistant({ page = false } = {}) {
   const pageScrollRef = useRef(null);
   // 建议 chips：用户只说时长，场景由场景卡库自动抽取（2026-11-16 用户指正：
   // 长片不围绕某个主题，60–180 段是不同场景，不能演示成主题式长片示例）。
-  const PAGE_CHIPS = ['10 分钟的长视频', '上一次的视频', '现在进度怎样'];
+  const PAGE_CHIPS = ['30 秒（快速试）', '10 分钟的长视频', '上一次的视频', '现在进度怎样'];
   // 批量模式（2026-11-12 用户口径）：不填条数，按「目标时长 ÷ 每段秒数」自动算。
   // 默认 10 分钟 / 10 秒 = 60 条；可切 30 分钟 = 180 条。
   const [batchMinutes, setBatchMinutes] = useState(10);
@@ -886,6 +886,7 @@ export function Assistant({ page = false } = {}) {
                   unitCny=${imageUnitCny}
                   hasImageKey=${imageKeyPresent}
                   imageBackendReady=${imageBackendReady}
+                  onSetResolution=${(r) => send('改成 ' + r)}
                 />
               </div>
             `}
@@ -1078,6 +1079,7 @@ export function Assistant({ page = false } = {}) {
               unitCny=${imageUnitCny}
               hasImageKey=${imageKeyPresent}
               imageBackendReady=${imageBackendReady}
+              onSetResolution=${(r) => send('改成 ' + r)}
             />
           `}
           ${xstate && xstate.state && html`

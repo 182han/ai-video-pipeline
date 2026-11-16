@@ -35,14 +35,21 @@ function imageBillingText(plan, unitCny) {
 
 // 2026-11-16 契约 §0/§1：全自动链路 = 场景卡 → 逐段出图 → 图生视频；出图后整批停一次审图。
 // 开关默认开启（用户口径「全自动」），状态由调用方存 localStorage（vs_image_per_clip）。
-export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady }) {
+export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution }) {
   if (!plan) return null;
   const est = plan.estimate || {};
   const imgOn = imagePerClip !== false;
+  const totalSec = Math.round(Number(plan.totalSec) || 0);
+  const mins = Number(plan.totalMinutes);
+  // 不到 1 分钟按秒显示（2026-11-16 支持「30 秒」这类短视频/快速验证）
+  const durText = (Number.isFinite(mins) && mins >= 1)
+    ? `${mins.toFixed(2)} 分钟 = ${plan.clipCount} 段 × ${plan.clipDurationSec} 秒`
+    : `${totalSec} 秒 = ${plan.clipCount} 段 × ${plan.clipDurationSec} 秒`;
   const rows = [
-    ['时长', `${Number(plan.totalMinutes).toFixed(2)} 分钟 = ${plan.clipCount} 段 × ${plan.clipDurationSec} 秒`],
+    ['时长', durText],
     ...(plan.themeLabel ? [['主题', plan.themeLabel]] : []),
-    ['模型', `${plan.modelLabel || plan.model} · ${plan.resolution}`],
+    ['模型', plan.modelLabel || plan.model],
+    ['分辨率', `${plan.resolution}（下面可改）`],
     plan.sceneCards
       ? ['场景', `场景卡库自动抽取 ${plan.clipCount} 个不同场景（按章节顺序，不重复）`]
       : ['场景', '自由提示词（已关闭场景卡）'],
@@ -69,6 +76,17 @@ export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggle
             <span className="text-ink break-words">${v}</span>
           </div>
         `)}
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] text-ink3">分辨率</span>
+        ${['480p', '720p', '1080p'].map((r) => html`
+          <button key=${'res-' + r}
+            className=${'h-6 px-2 rounded-[4px] text-[10px] border ' + (plan.resolution === r ? 'border-accent text-accent bg-accent/[.08]' : 'border-white/[.08] text-ink2 hover:bg-white/[.05]')}
+            onClick=${() => onSetResolution && onSetResolution(r)}
+            title=${'改成 ' + r.replace('p', 'P') + '（重新出计划卡，不计费）'}
+          >${r.replace('p', 'P')}</button>`)}
+        <span className="text-[10px] text-ink3">点了重新出计划卡（不计费）</span>
       </div>
 
       ${(plan.warnings || []).length > 0 && html`

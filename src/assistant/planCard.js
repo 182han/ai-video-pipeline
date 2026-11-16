@@ -131,6 +131,18 @@ function findDuration(text) {
     if (n) return { totalMinutes: n, unit: 'minute' };
   }
   if (/半\s*(?:个)?\s*分钟/.test(text)) return { totalMinutes: 0.5, unit: 'minute' };
+  // 秒级总时长（2026-11-16 用户反馈：输入「30 秒」被当成听不懂、反复问时长）。
+  // 必须先把「每段 10 秒」「10 秒一段」「单段 15 秒」这类**每段时长**表达从文本里剔掉，
+  // 否则「30 秒，每段 15 秒」会两种含义混在一起（漏掉总时长 30 秒）。
+  const masked = String(text)
+    .replace(/每\s*(?:一)?\s*(?:段|个镜头|条)[^。，,；;]{0,12}\d+\s*(?:秒|s\b)/gi, ' ')
+    .replace(/(?:每段|单段)\s*\d+\s*(?:秒|s\b|sec)/gi, ' ')
+    .replace(/\d+\s*(?:秒|s\b)\s*(?:一|每)\s*(?:段|条|个镜头)/gi, ' ');
+  m = masked.match(new RegExp(NUM + '\\s*(?:秒钟?|s\\b|sec\\b|seconds?)', 'i'));
+  if (m) {
+    const n = parseCnNumber(m[1]);
+    if (n) return { totalMinutes: n / 60, unit: 'second', seconds: n };
+  }
   return null;
 }
 
@@ -362,8 +374,9 @@ function buildPlan(input = {}) {
     // 没给总时长时，用户口述的段数就是唯一依据；也没有段数 → 必须问（§7：总时长无默认）。
     if (clipCount === null) clipCount = parsed.clipCount;
     if (!clipCount) {
-      return fail('PLAN_NEED_DURATION', '这条视频要做多长？比如「10 分钟」或「半小时」。',
-        { missing: ['totalMinutes'], question: '这条视频要做多长？比如「10 分钟」或「半小时」。' });
+      const needDurText = '这条视频要做多长？比如「30 秒」「10 分钟」或「半小时」。';
+      return fail('PLAN_NEED_DURATION', needDurText,
+        { missing: ['totalMinutes'], question: needDurText });
     }
   } else if (clipCount === null) {
     // 给了总时长：段数由「总时长 ÷ 每段时长」向上取整决定（§7：用户给总时长 + 每段时长）。
@@ -499,7 +512,11 @@ function describe(plan) {
   if (!plan || typeof plan !== 'object') return [];
   const lines = [];
   const mins = plan.totalSec / 60;
-  lines.push(`总时长 ${mins >= 10 ? mins.toFixed(1) : mins.toFixed(2)} 分钟（${plan.clipCount} 段 × ${plan.clipDurationSec} 秒）`);
+  // 不到 1 分钟时按秒显示（「30 秒」比「0.50 分钟」更好读；2026-11-16 支持秒级时长）。
+  const secTotal = Math.round(Number(plan.totalSec) || 0);
+  const durLabel = mins >= 10 ? `${mins.toFixed(1)} 分钟`
+    : (mins >= 1 ? `${mins.toFixed(2)} 分钟` : `${secTotal} 秒`);
+  lines.push(`总时长 ${durLabel}（${plan.clipCount} 段 × ${plan.clipDurationSec} 秒）`);
   if (plan.themeLabel) lines.push(`主题：${plan.themeLabel}`);
   lines.push(`模型：${plan.modelLabel} · ${plan.resolution}`);
   lines.push(plan.sceneCards

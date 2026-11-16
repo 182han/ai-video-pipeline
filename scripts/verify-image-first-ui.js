@@ -190,8 +190,11 @@ function slice(src, startRe, endRe, maxLen) {
 
   // ------------------------------------------------------------
   section('[6] xiaozhiPlan.js：计划卡出图行 + 状态条「等待审图」（契约 §1/§2.3）');
-  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey(+imageBackendReady)',
-    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady \}\)/.test(plan));
+  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey(+imageBackendReady/onSetResolution)',
+    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution \}\)/.test(plan));
+  check('计划卡可改分辨率（480P/720P/1080P 按钮 + 回调 onSetResolution）',
+    /'480p', '720p', '1080p'/.test(plan) && /onSetResolution/.test(plan)
+    && /onSetResolution=\$\{\(r\) => send\('改成 ' \+ r\)\}/.test(assist));
   check('计划卡一行「出图：逐段 N 张 → 图生视频」',
     /'出图', imgOn \? `逐段 \$\{plan\.clipCount\} 张 → 图生视频` : '关（纯文生视频）'/.test(plan));
   check('关掉时文案「关（纯文生视频）」', /关（纯文生视频）/.test(plan));

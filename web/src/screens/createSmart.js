@@ -20,6 +20,7 @@ const html = window.htm.bind(React.createElement);
 const { useState, useEffect } = React;
 
 const RES = [
+  { key: '480p', label: '480P', rate: 0.3 },
   { key: '720p', label: '720P', rate: 0.6 },
   { key: '1080p', label: '1080P', rate: 1.2 }
 ];
@@ -281,6 +282,9 @@ export function CreateSmartWizard() {
             预计 <b className="text-ink">${clips} 段</b> × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟
             ${tooMany ? html`<span className="text-danger"> · 超过卡库 180 张</span>` : ''}
           </div>
+          <p className="mt-1 text-[11px] text-ink3">
+            分辨率（480P / 720P / 1080P）在下一步「④ 生成设置」里选；当前 ${res}。
+          </p>
           <div className="mt-4 flex gap-2">
             <${Btn} primary=${true} disabled=${busy === 'cards' || tooMany} onClick=${loadCards}>
               ${busy === 'cards' ? '读卡中…' : '看场景卡（' + clips + ' 段）'}
