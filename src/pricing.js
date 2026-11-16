@@ -188,10 +188,48 @@ function formatCny(amount) {
   return '¥' + (round2(amount)).toFixed(2);
 }
 
+// 图片生成按张计价（阿里云百炼北京价目表；国际站不同）。
+// 2026-11-14 用户要求在图片库标注生成费用；调色是本地派生，不重复计费。
+const IMAGE_PRICES = {
+  'wan2.7-image': { unit: 0.20, label: 'wan2.7-image ¥0.20/张' },
+  'wan2.7-image-pro': { unit: 0.50, label: 'wan2.7-image-pro ¥0.50/张' }
+};
+
+function computeImageCost(opts = {}) {
+  const model = String(opts.model || '').trim();
+  const count = Math.max(1, Math.floor(Number(opts.count) || 1));
+  const conf = IMAGE_PRICES[model];
+  if (!conf) {
+    return {
+      unitPrice: 0,
+      basis: 'unknown',
+      amount: 0,
+      currency: 'CNY',
+      label: '未配置图片单价',
+      priceVersion: PRICE_VERSION,
+      computed: false,
+      count,
+      detail: model ? `model=${model} 不在图片价目表` : 'model 为空'
+    };
+  }
+  return {
+    unitPrice: conf.unit,
+    basis: 'per_image',
+    amount: round2(conf.unit * count),
+    currency: 'CNY',
+    label: conf.label,
+    priceVersion: PRICE_VERSION,
+    computed: true,
+    count,
+    detail: `¥${conf.unit}/张 × ${count} 张`
+  };
+}
+
 module.exports = {
   PRICE_VERSION,
   computeUnitPrice,
   computeClipCost,
+  computeImageCost,
   formatCny,
   round2,
   round4,
@@ -199,6 +237,7 @@ module.exports = {
     version: PRICE_VERSION,
     perClip: PER_CLIP,
     perSecond: PER_SECOND,
-    seedance: SEEDANCE_PRICES
+    seedance: SEEDANCE_PRICES,
+    images: IMAGE_PRICES
   }
 };

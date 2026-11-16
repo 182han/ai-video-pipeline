@@ -27,6 +27,11 @@ const MODELS = Object.freeze({
     verified: 'docs(new-api)-unverified-relay',
     note: 'WhaleTV / new-api 的 Sora 格式：POST /v1/videos multipart，input_reference 为图片文件，size 需与图片宽高一致；中转是否实现该字段未实测'
   },
+  dashscope: {
+    input: 'oss-temp-upload',
+    verified: 'docs(temporary-upload)',
+    note: 'wan3.0-video：first_frame 用百炼临时上传的 oss://（getPolicy→OSS，48h 私有），请求加 X-DashScope-OssResourceResolve: enable；不需要用户自己的公网存储'
+  },
   mock: {
     input: 'none',
     verified: 'n/a',

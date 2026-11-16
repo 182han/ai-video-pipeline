@@ -50,13 +50,28 @@ class DashScopeGenerator extends BaseGenerator {
       }
     };
 
+    // 图生视频（2026-11-12）：wan3.0-video 官方 All-in-One 支持 first_frame。
+    // 官方字段要求公网可读 URL；本地文件/base64 不接受，不能静默退化成文生视频。
+    if (options.image) {
+      if (!options.image.url) {
+        throw new Error('DashScope 图生视频需要 first_frame 的 URL（公网地址或官方 oss:// 临时地址；本地文件/base64 不接）');
+      }
+      body.input.media = [{ type: 'first_frame', url: options.image.url }];
+    }
+
+    // oss:// 是百炼临时上传返回的私有地址；官方要求显式加这个 Header 才会解析。
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${this.apiKey}`,
+      'X-DashScope-Async': 'enable'
+    };
+    if (options.image && String(options.image.url || '').startsWith('oss://')) {
+      headers['X-DashScope-OssResourceResolve'] = 'enable';
+    }
+
     const response = await fetch(`${this.baseUrl}/services/aigc/video-generation/video-synthesis`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-        'X-DashScope-Async': 'enable'
-      },
+      headers,
       body: JSON.stringify(body)
     });
 

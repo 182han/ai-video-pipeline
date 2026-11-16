@@ -40,7 +40,9 @@ console.log('================================================================');
     check(!!getI2VInfo('seedance'), '能力表：seedance 已实现');
     check(!!getI2VInfo('openai-video'), '能力表：openai-video 已接（new-api Sora 格式，标注未实测）');
     check((getI2VInfo('openai-video') || {}).input === 'multipart-input_reference', 'openai-video 能力：multipart input_reference');
-    check(getI2VInfo('dashscope') === null, '能力表：dashscope 未实现（需公网 URL，未接）');
+    check(getI2VInfo('dashscope') && getI2VInfo('dashscope').input === 'oss-temp-upload',
+      '能力表：dashscope 已接（官方临时上传 oss://，无需用户公网存储）');
+    check(listI2VModels().includes('dashscope'), '能力表：dashscope 在 i2v 清单里');
     check(listI2VModels().includes('mock'), '能力表：mock 可用于链路测试');
 
     // ---------- 可灵 ----------
@@ -127,7 +129,8 @@ console.log('================================================================');
     const pipelineSrc = fs.readFileSync(path.join(APP, 'src', 'pipeline.js'), 'utf8');
     const serverSrc = fs.readFileSync(path.join(APP, 'server.js'), 'utf8');
     const createSrc = fs.readFileSync(path.join(APP, 'web', 'src', 'screens', 'create.js'), 'utf8');
-    check(/attachUsage\(photo\.id/.test(pipelineSrc), 'pipeline：把「哪张图生成了哪条视频」记回图片库');
+    check(/attachUsage\(usedPhotoId/.test(pipelineSrc), 'pipeline：片段成功后把「哪张图生成了哪条视频」记回图片库');
+    check(!/attachUsage\(photo\.id/.test(pipelineSrc), 'pipeline：不在取图阶段提前标记已使用');
     check(/status !== 'approved'/.test(pipelineSrc), 'pipeline：源图未通过审核 → 明确失败');
     check(/getI2VInfo\(modelId\)/.test(serverSrc), '/api/tasks：按能力表校验图生视频模型');
     check(/sourcePhoto\.id/.test(serverSrc), '/api/tasks：把 sourcePhotoId 传给任务');
