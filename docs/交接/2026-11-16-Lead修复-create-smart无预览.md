@@ -81,3 +81,53 @@ GET /api/photos?final=1 → 6 条（API 行为不变，其它调用方不受影�
 `inventory.js` 里同时有 C 窗口 +220 行未提交改动，按红线「按路径 add、不混入他人在途工作」，
 这 2 行只能随 C 的 `inventory.js` 一起提交 —— **请 C 在提交信息里注明「含 Lead 的 2026-11-16 图片口径放宽 2 行」**。
 在此之前改动已在工作区生效（前端静态文件，刷新即生效，无需重启 3001）。
+
+## 7. 图生视频闸门死锁 → 按用户口径解除（2026-11-16 13:2x）
+
+用户第二次被拦：`提交失败：第 1 个片段的图片未通过科学/物理审查，不能生成视频`，
+并明确指令：**「只要我打通过了，就不需要再审核，直接可以拿去生成视频」**。
+
+### 7.1 根因：三道闸门互相死锁（不是用户操作问题）
+
+`server.js`（引入于 `8f5e6fb feat(gallery): gate video generation on final approved photos`）
+对 `photoIds` / `sourcePhotoId` 要求同时满足：
+
+| 闸门 | 新出图实际值 | 能否满足 |
+|---|---|---|
+| `status === 'approved'` | approved | ✅（用户点了通过） |
+| `scienceStatus === 'passed'` | **unchecked** | ❌ 自动审查从没跑；手动入口在库·图片详情里 |
+| `isFinal === true` | **false** | ❌ 而 `PUT {isFinal:true}` 又要求 `scienceStatus === 'passed'`（`server.js:916`）→ **循环依赖** |
+
+→ 批量出图的图**结构性永远无法**用于图生视频。这是设计缺陷，`skipped/unchecked` 被当成 `passed` 的反向滥用。
+
+### 7.2 代码改动（按用户口径：人工通过即放行）
+
+`server.js` 两处（**仅删闸门，未整文件覆盖**；C 窗口的 server.js 改动区间在 +947/+2134/+2178/+2224，未触及这两段）：
+
+1. `sourcePhotoId` 路径：删 `scienceStatus !== 'passed'` 与 `isFinal !== true` 两个 400。
+2. `photoIds`（批量/向导）路径：同上，只保留 `status === 'approved'` 硬性要求。
+3. 两处均加注释说明口径来源与「原实现循环依赖」。
+
+语法门：`node --check server.js` **exit 0**；`grep 未通过科学/物理审查` 已无匹配。
+**生效条件：重启 3001**（后端文件），与 C 窗口改动一起。
+
+### 7.3 当前进程的即时解冻（零计费，仅元数据，可回退）
+
+重启会全员登出 + 丢失向导页内存状态（会迫使重出图再花 ¥0.40），故对**本次 B 测试的 2 张图**做等价操作
+（等同用户在库·图片里点「科学审查通过」+「设为最终版」）：
+
+```
+PUT /api/photos/smart_mwit3r22_img_0 {scienceStatus:'passed'} → 200
+PUT /api/photos/smart_mwit3r22_img_1 {scienceStatus:'passed'} → 200
+PUT 两张 {isFinal:true}                                      → 200
+复核：status=approved / scienceStatus=passed / isFinal=true（两张一致）
+```
+
+脚本 `.scratch/auto_chain/unblock_b_photos.js`（不在 git 内）。未调用任何模型，**零计费**。
+回退方式：`scienceStatus` 改回 `unchecked`、`isFinal` 改回 `false` 即可。
+
+### 7.4 提交状态
+
+同 §6：`server.js` 含 C 窗口在途改动，我的 2 处删改**未单独提交**，将随 C 的 `server.js` 提交一起入库。
+**请 C 在提交信息里注明「含 Lead 的 2026-11-16 图生视频闸门放宽（按用户口径：人工通过即放行）」**，
+并确认其 `verify-image-first-*` 套件里没有断言这两个 400 文案（若有，需改成新的口径断言）。
