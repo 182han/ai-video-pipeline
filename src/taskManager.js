@@ -170,6 +170,28 @@ class TaskManager {
     const sceneCardOption = options.sceneCards;
     const sceneCardRequested = sceneCardOption === true
       || (sceneCardOption && typeof sceneCardOption === 'object' && sceneCardOption.enabled === true);
+
+    // ===== 逐段提示词覆盖（P7-A）=====
+    // 键 = 0-based 段序号（"0" = 第 1 段）。只支持场景卡任务：
+    // 覆盖文本替换该段 prompt/imagePrompt，卡仍保留做审计（见 promptComposer.composeClipPatch）。
+    // 存到 task.promptOverrides；pipeline._composeSceneCardPrompts 每次任务启动都重拼并应用，
+    // 因此重跑/补跑不会把用户覆盖冲掉。
+    let promptOverrides = null;
+    if (options.promptOverrides !== undefined && options.promptOverrides !== null) {
+      if (!sceneCardRequested) {
+        const e = new Error('promptOverrides 只支持场景卡任务；普通提示词任务请用 prompts 逐段传入');
+        e.code = 'PROMPT_OVERRIDES_NEEDS_SCENE_CARDS';
+        throw e;
+      }
+      const norm = promptComposer.normalizePromptOverrides(options.promptOverrides, totalClips);
+      if (!norm.ok) {
+        const e = new Error(norm.error || 'promptOverrides 不合法');
+        e.code = norm.code || 'PROMPT_OVERRIDES_INVALID';
+        throw e;
+      }
+      if (Object.keys(norm.overrides).length) promptOverrides = norm.overrides;
+    }
+
     let sceneCardPlan = null;
     if (sceneCardRequested) {
       if (prompts) {
@@ -177,7 +199,15 @@ class TaskManager {
         // 避免「传了逐行提示词却完全没用上」这种静默行为。
         console.warn(`[${taskId}] 同时收到 prompts 与 sceneCards：按场景卡模式执行，逐行提示词被忽略`);
       }
-      sceneCardPlan = sceneCards.allocate(totalClips);
+      // P7-A：显式 ids（小智计划卡里固定/换过的卡）→ 按 id 组卡，**不再 allocate**；
+      // 没给 ids（旧调用方/HTTP 入口）保持 allocate 行为，零回归。
+      const explicitIds = (sceneCardOption && typeof sceneCardOption === 'object'
+        && Array.isArray(sceneCardOption.ids) && sceneCardOption.ids.length)
+        ? sceneCardOption.ids.map(String)
+        : null;
+      sceneCardPlan = explicitIds
+        ? sceneCards.planFromIds(explicitIds, { totalClips })
+        : sceneCards.allocate(totalClips);
       for (let i = 0; i < clips.length; i++) {
         const entry = sceneCardPlan.used[i];
         const card = sceneCards.getCardById(entry.id);
@@ -188,8 +218,11 @@ class TaskManager {
         }
         // 场景卡是唯一场景输入：不把用户整句（含时长/主题词）当「氛围」注入每段提示词，
         // 否则 60–180 段会被拉向同一主题（2026-11-16 用户指正）。主题仅在显式传 options.theme 时生效。
+        // P7-A：该段有用户覆盖时，composeClipPatch 会用覆盖文本替换 prompt/imagePrompt
+        // 并打 promptSource='scene-card-user-edit'（卡仍保留审计字段）。
         Object.assign(clips[i], promptComposer.composeClipPatch(card, {
-          theme: clips[i].theme
+          theme: clips[i].theme,
+          promptOverride: promptOverrides ? promptOverrides[String(i)] : null
         }));
       }
       const firstKey = sceneCardPlan.used[0] ? sceneCardPlan.used[0].scene_key : '';
@@ -319,6 +352,9 @@ class TaskManager {
       // 场景卡取卡计划（P4）：{ roundId, used:[{id,scene_key,chapter,sequence,...}], buffers, ... }；
       // null = 普通提示词任务。卡文件本身仍是只读输入，这里只存审计所需的最小字段。
       sceneCards: sceneCardPlan,
+      // P7-A：逐段提示词覆盖（键 = 0-based 段序号）。null = 全部按场景卡。
+      // pipeline 每次任务启动重拼提示词时应用（幂等，不叠后缀），重跑/补跑不丢。
+      promptOverrides,
       promptSource: sceneCardPlan ? 'scene-card' : null,
       steps,
       // 配乐：整片多轨时间轴。bgmPlan 为编辑结果（见 processors/bgmPlan.js），

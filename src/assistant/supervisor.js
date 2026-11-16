@@ -37,6 +37,8 @@ const planCard = require('./planCard');
 const stateMachine = require('./stateMachine');
 const fillLib = require('./fillFromLibrary');
 const sceneCardLibrary = require('../sceneCards');
+const promptComposer = require('../promptComposer');
+const audioMixer = require('../processors/audioMixer');
 
 const SUPERVISOR_VERSION = 'assistant-supervisor.v1';
 const ACTIVE_STATUS = new Set([
@@ -69,6 +71,11 @@ function briefPlan(plan) {
     model: plan.model,
     modelLabel: plan.modelLabel,
     sceneCards: plan.sceneCards,
+    // P7-A：计划阶段固定的 N 张卡 / 逐段提示词覆盖 / 配乐选择（UI 只读，不影响渲染）
+    sceneCardIds: Array.isArray(plan.sceneCardIds) ? plan.sceneCardIds : null,
+    promptOverrides: plan.promptOverrides || null,
+    bgm: plan.bgm || null,
+    bgmChoices: Array.isArray(plan.bgmChoices) ? plan.bgmChoices : null,
     fillMaxClips: plan.fillMaxClips,
     estimate: plan.estimate,
     requiresPaymentApproval: plan.requiresPaymentApproval,
@@ -182,8 +189,59 @@ function inputFromLast(last, parsed, text) {
   return input;
 }
 
+// ==========================================
+// P7-A：计划摘要里的「配乐」行（选中曲名 / 自动 / 关闭）
+// ------------------------------------------------------------
+// 只读 audioMixer 的素材清单（进程内 require，不走 HTTP）；不混音、不产生费用。
+// ==========================================
+function bgmFindTrack(trackId) {
+  if (!trackId) return null;
+  try {
+    return audioMixer.findTrack(String(trackId));
+  } catch (e) {
+    return null;
+  }
+}
+
+// 素材库：返回 { tracks, byId }。tracks 按用户自定义顺序（listTracksInOrder），
+// 并补上 category（music/ambient）与时长，供「配乐有哪些」逐条列出。
+function bgmLibrary() {
+  let publicTracks = [];
+  try {
+    publicTracks = audioMixer.toPublicTracks();
+  } catch (e) {
+    publicTracks = [];
+  }
+  const byId = new Map(publicTracks.map((t) => [t.id, t]));
+  let orderIds = [];
+  try {
+    orderIds = audioMixer.listTracksInOrder().map((t) => t.id);
+  } catch (e) {
+    orderIds = [];
+  }
+  const ordered = orderIds.filter((id) => byId.has(id)).map((id) => byId.get(id));
+  // 防御：顺序表缺项时不丢曲目（补在末尾）
+  for (const t of publicTracks) {
+    if (!ordered.includes(t)) ordered.push(t);
+  }
+  return { tracks: ordered, byId };
+}
+
+function bgmLabel(plan) {
+  const b = plan && plan.bgm;
+  if (!b) return '自动（随机轻音乐）';
+  if (b.enabled === false || b.mode === 'off') return '关闭（不要配乐）';
+  if (b.trackId) {
+    const hit = bgmFindTrack(b.trackId);
+    return hit ? `手动：${hit.track.title || hit.track.id}` : `手动：${b.trackId}`;
+  }
+  return '自动（随机轻音乐）';
+}
+
 function describeReply(plan) {
   const lines = planCard.describe(plan);
+  // P7-A：计划摘要必须显示当前配乐（§3.3.5）
+  lines.push(`配乐：${bgmLabel(plan)}`);
   return lines.join('\n');
 }
 
@@ -289,6 +347,34 @@ function formatSceneEntries(entries) {
   return shown.join('\n');
 }
 
+// P7-A：按计划里**固定的** sceneCardIds 取卡（换单段后这里是换过的卡），
+// 而不是每次重新 allocate（否则「问选了哪些场景」会把用户换的卡说回去）。
+// 计划没有 sceneCardIds（本功能上线前创建的旧计划）→ 回退 allocate 预览，仅只读。
+function planSceneEntries(plan) {
+  if (!plan) return [];
+  const ids = Array.isArray(plan.sceneCardIds) && plan.sceneCardIds.length ? plan.sceneCardIds : null;
+  if (ids) {
+    return ids.map((id, i) => {
+      const card = sceneCardLibrary.getCardById(id);
+      if (!card) return { index: i, id, scene_key: '(卡缺失)', role: 'feature' };
+      return {
+        index: i,
+        id: card.id,
+        scene_key: card.scene_key,
+        chapter: Number.isInteger(card.chapter) ? card.chapter : null,
+        sequence: Number.isInteger(card.sequence) ? card.sequence : null,
+        role: card.role,
+        palette_id: card.palette_id || null
+      };
+    });
+  }
+  try {
+    return sceneCardLibrary.allocate(plan.clipCount).used;
+  } catch (e) {
+    return [];
+  }
+}
+
 function replyForPlanScenes(sessionId) {
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
@@ -311,11 +397,15 @@ function replyForPlanScenes(sessionId) {
       + '想要卡库选场景，就新排一条（不要说「不要场景卡」）。';
   }
   try {
+    // 计划阶段固定下来的卡（换卡后这里就是新卡）；旧计划没有 ids 时回退纯函数预览。
     // allocate() 是纯函数：按 chapter+sequence 取前 N 张，不占卡、不写卡库、不建任务。
-    // createTask 执行时也按同一顺序取卡，所以这份预览与真正要用的卡一致。
-    const preview = sceneCardLibrary.allocate(plan.clipCount);
-    return `这条计划 ${plan.clipCount} 段，确认后会按章节顺序取这 ${preview.used.length} 张场景卡：\n`
-      + formatSceneEntries(preview.used)
+    // createTask 执行时按同一批 id 取卡，所以这份预览与真正要用的卡一致。
+    const preview = planSceneEntries(plan);
+    if (!preview.length) {
+      return '场景卡库暂时读不到，计划还在，稍后再问一次就行。';
+    }
+    return `这条计划 ${plan.clipCount} 段，确认后会按计划顺序取这 ${preview.length} 张场景卡：\n`
+      + formatSceneEntries(preview)
       + '\n（现在只是预览，还没占卡；真正点「确认执行」时才分配给任务。）';
   } catch (e) {
     return `场景卡库暂时读不到：${(e && e.message) || e}。计划还在，稍后再问一次就行。`;
@@ -334,6 +424,215 @@ function replyForNoImage(sessionId) {
     + '· 纯文生视频（不出图）：取消「逐段出图」的勾选，再点「确认执行」——只按场景卡提示词生成视频，不出图、也不会停下来等你审图；\n'
     + '· 出图 → 图生视频：保持勾选（默认开）。出图后我会停下来，等你去「库 · 图片」审完再点「继续生成」。\n'
     + '改这个勾选不重排计划，也不产生任何费用。';
+}
+
+// ==========================================
+// P7-A：计划内精准修改（换单段场景卡 / 改单段提示词）
+// ------------------------------------------------------------
+// 硬性约束（写死在这里，测试逐条断言）：
+//   · **不建任务、不调任何模型、不改 planId**；只 memory.addPlan 覆盖同一 planId；
+//   · 只允许 1 ≤ N ≤ plan.clipCount，越界明确报错；
+//   · 无计划时先问总时长，不凭空排一条；
+//   · 改了哪一段写在回复第一行，后面跟当前计划摘要。
+// ==========================================
+const RE_SEGMENT_INDEX = /第\s*(\d+|[零〇一二两三四五六七八九十百]+)\s*(?:个)?\s*(?:段|镜头|场景|张|条|画面)/;
+// 「换成别的 / 换一个」这类空指代 = 换卡，不是改提示词。
+const RE_VAGUE_PAYLOAD = /^(?:别的|别的一个?|另一个|其他|其它|其他场景|别的场景|新的|新的一张|一张|一个|一个场景)[。.!！,，]?$/;
+
+function cleanEditPayload(raw) {
+  let s = String(raw === undefined || raw === null ? '' : raw).trim();
+  s = s.replace(/^[：:，,、\s]+/, '');
+  s = s.replace(/^[「『“"']+/, '').replace(/[」』”"']+$/, '');
+  s = s.replace(/[。；;，,\s]+$/, '');
+  return s.trim();
+}
+
+// 从「第 2 段的提示词改成：XXX」里取 XXX（也支持「换成/改为」「画面改成」）。
+// 取不到正文返回 ''，由调用方决定是「问用户要正文」还是「当换卡」。
+function extractPromptEditText(text) {
+  const s = String(text || '');
+  let m = s.match(/(?:提示词|画面(?:内容)?)\s*(?:改成|换成|改为|写成|是|[:：])\s*([\s\S]+)$/);
+  if (!m) m = s.match(/(?:改成|换成|改为|写成)\s*[：:]?\s*([\s\S]+)$/);
+  return m ? cleanEditPayload(m[1]) : '';
+}
+
+function savePlanInPlace(sessionId, plan) {
+  memory.addPlan(sessionId, plan);
+  planCache.set(plan.planId, plan);
+  return plan;
+}
+
+function replyForPlanEdit(sessionId, text) {
+  const plan = memory.lastPlan(sessionId);
+  if (!plan) {
+    return '现在还没有计划卡，所以没有哪一段可改。先说总时长（比如「30 秒」「10 分钟」），'
+      + '我排好计划你再改第几段。';
+  }
+  const m = String(text || '').match(RE_SEGMENT_INDEX);
+  if (!m) {
+    return '我没听清要改第几段。可以说「第 2 段换一个」或「第 2 段提示词改成：……」。';
+  }
+  const n = planCard.parseCnNumber(m[1]);
+  if (!Number.isInteger(n) || n < 1 || n > plan.clipCount) {
+    return `这条计划只有 ${plan.clipCount} 段，没有第 ${m[1]} 段。`;
+  }
+  if (plan.sceneCards === false) {
+    return '这条计划关了场景卡（自由提示词），不支持按段换卡/改提示词；'
+      + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
+  }
+  const index = n - 1;
+  const payload = extractPromptEditText(text);
+  const promptHint = /提示词|画面/.test(text);
+  const vague = !payload || RE_VAGUE_PAYLOAD.test(payload);
+  if (promptHint && vague) {
+    return `第 ${n} 段要改成什么？直接说「第 ${n} 段提示词改成：……」（每段最多 `
+      + `${promptComposer.MAX_PROMPT_OVERRIDE_CHARS} 字）。`;
+  }
+  // 判定顺序（写死，测试按这两条断言）：
+  //   1) 给了具体正文（且不是「换成别的」这类空指代）→ 改提示词；
+  //   2) 其余（换一个 / 换成别的 / 不想要）→ 换场景卡。
+  if (!vague) {
+    const merged = { ...(plan.promptOverrides || {}), [String(index)]: payload };
+    const norm = promptComposer.normalizePromptOverrides(merged, plan.clipCount);
+    if (!norm.ok) return `改第 ${n} 段提示词失败：${norm.error}`;
+    plan.promptOverrides = Object.keys(norm.overrides).length ? norm.overrides : null;
+    savePlanInPlace(sessionId, plan);
+    const len = plan.promptOverrides[String(index)].length;
+    const warn = (norm.warnings || []).length ? `；${norm.warnings.join('；')}` : '';
+    return `已改第 ${n} 段提示词（${len} 字），其余段仍按场景卡${warn}\n${describeReply(plan)}`;
+  }
+
+  // ---- 换第 N 段场景卡：只改 sceneCardIds[N-1]，planId 不变 ----
+  const currentIds = (Array.isArray(plan.sceneCardIds) && plan.sceneCardIds.length === plan.clipCount)
+    ? plan.sceneCardIds.slice()
+    : planSceneEntries(plan).map((e) => e.id);
+  const oldId = currentIds[index];
+  const oldCard = sceneCardLibrary.getCardById(oldId);
+  let next;
+  try {
+    next = sceneCardLibrary.nextSwapCandidate(oldId, currentIds);
+  } catch (e) {
+    return `换第 ${n} 段失败：${(e && e.message) || e}`;
+  }
+  const nextCard = sceneCardLibrary.getCardById(next.id);
+  plan.sceneCardIds = currentIds;
+  plan.sceneCardIds[index] = next.id;
+  savePlanInPlace(sessionId, plan);
+  const fromKey = oldCard ? oldCard.scene_key : oldId;
+  const toKey = nextCard ? nextCard.scene_key : next.id;
+  const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
+    ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
+  return `已换第 ${n} 段：${fromKey} → ${toKey}${chapterSeq}\n`
+    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
+    + describeReply(plan);
+}
+
+// ==========================================
+// P7-A：配乐（列素材库 / 用第 N 首 / 换一首 / 不要配乐 / 设为默认）
+// ------------------------------------------------------------
+// · 读库走进程内 audioMixer（不走 HTTP、不混音、不产生费用）；
+// · 「用第 N 首」的编号上下文存进 plan.bgmChoices（持久化在会话里，重启不丢），
+//   不用进程内存 Map；
+// · 写全局默认只走 audioMixer.savePrefs，写前用 findTrack 校验存在；
+// · 不做已提交任务的重新混音（P7-C 范围）。
+// ==========================================
+const RE_BGM_INDEX = /第\s*(\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
+
+function replyForBgm(sessionId, text) {
+  const plan = memory.lastPlan(sessionId);
+  const lib = bgmLibrary();
+  const tracks = lib.tracks;
+  if (!tracks.length) return '配乐素材库是空的，先去设置页/剪辑台传一首再让我配乐。';
+  // 编号上下文：优先用这条计划上次列出的顺序（1-based 编号与它对齐）。
+  let orderIds = (plan && Array.isArray(plan.bgmChoices) && plan.bgmChoices.length)
+    ? plan.bgmChoices.filter((id) => lib.byId.has(id))
+    : [];
+  if (!orderIds.length) orderIds = tracks.map((t) => t.id);
+  const orderedTracks = orderIds.map((id) => lib.byId.get(id)).filter(Boolean);
+  const nMatch = String(text || '').match(RE_BGM_INDEX);
+  const n = nMatch ? planCard.parseCnNumber(nMatch[1]) : null;
+  if (nMatch && (!Number.isInteger(n) || n < 1 || n > orderedTracks.length)) {
+    return `素材库只有 ${orderedTracks.length} 首，没有第 ${nMatch[1]} 首。说「配乐有哪些」看编号。`;
+  }
+  const pick = (Number.isInteger(n) && n >= 1) ? orderedTracks[n - 1] : null;
+  // 按曲名/曲目 id 匹配（例：「配乐换成 Morning」）
+  const named = orderedTracks.find((t) => t && (
+    (t.title && String(t.title).length >= 2 && String(text).includes(String(t.title)))
+    || (t.id && String(text).includes(String(t.id)))
+  )) || null;
+
+  // 1) 设为默认（全局默认；不是只改这一条计划）
+  if (/默认/.test(text)) {
+    const target = pick || named
+      || (plan && plan.bgm && plan.bgm.trackId ? (bgmFindTrack(plan.bgm.trackId) || {}).track : null);
+    if (!target) {
+      return '没认出要设为默认的是哪一首：先说「配乐有哪些」看编号，或说「把第 3 首设为默认配乐」。';
+    }
+    if (!bgmFindTrack(target.id)) {
+      return `设为默认失败：素材库里没有 ${target.id}。`;
+    }
+    try {
+      audioMixer.savePrefs({ defaultTrackId: target.id });
+    } catch (e) {
+      return `设为默认失败：${(e && e.message) || e}`;
+    }
+    const saved = audioMixer.getPrefs().defaultTrackId;
+    if (saved !== target.id) {
+      return `设为默认失败：写入后读回不一致（当前 ${saved || '(空)'}）。`;
+    }
+    return `已改默认配乐：《${target.title || target.id}》（${target.id}）——`
+      + '之后新计划用「自动」配乐时都会以它作为开场曲。';
+  }
+
+  // 2) 不要配乐（写进计划，执行时整片不混音）
+  if (/不要配乐|不配乐|关掉配乐|关闭配乐|取消配乐|去掉配乐|静音|不要音乐/.test(text)) {
+    if (!plan) {
+      return '现在还没有计划卡：先说总时长（比如「10 分钟」）排好计划，再说「不要配乐」。';
+    }
+    plan.bgm = { enabled: false, mode: 'off' };
+    plan.bgmChoices = orderIds;
+    savePlanInPlace(sessionId, plan);
+    return `已关掉配乐：这条计划不混配乐。\n${describeReply(plan)}`;
+  }
+
+  // 3) 选曲 / 换一首
+  const wantsNext = /换一首|换首|换一曲|再来一首/.test(text);
+  const selectionVerb = /换成|改用|选用|用|选|要|放|听/.test(text);
+  if (nMatch || named || wantsNext || (selectionVerb && /配乐|音乐|曲/.test(text))) {
+    if (!plan) {
+      return '现在还没有计划卡：先说总时长（比如「10 分钟」）排好计划，再说「用第 3 首」。';
+    }
+    let track = pick || named || null;
+    if (!track && wantsNext) {
+      const curId = plan.bgm && plan.bgm.trackId ? plan.bgm.trackId : null;
+      const curIdx = curId ? orderedTracks.findIndex((t) => t.id === curId) : -1;
+      track = orderedTracks[(curIdx + 1) % orderedTracks.length] || null;
+    }
+    if (!track) {
+      return '没认出要哪一首：说「配乐有哪些」看编号，或说「用第 3 首」；'
+        + '也可以直接说曲名（例如「配乐换成 Morning」）。';
+    }
+    plan.bgm = { enabled: true, mode: 'manual', trackId: track.id };
+    plan.bgmChoices = orderIds;
+    savePlanInPlace(sessionId, plan);
+    const pos = orderedTracks.indexOf(track) + 1;
+    return `已选配乐：第 ${pos} 首《${track.title || track.id}》（${track.id}）。`
+      + `确认执行时会用它。\n${describeReply(plan)}`;
+  }
+
+  // 4) 列出素材库（编号、曲名、类别 music/ambient、时长）
+  if (plan) {
+    plan.bgmChoices = orderIds;
+    savePlanInPlace(sessionId, plan);
+  }
+  const lines = orderedTracks.map((t, i) => {
+    const dur = Number(t.durationSec) > 0 ? `${Math.round(Number(t.durationSec))} 秒` : '时长未知';
+    return `${i + 1}. ${t.title || t.id}（${t.id}，${t.category || 'music'}，${dur}）`;
+  });
+  const head = plan
+    ? `素材库 ${orderedTracks.length} 首（编号记在这条计划里，直接说「用第 3 首」）：`
+    : `素材库 ${orderedTracks.length} 首（还没有计划卡；先说总时长，再说「用第 3 首」）：`;
+  return `${head}\n${lines.join('\n')}` + (plan ? `\n当前配乐：${bgmLabel(plan)}` : '');
 }
 
 /**
@@ -363,6 +662,12 @@ function handleMessage(opts = {}) {
   } else if (intent.intent === 'no_image') {
     // 2026-11-16 用户问题 b：要纯文生视频 → 告诉用户卡上的开关位置，不新建计划。
     reply = replyForNoImage(sessionId);
+  } else if (intent.intent === 'plan_edit') {
+    // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
+    reply = replyForPlanEdit(sessionId, text);
+  } else if (intent.intent === 'bgm') {
+    // 2026-11-16 P7-A：配乐 —— 列库 / 选曲 / 关掉 / 设默认。
+    reply = replyForBgm(sessionId, text);
   } else if (intent.intent === 'last') {
     const res = retrieveRefs(text, 3);
     refs = res.refs;
@@ -513,8 +818,22 @@ function execute(opts = {}) {
       preset: 'final',
       // 关键：小智自己按预算重试，不让流水线先产出「缺段成片」。
       autoRetry: false,
-      sceneCards: plan.sceneCards ? { enabled: true } : undefined,
-      bgm: opts.options && opts.options.bgm ? opts.options.bgm : { enabled: true, mode: 'auto', wantMusic: true },
+      // P7-A：场景卡按计划里固定的 id 传给 createTask（用户换过的卡必须原样生效；
+      // 没有 ids 的旧计划才让 createTask 走 allocate，零回归）。
+      sceneCards: plan.sceneCards
+        ? {
+          enabled: true,
+          ...(Array.isArray(plan.sceneCardIds) && plan.sceneCardIds.length
+            ? { ids: plan.sceneCardIds }
+            : {})
+        }
+        : undefined,
+      // P7-A：逐段提示词覆盖（键 = 0-based 段序号）；pipeline 每次启动重拼时应用。
+      promptOverrides: plan.promptOverrides || undefined,
+      // P7-A：计划里的配乐选择优先于默认 auto；HTTP body 显式传的 bgm 优先级最高（不变）。
+      bgm: (opts.options && opts.options.bgm)
+        || plan.bgm
+        || { enabled: true, mode: 'auto', wantMusic: true },
       transition: opts.options && opts.options.transition ? opts.options.transition : { enabled: true, duration: 0.4, type: 'fade' },
       runtimeConfig: (opts.options && opts.options.runtimeConfig) || {},
       source: 'assistant'

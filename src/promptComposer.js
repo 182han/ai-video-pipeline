@@ -49,6 +49,8 @@ const PALETTE_ADJUST = Object.freeze({
 
 const MAX_PROMPT_CHARS = 2400;
 const MAX_USER_PROMPT_CHARS = 160;
+// P7-A：用户逐段提示词覆盖的单段上限（计划卡/任务/流水线三处共用同一数字）。
+const MAX_PROMPT_OVERRIDE_CHARS = 400;
 
 function _clean(v, max = 400) {
   if (v === undefined || v === null) return '';
@@ -207,13 +209,56 @@ function composeImagePrompt(card, ctx = {}) {
   return _clamp(sentences.join(''));
 }
 
+// P7-A：逐段提示词覆盖的规范化（键 = **0-based 段序号**；"0" 表示第 1 段）。
+// ------------------------------------------------------------
+// 只做白名单 + 范围 + 截断，不读计划/任务、不调用任何接口。
+// 调用点：planCard.buildPlan（计划阶段）、taskManager.createTask（任务阶段）、
+//         supervisor 的「改第 N 段提示词」意图（合并旧覆盖）。
+// 返回 { ok:true, overrides, warnings } 或 { ok:false, code, error }；
+// 空串/纯空白 = 不覆盖（不产生一个空文本空洞）。
+function normalizePromptOverrides(raw, clipCount) {
+  if (raw === undefined || raw === null) return { ok: true, overrides: {}, warnings: [] };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, code: 'PROMPT_OVERRIDES_NOT_OBJECT', error: 'promptOverrides 必须是对象（键 = 0-based 段序号）' };
+  }
+  const n = Number(clipCount);
+  if (!Number.isInteger(n) || n < 1) {
+    return { ok: false, code: 'PROMPT_OVERRIDES_BAD_COUNT', error: `promptOverrides 需要有效的段数（收到 ${clipCount}）` };
+  }
+  const overrides = {};
+  const warnings = [];
+  for (const key of Object.keys(raw)) {
+    if (!/^\d+$/.test(key)) {
+      return { ok: false, code: 'PROMPT_OVERRIDES_BAD_KEY', error: `promptOverrides 的键必须是 0-based 段序号（收到 ${JSON.stringify(key)}）` };
+    }
+    const idx = Number(key);
+    if (idx < 0 || idx >= n) {
+      return { ok: false, code: 'PROMPT_OVERRIDES_OUT_OF_RANGE', error: `第 ${idx + 1} 段超出计划段数（共 ${n} 段）` };
+    }
+    let text = _clean(raw[key], MAX_PROMPT_OVERRIDE_CHARS + 1);
+    if (!text) continue;
+    if (text.length > MAX_PROMPT_OVERRIDE_CHARS) {
+      text = text.slice(0, MAX_PROMPT_OVERRIDE_CHARS);
+      warnings.push(`第 ${idx + 1} 段提示词超过 ${MAX_PROMPT_OVERRIDE_CHARS} 字，已截断到 ${MAX_PROMPT_OVERRIDE_CHARS} 字`);
+    }
+    overrides[String(idx)] = text;
+  }
+  return { ok: true, overrides, warnings };
+}
+
 // 一次产出 clip 需要的全部字段。调用方只负责写回 clip（不修改 card）。
+// ctx.promptOverride：用户对这一段的手写提示词（P7-A）。给了就**原样替换**
+// prompt 与 imagePrompt，并打 promptSource='scene-card-user-edit'，仍保留
+// sceneKey/sceneCardId/sceneCard 做审计（卡还是这一段选定的卡）。
+// 刻意**不追加任何风格/构图后缀**：每次任务启动都会重拼一次，只有
+// 「从卡 + 覆盖文本重新算」才能保证重跑/补跑不叠后缀、覆盖不丢。
 function composeClipPatch(card, ctx = {}) {
   _assertCard(card);
   const videoPrompt = composeVideoPrompt(card, ctx);
   const imagePrompt = composeImagePrompt(card, ctx);
   const negativePrompt = _negative(card);
-  return {
+  const override = _clean(ctx.promptOverride, MAX_PROMPT_OVERRIDE_CHARS);
+  const patch = {
     prompt: videoPrompt,
     imagePrompt,
     negativePrompt,
@@ -237,6 +282,13 @@ function composeClipPatch(card, ctx = {}) {
     // 参数化调色（null = 未知 palette_id，不臆造参数）
     adjust: paletteAdjust(card.palette_id)
   };
+  if (override) {
+    patch.prompt = override;
+    patch.imagePrompt = override;
+    patch.promptSource = 'scene-card-user-edit';
+    patch.userPromptOverride = true;
+  }
+  return patch;
 }
 
 function compose(card, ctx = {}) {
@@ -257,6 +309,8 @@ function compose(card, ctx = {}) {
 module.exports = {
   SCENE_PROMPT_VERSION,
   MAX_PROMPT_CHARS,
+  MAX_USER_PROMPT_CHARS,
+  MAX_PROMPT_OVERRIDE_CHARS,
   THEME_LABELS,
   STYLE_LABELS,
   PALETTE_ADJUST,
@@ -264,6 +318,7 @@ module.exports = {
   styleLabel,
   paletteAdjust,
   listPalettes,
+  normalizePromptOverrides,
   composeVideoPrompt,
   composeImagePrompt,
   composeClipPatch,

@@ -816,6 +816,9 @@ class Pipeline {
   }
 
   // 确保任务有一轮完整取卡计划（缺则重新取一轮：按 chapter+sequence、不放回）。
+  // P7-A：小智计划卡把卡 id 固定后传给 createTask（显式 ids 组的一轮，used 长度 = totalClips），
+  // 这里必须原样保留——否则用户换过的卡会在任务启动时被 allocate 静默冲掉。
+  // 只有字段缺失/长度不足（旧任务、数据恢复）才补取一轮。
   _ensureSceneCardPlan(taskId) {
     let task = taskManager.getTask(taskId);
     if (!this._isSceneCardTask(task)) return task;
@@ -845,12 +848,19 @@ class Pipeline {
         e.code = 'SCENE_CARDS_MISSING_CARD';
         throw e;
       }
+      // P7-A：该段有用户覆盖时，覆盖文本**原样**替换 prompt/imagePrompt（不叠后缀），
+      // 场景卡 id 仍保留做审计；promptSource 标记为 scene-card-user-edit。
+      // 每次任务启动都会走到这里，必须从「卡 + 覆盖文本」重新算（而不是在旧 prompt 上追加），
+      // 这样重跑/补跑既不会冲掉覆盖，也不会把后缀叠两遍。
+      const override = task.promptOverrides && task.promptOverrides[String(clip.index)];
       const patch = promptComposer.composeClipPatch(card, {
-        theme: clip.theme ?? task.theme
+        theme: clip.theme ?? task.theme,
+        promptOverride: override || null
       });
       const changed = clip.prompt !== patch.prompt
-        || clip.promptSource !== 'scene-card'
+        || clip.promptSource !== patch.promptSource
         || clip.sceneCardId !== patch.sceneCardId
+        || (!!clip.userPromptOverride) !== (!!patch.userPromptOverride)
         || JSON.stringify(clip.adjust || null) !== JSON.stringify(patch.adjust || null);
       if (changed) {
         taskManager.updateClip(taskId, clip.index, patch);
@@ -872,8 +882,11 @@ class Pipeline {
       return null;
     }
     const clip = task.clips[index] || {};
+    // P7-A：缓冲区替换只换卡，不丢用户覆盖（覆盖文本仍按该段位置生效）。
+    const override = task.promptOverrides && task.promptOverrides[String(index)];
     const patch = promptComposer.composeClipPatch(replaced.card, {
-      theme: clip.theme ?? task.theme
+      theme: clip.theme ?? task.theme,
+      promptOverride: override || null
     });
     taskManager.updateClip(taskId, index, {
       ...patch,

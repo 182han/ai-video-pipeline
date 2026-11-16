@@ -19,6 +19,7 @@
 'use strict';
 
 const sceneCards = require('../sceneCards');
+const promptComposer = require('../promptComposer');
 const pricing = require('../pricing');
 const budget = require('../budget');
 
@@ -421,6 +422,43 @@ function buildPlan(input = {}) {
     }
   }
 
+  // ---- 场景卡 id（P7-A）----
+  // 计划阶段就把 N 张卡固定下来（allocate 是纯函数、不占卡），执行时按 id 传给
+  // taskManager.createTask —— 「换单段场景卡」只需改这个数组里的一项，planId 不变。
+  // 卡库文件被换掉、id 不存在时，execute 会拿到明确错误（提示重新排计划），
+  // 而不是在 createTask 里静默 allocate 出一批新卡。
+  let sceneCardIds = null;
+  if (sceneCardEnabled) {
+    try {
+      sceneCardIds = sceneCards.allocate(clipCount).used.map((entry) => entry.id);
+    } catch (e) {
+      return fail(e.code || 'PLAN_SCENE_CARDS_ERROR', `场景卡取卡失败：${e && e.message ? e.message : e}`);
+    }
+  }
+
+  // ---- 每段提示词覆盖（P7-A）----
+  // plan.promptOverrides 的键 = **0-based 段序号**（"0" = 第 1 段，写死在本注释里，
+  // 并由 promptComposer.normalizePromptOverrides 断言/校验；1-based 的「第 N 段」
+  // 只在 supervisor 解析用户话术时出现，进入计划前一律 -1）。
+  // 只在场景卡计划下有意义：覆盖文本直接替换该段的 prompt/imagePrompt，
+  // 场景卡仍保留做审计（见 promptComposer.composeClipPatch）。
+  const overrideWarnings = [];
+  let promptOverrides = {};
+  if (input.promptOverrides !== undefined && input.promptOverrides !== null) {
+    if (!sceneCardEnabled) {
+      return fail('PLAN_PROMPT_OVERRIDE_NEEDS_SCENE_CARDS',
+        '按段改提示词需要场景卡计划（这条计划关了场景卡）；请说「用场景卡」新排一条。',
+        { missing: ['promptOverrides'] });
+    }
+    const norm = promptComposer.normalizePromptOverrides(input.promptOverrides, clipCount);
+    if (!norm.ok) {
+      return fail(norm.code || 'PLAN_BAD_PROMPT_OVERRIDES', norm.error || '提示词覆盖不合法',
+        { missing: ['promptOverrides'] });
+    }
+    promptOverrides = norm.overrides;
+    overrideWarnings.push(...(norm.warnings || []));
+  }
+
   // ---- 主题（不作为长片选卡依据）----
   // 只接受调用方显式传入的 theme；用户口语里的地貌词不升级成「计划主题」。
   // 场景卡模式 = 卡库按 chapter+sequence 抽取不同场景，单一主题会把 60–180 段拉成同一类画面。
@@ -453,6 +491,17 @@ function buildPlan(input = {}) {
     modelId: input.modelId ? String(input.modelId) : null,
     sceneCards: sceneCardEnabled,
     sceneCardsRequired: true, // 小智计划默认走卡库（§7）
+    // P7-A：这一轮要用的卡 id（与 clipCount 等长；换单段只改一项）。
+    sceneCardIds,
+    // P7-A：逐段提示词覆盖（键 = 0-based 段序号）；null = 全部按场景卡。
+    promptOverrides: Object.keys(promptOverrides).length ? promptOverrides : null,
+    // P7-A：配乐选择（由 supervisor 的「配乐」意图写入）。
+    //   null = 未指定（执行时用默认「自动」）；{enabled:true,mode:'manual',trackId} = 指定曲目；
+    //   {enabled:false,mode:'off'} = 不要配乐。
+    bgm: null,
+    // P7-A：最近一次列出的配乐曲目 id 顺序（持久化在计划里，「用第 N 首」靠它，
+    // 不用进程内存 Map —— 服务重启后上下文不丢）。
+    bgmChoices: null,
     limits: {
       maxMinutes: LIMITS.maxMinutes,
       maxClips: LIMITS.maxClips,
@@ -477,6 +526,8 @@ function buildPlan(input = {}) {
       `你提到了「${mentionedThemeLabel}」：长片按场景卡库自动抽取不同场景，不按单一主题选卡；`
       + '这个主题词不会影响出片，只作提示。');
   }
+  // P7-A：提示词被截断等必须告知用户，不静默。
+  overrideWarnings.forEach((w) => base.warnings.push(w));
 
   const est = estimate(base);
   base.estimate = est;

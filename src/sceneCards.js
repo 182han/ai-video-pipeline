@@ -291,6 +291,101 @@ function allocate(count, options = {}) {
   return plan;
 }
 
+// 按显式 id 列表组装一轮取卡计划（P7-A：计划内换单段场景卡）。
+// ------------------------------------------------------------
+// 与 allocate() 产出的结构完全一致，唯一区别：used 的顺序/内容由调用方给定，
+// **不再 allocate**（supervisor.execute 把计划卡上的 sceneCardIds 原样传进来）。
+// 为什么需要它：计划卡在创建计划时就把 N 张卡固定下来（plan.sceneCardIds），
+// 用户换单段后只改数组里的一个 id；执行时若还走 allocate，用户换的卡会被静默冲掉。
+// 校验（任何一条不满足都抛明确错误，不静默兜底）：
+//   · ids 必须是非空数组（数量由调用方对 totalClips 校验，这里可用 options.totalClips 再兜底）；
+//   · 每个 id 必须存在（否则 SCENE_CARDS_MISSING_CARD，提示重新排计划）；
+//   · 不允许重复（同一任务内 scene_key 唯一）；
+//   · 只允许正片（buffer 只在生成失败时由 replaceWithBuffer 使用，不参与初始分配）。
+function planFromIds(ids, options = {}) {
+  const lib = loadLibrary(options);
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw sceneCardsError('SCENE_CARDS_BAD_IDS', '按 id 取卡需要一个非空 id 数组');
+  }
+  if (options.totalClips !== undefined && options.totalClips !== null
+    && Number(options.totalClips) !== ids.length) {
+    throw sceneCardsError('SCENE_CARDS_IDS_LENGTH',
+      `场景卡 id 数量（${ids.length}）与片段数（${options.totalClips}）不一致`, {
+        ids: ids.length,
+        totalClips: Number(options.totalClips)
+      });
+  }
+  const seen = new Set();
+  const used = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = String(ids[i] === undefined || ids[i] === null ? '' : ids[i]).trim();
+    if (!id) {
+      throw sceneCardsError('SCENE_CARDS_BAD_IDS', `第 ${i + 1} 段的场景卡 id 为空`);
+    }
+    if (seen.has(id)) {
+      throw sceneCardsError('SCENE_CARDS_IDS_DUPLICATE',
+        `场景卡 id 重复：${id}（同一任务内 scene_key 必须唯一）`, { id, index: i });
+    }
+    const card = lib.byId.get(id);
+    if (!card) {
+      throw sceneCardsError('SCENE_CARDS_MISSING_CARD',
+        `场景卡缺失：${id}（卡库文件可能被替换，请重新排计划）`, { id, index: i });
+    }
+    if (card.role !== 'feature') {
+      throw sceneCardsError('SCENE_CARDS_BUFFER_NOT_ALLOCATABLE',
+        `缓冲卡不能作为初始选卡：${id}（缓冲卡只在生成失败时替换）`, { id, index: i });
+    }
+    seen.add(id);
+    used.push(_entry(card, i));
+  }
+  const plan = {
+    enabled: true,
+    roundId: _makeRoundId(),
+    schemaVersion: lib.meta.schemaVersion,
+    version: lib.meta.version,
+    featureTotal: lib.features.length,
+    bufferTotal: lib.buffers.length,
+    durationSec: lib.meta.durationSec,
+    allocatedAt: new Date().toISOString(),
+    used,
+    buffers: [],
+    replacements: [],
+    status: null,
+    // 审计用：这一轮是按用户选定的 id 组的，不是按 chapter+sequence 顺序分配。
+    source: 'explicit-ids'
+  };
+  plan.status = statusOf(plan);
+  return plan;
+}
+
+// 换单段场景卡的候选（P7-A）：从 currentId 之后按 chapter+sequence 顺序找
+// **下一张还没用过**的正片卡，跳过 usedIds（当前计划已用的卡，含 currentId）。
+// 语义：
+//   · 先向文件顺序后面找，到末尾再从头环形继续 —— 用户连点「换一个」不会卡住；
+//   · 返回 _entry（index 由调用方按段号重设），不改任何卡文件；
+//   · 180 张正片全在 usedIds 里 → SCENE_CARDS_SWAP_EXHAUSTED 明确报错，
+//     不静默复用（产品已定：耗尽要提示扩卡库）。
+function nextSwapCandidate(currentId, usedIds, options = {}) {
+  const lib = loadLibrary(options);
+  const features = lib.features;
+  const start = features.findIndex(c => c.id === String(currentId));
+  if (start < 0) {
+    throw sceneCardsError('SCENE_CARDS_MISSING_CARD',
+      `场景卡缺失：${currentId}（卡库文件可能被替换，请重新排计划）`, { id: currentId });
+  }
+  const used = new Set((Array.isArray(usedIds) ? usedIds : []).map(id => String(id)));
+  for (let step = 1; step <= features.length; step++) {
+    const card = features[(start + step) % features.length];
+    if (used.has(card.id)) continue;
+    return _entry(card, start);
+  }
+  throw sceneCardsError('SCENE_CARDS_SWAP_EXHAUSTED',
+    `场景卡库 ${features.length} 张正片已经全部用在这条计划里，没有可换的卡；请先扩卡库。`, {
+      featureTotal: features.length,
+      used: used.size
+    });
+}
+
 // buffer 替换：只在某个片段「生成失败」时调用（pipeline 在重试预算内调用）。
 // 同一任务内 buffer 不复用；18 张用尽后返回 null（调用方保留原失败，不静默复用）。
 // 返回 { card, plan, entry, buffer }，plan 已被就地更新（调用方负责持久化）。
@@ -356,6 +451,8 @@ module.exports = {
   getCardById,
   checkCapacity,
   allocate,
+  planFromIds,
+  nextSwapCandidate,
   replaceWithBuffer,
   statusOf
 };

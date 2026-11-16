@@ -89,6 +89,8 @@ const taskManager = require('../src/taskManager');
 const library = require('../src/library');
 const pipeline = require('../src/pipeline');
 const budget = require('../src/budget');
+const sceneCardLibrary = require('../src/sceneCards');
+const audioMixer = require('../src/processors/audioMixer');
 
 let pass = 0;
 let fail = 0;
@@ -393,6 +395,191 @@ async function main() {
     return r.refs.length === 1 && r.refs[0].kind === 'final';
   })());
 
+  // ================= [3c] 计划内精准修改（P7-A：换单段卡 / 改单段提示词 / 配乐） =================
+  console.log('\n[3c] 计划内精准修改：换单段场景卡 / 改单段提示词 / 配乐（零计费、不建任务）');
+  const sidEdit = 's_p7a_plan_edit_1';
+  const msgEditPlan = supervisor.handleMessage({ sessionId: sidEdit, text: 'mock 3段，每段10秒' });
+  ok('计划卡自带 sceneCardIds（3 段 = 3 张卡，创建时固定）',
+    msgEditPlan.ok === true && !!msgEditPlan.plan && msgEditPlan.plan.sceneCards === true
+    && Array.isArray(msgEditPlan.plan.sceneCardIds) && msgEditPlan.plan.sceneCardIds.length === 3,
+    msgEditPlan.plan ? msgEditPlan.plan.sceneCardIds.join(',') : msgEditPlan.code);
+  const editPlanBefore = assistantMemory.lastPlan(sidEdit);
+  const editIdsBefore = editPlanBefore.sceneCardIds.slice();
+  const tasksBeforeEdit = taskManager.getAllTasks().length;
+
+  // planFromIds：按给定顺序组卡、不 allocate；显式 ids 的负向校验
+  const twoIds = sceneCardLibrary.allocate(2).used.map((e) => e.id);
+  const rotatedPlan = sceneCardLibrary.planFromIds([twoIds[1], twoIds[0]]);
+  ok('planFromIds 按传入顺序组卡（source=explicit-ids，不 allocate）',
+    rotatedPlan.used.length === 2 && rotatedPlan.used[0].id === twoIds[1]
+    && rotatedPlan.used[1].id === twoIds[0] && rotatedPlan.source === 'explicit-ids');
+  let idsLenErr = null;
+  let idsDupErr = null;
+  try {
+    taskManager.createTask('bad-ids-len', { model: 'mock', totalClips: 3, clipDuration: 10, sceneCards: { enabled: true, ids: twoIds } });
+  } catch (e) { idsLenErr = e; }
+  try {
+    taskManager.createTask('bad-ids-dup', { model: 'mock', totalClips: 2, clipDuration: 10, sceneCards: { enabled: true, ids: [twoIds[0], twoIds[0]] } });
+  } catch (e) { idsDupErr = e; }
+  ok('createTask 显式 ids 数量不符 → SCENE_CARDS_IDS_LENGTH；重复 → SCENE_CARDS_IDS_DUPLICATE（都不建任务）',
+    idsLenErr && idsLenErr.code === 'SCENE_CARDS_IDS_LENGTH'
+    && idsDupErr && idsDupErr.code === 'SCENE_CARDS_IDS_DUPLICATE'
+    && taskManager.getAllTasks().length === tasksBeforeEdit,
+    `${idsLenErr && idsLenErr.code} / ${idsDupErr && idsDupErr.code}`);
+
+  // 换单段场景卡
+  const swapMsg = supervisor.handleMessage({ sessionId: sidEdit, text: '第 2 个场景换一个' });
+  const planAfterSwap = assistantMemory.lastPlan(sidEdit);
+  ok('换单段场景卡：只改第 2 段、其它段不变、planId 不变、不建任务',
+    swapMsg.ok === true && swapMsg.intent === 'plan_edit'
+    && planAfterSwap.planId === editPlanBefore.planId
+    && planAfterSwap.sceneCardIds[1] !== editIdsBefore[1]
+    && planAfterSwap.sceneCardIds[0] === editIdsBefore[0]
+    && planAfterSwap.sceneCardIds[2] === editIdsBefore[2]
+    && taskManager.getAllTasks().length === tasksBeforeEdit,
+    `planId=${planAfterSwap.planId} ids=${planAfterSwap.sceneCardIds.join(',')}`);
+  ok('换卡回复写清「第 N 段：旧 → 新（第 X 章-Y）」并列出当前 3 张卡', (() => {
+    const oldCard = sceneCardLibrary.getCardById(editIdsBefore[1]);
+    const newCard = sceneCardLibrary.getCardById(planAfterSwap.sceneCardIds[1]);
+    return /已换第 2 段/.test(swapMsg.reply)
+      && !!oldCard && !!newCard
+      && swapMsg.reply.includes(oldCard.scene_key) && swapMsg.reply.includes(newCard.scene_key)
+      && /第 \d+ 章-\d+/.test(swapMsg.reply)
+      && /当前 3 张场景卡/.test(swapMsg.reply);
+  })(), String(swapMsg.reply || '').split('\n')[0]);
+  ok('问「选了哪些场景」→ 显示换卡后的卡（不回到默认 allocate 预览）', (() => {
+    const ask = supervisor.handleMessage({ sessionId: sidEdit, text: '你选了哪些场景卡' });
+    const newCard = sceneCardLibrary.getCardById(planAfterSwap.sceneCardIds[1]);
+    return ask.intent === 'plan_scenes' && ask.plan === null && ask.reply.includes(newCard.scene_key);
+  })());
+  const swap2Msg = supervisor.handleMessage({ sessionId: sidEdit, text: '第 2 段这个场景我不想要' });
+  const idsAfterSwap2 = assistantMemory.lastPlan(sidEdit).sceneCardIds;
+  ok('可反复换同一段：第 2 段再次变化、其它段仍不变',
+    swap2Msg.intent === 'plan_edit' && idsAfterSwap2[1] !== planAfterSwap.sceneCardIds[1]
+    && idsAfterSwap2[0] === editIdsBefore[0] && idsAfterSwap2[2] === editIdsBefore[2],
+    idsAfterSwap2.join(','));
+
+  // 卡库尽头：180 段 = 全部正片都在 used 里 → 换卡必须明确报错，不静默复用
+  const sidExhaust = 's_p7a_plan_edit_exhaust';
+  const bigPlanMsg = supervisor.handleMessage({ sessionId: sidExhaust, text: '30分钟' });
+  ok('准备 180 段计划（全部 180 张正片都已在计划里）',
+    bigPlanMsg.ok === true && !!bigPlanMsg.plan && bigPlanMsg.plan.sceneCardIds.length === 180);
+  const tasksBeforeExhaust = taskManager.getAllTasks().length;
+  const exhaustMsg = supervisor.handleMessage({ sessionId: sidExhaust, text: '第 2 个场景换一个' });
+  ok('卡库用尽 → 明确错误（不静默复用）、计划不变、不建任务',
+    exhaustMsg.intent === 'plan_edit' && /没有可换/.test(exhaustMsg.reply)
+    && assistantMemory.lastPlan(sidExhaust).sceneCardIds[1] === bigPlanMsg.plan.sceneCardIds[1]
+    && taskManager.getAllTasks().length === tasksBeforeExhaust,
+    String(exhaustMsg.reply || '').split('\n')[0]);
+
+  // 改单段提示词
+  const promptText = '雪山日出，金光打在雪脊上，缓慢横移';
+  const cardsBeforePrompt = assistantMemory.lastPlan(sidEdit).sceneCardIds.slice();
+  const promptMsg = supervisor.handleMessage({ sessionId: sidEdit, text: `第 2 段的提示词改成：${promptText}` });
+  const planAfterPrompt = assistantMemory.lastPlan(sidEdit);
+  ok('改单段提示词：plan.promptOverrides["1"] 记录用户文本、planId 不变、不建任务',
+    promptMsg.intent === 'plan_edit' && !!planAfterPrompt.promptOverrides
+    && planAfterPrompt.promptOverrides['1'] === promptText
+    && planAfterPrompt.planId === editPlanBefore.planId
+    && taskManager.getAllTasks().length === tasksBeforeEdit,
+    planAfterPrompt.promptOverrides ? planAfterPrompt.promptOverrides['1'] : '');
+  ok('改提示词回复：字数 + 「其余段仍按场景卡」+ 当前计划摘要',
+    new RegExp(`已改第 2 段提示词（${promptText.length} 字）`).test(promptMsg.reply)
+    && /其余段仍按场景卡/.test(promptMsg.reply)
+    && /总时长 30 秒/.test(promptMsg.reply),
+    String(promptMsg.reply || '').split('\n')[0]);
+  ok('改提示词不动场景卡（第 2 段仍是换过的卡）',
+    JSON.stringify(planAfterPrompt.sceneCardIds) === JSON.stringify(cardsBeforePrompt));
+  const outOfRangeMsg = supervisor.handleMessage({ sessionId: sidEdit, text: '第 9 段换成别的' });
+  ok('段号越界 → 明确错误（不改计划）',
+    outOfRangeMsg.intent === 'plan_edit' && /只有 3 段/.test(outOfRangeMsg.reply)
+    && JSON.stringify(assistantMemory.lastPlan(sidEdit).sceneCardIds) === JSON.stringify(cardsBeforePrompt));
+  const editNoPlanMsg = supervisor.handleMessage({ text: '第 1 段换一个' });
+  ok('无计划时说改计划 → 先问总时长（不建计划、不建任务）',
+    editNoPlanMsg.intent === 'plan_edit' && editNoPlanMsg.plan === null
+    && /总时长/.test(editNoPlanMsg.reply), String(editNoPlanMsg.reply || '').slice(0, 60));
+  const longText = '雪'.repeat(450);
+  const longMsg = supervisor.handleMessage({ sessionId: sidEdit, text: `第 1 段提示词改成：${longText}` });
+  const longPlan = assistantMemory.lastPlan(sidEdit);
+  ok('提示词超过 400 字 → 截断到 400 且回复告知（不静默）',
+    longMsg.intent === 'plan_edit' && longPlan.promptOverrides['0'].length === 400
+    && /截断/.test(longMsg.reply), `${longPlan.promptOverrides['0'].length} 字`);
+  ok('新意图不抢既有：改成 1080p / 每段 15 秒 / 再来一条 / 不要场景卡 分类不变',
+    assistantMemory.classify('改成 1080p').intent === 'unknown'
+    && assistantMemory.classify('每段 15 秒').intent === 'create'
+    && assistantMemory.classify('再来一条').intent === 'create'
+    && assistantMemory.classify('不要场景卡').intent === 'unknown');
+
+  // 配乐：列库 / 用第 N 首 / 换一首 / 不要配乐 / 设默认（默认写完必须恢复真实 prefs）
+  const bgmList = audioMixer.listTracksInOrder();
+  ok('配乐素材库可读（≥2 首，带 id/title/category/时长）',
+    bgmList.length >= 2 && bgmList.every((t) => t.id && t.title && Number.isFinite(Number(t.durationSec))),
+    `${bgmList.length} 首`);
+  const sidBgm = 's_p7a_bgm_1';
+  const bgmPlanMsg = supervisor.handleMessage({ sessionId: sidBgm, text: 'mock 2段，每段10秒' });
+  ok('配乐测试前置：2 段计划就绪', bgmPlanMsg.ok === true && !!bgmPlanMsg.plan);
+  const listMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '配乐有哪些' });
+  const planBgm1 = assistantMemory.lastPlan(sidBgm);
+  ok('列素材库：编号/曲名/类别/时长齐 + 记住 plan.bgmChoices（持久化上下文）',
+    listMsg.intent === 'bgm'
+    && bgmList.every((t) => listMsg.reply.includes(t.title))
+    && /（[^）]*，(?:music|ambient)，/.test(listMsg.reply)
+    && Array.isArray(planBgm1.bgmChoices) && planBgm1.bgmChoices.length === bgmList.length,
+    String(listMsg.reply || '').split('\n').slice(0, 2).join(' | '));
+  const track3Id = planBgm1.bgmChoices[2];
+  const track3 = audioMixer.findTrack(track3Id).track;
+  const pickMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '用第 3 首' });
+  const planAfterPick = assistantMemory.lastPlan(sidBgm);
+  ok('用第 3 首 → plan.bgm 手动指定该 trackId',
+    pickMsg.intent === 'bgm' && !!planAfterPick.bgm
+    && planAfterPick.bgm.enabled === true && planAfterPick.bgm.mode === 'manual'
+    && planAfterPick.bgm.trackId === track3Id,
+    planAfterPick.bgm ? planAfterPick.bgm.trackId : '');
+  ok('选曲回复带曲名 + 计划摘要显示「配乐：手动」',
+    pickMsg.reply.includes(track3.title) && /配乐：手动/.test(pickMsg.reply));
+  const nextMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '换一首' });
+  const planAfterNext = assistantMemory.lastPlan(sidBgm);
+  ok('换一首 → 切到清单下一首',
+    nextMsg.intent === 'bgm' && !!planAfterNext.bgm
+    && planAfterNext.bgm.trackId === planBgm1.bgmChoices[3],
+    planAfterNext.bgm ? planAfterNext.bgm.trackId : '');
+  const offMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '不要配乐' });
+  const planOff = assistantMemory.lastPlan(sidBgm);
+  ok('不要配乐 → plan.bgm = {enabled:false, mode:"off"}，摘要显示关闭',
+    offMsg.intent === 'bgm' && !!planOff.bgm
+    && planOff.bgm.enabled === false && planOff.bgm.mode === 'off'
+    && /配乐：关闭/.test(offMsg.reply));
+  const badNameMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '配乐换成不存在的曲名XYZ' });
+  const badIndexMsg = supervisor.handleMessage({ sessionId: sidBgm, text: '用第 999 首' });
+  ok('非法曲目 → 明确失败（曲名不存在 / 编号越界都不静默乱选）',
+    badNameMsg.intent === 'bgm' && /没认出|没有/.test(badNameMsg.reply)
+    && badIndexMsg.intent === 'bgm' && /只有 \d+ 首/.test(badIndexMsg.reply),
+    `${String(badNameMsg.reply || '').split('\n')[0]} / ${String(badIndexMsg.reply || '').split('\n')[0]}`);
+  // 设默认：先快照真实 prefs，测完按原字节恢复（handoff §8.7）
+  const prefsSnapshot = {
+    existed: fs.existsSync(audioMixer.PREFS_PATH),
+    raw: null
+  };
+  if (prefsSnapshot.existed) prefsSnapshot.raw = fs.readFileSync(audioMixer.PREFS_PATH);
+  const beforeDefault = audioMixer.getPrefs().defaultTrackId;
+  const defaultPickIndex = Math.max(0, bgmList.findIndex((t) => t.id !== beforeDefault));
+  const defaultTargetId = bgmList[defaultPickIndex].id;
+  try {
+    const defaultMsg = supervisor.handleMessage({ sessionId: sidBgm, text: `把第 ${defaultPickIndex + 1} 首设为默认配乐` });
+    const afterDefault = audioMixer.getPrefs().defaultTrackId;
+    ok('设为默认配乐 → savePrefs 改全局默认 + 回复说明「之后新计划」',
+      defaultMsg.intent === 'bgm' && afterDefault === defaultTargetId && afterDefault !== beforeDefault
+      && /默认配乐/.test(defaultMsg.reply) && /之后新计划/.test(defaultMsg.reply),
+      `${beforeDefault || '(空)'} → ${afterDefault || '(空)'}`);
+  } finally {
+    if (prefsSnapshot.existed) fs.writeFileSync(audioMixer.PREFS_PATH, prefsSnapshot.raw);
+    else { try { fs.unlinkSync(audioMixer.PREFS_PATH); } catch (e) { /* ignore */ } }
+  }
+  ok('设置默认配乐的测试后已恢复真实 prefs（不留测试曲目）',
+    prefsSnapshot.existed
+      ? fs.readFileSync(audioMixer.PREFS_PATH).equals(prefsSnapshot.raw)
+      : !fs.existsSync(audioMixer.PREFS_PATH));
+
   // ================= [4] 语音（离线 ASR） =================
   console.log('\n[4] 语音：离线 ASR（sherpa-onnx + SenseVoice）');
   const asrStatus = asr.status();
@@ -573,6 +760,73 @@ async function main() {
       String(sceneAsk6.reply || '').split('\n')[0]);
   } finally {
     Math.random = origRandom;
+  }
+
+  // ================= [6b] Mock 端到端：换卡 + 改单段提示词（P7-A，零计费） =================
+  console.log('\n[6b] Mock 端到端：换卡 + 改第 2 段提示词 → 任务按选定 id / 覆盖文本执行');
+  const origRandom6b = Math.random;
+  Math.random = () => 0.95;
+  try {
+    const sid6b = 's_p7a_mock_e2e_1';
+    const msg6b = supervisor.handleMessage({ sessionId: sid6b, text: 'mock 3段，每段10秒' });
+    ok('6b 计划：3 段 + 3 张卡', msg6b.ok === true && !!msg6b.plan && msg6b.plan.clipCount === 3);
+    const swap6bMsg = supervisor.handleMessage({ sessionId: sid6b, text: '第 2 个场景换一个' });
+    const override6b = '第 2 段用户指定：星空湖面，缓慢推近';
+    const edit6bMsg = supervisor.handleMessage({ sessionId: sid6b, text: `第 2 段提示词改成：${override6b}` });
+    // P7-A：配乐也要从 plan.bgm 落到 task.bgm（不只是计划字段），且真的参与混音。
+    const pick6bMsg = supervisor.handleMessage({ sessionId: sid6b, text: '用第 2 首' });
+    const expectedBgm6bId = audioMixer.listTracksInOrder()[1].id;
+    const plan6b = assistantMemory.lastPlan(sid6b);
+    ok('6b 执行前：换卡 / 覆盖 / 配乐都记在计划里（planId 不变）',
+      swap6bMsg.intent === 'plan_edit' && edit6bMsg.intent === 'plan_edit' && pick6bMsg.intent === 'bgm'
+      && plan6b.planId === msg6b.plan.planId
+      && !!plan6b.promptOverrides && plan6b.promptOverrides['1'] === override6b
+      && plan6b.sceneCardIds[1] !== msg6b.plan.sceneCardIds[1]
+      && !!plan6b.bgm && plan6b.bgm.mode === 'manual' && plan6b.bgm.trackId === expectedBgm6bId,
+      plan6b.bgm ? plan6b.bgm.trackId : '');
+    const tasksBefore6b = taskManager.getAllTasks().length;
+    const ex6b = supervisor.execute({ sessionId: sid6b, planId: plan6b.planId, approved: true });
+    ok('6b 确认执行 → 建任务并启动（不重新分配卡）', ex6b.ok === true && !!ex6b.taskId, ex6b.error || ex6b.taskId);
+    if (ex6b.ok) createdTasks.push(ex6b.taskId);
+    ok('6b 只建了 1 个任务', taskManager.getAllTasks().length === tasksBefore6b + 1);
+    const task6b = ex6b.ok ? taskManager.getTask(ex6b.taskId) : null;
+    ok('6b 任务 sceneCards.used 严格按计划里的 sceneCardIds（换卡生效）',
+      !!task6b && !!task6b.sceneCards && Array.isArray(task6b.sceneCards.used)
+      && task6b.sceneCards.used.map((e) => e.id).join(',') === plan6b.sceneCardIds.join(','),
+      task6b && task6b.sceneCards ? task6b.sceneCards.used.map((e) => e.id).join(',') : '');
+    ok('6b 第 2 段 promptSource=scene-card-user-edit 且提示词=用户文本；其它段仍是 scene-card',
+      !!task6b && task6b.clips[1].promptSource === 'scene-card-user-edit'
+      && task6b.clips[1].prompt === override6b
+      && task6b.clips[0].promptSource === 'scene-card'
+      && task6b.clips[2].promptSource === 'scene-card',
+      task6b ? task6b.clips.map((c) => c.promptSource).join(',') : '');
+    ok('6b 覆盖段仍保留 sceneKey / sceneCardId（审计）',
+      !!task6b && !!task6b.clips[1].sceneKey && !!task6b.clips[1].sceneCardId);
+    ok('6b 计划里的配乐随 execute 落到 task.bgm（manual + 选定 trackId）',
+      !!task6b && !!task6b.bgm && task6b.bgm.enabled === true
+      && task6b.bgm.mode === 'manual' && task6b.bgm.trackId === expectedBgm6bId,
+      task6b && task6b.bgm ? `${task6b.bgm.mode}/${task6b.bgm.trackId}` : '');
+    // 幂等：重拼两次不冲掉覆盖、不重复叠后缀
+    const compose6b1 = pipeline._composeSceneCardPrompts(ex6b.taskId);
+    const compose6b2 = pipeline._composeSceneCardPrompts(ex6b.taskId);
+    const task6bComposed = taskManager.getTask(ex6b.taskId);
+    ok('6b 重拼两次幂等：覆盖文本不变、不叠后缀、其它段仍 scene-card',
+      compose6b2.updated === 0
+      && task6bComposed.clips[1].prompt === override6b
+      && task6bComposed.clips[1].promptSource === 'scene-card-user-edit'
+      && task6bComposed.clips[0].promptSource === 'scene-card',
+      `compose updated=${compose6b1 && compose6b1.updated}/${compose6b2 && compose6b2.updated}`);
+    const st6b = await waitTerminal(sid6b, plan6b.planId, 240000);
+    ok('6b 状态机走到 done（成片流程不回归）', st6b.state.state === 'done', st6b.state.reason || '');
+    const done6b = taskManager.getTask(ex6b.taskId);
+    ok('6b 成片存在且可完整解码',
+      !!(done6b && done6b.outputPath && fs.existsSync(done6b.outputPath)) && decodes(done6b.outputPath).ok,
+      done6b ? done6b.outputPath : '无');
+    ok('6b 成片完成后第 2 段仍是用户文本（重拼没有冲掉覆盖）',
+      done6b && done6b.clips[1].prompt === override6b
+      && done6b.clips[1].promptSource === 'scene-card-user-edit');
+  } finally {
+    Math.random = origRandom6b;
   }
 
   // ================= [7] 自动重试 =================
