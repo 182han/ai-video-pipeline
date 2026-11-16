@@ -227,9 +227,20 @@ const RE_CREATE = /(?:做|拍|生成|来|搞|安排|剪).{0,6}(?:一条|一个|�
 // 「改成 1080p」「每段 15 秒」「再来一条」「不要场景卡」这些既有续问路径。
 const RE_SEGMENT_REF = /第\s*(?:\d+|[零〇一二两三四五六七八九十百]+)\s*(?:个)?\s*(?:段|镜头|场景|张|条|画面)/;
 const RE_SEGMENT_EDIT = /提示词|画面|改成|换成|改为|写成|换掉|换一|换张|换一个|换一张|重换|替换|不想要|不满意|不要按卡|调整/;
-// 2026-11-16 P7-A：配乐（列库 / 用第 N 首 / 换一首 / 不要配乐 / 设为默认）。
-// 「用第 3 首」这类说法不含「配乐」二字，但含「第 N 首」，一并归到配乐意图。
-const RE_BGM = /配乐|背景音乐|\bbgm\b|曲目|曲名|换一首|换首|换一曲|音乐|(?:用|选|要|放|听|换)?\s*第\s*(?:\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
+// 2026-11-16 Lead 收口：配乐是**编辑动作**，不能把「10 分钟，配点轻音乐」这类创建句抢走。
+// 归 bgm 的条件（任一）：
+//   ① 配乐名词（配乐/背景音乐/BGM/曲目/曲名/音乐）+ 明确动作（有哪些/换成/不要/设为默认…）；
+//   ② 「第 N 首」且没有时长词（= 列库后的选曲上下文）；
+//   ③ 换一首/换首/换一曲/再来一首（且不是创建句）。
+const RE_BGM_NOUN = /配乐|背景音乐|\bbgm\b|曲目|曲名|音乐/i;
+const RE_BGM_ACTION = /有哪些|有什么|哪几首|换成|改成|改为|用第|选第|要第|放第|听第|设为默认|设成默认|默认配乐|不要|关掉|关闭|取消|去掉/;
+const RE_BGM_INDEX = /第\s*(?:\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
+const RE_BGM_SWAP = /换一首|换首|换一曲|再来一首/;
+const RE_TIME_WORD = /(?:分钟|小时|秒|段)/;
+// 2026-11-16 Lead 收口：用户指着卡片说「不想要这个地方的换一个」时没有「第 N 段」。
+// 这类指代 + 换卡动作 → plan_edit（supervisor 回「要换第几段？」），不要再掉进"问时长"。
+const RE_SEGMENT_VAGUE = /这个地方|这里|这块|这个场景|这张卡|这张|这段|那个场景|那条/;
+const RE_SEGMENT_SWAP_WORD = /换一个|换一张|换个|换掉|换成别的|换别的|不想要|不满意|不要这个/;
 
 function classify(text) {
   const s = String(text || '').trim();
@@ -241,9 +252,13 @@ function classify(text) {
   if (RE_PLAN_SCENES.test(s)) return { intent: 'plan_scenes' };
   if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
   // 2026-11-16 P7-A：计划内修改必须排在 create 之前（否则「第 2 个场景换一个」会被当成新计划重排）；
-  // 但只能匹配带「第 N 段/个」的句子，不能抢「改成 1080p」「每段 15 秒」「再来一条」。
-  if (RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s)) return { intent: 'plan_edit' };
-  if (RE_BGM.test(s)) return { intent: 'bgm' };
+  // 但只能匹配带「第 N 段/个」或「这个地方/这里 + 换一个」的句子，
+  // 不能抢「改成 1080p」「每段 15 秒」「再来一条」。
+  if ((RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s))
+    || (RE_SEGMENT_VAGUE.test(s) && RE_SEGMENT_SWAP_WORD.test(s))) return { intent: 'plan_edit' };
+  if ((RE_BGM_NOUN.test(s) && RE_BGM_ACTION.test(s))
+    || (RE_BGM_INDEX.test(s) && !RE_TIME_WORD.test(s))
+    || (RE_BGM_SWAP.test(s) && !RE_CREATE.test(s))) return { intent: 'bgm' };
   if (RE_CREATE.test(s)) return { intent: 'create' };
   return { intent: 'unknown' };
 }

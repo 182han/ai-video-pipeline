@@ -390,6 +390,26 @@ async function main() {
     && /逐段出图/.test(noImg.reply) && /取消/.test(noImg.reply) && /纯文生视频/.test(noImg.reply)
     && assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene,
     String(noImg.reply || '').split('\n')[0]);
+
+  // 2026-11-16 Lead 收口：配乐意图不能抢「时长 + 音乐」的创建句；指代式换卡要接住。
+  ok('意图不抢：带时长的「配点轻音乐 / 配乐随意」仍走 create',
+    assistantMemory.classify('10 分钟，配点轻音乐').intent === 'create'
+    && assistantMemory.classify('来一条 10 分钟的视频，配乐随意').intent === 'create');
+  ok('配乐意图仍识别：配乐有哪些 / 用第 3 首 / 不要配乐',
+    assistantMemory.classify('配乐有哪些').intent === 'bgm'
+    && assistantMemory.classify('用第 3 首').intent === 'bgm'
+    && assistantMemory.classify('不要配乐').intent === 'bgm');
+  ok('指代式换卡：「这个地方的换一个」→ plan_edit（不是 create/unknown）',
+    assistantMemory.classify('不想要这个地方的换一个可以吗').intent === 'plan_edit');
+  ok('「这里换成1080p」不被当成按段编辑（仍走分辨率续问）',
+    assistantMemory.classify('这里换成1080p').intent !== 'plan_edit');
+  const vagueEdit = supervisor.handleMessage({ sessionId: sidScene, text: '不想要这个地方的换一个可以吗' });
+  ok('指代式换卡：回复问「第几段」、不重排计划、不建任务',
+    vagueEdit.ok === true && vagueEdit.intent === 'plan_edit' && vagueEdit.plan === null
+    && /第几段/.test(String(vagueEdit.reply || ''))
+    && assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene
+    && taskManager.getAllTasks().length === tasksBeforeScene,
+    String(vagueEdit.reply || '').slice(0, 50));
   ok('finals 参与检索并标 kind=final', (() => {
     const r = assistantMemory.retrieveTasks({ query: '上一次的视频', tasks: [], finals: [{ id: 'fin_1', kind: 'final', prompt: '成片 A', filePath: 'output/a.mp4', createdAt: new Date().toISOString() }] });
     return r.refs.length === 1 && r.refs[0].kind === 'final';
