@@ -336,6 +336,58 @@ async function main() {
   ok('意图分类：进度 → status，且优先在跑任务', statusRes.intent === 'status' && statusRes.refs[0].taskId === 'task_live');
   ok('意图分类：10 分钟极光 → create', assistantMemory.classify('10 分钟极光').intent === 'create');
   ok('意图分类：你好 → greeting', assistantMemory.classify('你好').intent === 'greeting');
+
+  // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================
+  console.log('\n[3b] 新意图：问「选了哪些场景卡」/ 要「纯文生视频」（只读，不建计划）');
+  ok('意图分类：「哪三个场景」→ plan_scenes（不再当成新计划重问时长）',
+    assistantMemory.classify('你可以给我看一下你选择的是哪三个场景吗').intent === 'plan_scenes'
+    && assistantMemory.classify('你选了哪些场景卡').intent === 'plan_scenes'
+    && assistantMemory.classify('场景是哪几个').intent === 'plan_scenes');
+  ok('意图分类：要纯文生视频 → no_image',
+    assistantMemory.classify('可以直接选择文生图的模式吗').intent === 'no_image'
+    && assistantMemory.classify('不要出图').intent === 'no_image'
+    && assistantMemory.classify('纯文生视频').intent === 'no_image'
+    && assistantMemory.classify('能不能只做文生视频').intent === 'no_image');
+  ok('意图分类未被抢：10 分钟 / 上一次 / 你好 / 进度 的原分类不变',
+    assistantMemory.classify('10 分钟').intent === 'create'
+    && assistantMemory.classify('上一次的视频').intent === 'last'
+    && assistantMemory.classify('你好').intent === 'greeting'
+    && assistantMemory.classify('现在进度怎样').intent === 'status');
+
+  const sceneNoPlan = supervisor.handleMessage({ text: '你选了哪三个场景卡' });
+  ok('无计划时问场景 → 先问总时长（不建计划、不占卡）',
+    sceneNoPlan.ok === true && sceneNoPlan.intent === 'plan_scenes' && sceneNoPlan.plan === null
+    && /总时长/.test(sceneNoPlan.reply), String(sceneNoPlan.reply || '').slice(0, 60));
+
+  const sidScene = 's_scene_preview_1';
+  const msgScenePlan = supervisor.handleMessage({ sessionId: sidScene, text: 'mock 3段，每段10秒' });
+  ok('准备场景预览：3 段计划就绪（场景卡默认开）',
+    msgScenePlan.ok === true && !!msgScenePlan.plan && msgScenePlan.plan.sceneCards === true
+    && msgScenePlan.plan.clipCount === 3,
+    msgScenePlan.ok ? `${msgScenePlan.plan.clipCount}段` : msgScenePlan.code);
+  const planIdBeforeScene = assistantMemory.lastPlan(sidScene).planId;
+  const tasksBeforeScene = taskManager.getAllTasks().length;
+  const sceneAsk = supervisor.handleMessage({
+    sessionId: sidScene,
+    text: '你可以给我看一下你选择的是哪三个场景吗'
+  });
+  const expectedKeys = require('../src/sceneCards').allocate(3).used.map((e) => e.scene_key);
+  ok('问场景 → 按 chapter+sequence 列出 3 张卡的 scene_key（只读预览）',
+    sceneAsk.ok === true && sceneAsk.intent === 'plan_scenes' && sceneAsk.plan === null
+    && expectedKeys.length === 3 && expectedKeys.every((k) => sceneAsk.reply.includes(k))
+    && /取这 3 张/.test(sceneAsk.reply),
+    String(sceneAsk.reply || '').split('\n').slice(0, 2).join(' | '));
+  ok('问场景不建任务、不重排计划（lastPlan 未变、任务数不变）',
+    assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene
+    && taskManager.getAllTasks().length === tasksBeforeScene,
+    `${tasksBeforeScene} → ${taskManager.getAllTasks().length}`);
+
+  const noImg = supervisor.handleMessage({ sessionId: sidScene, text: '可以直接选择文生图的模式吗' });
+  ok('要纯文生视频 → 告诉用户卡上「取消逐段出图」，不建新计划',
+    noImg.ok === true && noImg.intent === 'no_image' && noImg.plan === null
+    && /逐段出图/.test(noImg.reply) && /取消/.test(noImg.reply) && /纯文生视频/.test(noImg.reply)
+    && assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene,
+    String(noImg.reply || '').split('\n')[0]);
   ok('finals 参与检索并标 kind=final', (() => {
     const r = assistantMemory.retrieveTasks({ query: '上一次的视频', tasks: [], finals: [{ id: 'fin_1', kind: 'final', prompt: '成片 A', filePath: 'output/a.mp4', createdAt: new Date().toISOString() }] });
     return r.refs.length === 1 && r.refs[0].kind === 'final';
@@ -507,6 +559,18 @@ async function main() {
     const mem6 = assistantMemory.listMessages(sid6, 20);
     ok('会话记忆保留用户+助手消息', mem6.filter((m) => m.role === 'user').length >= 1
       && mem6.filter((m) => m.role === 'assistant').length >= 2, `${mem6.length} 条`);
+    // 2026-11-16 Lead：任务已开工后问「选了哪些场景」→ 必须按**实际分配**的卡回答（不是预览）。
+    const sceneAsk6 = supervisor.handleMessage({
+      sessionId: sid6,
+      text: '你可以给我看一下你选择的是哪几个场景卡吗'
+    });
+    const usedKeys6 = task6 && task6.sceneCards && Array.isArray(task6.sceneCards.used)
+      ? task6.sceneCards.used.map((e) => e.scene_key) : [];
+    ok('已开工问场景 → 按任务实际分配的卡回答（含 scene_key，不重排计划）',
+      sceneAsk6.ok === true && sceneAsk6.intent === 'plan_scenes' && sceneAsk6.plan === null
+      && /实际分配到 2 张场景卡/.test(sceneAsk6.reply)
+      && usedKeys6.length === 2 && usedKeys6.every((k) => sceneAsk6.reply.includes(k)),
+      String(sceneAsk6.reply || '').split('\n')[0]);
   } finally {
     Math.random = origRandom;
   }

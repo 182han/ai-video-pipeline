@@ -36,6 +36,7 @@ const memory = require('./memory');
 const planCard = require('./planCard');
 const stateMachine = require('./stateMachine');
 const fillLib = require('./fillFromLibrary');
+const sceneCardLibrary = require('../sceneCards');
 
 const SUPERVISOR_VERSION = 'assistant-supervisor.v1';
 const ACTIVE_STATUS = new Set([
@@ -255,6 +256,86 @@ function replyForStatus(sessionId) {
     + `当前 ${task.currentStep || task.status}，成功片段 ${(task.clips || []).filter((c) => c.status === 'success').length}/${task.totalClips}。`;
 }
 
+// ==========================================
+// 计划用了哪些场景卡（2026-11-16 用户问题 a）
+// ------------------------------------------------------------
+// 用户问「你选的是哪三个场景」时，原实现会把它当新计划再问一遍时长。
+// 这里只读地回答：计划阶段用 allocate() 预览（纯函数，不占卡、不建任务），
+// 已开工的任务用 task.sceneCards.used（实际分配的卡，比预览更可信）。
+// 不写文件、不发请求、不产生费用。
+// ==========================================
+const SCENE_PREVIEW_LIMIT = 8;
+
+function sceneCardLine(entry, i) {
+  const card = (entry && entry.id ? sceneCardLibrary.getCardById(entry.id) : null) || entry || {};
+  const bits = [`#${i + 1}`, card.scene_key || card.sceneKey || card.id || '(未知卡)'];
+  const chapter = Number.isInteger(card.chapter) ? card.chapter : (entry && entry.chapter);
+  const sequence = Number.isInteger(card.sequence) ? card.sequence : (entry && entry.sequence);
+  if (Number.isInteger(chapter) && Number.isInteger(sequence)) bits.push(`第 ${chapter} 章-${sequence}`);
+  const biome = [card.biome, card.landform].filter(Boolean).join('/');
+  if (biome) bits.push(biome);
+  if (card.shot) bits.push(card.shot);
+  if (card.palette) bits.push(card.palette);
+  if (entry && entry.role === 'buffer') bits.push('缓冲卡');
+  return bits.join(' · ');
+}
+
+function formatSceneEntries(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const shown = list.slice(0, SCENE_PREVIEW_LIMIT).map(sceneCardLine);
+  if (list.length > shown.length) {
+    shown.push(`…… 共 ${list.length} 张，这里先列前 ${shown.length} 张。`);
+  }
+  return shown.join('\n');
+}
+
+function replyForPlanScenes(sessionId) {
+  const plan = memory.lastPlan(sessionId);
+  if (!plan) {
+    return '现在还没有计划卡，所以我还没选卡。先说总时长（比如「30 秒」「10 分钟」），'
+      + '我排好计划后就把要用的场景卡列给你看。';
+  }
+  // 已开工：以任务里实际分配的卡为准（可能已有 buffer 替换）。
+  // 只认**这条计划自己的**状态；不能用「会话里最新的状态」——用户可能在上一条计划之后
+  // 又排了一条尚未执行的新计划，用最新状态会把上一条任务的卡说成这条计划的。
+  const state = memory.getState(sessionId, plan.planId);
+  const taskId = state && state.taskId ? state.taskId : null;
+  const task = taskId ? taskManager.getTask(taskId) : null;
+  if (task && task.sceneCards && Array.isArray(task.sceneCards.used) && task.sceneCards.used.length) {
+    return `任务 ${task.taskId} 实际分配到 ${task.sceneCards.used.length} 张场景卡（按章节顺序）：\n`
+      + formatSceneEntries(task.sceneCards.used)
+      + '\n这些卡已写进各段提示词；要换卡得新开一条计划。';
+  }
+  if (plan.sceneCards === false) {
+    return '这条计划关掉了场景卡（自由提示词），所以没有选卡。'
+      + '想要卡库选场景，就新排一条（不要说「不要场景卡」）。';
+  }
+  try {
+    // allocate() 是纯函数：按 chapter+sequence 取前 N 张，不占卡、不写卡库、不建任务。
+    // createTask 执行时也按同一顺序取卡，所以这份预览与真正要用的卡一致。
+    const preview = sceneCardLibrary.allocate(plan.clipCount);
+    return `这条计划 ${plan.clipCount} 段，确认后会按章节顺序取这 ${preview.used.length} 张场景卡：\n`
+      + formatSceneEntries(preview.used)
+      + '\n（现在只是预览，还没占卡；真正点「确认执行」时才分配给任务。）';
+  } catch (e) {
+    return `场景卡库暂时读不到：${(e && e.message) || e}。计划还在，稍后再问一次就行。`;
+  }
+}
+
+// 纯文生视频开关（2026-11-16 用户问题 b）
+// 实测「逐段出图」是前端 localStorage 状态（assistant.js 的 imagePerClip），不进计划卡；
+// 所以聊天里只能告诉用户去卡上点，不能假装已经改掉。
+function replyForNoImage(sessionId) {
+  const plan = memory.lastPlan(sessionId);
+  const head = plan
+    ? `当前计划：${plan.clipCount} 段 × ${plan.clipDurationSec} 秒（${plan.modelLabel}）。`
+    : '现在还没有计划卡：先说总时长（比如「30 秒」「10 分钟」），我排好计划。';
+  return `${head}\n「逐段出图」是计划卡上的勾选框，聊天里改不了（它存在你浏览器本地），手动点一下就行：\n`
+    + '· 纯文生视频（不出图）：取消「逐段出图」的勾选，再点「确认执行」——只按场景卡提示词生成视频，不出图、也不会停下来等你审图；\n'
+    + '· 出图 → 图生视频：保持勾选（默认开）。出图后我会停下来，等你去「库 · 图片」审完再点「继续生成」。\n'
+    + '改这个勾选不重排计划，也不产生任何费用。';
+}
+
 /**
  * 对话入口：听懂 → 排计划 / 检索记录 / 报进度。不创建任务、不发付费请求。
  * @param {object} opts { sessionId?, text, options? }
@@ -276,6 +357,12 @@ function handleMessage(opts = {}) {
     reply = replyForGreeting();
   } else if (intent.intent === 'status') {
     reply = replyForStatus(sessionId);
+  } else if (intent.intent === 'plan_scenes') {
+    // 2026-11-16 用户问题 a：问「选了哪几个场景」→ 只读预览，不重排计划、不占卡。
+    reply = replyForPlanScenes(sessionId);
+  } else if (intent.intent === 'no_image') {
+    // 2026-11-16 用户问题 b：要纯文生视频 → 告诉用户卡上的开关位置，不新建计划。
+    reply = replyForNoImage(sessionId);
   } else if (intent.intent === 'last') {
     const res = retrieveRefs(text, 3);
     refs = res.refs;

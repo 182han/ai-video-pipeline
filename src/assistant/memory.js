@@ -214,6 +214,13 @@ function listSessions(limit = 20) {
 const RE_GREETING = /^(?:你好|您好|hi|hello|嗨|哈喽|小智|在吗|在不在)[!！。,.，\s]*$/i;
 const RE_LAST = /上一次|上一次的|上个|上一条|上条|最近.{0,6}(?:视频|成片|任务)|刚才.{0,4}(?:那个|视频|任务)|最后.{0,4}(?:一个|一条)?\s*(?:视频|成片)/;
 const RE_STATUS = /进度|到哪|跑到|状态|完成了吗|好了没|还要多久/;
+// 2026-11-16 Lead：用户新意图「看计划用了哪些场景卡」。
+// 触发例：「你可以给我看一下你选择的是哪三个场景吗」「选了哪些场景卡」「场景是哪几个」。
+// 注意必须要求疑问词，避免把「10 分钟，场景从卡库选」这类排计划的话误判成查场景。
+const RE_PLAN_SCENES = /(?:哪|几|哪些|什么)[^。，,；;？?!！]{0,6}?场景|场景卡?\s*(?:是|有|抽|选|用)\s*(?:哪|几|什么|哪些)|(?:看看|看一下|给我看|展示|预览|列一下|瞧一眼).{0,8}场景|场景.{0,6}(?:预览|列表|看看|给我看|列一下|有哪)/;
+// 2026-11-16 Lead：用户新意图「切纯文生视频（不要出图）」。
+// 只认明确的「不出图」表达，不抢「文生图 → 图生视频」这类正常排计划描述。
+const RE_NO_IMAGE = /(?:不要|不用|别|取消|关闭|关掉|去掉|免了?)\s*(?:再)?\s*(?:逐段出图|出图|图片|配图|生成图|插图)|(?:纯|只|直接)\s*(?:用|走|要|做|跑|出)?\s*文生视频|文生视频\s*(?:模式|就行|即可|好了|可以吗|能用吗|能选吗|能切吗)|不出图|无图模式|(?:选择|选|切|换|改成?|用)\s*(?:纯)?\s*文生图(?:的)?模式|文生图\s*模式/;
 const RE_CREATE = /(?:做|拍|生成|来|搞|安排|剪).{0,6}(?:一条|一个|一部)?|(?:分钟|小时|秒|段)/;
 
 function classify(text) {
@@ -222,6 +229,9 @@ function classify(text) {
   if (RE_GREETING.test(s)) return { intent: 'greeting' };
   if (RE_STATUS.test(s)) return { intent: 'status' };
   if (RE_LAST.test(s)) return { intent: 'last' };
+  // 2026-11-16：查「选了哪些场景卡」不排新计划（只读预览）；「不要出图」只回开关位置。
+  if (RE_PLAN_SCENES.test(s)) return { intent: 'plan_scenes' };
+  if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
   if (RE_CREATE.test(s)) return { intent: 'create' };
   return { intent: 'unknown' };
 }
