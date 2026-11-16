@@ -48,6 +48,7 @@ async function httpGet(url) {
 
   console.log('\n[2] 可收起气泡导航（三个点 = 收起/展开，不是退出）');
   check(/RAIL_KEY = 'vs_rail_collapsed'/.test(page), 'localStorage 键 vs_rail_collapsed');
+  check(/getItem\(RAIL_KEY\) !== '0'/.test(page), '默认收起（用户指定的第三张截图形态）');
   check(/setCollapsed/.test(page) && /localStorage\.setItem\(RAIL_KEY/.test(page), '收起状态持久化');
   check(/aria-label=\$\{collapsed \? '展开导航' : '收起导航'\}/.test(page), '三个点按钮 aria-label 为展开/收起');
   check(/•••/.test(page), '按钮文案为三个点');
@@ -55,6 +56,16 @@ async function httpGet(url) {
   check(!/label: '退出'/.test(page), '导航不含「退出」项（三个点不是退出）');
   check(/route: '\/create'/.test(page) && /route: '\/edit'/.test(page)
     && /route: '\/library'/.test(page) && /route: '\/settings'/.test(page), '4 个导航目标：创作/剪辑/库/设置');
+
+  console.log('\n[2.1] 板块页「回小智」退出入口');
+  check(/className="rail-home"/.test(shell), '左栏顶部固定「小智 · 对话首页」入口');
+  check(/aria-label="回到小智首页"/.test(shell) && /onClick=\$\{\(\) => navigate\('\/'\)\}/.test(shell), '点击回 /（小智首页）');
+  check(/rail-home-sub[\s\S]{0,80}点这里回来/.test(shell), '入口有「点这里回来」说明');
+  check(/title="返回小智"\s+onClick=\$\{\(\) => navigate\('\/'\)\}/.test(read(path.join(WEB, 'src', 'screens', 'editor.js')))
+    || /onClick=\$\{\(\) => navigate\('\/'\)\}\s+title="返回小智"/.test(read(path.join(WEB, 'src', 'screens', 'editor.js'))),
+    '剪辑台左上角 ← 返回小智');
+  check(/onClick=\$\{\(\) => navigate\('\/'\)\}[\s\S]{0,120}退出观看/.test(read(path.join(WEB, 'src', 'screens', 'gen.js'))),
+    '生成页「退出观看」回小智首页');
 
   console.log('\n[3] 整页对话：大球 + 介绍卡 + 底部输入框');
   check(/export function Assistant\(\{ page = false \}/.test(assistant), 'Assistant 支持 page 模式');
@@ -67,10 +78,11 @@ async function httpGet(url) {
   check(/navigate\('\/create'\)/.test(assistant), '填入提示词后回 /create（不再回 /）');
 
   console.log('\n[4] 样式与入口');
-  check(!/navigate\('\/'\)/.test(shell), 'shell.js 不再有 navigate(/) 旧回退');
-  for (const f of ['gen.js', 'inventory.js', 'templates.js', 'editor.js']) {
-    check(!/navigate\('\/'\)/.test(read(path.join(WEB, 'src', 'screens', f))), `${f} 不再 navigate('/')`);
+  check(/navigate\('\/'\)/.test(shell) && /rail-home/.test(shell), 'shell.js 只有「回小智」用 navigate(/)');
+  for (const f of ['inventory.js', 'templates.js']) {
+    check(!/navigate\('\/'\)/.test(read(path.join(WEB, 'src', 'screens', f))), `${f} 仍回 /create（不回 /）`);
   }
+  check(/navigate\('\/create'\)/.test(read(path.join(WEB, 'src', 'screens', 'gen.js'))), 'gen.js「去创作」仍回 /create');
   check(/assistant-home\.css/.test(indexHtml), 'index.html 引入 assistant-home.css');
   check(/\.xz-root[\s\S]{0,400}radial-gradient/.test(css), '整页绿色渐变/光晕样式');
   check(/\.xz-rail\.is-collapsed/.test(css) && /flex-basis: 64px/.test(css), '导航收起 64px 样式');
