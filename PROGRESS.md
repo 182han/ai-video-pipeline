@@ -25,6 +25,9 @@
 - 修改（本轮触及）：`server.js`、`src/photoLibrary.js`、`src/library.js`、`src/pipeline.js`、`web/src/screens/inventory.js`、`PROGRESS.md`。
 - **注意**：`server.js`、`web/src/components/assistant.js`、`web/verify/`、`assets/bgm/manifest.json` 等还有他人的未提交改动；不要 checkout/覆盖，不要 `git add -A`。
 - 产物：`app/output/v31-*`、`app/output/final-image-set-review/`、`app/clips/v31test_*.jpg`；均保留，不删除。
+  > **2026-11-16 更正**：上述 `clips/v31test_*.jpg` 与两个 output 目录实际在 2026-11-15 17:49 被
+  > `purge-artifacts.js --apply` + PowerShell `Remove-Item` 误删（引用范围漏了 `data/photos`）；17 张图片已于
+  > 2026-11-16 11:11 从 Chrome 缓存恢复（`docs/交接/2026-11-16-图片丢失-取证与恢复.md`），output 目录的视频/JSON 未恢复。
 
 ### 下一步第一个动作
 1. 由改动所有者按路径审查 `git diff`（不要整库提交）。
