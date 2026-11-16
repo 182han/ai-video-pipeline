@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>拖拽自检 · 运行中</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 18px 22px;
+    background: #0a0e0c;
+    color: #f4f7f5;
+    font-family: Inter, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 6px; }
+  p { margin: 0 0 12px; color: #a7b3ad; font-size: 12px; line-height: 1.6; }
+  pre {
+    margin: 0 0 14px;
+    padding: 12px;
+    background: #0e1411;
+    border: 1px solid rgba(255, 255, 255, .09);
+    border-radius: 6px;
+    font-family: 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: #d6b36a;
+    white-space: pre-wrap;
+  }
+  iframe { width: 1280px; height: 900px; max-width: 100%; border: 0; opacity: .35; pointer-events: none; }
+  .meta { font-size: 11px; color: #7b8781; font-family: 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>配乐时间轴 · 拖拽/裁剪自检</h1>
+<p>
+  在真实 Chromium 里加载 <code>/app/bgm/task_devtest_bgm2</code>（同源 iframe），
+  对真实片段块派发 PointerEvent 驱动拖拽处理器：右裁 → 移动 → 左裁 → 右裁 → 保存 → 刷新读回 → 负向夹取。
+  页面自身的失败/成功以文末 <code>PASS/FAIL</code> 行为准。
+</p>
+<p class="meta">注：REA Playwright 场景动作只有 click/fill/press，没有 mouse.down/move/up，因此本页用合成 PointerEvent 驱动真实页面处理器。</p>
+<pre id="log">等待 iframe 加载…</pre>
+<iframe id="app" src="/app/bgm/task_devtest_bgm2"></iframe>
+<script>
+(function () {
+  var logEl = document.getElementById('log');
+  var frame = document.getElementById('app');
+  var lines = [];
+  var failures = 0;
+  var passes = 0;
+  var readoutSeen = '';
+
+  function log(line) {
+    lines.push(line);
+    logEl.textContent = lines.join('\n');
+  }
+  function ok(name, cond, detail) {
+    if (cond) { passes++; log('PASS ' + name); }
+    else { failures++; log('FAIL ' + name + (detail ? ' — ' + detail : '')); }
+  }
+  function approx(a, b, tol) { return Math.abs(a - b) <= (tol == null ? 0.06 : tol); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function doc() { return frame.contentWindow.document; }
+  function win() { return frame.contentWindow; }
+
+  function waitFor(fn, timeout, step) {
+    var t0 = Date.now();
+    var limit = timeout || 20000;
+    var gap = step || 120;
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        try { var v = fn(); if (v) return resolve(v); } catch (e) { /* app 还没挂载 */ }
+        if (Date.now() - t0 > limit) return reject(new Error('waitFor timeout'));
+        setTimeout(poll, gap);
+      })();
+    });
+  }
+
+  function clipEl() {
+    return doc().querySelector('.bgm-tl-inner > .bgm-lane:nth-child(3) > .bgm-clip');
+  }
+  function handleEl(side) {
+    var c = clipEl();
+    return c ? c.querySelector('.bgm-clip-handle.' + side) : null;
+  }
+  function readProp(labelPart) {
+    var labels = Array.prototype.slice.call(doc().querySelectorAll('.bgm-props-grid label.bgm-field'));
+    for (var i = 0; i < labels.length; i++) {
+      var span = labels[i].querySelector('span');
+      if (span && span.textContent.indexOf(labelPart) >= 0) {
+        var input = labels[i].querySelector('input, select');
+        return input ? input.value : '';
+      }
+    }
+    return '';
+  }
+  function nums() {
+    return {
+      start: Number(readProp('时间轴起点')),
+      end: Number(readProp('时间轴终点')),
+      sin: Number(readProp('源内起点')),
+      sout: Number(readProp('源内终点'))
+    };
+  }
+  function pps() {
+    var c = clipEl();
+    var p = nums();
+    var w = c.getBoundingClientRect().width;
+    return w / Math.max(0.0001, p.end - p.start);
+  }
+  function pointer(target, type, x, y) {
+    var ev = new (win().PointerEvent)(type, {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: x, clientY: y,
+      button: 0,
+      buttons: type === 'pointerup' ? 0 : 1,
+      pointerId: 1, pointerType: 'mouse', isPrimary: true
+    });
+    target.dispatchEvent(ev);
+  }
+  function clickEl(el) {
+    if (!el) throw new Error('clickEl: 元素不存在');
+    el.click();
+  }
+  function findButton(text) {
+    var btns = Array.prototype.slice.call(doc().querySelectorAll('button'));
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].textContent.trim() === text) return btns[i];
+    }
+    return null;
+  }
+
+  async function selectClip() {
+    var c = clipEl();
+    var r = c.getBoundingClientRect();
+    var x = r.left + r.width * 0.5;
+    var y = r.top + r.height * 0.5;
+    pointer(c, 'pointerdown', x, y);
+    pointer(win(), 'pointerup', x, y);
+    await sleep(120);
+    await waitFor(function () { return readProp('时间轴起点') !== ''; }, 5000);
+  }
+
+  // 拖：target 元素中心按下，水平移动 dxSec 秒后松手；返回拖动过程中是否看到临时读数
+  async function drag(target, dxSec) {
+    var p = pps();
+    var r = target.getBoundingClientRect();
+    var x0 = r.left + r.width * 0.5;
+    var y0 = r.top + r.height * 0.5;
+    var dx = dxSec * p;
+    pointer(target, 'pointerdown', x0, y0);
+    await sleep(40);
+    var seen = '';
+    for (var i = 1; i <= 6; i++) {
+      pointer(win(), 'pointermove', x0 + (dx * i) / 6, y0);
+      await sleep(35);
+      var readout = doc().querySelector('.bgm-drag-readout');
+      if (!seen && readout) seen = readout.textContent.replace(/\s+/g, ' ').trim();
+    }
+    pointer(win(), 'pointerup', x0 + dx, y0);
+    await sleep(180);
+    return seen;
+  }
+
+  async function clickSaveAndWait() {
+    var btn = findButton('保存');
+    if (!btn) throw new Error('找不到保存按钮');
+    clickEl(btn);
+    await waitFor(function () {
+      var st = doc().querySelector('.bgm-status');
+      return st && st.textContent.indexOf('已保存') >= 0;
+    }, 8000);
+  }
+
+  async function reloadApp() {
+    win().location.reload();
+    await sleep(400);
+    await waitFor(function () { return clipEl(); }, 25000);
+    await sleep(300);
+    await selectClip();
+  }
+
+  async function fetchPlan() {
+    var res = await fetch('/api/tasks/task_devtest_bgm2/bgm-plan', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('GET bgm-plan HTTP ' + res.status);
+    return res.json();
+  }
+
+  // 让自检可重复：先把轻音乐首段重置成 0 → 35s（测试任务固定 35s），
+  // 每次重新打开本页都从同一基线开始；环境音轨原样保留。
+  async function resetBaseline() {
+    var api = await fetchPlan();
+    var plan = (api && api.plan) || {};
+    var music = Array.isArray(plan.music) ? plan.music : [];
+    var ambient = Array.isArray(plan.ambient) ? plan.ambient : [];
+    var base = music[0]
+      ? Object.assign({}, music[0], { timelineStart: 0, timelineEnd: 35, sourceIn: 0, sourceOut: 35 })
+      : {
+          id: 'selftest_music', trackId: 'calm_01',
+          timelineStart: 0, timelineEnd: 35, sourceIn: 0, sourceOut: 35,
+          volume: 1, fadeIn: 2, fadeOut: 2, speed: 1, fillMode: 'none', keyframes: []
+        };
+    var res = await fetch('/api/tasks/task_devtest_bgm2/bgm-plan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ plan: { music: [base], ambient: ambient } })
+    });
+    if (!res.ok) throw new Error('重置基线 HTTP ' + res.status);
+    log('已重置测试基线：music 0 → 35s（可重复运行）');
+  }
+
+  (async function run() {
+    try {
+      await waitFor(function () { return frame.contentWindow && frame.contentWindow.document; }, 15000);
+      await resetBaseline();
+      await reloadApp();
+      var initial = nums();
+      ok('初始计划可读（时间轴输入框有值）',
+        Number.isFinite(initial.start) && Number.isFinite(initial.end), JSON.stringify(initial));
+      ok('初始片段：0 → 35s', approx(initial.start, 0) && approx(initial.end, 35), JSON.stringify(initial));
+
+      // 1) 右裁剪 -6s：end/sourceOut 同减
+      var seen1 = await drag(handleEl('right'), -6);
+      var a1 = nums();
+      ok('右裁剪：timelineEnd 减 6s', approx(a1.end, 29), JSON.stringify(a1));
+      ok('右裁剪：sourceOut 同减 6s', approx(a1.sout, 29), JSON.stringify(a1));
+      ok('右裁剪：timelineStart 不变', approx(a1.start, 0), JSON.stringify(a1));
+      readoutSeen = readoutSeen || seen1;
+
+      // 2) 整体移动 +2s：start/end 同增，source 不变
+      var seen2 = await drag(clipEl(), 2);
+      var a2 = nums();
+      ok('移动：timelineStart +2s', approx(a2.start, 2), JSON.stringify(a2));
+      ok('移动：timelineEnd +2s（时长不变）', approx(a2.end, 31), JSON.stringify(a2));
+      ok('移动：sourceIn/sourceOut 不变', approx(a2.sin, 0) && approx(a2.sout, 29), JSON.stringify(a2));
+      readoutSeen = readoutSeen || seen2;
+
+      // 3) 左裁剪 +1s：start 与 sourceIn 同增
+      await drag(handleEl('left'), 1);
+      var a3 = nums();
+      ok('左裁剪：timelineStart +1s', approx(a3.start, 3), JSON.stringify(a3));
+      ok('左裁剪：sourceIn 同增 1s', approx(a3.sin, 1), JSON.stringify(a3));
+      ok('左裁剪：timelineEnd 不变', approx(a3.end, 31), JSON.stringify(a3));
+
+      // 4) 右裁剪 -1s：end 与 sourceOut 同减
+      await drag(handleEl('right'), -1);
+      var a4 = nums();
+      ok('第二次右裁剪：timelineEnd -1s', approx(a4.end, 30), JSON.stringify(a4));
+      ok('第二次右裁剪：sourceOut -1s', approx(a4.sout, 28), JSON.stringify(a4));
+
+      // 5) 拖动中临时读数 + dirty 标记
+      ok('拖动中显示临时位置/时间', !!readoutSeen, readoutSeen);
+      log('  临时读数示例：' + (readoutSeen || '(未捕获)'));
+      var dirtyEl = doc().querySelector('.bgm-dirty');
+      ok('拖动后标记 dirty（未保存修改）', !!dirtyEl && dirtyEl.textContent.indexOf('未保存') >= 0,
+        dirtyEl ? dirtyEl.textContent.trim() : '无 .bgm-dirty');
+
+      // 6) 保存 → API 复核
+      await clickSaveAndWait();
+      var api = await fetchPlan();
+      var music = (api.plan && api.plan.music) || [];
+      var seg = music[0] || {};
+      ok('保存后 API：music[0].timelineStart=3', approx(Number(seg.timelineStart), 3), JSON.stringify(seg));
+      ok('保存后 API：music[0].timelineEnd=30', approx(Number(seg.timelineEnd), 30), JSON.stringify(seg));
+      ok('保存后 API：music[0].sourceIn=1', approx(Number(seg.sourceIn), 1), JSON.stringify(seg));
+      ok('保存后 API：music[0].sourceOut=28', approx(Number(seg.sourceOut), 28), JSON.stringify(seg));
+
+      // 7) 刷新 → 读回
+      await reloadApp();
+      var b = nums();
+      ok('刷新后读回 timelineStart=3', approx(b.start, 3), JSON.stringify(b));
+      ok('刷新后读回 timelineEnd=30', approx(b.end, 30), JSON.stringify(b));
+      ok('刷新后读回 sourceIn=1', approx(b.sin, 1), JSON.stringify(b));
+      ok('刷新后读回 sourceOut=28', approx(b.sout, 28), JSON.stringify(b));
+
+      // 8) 负向：把片段拖出左边，start 夹到 0，不出现负数
+      await drag(clipEl(), -999);
+      var n1 = nums();
+      ok('负向：左拖出边界被夹住（start=0）', approx(n1.start, 0), JSON.stringify(n1));
+      ok('负向：左拖出边界后仍有限且 end<=35',
+        Number.isFinite(n1.end) && n1.end <= 35.001 && n1.end >= 0.1, JSON.stringify(n1));
+
+      // 9) 负向：左把手向右拖到底，长度夹到 0.1s
+      await drag(handleEl('left'), 999);
+      var n2 = nums();
+      ok('负向：左裁剪到最短 0.1s 被夹住',
+        Number.isFinite(n2.start) && approx(n2.end - n2.start, 0.1, 0.02),
+        JSON.stringify(n2));
+      ok('负向：左裁剪后 start>=0 且 sourceIn>=0',
+        n2.start >= 0 && n2.sin >= 0, JSON.stringify(n2));
+
+      // 10) 负向：右把手向左拖到底，长度仍 0.1s
+      await drag(handleEl('right'), -999);
+      var n3 = nums();
+      ok('负向：右裁剪到最短 0.1s 被夹住',
+        Number.isFinite(n3.end) && approx(n3.end - n3.start, 0.1, 0.02),
+        JSON.stringify(n3));
+      ok('负向：右裁剪后 sourceOut>sourceIn 且有限',
+        Number.isFinite(n3.sout) && n3.sout > n3.sin, JSON.stringify(n3));
+
+      // 11) 负向：向右拖出片尾，end 夹到 35
+      await drag(clipEl(), 999);
+      var n4 = nums();
+      ok('负向：右拖出片尾被夹住（end=35）', approx(n4.end, 35, 0.02), JSON.stringify(n4));
+      ok('负向：右拖后 start>=0 且有限', Number.isFinite(n4.start) && n4.start >= 0, JSON.stringify(n4));
+
+      // 12) 刷新丢弃负向改动，恢复已保存值
+      await reloadApp();
+      var c = nums();
+      ok('负向改动未保存：刷新后回到 3 → 30',
+        approx(c.start, 3) && approx(c.end, 30), JSON.stringify(c));
+    } catch (e) {
+      failures++;
+      log('FAIL 自检异常：' + (e && e.message ? e.message : String(e)));
+      if (e && e.stack) log(String(e.stack).split('\n').slice(0, 4).join('\n'));
+    }
+
+    log('');
+    log('结果：' + passes + ' 通过 / ' + failures + ' 失败');
+    document.title = (failures ? 'FAIL' : 'PASS') + ' drag selftest';
+    var hint = document.querySelector('p');
+    if (hint) hint.textContent = failures
+      ? '存在失败项，见下方日志。'
+      : '全部通过：拖拽移动、左右裁剪、临时读数、dirty、保存、刷新读回、负向夹取。';
+  })();
+})();
+</script>
+</body>
+</html>
