@@ -348,6 +348,36 @@ const SUITES = [
     script: 'verify-xiaozhi-home.js',
     group: 'fast',
     desc: '小智首页：/ 整页对话（大球/介绍卡/底部输入/可收起导航）+ /create 六步向导（静态 + 3001 只读）'
+  },
+  {
+    name: 'image-first-pipeline',
+    script: 'verify-image-first-pipeline.js',
+    group: 'real',
+    desc: '小智出图→图生视频：场景卡逐段出图（stub 适配器，零计费）/ 出图后暂停审图 / unpause 结算 / 缺图拒绝降级 / 补跑闸门'
+  },
+  {
+    name: 'image-first-ui',
+    script: 'verify-image-first-ui.js',
+    group: 'fast',
+    desc: '小智前端出图开关（默认开/单价来自 info/请求体 imagePerClip 与图片字段）+ 审图暂停卡片与继续按钮（静态 + 3001 只读）'
+  },
+  {
+    name: 'image-first-http',
+    script: 'verify-image-first-http.js',
+    group: 'real',
+    desc: '出图/调色 HTTP 契约：临时隔离实例验 /api/assistant/info 的 image 段、execute 出图未就绪前置拒绝（不建任务）、/api/photos/:id/adjust'
+  },
+  {
+    name: 'photo-adjust',
+    script: 'verify-photo-adjust.js',
+    group: 'real',
+    desc: '图片手动调色模块：亮度/对比度/饱和度/色温真 ffmpeg 渲染（YAVG/色偏实测）、原图保留、版本递增、回退、参数越界负向'
+  },
+  {
+    name: 'photo-adjust-ui',
+    script: 'verify-photo-adjust-ui.js',
+    group: 'fast',
+    desc: '图片审核页调色滑杆：四条滑杆/应用/恢复原图/CSS 近似预览/cache-busting/错误显示（静态断言 + 3001 只读）'
   }
 ];
 
