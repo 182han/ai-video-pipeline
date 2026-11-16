@@ -9,6 +9,8 @@
 //   计划卡 plan = { planId, themeLabel, totalMinutes, clipCount, clipDurationSec,
 //                   resolution, modelLabel, sceneCards, estimate:{totalCny,retryCapCny,autoQcRetries},
 //                   fillMaxClips, requiresPaymentApproval, warnings[] }
+//   2026-11-16 用户口径：计划卡按「时长 + 场景卡库自动抽取」展示，不把长片说成单一主题；
+//   themeLabel 只在调用方显式给主题时出现（正常对话为空）。
 //   状态   state = { state, label, taskId, retries, retryAllowed, fills, fillAllowed, reason, events[] }
 // ============================================================
 const { React } = window;
@@ -22,9 +24,11 @@ export function PlanCard({ plan, busy, onConfirm, onEdit }) {
   const est = plan.estimate || {};
   const rows = [
     ['时长', `${Number(plan.totalMinutes).toFixed(2)} 分钟 = ${plan.clipCount} 段 × ${plan.clipDurationSec} 秒`],
-    ['主题', plan.themeLabel || '（未指定，按卡库内容出片）'],
+    ...(plan.themeLabel ? [['主题', plan.themeLabel]] : []),
     ['模型', `${plan.modelLabel || plan.model} · ${plan.resolution}`],
-    ['场景卡', plan.sceneCards ? `${plan.clipCount} 张（chapter+sequence，顺序不重复）` : '关闭（自由提示词）'],
+    plan.sceneCards
+      ? ['场景', `场景卡库自动抽取 ${plan.clipCount} 个不同场景（按章节顺序，不重复）`]
+      : ['场景', '自由提示词（已关闭场景卡）'],
     ['预估费用', `${money(est.totalCny)}${est.autoQcRetries ? `（重试上限 ${money(est.retryCapCny)}，最多 ${est.autoQcRetries} 次）` : '（无重试预算）'}`],
     ['失败补位', `最多 ${plan.fillMaxClips || 0} 段（≤5% 且 ≤10 段）`]
   ];
@@ -111,7 +115,7 @@ export function StateStrip({ state, task, onOpenTask }) {
 
 // 首页气泡：在创作页给一个「我是小智」的引导气泡；可关，关一次不再打扰。
 export function GreetingBubble({ onPick, onClose, bottom = 136 }) {
-  const chips = ['30 分钟的雪山、星空和极光', '上一次的视频', '现在进度怎样'];
+  const chips = ['10 分钟的长视频', '上一次的视频', '现在进度怎样'];
   return html`
     <div
       role="status"
@@ -125,7 +129,7 @@ export function GreetingBubble({ onPick, onClose, bottom = 136 }) {
         <div className="flex-1">
           <p className="text-[12px] text-ink font-medium">我是小智</p>
           <p className="mt-1 text-[11px] leading-[1.65] text-ink3">
-            说个总时长和想拍的景色，我来排计划；长片可以一次说多个主题，比如「30 分钟的雪山、星空和极光」。
+            说个总时长，我来排计划，比如「10 分钟」。场景从场景卡库里按顺序自动抽取，长片也是几十个不同场景，不用指定主题。
           </p>
         </div>
         <button

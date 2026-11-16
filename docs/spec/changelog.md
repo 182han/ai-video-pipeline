@@ -3415,3 +3415,36 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - **板块页「小智 · 对话首页」小球改为与首页大球同源的绿色渐变**（原为蓝色）；WebGL 不可用时的兜底球也改为绿色，
   保持「小智 = 绿色液态球」的一致形态。
 - 验收：`verify-assistant` **95/0**、`verify-xiaozhi-home` **43/0**、CDP 9222 **22/0**（示例/配色已刷新截图）。
+
+### 用户反馈修订（2026-11-16 11:44）：长片不按主题，改为「时长优先 + 场景卡自动抽取」
+
+用户指正（原话要点）：
+- 「我想要的不是用户直接告诉你说我要哪几个主题，而是我告诉你我要的时长，你自动通过我的场景卡里面去抽取选择。」
+- 「10 分钟的长视频肯定不是围绕什么主题的……每段 10 秒或 15 秒，都从场景卡里面选，大约 60 到 90 个不同的场景，
+  他们都不属于某一种主题。」
+- 「目前这个什么 30 分钟的雪山、星空和极光是错误的。」
+
+改动（全部增量 edit；未整文件覆盖 `qualityChecker.js` / `pipeline.js` / `server.js`）：
+- `src/assistant/planCard.js`：口语里的地貌词不再升级成 `theme / themeLabel`（用户提到时只给一句
+  「不按单一主题选卡」提示）；删除「没识别到主题」警告；`describe()` 改为
+  「场景：场景卡库自动抽取 N 个不同场景（按章节顺序，不重复）」。
+- `src/assistant/supervisor.js`：回复开头改「我按 X 分钟排好了」；问候 / 未知 / 无记录 / 无任务文案去主题；
+  不再把 `parsed.theme / parsed.themeLabel` 传进计划卡。
+- `src/taskManager.js` / `src/pipeline.js`：场景卡任务拼提示词时不再把用户整句当「氛围」注入每段
+  （否则 60–180 段会被拉向同一主题）；`theme` 仅在调用方显式传 `options.theme` 时生效。
+- `web/src/components/assistant.js` / `xiaozhiPlan.js`：chips 改
+  `['10 分钟的长视频', '上一次的视频', '现在进度怎样']`；介绍卡 / 输入框占位 / 首页气泡改「说个总时长」；
+  计划卡去掉「主题（未指定）」行，改为「场景：场景卡库自动抽取 N 个不同场景（按章节顺序，不重复）」。
+- 验收脚本同步：`verify-assistant`（新增「不按主题」「多主题只提示」「10 分钟 = 60 段」「describe 场景行」
+  「回复不带主题」「首页示例时长优先」断言）、`verify-scene-cards`（任务提示词期望 = 卡 + 显式主题，不含用户整句）、
+  `verify-xiaozhi-home`（chips / 介绍卡断言 + 场景文案，43 → 44 项）。
+
+验收（本机实测，零计费）：
+- `node scripts/verify-assistant.js` → **99 通过 / 0 失败**（原 95；含 Mock 成片 19.11s、自动重试、离线 ASR）。
+- `node scripts/verify-scene-cards.js` → **57 / 0**。
+- `node scripts/verify-xiaozhi-home.js` → **44 / 0**。
+- `node scripts/verify-p6-offline.js` → **41 / 0**。
+- 运行中 3001（PID 25988）仍是旧后端：11:44 登录态探针发「30 分钟的雪山、星空和极光」→ `themeLabel='极光'`（旧逻辑）。
+  **src/ 改动需重启 3001；`web/` 刷新即生效。** 未重启前前端已是新文案，但计划卡措辞仍是旧后端。
+- 未做：15 秒/段。场景卡按 10 秒/张设计（180 张 = 30 分钟），15 秒会被 `PLAN_SCENE_CARD_DURATION` 拒绝；
+  是否开放需产品决定 + Mock/真实生成验证，不能只改校验。

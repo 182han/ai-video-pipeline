@@ -157,20 +157,24 @@ function describeReply(plan) {
 }
 
 function replyForPlan(plan) {
-  return `我按「${plan.themeLabel || '自然风光'}」排好了：\n${describeReply(plan)}\n`
+  // 2026-11-16 用户口径：长片按「总时长」排，场景从场景卡库自动抽取，不再说「我按某个主题排好了」。
+  const mins = Number(plan.totalSec || 0) / 60;
+  const durLabel = mins >= 10 ? mins.toFixed(1) : mins.toFixed(2);
+  return `我按 ${durLabel} 分钟排好了：\n${describeReply(plan)}\n`
     + (plan.requiresPaymentApproval
       ? '这是付费任务：你确认后我才开始，不会自动扣费。要改哪里直接说。'
       : '这是零计费任务（Mock）：你确认后我就开始。要改哪里直接说。');
 }
 
 function replyForGreeting() {
-  return '我是小智。说个总时长和想拍的景色就能排计划，例如「30 分钟的雪山、星空和极光」；'
+  return '我是小智。说个总时长就能排计划，例如「10 分钟」或「30 分钟」——'
+    + '场景由场景卡库按章节顺序自动抽取（10 秒/段，10 分钟 = 60 个不同场景），不需要指定主题；'
     + '也可以问「上一次的视频」或「现在进度怎样」。语音按钮在输入框左侧。';
 }
 
 function replyUnknown() {
-  return '我可以做三件事：① 按「总时长 + 主题」排计划；② 帮你找「上一次的视频」；③ 报当前任务进度。'
-    + '比如：10 分钟极光 / 上一次的视频 / 进度。';
+  return '我可以做三件事：① 按总时长排计划（场景从场景卡库自动抽取，不需要说主题）；'
+    + '② 帮你找「上一次的视频」；③ 报当前任务进度。比如：10 分钟 / 上一次的视频 / 进度。';
 }
 
 function retrieveRefs(query, limit = 5) {
@@ -197,7 +201,7 @@ function describeRefs(refs) {
 function replyForLast(query) {
   const res = retrieveRefs(query, 3);
   if (!res.refs.length) {
-    return '库里还没有成片记录。说个总时长和主题（比如「10 分钟极光」），我来做第一条。';
+    return '库里还没有成片记录。说个总时长（比如「10 分钟」），我来做第一条。';
   }
   return `我查到这些相关记录：\n${describeRefs(res.refs)}\n`
     + '要再来一条类似的，直接说「再来一条」并告诉我时长；要看成片就去「库 · 成片」。';
@@ -205,7 +209,7 @@ function replyForLast(query) {
 
 function replyForStatus(sessionId) {
   const state = memory.getState(sessionId);
-  if (!state) return '现在没有正在执行的任务。说个时长和主题，我来排计划。';
+  if (!state) return '现在没有正在执行的任务。说个时长，我来排计划。';
   const task = state.finalTaskId ? taskManager.getTask(state.finalTaskId) : (state.taskId ? taskManager.getTask(state.taskId) : null);
   if (state.state === stateMachine.STATES.DONE) {
     const file = task && task.outputPath ? `，成片 ${require('path').basename(task.outputPath)}` : '';
@@ -257,8 +261,7 @@ function handleMessage(opts = {}) {
       input.clipCount = parsed.clipCount !== null ? parsed.clipCount : undefined;
       input.resolution = parsed.resolution || undefined;
       input.model = parsed.model || undefined;
-      input.theme = parsed.theme || undefined;
-      input.themeLabel = parsed.themeLabel || undefined;
+      // 主题词不进入计划：长片按场景卡库自动抽取不同场景（2026-11-16 用户口径）。
       input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
     }
     const built = planCard.buildPlan(input);

@@ -362,9 +362,9 @@ async function main() {
   ok('初始分配未用 buffer', task.sceneCards && task.sceneCards.status.bufferUsed === 0);
   const expectedPatches = task.sceneCards.used.map((e, i) => promptComposer.composeClipPatch(
     sceneCards.getCardById(e.id),
-    { theme: 'landscape', userPrompt }
+    { theme: 'landscape' }
   ));
-  ok('每个 clip 的 prompt 由 promptComposer 产出',
+  ok('每个 clip 的 prompt 由 promptComposer 产出（卡 + 显式主题，不含用户整句）',
     task.clips.every((c, i) => c.prompt === expectedPatches[i].prompt
       && c.promptSource === 'scene-card'
       && c.sceneKey === expectedPatches[i].sceneKey),

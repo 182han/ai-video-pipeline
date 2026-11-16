@@ -186,9 +186,10 @@ class TaskManager {
           e.code = 'SCENE_CARDS_MISSING_CARD';
           throw e;
         }
+        // 场景卡是唯一场景输入：不把用户整句（含时长/主题词）当「氛围」注入每段提示词，
+        // 否则 60–180 段会被拉向同一主题（2026-11-16 用户指正）。主题仅在显式传 options.theme 时生效。
         Object.assign(clips[i], promptComposer.composeClipPatch(card, {
-          theme: clips[i].theme,
-          userPrompt: prompt
+          theme: clips[i].theme
         }));
       }
       const firstKey = sceneCardPlan.used[0] ? sceneCardPlan.used[0].scene_key : '';

@@ -786,7 +786,8 @@ class Pipeline {
   }
 
   // ===== 场景卡模式（P4）=====
-  // 运行时把「卡 + 主题」拼成提示词；卡只读、不回写。
+  // 场景卡是唯一场景输入：运行时按「卡」拼提示词；卡只读、不回写。
+  // 主题仅在调用方显式配置时作为氛围参数，不把用户整句注入每段（2026-11-16 用户口径）。
   // 取卡计划在任务创建时写入；这里再做一次幂等兜底，覆盖两种路径：
   //   1) 老代码/脚本直接 createTask 未带 sceneCards，但任务标记了场景卡模式；
   //   2) 任务在保存/恢复过程中丢了 sceneCards 字段。
@@ -825,8 +826,7 @@ class Pipeline {
         throw e;
       }
       const patch = promptComposer.composeClipPatch(card, {
-        theme: clip.theme ?? task.theme,
-        userPrompt: task.prompt
+        theme: clip.theme ?? task.theme
       });
       const changed = clip.prompt !== patch.prompt
         || clip.promptSource !== 'scene-card'
@@ -853,8 +853,7 @@ class Pipeline {
     }
     const clip = task.clips[index] || {};
     const patch = promptComposer.composeClipPatch(replaced.card, {
-      theme: clip.theme ?? task.theme,
-      userPrompt: task.prompt
+      theme: clip.theme ?? task.theme
     });
     taskManager.updateClip(taskId, index, {
       ...patch,
@@ -1423,7 +1422,7 @@ class Pipeline {
 
     if (isSceneCardTask && !skipPromptStages) {
       // ===== 第1步（场景卡模式）：运行时拼提示词 + 提示词质检 =====
-      // 卡是只读输入：这里只把「卡 + 主题」拼成 clips[i].prompt，不写回卡库。
+      // 卡是只读输入：这里只把「卡」拼成 clips[i].prompt，不写回卡库，也不把用户整句当氛围。
       // 分镜步骤随后标记为合法跳过（场景顺序已由 chapter+sequence 定死）。
       taskManager.recordStepStart(taskId, 'prompt_optimize');
       console.log(`[${taskId}] 步骤1: 场景卡提示词生成 + 质检`);
@@ -1446,7 +1445,7 @@ class Pipeline {
           roundId: composed.plan.roundId,
           sceneKeys: composed.plan.used.map(e => e.scene_key),
           updatedClips: composed.updated,
-          note: '提示词由场景卡 + 用户主题运行时拼出；卡只读，不写回'
+          note: '提示词由场景卡运行时拼出；卡只读，不写回'
         }
       });
       // 场景顺序 = 卡库 chapter+sequence；LLM 分镜会打乱卡序，属于业务上不适用。

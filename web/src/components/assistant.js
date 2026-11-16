@@ -92,8 +92,9 @@ export function Assistant({ page = false } = {}) {
   // 页面模式（2026-11-16）：整页对话页 / 面板共用同一套状态与接口。
   const visible = page || open;
   const pageScrollRef = useRef(null);
-  // 建议 chips：长视频通常是多主题混合，不能演示成「10 分钟全是极光」（用户 2026-11-16 指正）
-  const PAGE_CHIPS = ['30 分钟的雪山、星空和极光', '上一次的视频', '现在进度怎样'];
+  // 建议 chips：用户只说时长，场景由场景卡库自动抽取（2026-11-16 用户指正：
+  // 长片不围绕某个主题，60–180 段是不同场景，不能演示成主题式长片示例）。
+  const PAGE_CHIPS = ['10 分钟的长视频', '上一次的视频', '现在进度怎样'];
   // 批量模式（2026-11-12 用户口径）：不填条数，按「目标时长 ÷ 每段秒数」自动算。
   // 默认 10 分钟 / 10 秒 = 60 条；可切 30 分钟 = 180 条。
   const [batchMinutes, setBatchMinutes] = useState(10);
@@ -673,9 +674,9 @@ export function Assistant({ page = false } = {}) {
             ${!chatting && html`
               <section className="xz-intro" aria-label="小智介绍">
                 <p className="xz-intro-kicker">你的视频管家</p>
-                <h2 className="xz-intro-title">我是小智，告诉我视频多长、想拍哪些景色，我来排计划并自动完成。</h2>
+                <h2 className="xz-intro-title">我是小智，告诉我视频多长，我从场景卡库里自动挑不同场景、排好计划并完成。</h2>
                 <p className="xz-intro-sub">
-                  比如「30 分钟的雪山、星空和极光」。我会先给你一张计划卡，确认后才开始执行；涉及付费的调用一定先问你。
+                  比如「10 分钟」：每段 10 秒，10 分钟就是 60 个不同场景，不用指定主题。我会先给你一张计划卡，确认后才开始执行；涉及付费的调用一定先问你。
                 </p>
                 <div className="xz-chips">
                   ${PAGE_CHIPS.map((c) => html`
@@ -757,7 +758,7 @@ export function Assistant({ page = false } = {}) {
                 value=${draft}
                 onInput=${(e) => { setDraft(e.target.value); growComposer(e); }}
                 onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder=${backend.ok ? '说总时长和想拍的景色，比如「30 分钟的雪山和星空」…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
+                placeholder=${backend.ok ? '说个总时长，比如「10 分钟」…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
                 disabled=${!canType}
                 aria-label="给小智发消息"
                 className="xz-input"
@@ -874,7 +875,7 @@ export function Assistant({ page = false } = {}) {
             </div>
           `}
           ${msgs.length === 0 && backend.ok && html`
-            <${Msg} role="assistant" text=${'我是小智。说个总时长 + 想拍的景色就能排计划，例如「30 分钟的雪山、星空和极光」；也可以问「上一次的视频」或「现在进度怎样」。'} />
+            <${Msg} role="assistant" text=${'我是小智。说个总时长就能排计划，比如「10 分钟」——场景从场景卡库按顺序自动抽取，不需要指定主题；也可以问「上一次的视频」或「现在进度怎样」。'} />
           `}
           ${msgs.length === 0 && !backend.ok && hasKey && html`
             <${Msg} role="assistant" text="说说你想拍什么？比如「极光」「喀斯特晨雾」。单条就一次问一个问题；也可以在上面直接批量生成 N 条不同地貌。" />
@@ -950,7 +951,7 @@ export function Assistant({ page = false } = {}) {
             value=${draft}
             onInput=${(e) => setDraft(e.target.value)}
             onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder=${backend.ok ? '说总时长和主题，或问上一次的视频…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
+            placeholder=${backend.ok ? '说个总时长，或问上一次的视频…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
             disabled=${backend.ok ? false : !hasKey}
             className="flex-1 resize-none bg-transparent outline-none text-[12px] leading-[1.6] text-ink placeholder:text-ink3 px-1 py-1 disabled:opacity-50"
           ></textarea>

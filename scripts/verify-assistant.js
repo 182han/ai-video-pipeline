@@ -172,13 +172,31 @@ async function main() {
   ok('30 分钟极光 → 180 段 × 10 秒', p30.ok && p30.plan.clipCount === 180 && p30.plan.clipDurationSec === 10,
     p30.ok ? `${p30.plan.clipCount}×${p30.plan.clipDurationSec}` : p30.code);
   ok('场景卡默认开启且 180 张可容纳', p30.ok && p30.plan.sceneCards === true && p30.plan.totalSec === 1800);
-  ok('主题识别 aurora + 中文标签', p30.ok && p30.plan.theme === 'aurora' && p30.plan.themeLabel === '极光');
+  ok('长片不按主题排：theme / themeLabel 为 null（场景由卡库自动抽取）',
+    p30.ok && p30.plan.theme === null && p30.plan.themeLabel === null);
   const pMulti = planCard.buildPlan({ text: '来一条 30 分钟的雪山、星空和极光视频，每段 10 秒' });
-  ok('多主题长片：theme 取第一个，themeLabel 展示全部（不再显示成全是极光）',
-    pMulti.ok && pMulti.plan.theme === 'mountain'
-    && pMulti.plan.themeLabel === '雪山冰川、星空银河、极光'
+  ok('用户提到多主题：不写进计划卡，只提示「不按单一主题选卡」',
+    pMulti.ok && pMulti.plan.theme === null && pMulti.plan.themeLabel === null
+    && pMulti.plan.warnings.some((w) => /雪山冰川、星空银河、极光/.test(w) && /不按单一主题/.test(w))
     && pMulti.plan.clipCount === 180,
-    pMulti.ok ? pMulti.plan.theme + ' / ' + pMulti.plan.themeLabel : pMulti.code);
+    pMulti.ok ? JSON.stringify(pMulti.plan.warnings) : pMulti.code);
+  const pDurOnly = planCard.buildPlan({ text: '10 分钟' });
+  ok('只说时长（10 分钟）→ 60 段 × 10 秒、无主题、无警告',
+    pDurOnly.ok && pDurOnly.plan.clipCount === 60 && pDurOnly.plan.theme === null
+    && (pDurOnly.plan.warnings || []).length === 0,
+    pDurOnly.ok ? `${pDurOnly.plan.clipCount}段` : pDurOnly.code);
+  ok('describe() 按「场景卡库自动抽取」描述、不再有主题行', (() => {
+    if (!pDurOnly.ok) return false;
+    const lines = planCard.describe(pDurOnly.plan);
+    return lines.some((l) => l.includes('场景：场景卡库自动抽取 60 个不同场景'))
+      && !lines.some((l) => l.startsWith('主题：'));
+  })(), pDurOnly.ok ? planCard.describe(pDurOnly.plan).join(' | ') : '');
+  const msgDurOnly = supervisor.handleMessage({ sessionId: 's_reply_dur_1', text: '10 分钟' });
+  ok('对话回复按总时长排，不出现「我按「某主题」排好了」',
+    msgDurOnly.ok && msgDurOnly.plan && /我按 10\.0 分钟排好了/.test(msgDurOnly.reply)
+    && /场景：场景卡库自动抽取 60 个不同场景/.test(msgDurOnly.reply)
+    && !/我按「/.test(msgDurOnly.reply),
+    String(msgDurOnly.reply || '').slice(0, 120));
   ok('预算：720p 30 分钟 = ¥1080，重试上限 ¥108（10%），最多 2 次',
     p30.ok && p30.plan.estimate.totalCny === 1080 && p30.plan.estimate.retryCapCny === 108
     && p30.plan.estimate.autoQcRetries === 2,
@@ -189,9 +207,9 @@ async function main() {
     planCard.describe(p30.plan).slice(0, 2).join(' | '));
 
   const pHalf = planCard.buildPlan({ text: '半小时星空，1080p' });
-  ok('「半小时」= 30 分钟，1080p 单价 ¥1.2/s → ¥2160',
+  ok('「半小时」= 30 分钟，1080p 单价 ¥1.2/s → ¥2160（不按「星空」选卡）',
     pHalf.ok && pHalf.plan.clipCount === 180 && pHalf.plan.resolution === '1080p'
-    && pHalf.plan.estimate.totalCny === 2160 && pHalf.plan.theme === 'space',
+    && pHalf.plan.estimate.totalCny === 2160 && pHalf.plan.theme === null,
     pHalf.ok ? `¥${pHalf.plan.estimate.totalCny}` : pHalf.code);
 
   const p2 = planCard.buildPlan({ text: '帮我拍一条两分钟的雪山，不要场景卡' });
@@ -553,6 +571,10 @@ async function main() {
   ok('首页气泡只在创作页出现（currentRoute() === \'/\'）',
     /currentRoute\(\) === '\/'/.test(assistantJs));
   ok('shell.js 仍挂载 <Assistant />（小智是全局悬浮球）', /<\$\{Assistant\} \/>/.test(shellJs));
+  ok('首页示例改为「时长优先」（不再出现主题式长片示例）',
+    /PAGE_CHIPS = \['10 分钟的长视频'/.test(assistantJs)
+    && !/30 分钟的雪山/.test(assistantJs)
+    && /场景卡库/.test(assistantJs));
 
   console.log('\n[清理] 测试任务 / 临时产物');
   const cleaned = await cleanupAll();

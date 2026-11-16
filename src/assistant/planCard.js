@@ -179,9 +179,10 @@ function findSceneCardsFlag(text) {
   return null; // 默认按产品口径开启（见 buildPlan）
 }
 
-// 一段话里可能同时说多个地貌（长视频的正常需求），全部识别出来：
-// 返回按原文出现顺序去重的 [{ id, label, index }]。theme 仍取第一个（promptComposer 的氛围参数），
-// themeLabel 展示全部（如「雪山冰川、星空银河、极光」），避免把 30 分钟长片说成全是极光。
+// 识别一段话里提到的地貌词，按原文出现顺序去重。
+// 2026-11-16 用户口径：长片只说时长，场景由场景卡库按 chapter+sequence 自动抽取（10 分钟 = 60 个不同场景），
+// 不围绕单一主题。因此这里识别到的主题词**不参与选卡、不写进计划卡、不注入提示词**，
+// 只用于在计划卡上给一句「不按单一主题选卡」的提示。
 function findThemes(text) {
   const lower = String(text || '').toLowerCase();
   const hits = [];
@@ -390,14 +391,16 @@ function buildPlan(input = {}) {
     }
   }
 
-  // ---- 主题 ----
-  let theme = pick(input.theme, parsed.theme);
-  if (theme) theme = String(theme).slice(0, 80);
-  let themeLabel = input.themeLabel || parsed.themeLabel || null;
+  // ---- 主题（不作为长片选卡依据）----
+  // 只接受调用方显式传入的 theme；用户口语里的地貌词不升级成「计划主题」。
+  // 场景卡模式 = 卡库按 chapter+sequence 抽取不同场景，单一主题会把 60–180 段拉成同一类画面。
+  let theme = input.theme ? String(input.theme).slice(0, 80) : null;
+  let themeLabel = input.themeLabel || null;
   if (theme && !themeLabel) {
     const t = THEMES.find((x) => x.id === theme) || THEMES.find((x) => x.label === theme);
     themeLabel = t ? t.label : theme;
   }
+  const mentionedThemeLabel = parsed.themeLabel || null;
 
   const planId = 'plan_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const base = {
@@ -438,8 +441,11 @@ function buildPlan(input = {}) {
       `目标 ${base.requestedTotalMinutes} 分钟，按 ${clipDurationSec} 秒/段向上取整 → ${clipCount} 段 = `
       + `${(actualTotalSec / 60).toFixed(2)} 分钟。`);
   }
-  if (!theme) {
-    base.warnings.push('没识别到主题：将按卡库内容直接出片（可在计划里补一句主题）。');
+  // 用户随口提主题词时只提示「不按主题选卡」，不静默忽略、也不写成计划主题。
+  if (mentionedThemeLabel && sceneCardEnabled && !input.theme) {
+    base.warnings.push(
+      `你提到了「${mentionedThemeLabel}」：长片按场景卡库自动抽取不同场景，不按单一主题选卡；`
+      + '这个主题词不会影响出片，只作提示。');
   }
 
   const est = estimate(base);
@@ -478,8 +484,10 @@ function describe(plan) {
   const mins = plan.totalSec / 60;
   lines.push(`总时长 ${mins >= 10 ? mins.toFixed(1) : mins.toFixed(2)} 分钟（${plan.clipCount} 段 × ${plan.clipDurationSec} 秒）`);
   if (plan.themeLabel) lines.push(`主题：${plan.themeLabel}`);
-  lines.push(`模型：${plan.modelLabel} · ${plan.resolution}`
-    + (plan.sceneCards ? ` · 场景卡 ${plan.clipCount} 张（按顺序不重复）` : ' · 自由提示词'));
+  lines.push(`模型：${plan.modelLabel} · ${plan.resolution}`);
+  lines.push(plan.sceneCards
+    ? `场景：场景卡库自动抽取 ${plan.clipCount} 个不同场景（按章节顺序，不重复）`
+    : '场景：自由提示词（已关闭场景卡）');
   if (plan.estimate) {
     if (plan.estimate.totalCny > 0) {
       lines.push(`预估费用：¥${plan.estimate.totalCny.toFixed(2)}（重试上限 ¥${plan.estimate.retryCapCny.toFixed(2)}，最多 ${plan.estimate.autoQcRetries} 次）`);
