@@ -11,14 +11,25 @@ const qualityChecker = require('./qualityChecker');
 const videoProcessor = require('./videoProcessor');
 const transitionMixer = require('./processors/transitionMixer');
 const promptOptimizer = require('./promptOptimizer');
+// 场景卡（P4）：运行时拼提示词 / 不放回取卡 / buffer 替换
+const sceneCards = require('./sceneCards');
+const promptComposer = require('./promptComposer');
 const { resolveResume } = require('./pipelineStages');
 const llmService = require('./services/llmService');
 const pricing = require('./pricing');
 const library = require('./library');
 const photoLibrary = require('./photoLibrary');
+const objectStore = require('./storage/objectStore');
+const dashscopeUpload = require('./generators/dashscopeUpload');
+const { getI2VInfo } = require('./generators/i2vSupport');
 
 const CLIPS_DIR = config.STORAGE.clipsDir;
 const OUTPUT_DIR = config.STORAGE.outputDir;
+
+// 片段级「硬闸门」：只有这些项失败才拦片段。
+// 模糊/重复帧/内容匹配对 AI 风光片容易误判（慢镜头、浅景深），只警告、不触发重生成。
+// NSFW 在 qualityChecker 内部永远是硬项，这里列出只是让语义完整。
+const HARD_QC_ITEMS = ['blackFrame', 'duration', 'nsfw'];
 
 // 确保目录存在
 [CLIPS_DIR, OUTPUT_DIR].forEach(d => {
@@ -149,7 +160,22 @@ class Pipeline {
     taskManager.updateTaskStatus(taskId, 'regenerating', { currentStep: `重新生成片段 ${index + 1}` });
     console.log(`[${taskId}] 重新生成片段 ${index + 1}`);
 
-    await this._processSingleClip(taskId, index, generator);
+    // 图生视频：重生成单片段也要带首帧图，否则片段级 i2v 任务会退化成纯文生视频。
+    const i2vImage = await this._i2vPayload(task, task.clips[index]);
+    await this._processSingleClip(taskId, index, generator, i2vImage);
+
+    // autoRetry=false：单条重生成后如果还有别的失败片段，仍然不重拼，
+    // 避免「只修好一条就把缺片的成片拼出来」。
+    const afterRegen = taskManager.getTask(taskId) || task;
+    const stillFailed = this._failedClipSummaries(afterRegen);
+    if (afterRegen.autoRetry === false && stillFailed.length > 0) {
+      const list = stillFailed.map(f => `#${f.index} ${f.reason}`).join('；');
+      taskManager.updateTaskStatus(taskId, 'failed', {
+        error: `仍有 ${stillFailed.length} 个片段失败：${list}。未重拼；请继续重生成失败片段。`,
+        failedClips: stillFailed
+      });
+      return;
+    }
 
     // 收集全部成功片段（含刚重生成的），重新拼接成片（配乐在整片阶段统一混入）
     const successClips = task.clips
@@ -221,7 +247,7 @@ class Pipeline {
       concatPath = path.join(OUTPUT_DIR, `${taskId}_concat.mp4`);
       const trans = this._transitionOptions(task);
       const concatResult = trans.enabled
-        ? await transitionMixer.concatWithTransitions(successClips, concatPath, {
+        ? await transitionMixer.concatWithTransitions(this._sceneCardConcatInputs(task, successClips), concatPath, {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
@@ -229,7 +255,14 @@ class Pipeline {
           // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
           colorMatch: this._colorMatchOptions(task)
         })
-        : await videoProcessor.concatenate(successClips, concatPath);
+        // 转场关闭时不再对原始模型输出直接 -c copy：
+        // 分辨率/帧率/像素格式不一致会静默产出黑帧、重复帧、DTS 错乱。
+        // concatenateSegments 会先探测，只重编码不匹配的片段，再做完整解码校验。
+        : await videoProcessor.concatenateSegments(
+          this._sceneCardConcatInputs(task, successClips),
+          concatPath,
+          { resolution: task.resolution, fps: 30 }
+        );
 
       if (!concatResult.success) {
         taskManager.recordStepComplete(taskId, 'concatenation', {
@@ -249,7 +282,11 @@ class Pipeline {
         qcResult: concatQC.passed ? 'pass' : concatQC.level,
         // 补跑路径同样要留痕，否则终检拿不到「转场/校色实际执行了什么」
         qcDetails: concatResult.colorMatch
-          ? { ...concatQC, colorMatch: concatResult.colorMatch }
+          ? {
+            ...concatQC,
+            colorMatch: concatResult.colorMatch,
+            ...(this._isSceneCardTask(task) ? { sceneCardGrading: concatResult.adjust || null } : {})
+          }
           : concatQC
       });
     }
@@ -748,6 +785,108 @@ class Pipeline {
     console.log(`[${taskId}] 步骤 ${stepKey} ${isReused ? '复用已有产物' : `按档位「${preset}」跳过`}`);
   }
 
+  // ===== 场景卡模式（P4）=====
+  // 运行时把「卡 + 主题」拼成提示词；卡只读、不回写。
+  // 取卡计划在任务创建时写入；这里再做一次幂等兜底，覆盖两种路径：
+  //   1) 老代码/脚本直接 createTask 未带 sceneCards，但任务标记了场景卡模式；
+  //   2) 任务在保存/恢复过程中丢了 sceneCards 字段。
+  _isSceneCardTask(task) {
+    return !!(task && task.sceneCards && task.sceneCards.enabled);
+  }
+
+  // 确保任务有一轮完整取卡计划（缺则重新取一轮：按 chapter+sequence、不放回）。
+  _ensureSceneCardPlan(taskId) {
+    let task = taskManager.getTask(taskId);
+    if (!this._isSceneCardTask(task)) return task;
+    const used = Array.isArray(task.sceneCards.used) ? task.sceneCards.used.length : 0;
+    if (used === task.totalClips) return task;
+    const plan = sceneCards.allocate(task.totalClips); // 不足会抛 SCENE_CARDS_EXHAUSTED，不静默复用
+    task = taskManager.setSceneCards(taskId, plan) || taskManager.getTask(taskId);
+    console.log(`[${taskId}] 场景卡补取一轮：${task.totalClips} 张（round ${plan.roundId}）`);
+    return task;
+  }
+
+  // 逐片段拼提示词（只在内容不一致时写回，避免 180 次无意义的存盘/推送）。
+  _composeSceneCardPrompts(taskId) {
+    let task = this._ensureSceneCardPlan(taskId);
+    if (!this._isSceneCardTask(task)) return null;
+    let updated = 0;
+    for (const clip of task.clips) {
+      const entry = task.sceneCards.used[clip.index];
+      if (!entry) {
+        const e = new Error(`场景卡计划缺少第 ${clip.index + 1} 段（sceneCards.used 长度不足）`);
+        e.code = 'SCENE_CARDS_MISSING_ENTRY';
+        throw e;
+      }
+      const card = sceneCards.getCardById(entry.id);
+      if (!card) {
+        const e = new Error(`场景卡缺失：${entry.id}（卡库文件可能被替换，请核对 assets/scene-cards/v3.3-final.json）`);
+        e.code = 'SCENE_CARDS_MISSING_CARD';
+        throw e;
+      }
+      const patch = promptComposer.composeClipPatch(card, {
+        theme: clip.theme ?? task.theme,
+        userPrompt: task.prompt
+      });
+      const changed = clip.prompt !== patch.prompt
+        || clip.promptSource !== 'scene-card'
+        || clip.sceneCardId !== patch.sceneCardId
+        || JSON.stringify(clip.adjust || null) !== JSON.stringify(patch.adjust || null);
+      if (changed) {
+        taskManager.updateClip(taskId, clip.index, patch);
+        updated += 1;
+      }
+    }
+    task = taskManager.getTask(taskId);
+    return { task, updated, plan: task.sceneCards };
+  }
+
+  // 生成失败 → 用缓冲区卡替换该片段（同一轮内 buffer 不复用）。
+  // 只在「还有重试机会」时调用：不额外增加付费调用次数，仍受任务/档位原有的重试预算约束。
+  _replaceSceneCardOnFailure(taskId, index, reason) {
+    const task = taskManager.getTask(taskId);
+    if (!this._isSceneCardTask(task)) return null;
+    const replaced = sceneCards.replaceWithBuffer(task.sceneCards, index, reason);
+    if (!replaced) {
+      console.warn(`[${taskId}] 片段 ${index + 1} 生成失败，但缓冲区卡已用尽/已替换过，保留失败结果`);
+      return null;
+    }
+    const clip = task.clips[index] || {};
+    const patch = promptComposer.composeClipPatch(replaced.card, {
+      theme: clip.theme ?? task.theme,
+      userPrompt: task.prompt
+    });
+    taskManager.updateClip(taskId, index, {
+      ...patch,
+      sceneCardReplacement: {
+        fromSceneKey: replaced.entry.replacedFrom ? replaced.entry.replacedFrom.scene_key : null,
+        fromCardId: replaced.entry.replacedFrom ? replaced.entry.replacedFrom.id : null,
+        reason: reason ? String(reason).slice(0, 500) : '',
+        at: replaced.buffer.at
+      }
+    });
+    taskManager.setSceneCards(taskId, replaced.plan);
+    return replaced;
+  }
+
+  // 场景卡（P4）：把成功片段路径映射成拼接输入对象（逐段带 palette adjust）。
+  // 参数化调色只在「转场重编码」路径生效；不是场景卡任务时只返回 { path }（行为不变，
+  // 但必须是对象：videoProcessor.concatenateSegments 只认 s.path）。
+  _sceneCardConcatInputs(task, successClips) {
+    const byPath = new Map();
+    if (this._isSceneCardTask(task)) {
+      for (const c of (task.clips || [])) {
+        if (!c || !c.adjust || typeof c.adjust !== 'object') continue;
+        const p = this._resolveClipPath(c.videoPath);
+        if (p) byPath.set(p, c.adjust);
+      }
+    }
+    return successClips.map(p => ({
+      path: p,
+      ...(byPath.has(p) ? { adjust: byPath.get(p) } : {})
+    }));
+  }
+
   // ===== 补跑：从已完成步骤继续，不重跑已有的产物 =====
   //
   // 这是「流水线模式化」真正省钱的地方：
@@ -928,6 +1067,10 @@ class Pipeline {
           library.ingestClip(task, { ...clip, status: 'success' });
         } catch (e) {
           console.warn(`[${taskId}] 片段 ${i + 1} 入库失败: ${e.message}`);
+        }
+        const usedPhotoId = clip.photoId || task.sourcePhotoId;
+        if (usedPhotoId) {
+          try { photoLibrary.attachUsage(usedPhotoId, taskId); } catch (e) { /* 追溯失败不影响质检 */ }
         }
         results.push({ index: i, passed: true });
       } else {
@@ -1276,8 +1419,40 @@ class Pipeline {
     const isLibraryTask = task.source === 'library';
     const isRegenerateTask = task.source === 'regenerate';
     const skipPromptStages = isLibraryTask || isRegenerateTask;
+    const isSceneCardTask = this._isSceneCardTask(task);
 
-    if (skipPromptStages) {
+    if (isSceneCardTask && !skipPromptStages) {
+      // ===== 第1步（场景卡模式）：运行时拼提示词 + 提示词质检 =====
+      // 卡是只读输入：这里只把「卡 + 主题」拼成 clips[i].prompt，不写回卡库。
+      // 分镜步骤随后标记为合法跳过（场景顺序已由 chapter+sequence 定死）。
+      taskManager.recordStepStart(taskId, 'prompt_optimize');
+      console.log(`[${taskId}] 步骤1: 场景卡提示词生成 + 质检`);
+      const composed = this._composeSceneCardPrompts(taskId);
+      let worstQC = { passed: true, level: 'pass', reason: '场景卡提示词质检通过' };
+      for (const clip of composed.task.clips) {
+        const qc = qualityChecker.checkPrompt(clip.prompt, clip.theme ?? task.theme);
+        if (!qc.passed) worstQC = qc;
+      }
+      const promptQC = worstQC.passed
+        ? { passed: true, level: 'pass', reason: '场景卡提示词质检通过' }
+        : worstQC;
+      await this._sleep(300);
+      taskManager.recordStepComplete(taskId, 'prompt_optimize', {
+        qcResult: promptQC.passed ? 'pass' : promptQC.level,
+        qcDetails: {
+          ...promptQC,
+          promptSource: 'scene-card',
+          composerVersion: promptComposer.SCENE_PROMPT_VERSION,
+          roundId: composed.plan.roundId,
+          sceneKeys: composed.plan.used.map(e => e.scene_key),
+          updatedClips: composed.updated,
+          note: '提示词由场景卡 + 用户主题运行时拼出；卡只读，不写回'
+        }
+      });
+      // 场景顺序 = 卡库 chapter+sequence；LLM 分镜会打乱卡序，属于业务上不适用。
+      this._markStageSkipped(taskId, 'storyboard', task.preset,
+        '场景卡模式：场景顺序由卡库 chapter+sequence 决定，无需 LLM 分镜');
+    } else if (skipPromptStages) {
       this._markStageSkipped(taskId, 'prompt_optimize', task.preset,
         isLibraryTask ? '片段库成片：片段为已有素材，无需提示词优化' : '片段库重新生成：使用用户指定的提示词，不再自动优化');
       this._markStageSkipped(taskId, 'storyboard', task.preset,
@@ -1435,6 +1610,24 @@ class Pipeline {
     // 全部片段都是复用来的（补跑场景）：如实标为 reused，不谎称本轮重新生成过
     const allReused = batchInfo && batchInfo.reused > 0 && batchInfo.generated === 0;
 
+    // 用户口径（2026-11-12）：autoRetry=false 时不许自动重生成。
+    // 只要有片段没成功，就停在拼接前，把失败清单交给用户；不带着缺失片段出片。
+    const failedSummaries = this._failedClipSummaries(taskManager.getTask(taskId) || task);
+    if (task.autoRetry === false && failedSummaries.length > 0) {
+      const list = failedSummaries.map(f => `#${f.index} ${f.reason}`).join('；');
+      taskManager.recordStepComplete(taskId, 'clip_generation', {
+        status: 'failed',
+        qcResult: 'fail',
+        error: `片段失败 ${failedSummaries.length}/${task.totalClips}，未进入拼接`
+      });
+      taskManager.updateTaskStatus(taskId, 'failed', {
+        error: `片段失败：${list}。未拼接；请逐条重新生成失败片段后再补跑。`,
+        failedClips: failedSummaries
+      });
+      console.log(`[${taskId}] ⛔ ${failedSummaries.length} 个片段失败；autoRetry=false，不重试、不拼接`);
+      return { success: false, failedClips: failedSummaries, needsRetry: true };
+    }
+
     if (qcPassed === 0) {
       // 全部失败，无法继续
       taskManager.recordStepComplete(taskId, 'clip_generation', {
@@ -1545,7 +1738,9 @@ class Pipeline {
       const segs = successClipObjs.map(c => ({
         path: this._resolveClipPath(c.videoPath),
         inSec: c.trim && c.trim.inSec ? c.trim.inSec : 0,
-        outSec: c.trim && c.trim.outSec !== undefined ? c.trim.outSec : null
+        outSec: c.trim && c.trim.outSec !== undefined ? c.trim.outSec : null,
+        // 场景卡逐段参数化调色（仅转场重编码路径生效；其余路径忽略该字段）
+        adjust: c.adjust && typeof c.adjust === 'object' ? c.adjust : null
       })).filter(s => s.path);
       console.log(`[${taskId}] 片段库拼接：${segs.length} 段，目标 ${task.resolution}`);
       const trans = this._transitionOptions(task);
@@ -1627,7 +1822,7 @@ class Pipeline {
       concatPath = path.join(OUTPUT_DIR, `${taskId}_concat.mp4`);
       const trans = this._transitionOptions(task);
       const concatResult = trans.enabled
-        ? await transitionMixer.concatWithTransitions(successClips, concatPath, {
+        ? await transitionMixer.concatWithTransitions(this._sceneCardConcatInputs(task, successClips), concatPath, {
           duration: trans.duration,
           type: trans.type,
           resolution: task.resolution,
@@ -1635,7 +1830,14 @@ class Pipeline {
           // 校色：默认关；转场关闭时不会走到这里（走 -c copy），由终检报「未执行」
           colorMatch: this._colorMatchOptions(task)
         })
-        : await videoProcessor.concatenate(successClips, concatPath);
+        // 转场关闭时不再对原始模型输出直接 -c copy：
+        // 分辨率/帧率/像素格式不一致会静默产出黑帧、重复帧、DTS 错乱。
+        // concatenateSegments 会先探测，只重编码不匹配的片段，再做完整解码校验。
+        : await videoProcessor.concatenateSegments(
+          this._sceneCardConcatInputs(task, successClips),
+          concatPath,
+          { resolution: task.resolution, fps: 30 }
+        );
 
       if (!concatResult.success) {
         taskManager.recordStepComplete(taskId, 'concatenation', {
@@ -1665,7 +1867,9 @@ class Pipeline {
               decodeCheck: concatResult.decodeCheck
             },
             // 校色实际状态（disabled/applied/failed）：终检据此判「校色未执行」
-            colorMatch: concatResult.colorMatch
+            colorMatch: concatResult.colorMatch,
+            // 场景卡 palette_id 参数化调色的实际执行数（null = 非场景卡任务）
+            ...(this._isSceneCardTask(task) ? { sceneCardGrading: concatResult.adjust || null } : {})
           }
           : concatQC
       });
@@ -1953,10 +2157,12 @@ class Pipeline {
 
   // 图生视频（2026-11-11 用户口径）：任务带 sourcePhotoId 时，把图片库里「已通过」的图
   // 读成 base64 交给适配器。这里是唯一读图点：失败就让任务明确失败，不许静默退回文生视频。
-  _i2vPayload(task) {
-    if (!task || !task.sourcePhotoId) return null;
-    const photo = photoLibrary.get(task.sourcePhotoId);
-    if (!photo) throw new Error(`图生视频的源图片不存在（${task.sourcePhotoId}）`);
+  async _i2vPayload(task, clip = null) {
+    // 每片段自己的图优先（图片优先链路）；没有则回退任务级 sourcePhotoId（旧口径）。
+    const photoId = (clip && clip.photoId) || (task && task.sourcePhotoId);
+    if (!task || !photoId) return null;
+    const photo = photoLibrary.get(photoId);
+    if (!photo) throw new Error(`图生视频的源图片不存在（${photoId}）`);
     if (photo.status !== 'approved') throw new Error('图生视频的源图片还没通过审核（请在「照片」页点通过）');
     let buf;
     try {
@@ -1970,12 +2176,46 @@ class Pipeline {
     const ext = path.extname(photo.filePath).toLowerCase();
     const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : (ext === '.webp' ? 'image/webp' : 'image/png');
     const base64 = buf.toString('base64');
-    try { photoLibrary.attachUsage(photo.id, task.taskId); } catch (e) { /* 追溯失败不影响生成 */ }
+
+    // 注意：这里只构建输入，不标记“已使用”。只有片段真正生成成功后才 attachUsage，
+    // 否则上传/生成失败也会把图片标成已用（用户 2026-11-14 反馈的显示错误）。
+    // wan3.0 图生视频需要 first_frame url。用户不想用自己的公网存储时，
+    // 走百炼官方临时上传：getPolicy → OSS → oss://（48h，私有），
+    // 视频请求加 X-DashScope-OssResourceResolve: enable。
+    // 其它模型（可灵/Seedance/WhaleTV）仍用 base64/dataUrl，不额外上传。
+    let url = null;
+    let urlProtocol = null;
+    if (task.model === 'dashscope') {
+      const rc = task.runtimeConfig || {};
+      const uploaded = await dashscopeUpload.uploadFile(photo.filePath, {
+        apiKey: rc.apiKey || '',
+        baseUrl: rc.apiBaseUrl || '',
+        model: rc.modelId || 'wan3.0-video'
+      });
+      url = uploaded.url;
+      urlProtocol = 'oss';
+    } else {
+      const i2vInfo = getI2VInfo(task.model);
+      if (i2vInfo && i2vInfo.input === 'public-url') {
+        const upload = await objectStore.uploadFile(photo.filePath, {
+          key: `photos/${photo.id}${ext || '.png'}`,
+          contentType: mime
+        });
+        if (!upload.success || !upload.url) {
+          throw new Error('图生视频：图片上传对象存储失败（该模型需要公网可读 URL）: ' + (upload.error || '无 url'));
+        }
+        url = upload.url;
+        urlProtocol = 'https';
+      }
+    }
+
     return {
       photoId: photo.id,
       filePath: photo.filePath,
       base64,
       dataUrl: `data:${mime};base64,${base64}`,
+      url,
+      urlProtocol,
       mime,
       sizeBytes: buf.length,
       width: photo.width || null,
@@ -1988,9 +2228,15 @@ class Pipeline {
     const task = taskManager.getTask(taskId);
     if (!task) return; // 任务已删除，直接结束批量生成
 
-    // 图生视频：把已审核通过的源图读成 base64（同一任务的每个片段都用这张图作首帧）。
-    // 读图失败会抛出 → 任务失败并带明确原因，不会退化成静默的文生视频。
-    const i2vImage = this._i2vPayload(task);
+    // 场景卡（P4）：批生成前确保「本轮取卡 + 提示词」齐全。
+    // 正常任务在创建时已写入；这里兜底恢复/旧任务，不足会抛错而不是静默复用。
+    if (this._isSceneCardTask(task)) {
+      this._composeSceneCardPrompts(taskId);
+    }
+
+    // 图生视频：按片段取图（图片优先链路用 clip.photoId；旧任务回退 sourcePhotoId）。
+    // 同一张图只解析/上传一次，避免 60 个片段重复上传 60 次。
+    const i2vCache = new Map();
 
     // 补跑复用：已经成功的片段不再重新生成。
     //
@@ -2040,7 +2286,26 @@ class Pipeline {
               skippedReused++;
               continue;
             }
-            await this._processSingleClip(taskId, index, generator);
+            const clip = task.clips[index];
+            const photoId = (clip && clip.photoId) || task.sourcePhotoId;
+            let clipImage = null;
+            if (photoId) {
+              try {
+                // 缓存 Promise，而不是缓存 await 后的结果：
+                // 并发 worker 会同时到达这里，缓存结果会让同一张图重复上传。
+                if (!i2vCache.has(photoId)) {
+                  i2vCache.set(photoId, this._i2vPayload(task, clip));
+                }
+                clipImage = await i2vCache.get(photoId);
+              } catch (e) {
+                // 读图/上传失败是配置或文件问题，不是模型生成失败；不重试，直接报清单。
+                this._finishClipFailure(taskId, index, 0, e.message, {
+                  genStartedAt: new Date().toISOString()
+                });
+                continue;
+              }
+            }
+            await this._processSingleClip(taskId, index, generator, clipImage);
             generated++;
 
             const prog = taskManager.getProgress(taskId);
@@ -2071,13 +2336,15 @@ class Pipeline {
   }
 
   // 处理单个片段（生成 + 质检 + 重试）
-  async _processSingleClip(taskId, index, generator) {
+  async _processSingleClip(taskId, index, generator, i2vImage = null) {
     const task = taskManager.getTask(taskId);
     if (!task) return; // 任务已删除，直接退出
     const clip = task.clips[index];
 
-    // 总尝试次数 = 1 + maxRetries（maxRetries=1 表示首次失败后还可重试 1 次）
-    for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
+    // 总尝试次数：autoRetry=false（新版创作页默认）只试 1 次；
+    // 旧任务/API 缺省 true 时仍按 1 + maxRetries，保持兼容。
+    const maxAttempts = task.autoRetry === false ? 1 : this.maxRetries + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // timing 必须在 try 外声明：catch 里的 _finishClipFailure 要用它记录耗时。
       // 历史 bug：声明在 try 内 → 片段最终失败时 catch 抛 ReferenceError: timing is not defined，
       // 整个进程崩掉，任务永远停在 generating（verify-adjust-pipeline 抓到的）。
@@ -2091,12 +2358,14 @@ class Pipeline {
 
         console.log(`[${taskId}] 片段 ${index + 1}/${task.totalClips} 第${attempt}次生成`);
 
-        // 取片段主题模板的负面词（第三批 §5），随生成请求传给适配器
-        const clipTheme = clip.theme || task.theme;
+        // 每轮重读实时片段：buffer 替换会改写提示词，不能沿用本轮开始前的旧 prompt。
+        const liveTask = taskManager.getTask(taskId) || task;
+        const liveClip = (Array.isArray(liveTask.clips) && liveTask.clips[index]) || clip;
+        const clipTheme = liveClip.theme || liveTask.theme;
         const clipTemplate = promptOptimizer.getTemplate(clipTheme);
-        const genResp = await generator.generate(clip.prompt, {
-          duration: task.clipDuration,
-          resolution: task.resolution,
+        const genResp = await generator.generate(liveClip.prompt, {
+          duration: liveTask.clipDuration,
+          resolution: liveTask.resolution,
           ...(clipTemplate && clipTemplate.negative ? { negative: clipTemplate.negative } : {}),
           ...(i2vImage ? { image: i2vImage } : {})
         });
@@ -2167,9 +2436,10 @@ class Pipeline {
             syntheticSource: this._isSynthetic(task)
           },
           // 用户勾选的「要紧项」；不传=全部要紧。NSFW 由 qualityChecker 内部锁定。
+          // 未显式指定时只把硬闸门当阻塞项；软项降级为警告，避免误判逼模型重生成。
           strictItems: Array.isArray(qcRuntime.strictQcItems) && qcRuntime.strictQcItems.length
             ? qcRuntime.strictQcItems
-            : undefined
+            : HARD_QC_ITEMS
         });
 
         // §9B 视觉内容质检（并联：与技术质检任一失败即触发重试）
@@ -2233,11 +2503,13 @@ class Pipeline {
         // 真正兜底合规的是 NSFW（上面已做存在性断言），不是内容匹配。
         const legitSkip = contentResult.legitimateSkip === true;
         if (!contentResult.passed && !legitSkip) {
-          if (qcResult.passed) {
-            qcResult.passed = false;
-            qcResult.reason = `视觉质检失败: ${contentResult.reason}`;
-            qcResult.failedCount = (qcResult.failedCount || 0) + 1;
-          }
+          // 内容匹配对 AI 风光片是主观项：只记警告，不阻塞、不触发重生成。
+          // 硬闸门仍是黑帧/时长/NSFW；这样不会因为「画面和文字不完全一致」白烧一次生成。
+          qcResult.warnings = qcResult.warnings || [];
+          qcResult.warnings.push('视觉内容匹配: ' + (contentResult.reason || '未通过（不阻塞）'));
+          qcResult.warningCount = (qcResult.warningCount || 0) + 1;
+          qcResult.reason = (qcResult.reason ? qcResult.reason + ' | ' : '')
+            + '内容匹配警告（不阻塞）: ' + (contentResult.reason || '');
         }
         taskManager.setQCResult(taskId, index, qcResult);
 
@@ -2273,7 +2545,7 @@ class Pipeline {
             return;
           }
 
-          if (attempt > this.maxRetries) {
+          if (attempt >= maxAttempts) {
             this._finishClipFailure(taskId, index, attempt, '质检未通过: ' + (qcResult.reason || ''), timing);
             return;
           }
@@ -2283,16 +2555,46 @@ class Pipeline {
       } catch (error) {
         console.log(`[${taskId}] 片段 ${index + 1} 生成失败 (第${attempt}次): ${error.message}`);
 
-        // 无剩余重试次数，或错误不可重试（402 余额不足/401 鉴权失败）→ 直接判失败
-        if (attempt > this.maxRetries || !generator.canRetry(error)) {
+        // 无剩余尝试次数，或错误不可重试（402 余额不足/401 鉴权失败）→ 直接判失败
+        if (attempt >= maxAttempts || !generator.canRetry(error)) {
           this._finishClipFailure(taskId, index, attempt, error.message, timing);
           return;
+        }
+        // 场景卡（P4）：生成失败 → 下一次尝试改用缓冲区卡替换。
+        // 只在「还有重试机会」时做，不额外增加付费调用次数。
+        if (attempt < maxAttempts) {
+          try {
+            const replaced = this._replaceSceneCardOnFailure(taskId, index, error.message);
+            if (replaced) {
+              const fromKey = replaced.entry.replacedFrom ? replaced.entry.replacedFrom.scene_key : '';
+              console.log(`[${taskId}] 片段 ${index + 1} 场景卡生成失败 → 缓冲卡替换：${fromKey} → ${replaced.card.scene_key}`);
+            }
+          } catch (e) {
+            console.warn(`[${taskId}] 片段 ${index + 1} 缓冲卡替换失败（保留原失败信息）: ${e.message}`);
+          }
         }
         await this._sleep(2000 * attempt);
       }
     }
 
-    this._finishClipFailure(taskId, index, this.maxRetries + 1, '重试次数超限', null);
+    this._finishClipFailure(taskId, index, maxAttempts, '重试次数超限', null);
+  }
+
+  // autoRetry=false 且存在失败片段 → 停在拼接前，交用户决定（不自动重生成、不带缺片出片）。
+  _shouldStopBeforeAssembly(task) {
+    return !!task && task.autoRetry === false && this._failedClipSummaries(task).length > 0;
+  }
+
+  // 失败片段摘要（给 API/UI 的失败清单）：index 从 1 开始，reason 优先取生成错误，其次质检原因。
+  _failedClipSummaries(task) {
+    if (!task || !Array.isArray(task.clips)) return [];
+    return task.clips
+      .filter(c => c && c.status !== 'success')
+      .map(c => ({
+        index: (c.index || 0) + 1,
+        status: c.status || 'pending',
+        reason: c.error || (c.qcResult && c.qcResult.reason) || '生成/质检未通过'
+      }));
   }
 
   // 片段成功的统一收口：写状态 + 计时 + 费用 + 片段库入库。
@@ -2326,6 +2628,11 @@ class Pipeline {
     } catch (e) {
       console.warn(`[library] 片段入库异常 ${taskId}#${index + 1}: ${e.message}`);
     }
+    // 只有片段真正成功后才把源图片标成“已使用”；失败不再污染图片库。
+    const usedPhotoId = (clip && clip.photoId) || (task && task.sourcePhotoId);
+    if (usedPhotoId) {
+      try { photoLibrary.attachUsage(usedPhotoId, taskId); } catch (e) { /* 追溯失败不影响生成 */ }
+    }
     return clip;
   }
 
@@ -2356,6 +2663,15 @@ class Pipeline {
       } catch (e) {
         console.warn(`[library] 记录重新生成失败异常: ${e.message}`);
       }
+    }
+    // 2026-11-15：失败片段只要文件还在，也要入库——
+    // 用户要求“质检不通过/生成失败的产物也要能在库里看到”，否则失败就只剩一个任务记录。
+    try {
+      if (clip && clip.videoPath && fs.existsSync(clip.videoPath)) {
+        library.ingestClip(taskManager.getTask(taskId) || task, clip);
+      }
+    } catch (e) {
+      console.warn(`[library] 失败片段入库异常 ${taskId}#${index + 1}: ${e.message}`);
     }
     return clip;
   }

@@ -44,6 +44,11 @@ const auth = require('./src/auth');
 const pipeline = require('./src/pipeline');
 const promptOptimizer = require('./src/promptOptimizer');
 const promptSkill = require('./src/promptSkill');
+// 场景卡（P4）：库状态查询 + 任务创建入口取卡校验
+// 场景卡（P4）：库状态查询 + 任务创建入口取卡校验。
+// 注意命名：POST /api/tasks 的解构里有同名请求体字段 `sceneCards`（开关），
+// 模块必须用 `sceneCardLibrary`，否则校验分支会在请求体上调用 `.checkCapacity` → 500。
+const sceneCardLibrary = require('./src/sceneCards');
 const { resolveResume } = require('./src/pipelineStages');
 const { getAvailableModels } = require('./src/generators');
 // 注册出图厂商适配器（当前：dashscope / wan2.7-image）。
@@ -51,6 +56,7 @@ const { getAvailableModels } = require('./src/generators');
 require('./src/generators/imageProviders');
 const { getImageGenStatus, listImageProviders, ImageGenerator } = require('./src/generators/imageGen');
 const { generateBatch: generateImageBatch } = require('./src/processors/imageBatch');
+const dashscopeUpload = require('./src/generators/dashscopeUpload');
 const KlingGenerator = require('./src/generators/kling');
 const wsManager = require('./src/wsManager');
 const qualityChecker = require('./src/qualityChecker');
@@ -61,10 +67,19 @@ const thumbnails = require('./src/thumbnails');
 const adjustLut = require('./src/adjustLut');
 const llmService = require('./src/services/llmService');
 const pricing = require('./src/pricing');
+const budget = require('./src/budget');
+const submitGuard = require('./src/submitGuard');
 const library = require('./src/library');
 const photoLibrary = require('./src/photoLibrary');
+const recycle = require('./src/recycle');
 const security = require('./src/utils/security');
 const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
+// 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 / 调度。
+// 说明：这些模块不自己起服务、不直连厂商；付费闸门在 supervisor.execute 内（未确认不发请求）。
+const assistantSupervisor = require('./src/assistant/supervisor');
+const assistantPlanCard = require('./src/assistant/planCard');
+const assistantAsr = require('./src/assistant/asr');
+const assistantMemory = require('./src/assistant/memory');
 
 const app = express();
 const server = http.createServer(app);
@@ -149,8 +164,12 @@ app.use((req, res, next) => {
 // 其余接口保持 express 默认 100KB（登录接口也走这里）。
 const jsonDefault = express.json();
 const jsonBgmUpload = express.json({ limit: '64mb' });
+// 小智语音：浏览器 MediaRecorder 的音频以 base64 JSON 上传（12MB 音频 → 约 16MB JSON）。
+// 只对这一个已登录接口放宽，其余接口仍是默认 100KB。
+const jsonAssistantAsr = express.json({ limit: '24mb' });
 app.use((req, res, next) => {
   if (req.method === 'POST' && req.path === '/api/bgm') return jsonBgmUpload(req, res, next);
+  if (req.method === 'POST' && req.path === '/api/assistant/asr') return jsonAssistantAsr(req, res, next);
   return jsonDefault(req, res, next);
 });
 
@@ -442,11 +461,11 @@ app.put('/api/bgm/:id', (req, res) => {
   res.json(result);
 });
 
-// 删除音轨
+// 删除音轨：2026-11-15 起移入回收站（内置音轨只移清单）
 app.delete('/api/bgm/:id', (req, res) => {
   const result = audioMixer.removeTrack(req.params.id);
   if (!result.success) return res.status(404).json({ error: result.error });
-  res.json({ success: true });
+  res.json({ success: true, trashed: !!result.trashed, recycleDir: result.recycleDir || null });
 });
 
 // 手动混音测试接口（演示用：对指定成片叠加单曲配乐）
@@ -596,6 +615,32 @@ app.get('/api/models', (req, res) => {
 });
 
 // ==========================================
+// 百炼临时上传自检（免费，不上传文件）
+// ------------------------------------------------------------
+// 图片优先链路在 wan3.0 图生视频阶段要把调色图传到百炼临时 OSS。
+// 出图前先拿一次上传凭证，确认 Key/BaseURL/model 可用，避免先花 N 张图的费用。
+// ==========================================
+app.post('/api/dashscope/upload-check', async (req, res) => {
+  const body = req.body || {};
+  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+  if (!apiKey) return res.status(400).json({ ok: false, error: '缺少 DashScope API Key' });
+  try {
+    const policy = await dashscopeUpload.getUploadPolicy({
+      apiKey,
+      baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '',
+      model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'wan3.0-video'
+    });
+    res.json({
+      ok: true,
+      uploadDir: policy.upload_dir,
+      expireInSeconds: Number(policy.expire_in_seconds) || null
+    });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// ==========================================
 // 图片生成（文生图，wan2.7-image）
 // ==========================================
 
@@ -648,6 +693,17 @@ app.post('/api/images/generate', async (req, res) => {
     });
   }
 
+  // 预算闸门（2026-11-14）：图片 $0.03/张，余额不足直接 402，不发真实请求
+  const imageUsd = budget.estimateImage(1);
+  if (!budget.canAfford(imageUsd)) {
+    const st = budget.status();
+    return res.status(402).json({
+      error: `余额不足：生成 1 张图需 $${imageUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
+      code: 'INSUFFICIENT_BUDGET',
+      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+    });
+  }
+
   try {
     const generator = new ImageGenerator({
       provider: status.imageGen.provider,
@@ -686,6 +742,12 @@ app.post('/api/images/generate', async (req, res) => {
     } catch (e) {
       photoError = e && e.message ? e.message : String(e);
       console.warn('[image-gen] 图片入库失败:', photoError);
+    }
+    // 成功后记账（失败不扣预算；与「按成功生成量计费」口径一致）
+    try {
+      budget.reserve({ usd: imageUsd, kind: 'image', taskId: body.taskId || out.model, meta: { model: out.model, size: body.size || status.imageGen.size } });
+    } catch (e) {
+      console.warn('[budget] 图片记账失败:', e.message);
     }
     res.json({
       ok: true,
@@ -746,6 +808,17 @@ app.post('/api/images/generate-batch', async (req, res) => {
     ...runtime
   });
 
+  // 预算闸门（2026-11-14）：按条数预检，避免生成到一半余额不足
+  const batchUsd = budget.estimateImage(prompts.length);
+  if (!budget.canAfford(batchUsd)) {
+    const st = budget.status();
+    return res.status(402).json({
+      error: `余额不足：生成 ${prompts.length} 张图需 $${batchUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
+      code: 'INSUFFICIENT_BUDGET',
+      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+    });
+  }
+
   try {
     const batch = await generateImageBatch({
       prompts,
@@ -764,6 +837,12 @@ app.post('/api/images/generate-batch', async (req, res) => {
         outDir
       })
     });
+    // 只按成功张数扣（失败张不计费）
+    try {
+      budget.reserve({ usd: budget.estimateImage(batch.items.length), kind: 'image', taskId: batch.taskId, meta: { count: batch.items.length, palette } });
+    } catch (e) {
+      console.warn('[budget] 批量出图记账失败:', e.message);
+    }
     return res.json({
       ok: batch.items.length > 0,
       taskId: batch.taskId,
@@ -788,14 +867,32 @@ app.get('/api/photos', (req, res) => {
   if (status && !photoLibrary.STATUSES.includes(status)) {
     return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
   }
-  const photos = photoLibrary.query({ status, q: req.query.q, finalOnly });
-  res.json({ photos, finalOnly, totals: photoLibrary.totals(photoLibrary.listAll()) });
+  // 2026-11-15 用户口径：**文件缺失的条目不显示**（图片库曾 17/17 文件全缺，界面全是破图）。
+  // 默认隐藏、数据一条不删；文件找回后自动重新出现。排查/对账用 ?includeMissing=1 取全量。
+  const includeMissing = String(req.query.includeMissing || '') === '1';
+  const withFileState = (p) => ({ ...p, fileMissing: !(p.filePath && fs.existsSync(p.filePath)) });
+  const queried = photoLibrary.query({ status, q: req.query.q, finalOnly }).map(withFileState);
+  const photos = includeMissing ? queried : queried.filter((p) => !p.fileMissing);
+  // totals 是跨状态的汇总，与列表用同一可见性口径，避免“顶部 17 张、列表 0 张”
+  const allVisible = photoLibrary.listAll()
+    .filter((p) => includeMissing || (p.filePath && fs.existsSync(p.filePath)));
+  res.json({
+    photos,
+    finalOnly,
+    includeMissing,
+    hiddenMissing: queried.length - photos.length,
+    totals: photoLibrary.totals(allVisible)
+  });
 });
 
 app.get('/api/photos/:id', (req, res) => {
   const photo = photoLibrary.get(req.params.id);
   if (!photo) return res.status(404).json({ error: '图片不存在' });
-  res.json({ ...photo, versions: photoLibrary.versions(photo.versionGroupId) });
+  res.json({
+    ...photo,
+    fileMissing: !(photo.filePath && fs.existsSync(photo.filePath)),
+    versions: photoLibrary.versions(photo.versionGroupId)
+  });
 });
 
 app.put('/api/photos/:id', (req, res) => {
@@ -851,7 +948,7 @@ app.delete('/api/photos/:id', (req, res) => {
   const keepFile = String(req.query.keepFile || '') === '1';
   const r = photoLibrary.remove(req.params.id, { deleteFile: !keepFile });
   if (!r.success) return res.status(r.error === '图片不存在' ? 404 : 500).json({ error: r.error });
-  res.json({ ok: true, fileDeleted: r.fileDeleted, photo: r.entry });
+  res.json({ ok: true, trashed: !!r.trashed, recycleDir: r.recycleDir || null, photo: r.entry });
 });
 
 // 测试 API Key 是否有效
@@ -1466,6 +1563,14 @@ app.post('/api/optimize-prompt', async (req, res) => {
     const useTheme = theme || parsed.themeId;
 
     const apiKey = llmApiKey || config.OPENAI_API_KEY;
+    if (apiKey && !budget.canAfford(budget.estimateLlm(1))) {
+      const st = budget.status();
+      return res.status(402).json({
+        error: `余额不足：本次 LLM 优化预计 $${budget.estimateLlm(1).toFixed(3)}，剩余 $${st.balanceUsd.toFixed(2)}`,
+        code: 'INSUFFICIENT_BUDGET',
+        budget: { balanceUsd: st.balanceUsd }
+      });
+    }
     let result;
     if (apiKey) {
       // AI 优化路径：会叠加 fengguang skill 规则（仅风光类主题）
@@ -1476,6 +1581,14 @@ app.post('/api/optimize-prompt', async (req, res) => {
       });
     } else {
       result = promptOptimizer.optimizeWithTemplate(prompt, useTheme);
+    }
+
+    if (apiKey) {
+      try {
+        budget.reserve({ usd: budget.estimateLlm(1), kind: 'llm', taskId: null, meta: { model: llmModel || config.OPENAI_MODEL, endpoint: '/api/optimize-prompt' } });
+      } catch (e) {
+        console.warn('[budget] LLM 记账失败:', e.message);
+      }
     }
 
     res.json({
@@ -1882,9 +1995,213 @@ app.post('/api/assistant/batch', async (req, res) => {
   });
 });
 
+// ==========================================
+// 小智（P5）：计划卡 / 状态机 / 记忆 / 语音
+// ------------------------------------------------------------
+// 已定产品决策（docs/交接/2026-11-15-handoff.md §7）：
+//   · 方案 C：模型只负责「听懂 + 填计划卡」；执行/失败处理由确定性状态机做，不问模型；
+//   · 记忆：会话内 + 任务检索（「上一次视频」用检索，不靠模型回忆）；
+//   · 语音：离线 ASR + 失败回退打字；
+//   · 付费任务必须先经用户明确同意（approved=true），未同意绝不发起。
+//
+// 设计约束：
+//   · 一律 HTTP 200，用 ok 字段区分成败（与 /api/assistant/chat 同一风格）；
+//   · 不在这里创建第二实例/第二端口，直接复用当前进程的 taskManager + pipeline；
+//   · ASR 不接受客户端传文件路径（防任意读盘），只收 base64 音频。
+// ==========================================
+app.get('/api/assistant/info', (req, res) => {
+  res.json({
+    ok: true,
+    name: '小智',
+    version: assistantSupervisor.SUPERVISOR_VERSION,
+    plan: {
+      version: assistantPlanCard.PLAN_VERSION,
+      limits: assistantPlanCard.LIMITS,
+      models: assistantPlanCard.MODELS,
+      themes: assistantPlanCard.THEMES.map(t => ({ id: t.id, label: t.label }))
+    },
+    asr: assistantAsr.status(),
+    memory: { maxMessages: assistantMemory.MAX_MESSAGES },
+    endpoints: [
+      '/api/assistant/info', '/api/assistant/message', '/api/assistant/execute',
+      '/api/assistant/state', '/api/assistant/memory', '/api/assistant/understand',
+      '/api/assistant/asr'
+    ]
+  });
+});
+
+// 对话：听懂 → 计划卡 / 上次记录 / 进度。不创建任务、不发付费请求。
+app.post('/api/assistant/message', (req, res) => {
+  const body = req.body || {};
+  const text = String(body.text === undefined || body.text === null ? '' : body.text);
+  try {
+    const out = assistantSupervisor.handleMessage({
+      sessionId: body.sessionId ? String(body.sessionId) : undefined,
+      text
+    });
+    res.json(out);
+  } catch (e) {
+    console.error('[assistant] message 失败:', e && e.message);
+    res.json({ ok: false, code: (e && e.code) || 'ASSISTANT_ERROR', error: '小智处理失败：' + (e && e.message ? e.message : String(e)) });
+  }
+});
+
+// 确认执行计划卡。approved=true 才允许真实计费模型；mock 不需要。
+// runtimeConfig 只透传白名单字段（Key 不落任务文件，与 /api/tasks 同口径）。
+app.post('/api/assistant/execute', (req, res) => {
+  const body = req.body || {};
+  try {
+    const out = assistantSupervisor.execute({
+      sessionId: body.sessionId ? String(body.sessionId) : '',
+      planId: body.planId ? String(body.planId) : null,
+      approved: body.approved === true,
+      force: body.force === true,
+      options: {
+        runtimeConfig: {
+          apiKey: body.apiKey || '',
+          apiBaseUrl: body.apiBaseUrl || '',
+          modelId: body.modelId || '',
+          klingAccessKey: body.klingAccessKey || '',
+          klingSecretKey: body.klingSecretKey || '',
+          llmApiKey: body.llmApiKey || '',
+          llmBaseUrl: body.llmBaseUrl || '',
+          llmModel: body.llmModel || '',
+          multimodalApiKey: body.multimodalApiKey || '',
+          multimodalBaseUrl: body.multimodalBaseUrl || '',
+          multimodalModel: body.multimodalModel || ''
+        },
+        bgm: (body.bgm && typeof body.bgm === 'object') ? body.bgm : undefined,
+        transition: (body.transition && typeof body.transition === 'object') ? body.transition : undefined
+      }
+    });
+    res.json(out);
+  } catch (e) {
+    console.error('[assistant] execute 失败:', e && e.message);
+    res.json({ ok: false, code: (e && e.code) || 'ASSISTANT_ERROR', error: '小智执行失败：' + (e && e.message ? e.message : String(e)) });
+  }
+});
+
+// 状态机快照 + 关联任务视图（前端轮询用）
+app.get('/api/assistant/state', (req, res) => {
+  const sessionId = req.query.sessionId ? String(req.query.sessionId) : '';
+  if (!sessionId) {
+    return res.json({ ok: false, code: 'ASSISTANT_BAD_SESSION', error: '需要 sessionId' });
+  }
+  try {
+    res.json(assistantSupervisor.stateOf(sessionId, req.query.planId ? String(req.query.planId) : null));
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_ERROR', error: e.message });
+  }
+});
+
+// 会话记忆 + 任务检索（q 触发「上一次视频」式检索）
+app.get('/api/assistant/memory', (req, res) => {
+  const sessionId = req.query.sessionId ? String(req.query.sessionId) : '';
+  if (!sessionId) {
+    return res.json({ ok: false, code: 'ASSISTANT_BAD_SESSION', error: '需要 sessionId' });
+  }
+  try {
+    const session = assistantMemory.getSession(sessionId);
+    const messages = assistantMemory.listMessages(sessionId, Number(req.query.limit) || 50);
+    const state = assistantMemory.getState(sessionId);
+    let refs = [];
+    if (req.query.q) {
+      try { refs = assistantSupervisor.retrieveRefs(String(req.query.q), 5).refs; } catch (e) { refs = []; }
+    }
+    res.json({
+      ok: true,
+      sessionId,
+      messages,
+      lastPlan: assistantSupervisor.briefPlan(assistantMemory.lastPlan(sessionId)),
+      state: state
+        ? { planId: state.planId, state: state.state, taskId: state.taskId, finalTaskId: state.finalTaskId, reason: state.reason }
+        : null,
+      refs
+    });
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_ERROR', error: e.message });
+  }
+});
+
+// 离线语音识别（12MB / 60s 上限；不接受客户端文件路径）
+app.post('/api/assistant/asr', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const out = await assistantAsr.transcribe({
+      base64: body.audioBase64 || body.base64 || '',
+      mime: body.mime || body.mimeType || ''
+    });
+    res.json(out);
+  } catch (e) {
+    console.error('[assistant] ASR 失败:', e && e.message);
+    res.json({ ok: false, code: 'ASR_ERROR', error: '语音识别异常：' + (e && e.message ? e.message : String(e)) });
+  }
+});
+
+// 可选的「模型填槽」：只填计划卡，不执行任何生成。
+// 这是唯一会产生 LLM 费用的入口，因此必须显式传 consent=true；没有 Key 不发请求。
+const ASSISTANT_SLOT_SYSTEM_PROMPT = `你是「小智」的听懂模块，只做一件事：把用户的话填进计划卡槽位。
+只输出一个 JSON 对象，不要 markdown、不要解释：
+{"totalMinutes": number|null, "clipDurationSec": number|null, "clipCount": number|null,
+ "resolution": "480p"|"720p"|"1080p"|"4k"|null, "model": "dashscope"|"kling"|"seedance"|null,
+ "theme": string|null, "sceneCards": boolean|null}
+规则：
+- 用户没说的字段填 null，绝不猜总时长；「半小时」= 30，「两分钟」= 2。
+- 主题只用中文地貌名（极光/雪山/沙漠/星空/海岸/森林/湖泊/瀑布/云雾山谷等），没提就 null。
+- sceneCards 默认 null（由系统按产品口径开启）；用户说「不用场景卡」才填 false。
+- 只填槽位，不执行、不生成视频、不报价。`;
+
+app.post('/api/assistant/understand', async (req, res) => {
+  const body = req.body || {};
+  const text = String(body.text || '').trim();
+  if (!text) return res.json({ ok: false, code: 'ASSISTANT_EMPTY_TEXT', error: '没有收到要说的话' });
+  if (body.consent !== true) {
+    return res.json({
+      ok: false,
+      code: 'LLM_CONSENT_REQUIRED',
+      error: '让模型解析计划卡会产生少量 LLM 费用；需要用户明确同意（consent=true）后才会发请求'
+    });
+  }
+  const llmCfg = { apiKey: body.llmApiKey, baseUrl: body.llmBaseUrl, model: body.llmModel };
+  if (!llmCfg.apiKey && !config.OPENAI_API_KEY) {
+    return res.json({ ok: false, code: 'NO_LLM_KEY' });
+  }
+  const { text: raw, failure } = await llmService.chatMulti(
+    ASSISTANT_SLOT_SYSTEM_PROMPT,
+    [{ role: 'user', content: text }],
+    llmCfg
+  );
+  if (!raw) return res.json(llmFailurePayload(failure));
+  let slots = null;
+  try {
+    const s = String(raw).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const a = s.indexOf('{');
+    const b = s.lastIndexOf('}');
+    if (a !== -1 && b > a) slots = JSON.parse(s.slice(a, b + 1));
+  } catch (e) {
+    slots = null;
+  }
+  if (!slots || typeof slots !== 'object') {
+    return res.json({ ok: false, code: 'BAD_LLM_JSON', message: '模型没有按格式返回计划卡槽位', raw: String(raw).slice(0, 500) });
+  }
+  const built = assistantPlanCard.buildPlan(assistantPlanCard.mergeModelSlots(text, slots));
+  if (!built.ok) {
+    return res.json({
+      ok: false,
+      code: built.code,
+      error: built.error,
+      missing: built.missing || null,
+      question: built.question || null,
+      slots
+    });
+  }
+  res.json({ ok: true, plan: assistantSupervisor.briefPlan(built.plan), slots, source: 'llm' });
+});
+
+
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, autoRetry, preset, stages, transition, colorMatch, adjust, sourcePhotoId, photoIds, sourcePhotoMotionPrompt } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, autoRetry, preset, stages, transition, colorMatch, adjust, sourcePhotoId, photoIds, sourcePhotoMotionPrompt, sceneCards } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -2001,8 +2318,105 @@ app.post('/api/tasks', (req, res) => {
     return res.status(400).json({ error: '单段时长必须在 1-60 秒之间' });
   }
 
+  // ===== 场景卡模式（P4）=====
+  // 只做后端开关：P4 不改 UI，P5 小智创建任务时显式传 { sceneCards: true }。
+  // 约束（产品已定）：v3.3 为唯一输入；每段 10s；单任务上限 180 张（30 分钟），
+  // 超出必须先扩卡库 → 明确 400，不允许静默复用或悄悄降级成普通提示词任务。
+  const sceneCardRequested = sceneCards === true
+    || (sceneCards && typeof sceneCards === 'object' && sceneCards.enabled === true);
+  if (sceneCardRequested) {
+    if (multiPrompts) {
+      return res.status(400).json({
+        error: '场景卡模式不接受逐行提示词（prompts）：场景内容由卡库提供，请只传主题/提示词。',
+        code: 'SCENE_CARDS_WITH_PROMPTS'
+      });
+    }
+    if (sourcePhoto) {
+      return res.status(400).json({
+        error: '场景卡模式暂不支持图生视频（sourcePhotoId）：卡库已是完整画面指令。',
+        code: 'SCENE_CARDS_WITH_I2V'
+      });
+    }
+    if (Array.isArray(photoIds) && photoIds.length > 0) {
+      return res.status(400).json({
+        error: '场景卡模式暂不支持逐片段首帧（photoIds）：卡库已是完整画面指令。',
+        code: 'SCENE_CARDS_WITH_I2V'
+      });
+    }
+    const cap = sceneCardLibrary.checkCapacity(count);
+    if (!cap.ok) {
+      const status = cap.code === 'SCENE_CARDS_EXHAUSTED' ? 400 : 503;
+      return res.status(status).json({
+        error: cap.error,
+        code: cap.code,
+        available: cap.available,
+        requested: count
+      });
+    }
+    if (Number(duration) !== Number(cap.durationSec)) {
+      return res.status(400).json({
+        error: `场景卡按 ${cap.durationSec} 秒/段设计（30 分钟 = ${cap.available} 张 × ${cap.durationSec}s）；`
+          + `本次 clipDuration=${duration}。请改为 ${cap.durationSec} 秒或关闭场景卡。`,
+        code: 'SCENE_CARDS_DURATION'
+      });
+    }
+  }
+
   // 创建任务（多提示词模式下 prompt 取第一行文本，各片段提示词/主题由 prompts 逐一分配）
   const firstPrompt = prompt || (multiPrompts ? multiPrompts[0].text : '') || '';
+
+  // ===== 防重复计费 + 余额闸门（2026-11-14）=====
+  // 顺序：先算美元预估 → 查 5 分钟内同指纹 → 查余额；全部通过才允许创建任务/写图片记录。
+  // 依据：2026-11-09 账单里 4 秒内创建了 4 个真实计费任务（1×720P + 3×1080P）。
+  const resolutionValue = resolution || config.GENERATION.defaultResolution || '720p';
+  const realModel = modelId !== 'mock';
+  const forceCreate = req.body && req.body.force === true;
+  const estimateUsd = budget.estimateTask({
+    clips: count,
+    seconds: duration,
+    resolution: resolutionValue,
+    images: 0,
+    llmCalls: realModel ? 1 : 0
+  });
+  let dupFingerprint = null;
+  if (realModel) {
+    dupFingerprint = submitGuard.fingerprint(submitGuard.build({
+      model: modelId,
+      resolution: resolutionValue,
+      clipDuration: duration,
+      clips: count,
+      prompts: multiPrompts ? multiPrompts.map(p => p.text) : [firstPrompt],
+      preset: preset || '',
+      sourcePhotoId: sourcePhoto ? sourcePhoto.id : '',
+      photoIds: photoIdList || [],
+      transition: transition || null,
+      colorMatch: colorMatch || null
+    }));
+    if (!forceCreate) {
+      const dup = submitGuard.check(dupFingerprint);
+      if (dup) {
+        return res.status(409).json({
+          error: `重复提交已拦截：${Math.ceil(submitGuard.WINDOW_MS / 60000)} 分钟内已创建过完全相同的任务`
+            + `（${dup.taskId || '未知 id'}）。为避免重复计费，本次不再创建；确需再跑一次请显式传 force=true。`,
+          code: 'DUPLICATE_TASK',
+          existingTaskId: dup.taskId,
+          retryAfterSec: dup.retryAfterSec,
+          estimateUsd: estimateUsd.usd
+        });
+      }
+    }
+    if (estimateUsd.usd > 0 && !budget.canAfford(estimateUsd.usd)) {
+      const st = budget.status();
+      return res.status(402).json({
+        error: `余额不足：本次预计 $${estimateUsd.usd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}。`
+          + '请减少片段数/单段时长，或降分辨率；充值后用 POST /api/budget/set 对账。',
+        code: 'INSUFFICIENT_BUDGET',
+        estimateUsd: estimateUsd.usd,
+        breakdown: estimateUsd.breakdown,
+        budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+      });
+    }
+  }
 
   // 用户口径（2026-11-11）：「改过提示词再用这张图生成视频」→ 分开存：
   // imagePrompt（画面）保持不动，videoPrompt 记录这次视频用的运动提示词，互不覆盖。
@@ -2017,7 +2431,9 @@ app.post('/api/tasks', (req, res) => {
     }
   }
 
-  const task = taskManager.createTask(firstPrompt.trim(), {
+  let task;
+  try {
+    task = taskManager.createTask(firstPrompt.trim(), {
     model: modelId,
     // 自动重试：缺省 true（API/旧前端兼容）；新版创作页传 false → 只试一次，失败交用户决定
     autoRetry: autoRetry !== false,
@@ -2025,7 +2441,7 @@ app.post('/api/tasks', (req, res) => {
     // 图生视频：存图片库条目 id；流水线运行时会重新校验文件与审核状态
     sourcePhotoId: sourcePhoto ? sourcePhoto.id : undefined,
     totalClips: count,
-    resolution: resolution || config.GENERATION.defaultResolution || '720p',
+    resolution: resolutionValue,
     clipDuration: duration,
     prompts: multiPrompts,
     // 流水线档位：不传则 final（全量 8 步，与旧行为一致）。
@@ -2047,6 +2463,9 @@ app.post('/api/tasks', (req, res) => {
     adjust: (adjust && typeof adjust === 'object') ? adjust : null,
     // 兼容：老前端仍传 clipTracks 时保留透传，由 createTask 收敛为整片主曲
     clipTracks: Array.isArray(clipTracks) ? clipTracks.slice(0, count) : undefined,
+    // 场景卡模式（P4）：取卡 + 拼提示词在 taskManager.createTask 内完成；
+    // 这里只传开关。失败由外层 try/catch 转成明确的 4xx/5xx，不静默降级成普通任务。
+    sceneCards: sceneCardRequested ? { enabled: true } : undefined,
     // 保存前端传入的 API 配置（运行时使用）
     runtimeConfig: {
       apiKey: apiKey || '',
@@ -2064,7 +2483,37 @@ app.post('/api/tasks', (req, res) => {
       // 用户勾选的「要紧质检项」；null/空 = 全部要紧。NSFW 由质检内部锁定。
       strictQcItems: Array.isArray(strictQcItems) && strictQcItems.length ? strictQcItems : null
     }
-  });
+    });
+  } catch (e) {
+    // 场景卡取卡失败（卡库缺失/结构异常/数量超限）→ 明确报错；
+    // 非场景卡任务的异常保持原有行为（不吞错）。
+    if (sceneCardRequested) {
+      const status = e && e.code === 'SCENE_CARDS_EXHAUSTED' ? 400 : 503;
+      return res.status(status).json({
+        error: '场景卡取卡失败: ' + (e && e.message ? e.message : String(e)),
+        code: (e && e.code) || 'SCENE_CARDS_ERROR'
+      });
+    }
+    throw e;
+  }
+
+  // 记账：任务创建成功才扣款并登记指纹；创建失败不会走到这里。
+  if (realModel && estimateUsd.usd > 0) {
+    try {
+      budget.reserve({
+        usd: estimateUsd.usd,
+        kind: 'video',
+        taskId: task.taskId,
+        meta: { model: modelId, resolution: resolutionValue, clips: count, seconds: duration }
+      });
+    } catch (e) {
+      // 理论上不会发生（前面已 canAfford）；真发生就明确告警，不静默超额。
+      console.error('[budget] 预留失败:', e.message);
+    }
+  }
+  if (dupFingerprint) {
+    submitGuard.remember(dupFingerprint, { taskId: task.taskId, model: modelId, clips: count });
+  }
 
   // 图片优先：把每张已通过的图按顺序挂到对应片段，流水线逐片段取首帧。
   if (photoIdList) {
@@ -2085,6 +2534,31 @@ app.post('/api/tasks', (req, res) => {
     taskId: task.taskId,
     status: task.status
   });
+});
+
+// 场景卡库状态（P4）：只读探针。单任务的取卡/耗尽状态见 GET /api/tasks/:id 的 sceneCards 字段。
+app.get('/api/scene-cards', (req, res) => {
+  try {
+    const stats = sceneCardLibrary.getStats();
+    res.json({
+      ok: true,
+      ...stats,
+      rules: {
+        role: 'feature 用于正片；buffer 仅生成失败时替换',
+        order: 'chapter+sequence（不放回；同一轮内不重复）',
+        replacement: 'buffer 同一任务不复用，用尽则保留失败结果',
+        durationSec: stats.durationSec,
+        maxClipsPerTask: stats.maxClipsPerTask,
+        exhausted: '超过正片数量时 400 并提示扩卡库（不静默复用）'
+      }
+    });
+  } catch (e) {
+    res.status(503).json({
+      ok: false,
+      error: e && e.message ? e.message : String(e),
+      code: (e && e.code) || 'SCENE_CARDS_ERROR'
+    });
+  }
 });
 
 // 获取质检项定义
@@ -2196,6 +2670,11 @@ app.get('/api/tasks/:id/clips', (req, res) => {
       attempts: c.attempts,
       error: c.error,
       prompt: c.prompt || '',
+      // 场景卡审计字段（P4）：第几号卡、正片还是缓冲、有没有被 buffer 替换过
+      sceneKey: c.sceneKey || null,
+      sceneCardId: c.sceneCardId || null,
+      sceneCardRole: c.sceneCardRole || null,
+      sceneCardReplacement: c.sceneCardReplacement || null,
       theme: c.theme || null,
       themeTag: c.themeTag || null,
       trackId: c.trackId || null,
@@ -2228,8 +2707,32 @@ app.get('/api/pricing', (req, res) => {
   res.json({ ...pricing.PRICE_TABLE, version: pricing.PRICE_VERSION });
 });
 
+// ==========================================
+// 预算闸门（2026-11-14）
+// ==========================================
+// 真实账单口径是美元（WhaleTV）：720P $0.10/s、1080P $0.20/s、图片 $0.03/张。
+// 人民币价目表（pricing.js）继续保留给旧页面/片段库展示，但「能不能再花钱」
+// 以这里的美元余额为准。状态落 data/budget.json，重启不丢。
+app.get('/api/budget', (req, res) => {
+  res.json({ ok: true, ...budget.status() });
+});
+
+// 手动对账：从网关控制台看到实际余额后，把剩余金额写回（会留一条 set 记录）
+app.post('/api/budget/set', (req, res) => {
+  const usd = Number(req.body && req.body.balanceUsd);
+  if (!Number.isFinite(usd) || usd < 0) {
+    return res.status(400).json({ ok: false, error: 'balanceUsd 必须是非负数（美元）' });
+  }
+  try {
+    res.json({ ok: true, ...budget.setBalance(usd) });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
 // 生成前费用预估：与 /api/pricing 用同一份 src/pricing.js，前端不再自己抄价目表。
 // 旧版口径（public/index.html，已删）：非 mock 才提示；余额留空 = 不拦截；预计 > 余额 → 拦截。
+// 2026-11-14 起同时返回美元预估与预算闸门状态：前端展示、后端 /api/tasks 强制拦截共用同一口径。
 app.post('/api/estimate', (req, res) => {
   const b = req.body || {};
   const clipCount = Math.max(1, Math.min(500, parseInt(b.clipCount, 10) || 1));
@@ -2239,6 +2742,18 @@ app.post('/api/estimate', (req, res) => {
     clipDurationSec: Number(b.clipDuration) || 0,
     modelId: typeof b.modelId === 'string' ? b.modelId : ''
   });
+  const seconds = Math.max(0, Number(b.clipDuration) || 0);
+  const isMock = String(b.model || '').toLowerCase() === 'mock';
+  const usd = isMock
+    ? { usd: 0, breakdown: { video: 0, image: 0, llm: 0, clips: clipCount, seconds, resolution: String(b.resolution || '').toLowerCase(), videoRate: 0 } }
+    : budget.estimateTask({
+      clips: clipCount,
+      seconds,
+      resolution: b.resolution,
+      images: Math.max(0, parseInt(b.images, 10) || 0),
+      llmCalls: Math.max(0, parseInt(b.llmCalls, 10) || 0)
+    });
+  const st = budget.status();
   res.json({
     ok: true,
     clips: clipCount,
@@ -2247,7 +2762,16 @@ app.post('/api/estimate', (req, res) => {
     perClip: unit.amountPerAttempt || 0,
     estimate: pricing.round2((unit.amountPerAttempt || 0) * clipCount),
     currency: 'CNY',
-    priceVersion: pricing.PRICE_VERSION
+    priceVersion: pricing.PRICE_VERSION,
+    // 美元侧（真实账单口径）
+    usd: usd.usd,
+    usdBreakdown: usd.breakdown,
+    budget: {
+      currency: 'USD',
+      balanceUsd: st.balanceUsd,
+      spentUsd: st.spentUsd,
+      affordable: isMock || usd.usd <= st.balanceUsd + 1e-9
+    }
   });
 });
 
@@ -2280,7 +2804,13 @@ app.get('/api/library/:id/thumb', async (req, res) => {
 app.get('/api/library', (req, res) => {
   try {
     const { resolution, theme, model, favorite, q } = req.query;
-    const all = library.listAll();
+    // 2026-11-15 用户口径：**文件缺失的条目不显示**（数据不删，文件找回后自动出现）。
+    // 排查/对账用 ?includeMissing=1 取全量；hiddenMissing 报告被隐藏的条数。
+    const includeMissing = String(req.query.includeMissing || '') === '1';
+    const withFileState = (it) => ({ ...it, fileMissing: !(it.filePath && fs.existsSync(it.filePath)) });
+    const everything = library.listAll().map(withFileState);
+    const all = includeMissing ? everything : everything.filter((it) => !it.fileMissing);
+    const hiddenMissing = everything.length - all.length;
     let items = all;
     if (resolution) items = items.filter(i => (i.tags && i.tags.resolution) === resolution);
     if (theme) items = items.filter(i => (i.tags && i.tags.theme) === theme);
@@ -2295,6 +2825,8 @@ app.get('/api/library', (req, res) => {
     res.json({
       groups: grouped.groups,
       totals: grouped.totals,
+      hiddenMissing,
+      includeMissing,
       overall: library.stats(),
       facets: {
         resolutions: uniq(all.map(i => i.tags && i.tags.resolution)),
@@ -2316,11 +2848,11 @@ app.put('/api/library/:id', (req, res) => {
   res.json({ success: true, entry });
 });
 
-// 删除库条目：同时删除 clips/ 下的源文件（用户明确要求，二次确认在前端）
+// 删除库条目：2026-11-15 起移入回收站（可恢复），不再直接删文件
 app.delete('/api/library/:id', (req, res) => {
   const result = library.remove(req.params.id);
   if (!result.success) return res.status(404).json({ error: result.error });
-  res.json({ success: true, fileDeleted: result.fileDeleted });
+  res.json({ success: true, trashed: !!result.trashed, recycleDir: result.recycleDir || null });
 });
 
 // 重新生成：改提示词/模型/分辨率，生成一条新片段（旧片段保留并标「已被替代」）
@@ -2678,6 +3210,51 @@ app.delete('/api/trash/:id', (req, res) => {
 // 获取垃圾箱列表
 app.get('/api/trash', (req, res) => {
   res.json(taskManager.getTrashList());
+});
+
+// ===== 统一回收站 API（片段 / 成片 / 图片 / 配乐，2026-11-15）=====
+// 与上面的任务垃圾箱分开：/api/trash 只收任务 JSON；这里收库条目 + 源文件。
+const RECYCLE_RESTORE = {
+  clip: (e) => library.restoreFromRecycle(e),
+  final: (e) => library.restoreFromRecycle(e),
+  photo: (e) => photoLibrary.restoreFromRecycle(e),
+  bgm: (e) => audioMixer.restoreTrack(e)
+};
+
+app.get('/api/recycle', (req, res) => {
+  try {
+    res.json({ items: recycle.list(req.query.type || null) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/recycle/:type/:id/restore', (req, res) => {
+  const type = String(req.params.type || '');
+  const fn = RECYCLE_RESTORE[type];
+  if (!fn) return res.status(400).json({ error: '未知回收类型: ' + type });
+  const r = recycle.restore(type, req.params.id);
+  if (!r.ok) return res.status(404).json({ error: r.error });
+  let restoredEntry = null;
+  try {
+    if (r.entry) restoredEntry = fn(r.entry);
+  } catch (e) {
+    // 文件已经放回，条目没写回：明确报告，不要谎报成功
+    return res.status(500).json({ error: '文件已恢复，但条目写回失败：' + e.message, restored: r.restored });
+  }
+  res.json({ success: true, restored: r.restored, conflicts: r.conflicts, entry: restoredEntry || r.entry });
+});
+
+app.delete('/api/recycle/:type/:id', (req, res) => {
+  const r = recycle.purge(req.params.type, req.params.id);
+  if (!r.ok) return res.status(404).json({ error: r.error });
+  res.json({ success: true });
+});
+
+// 彻底清空：type=all 或具体类型
+app.post('/api/recycle/:type/purge', (req, res) => {
+  const type = req.params.type === 'all' ? null : req.params.type;
+  res.json(recycle.purgeAll(type));
 });
 
 // 获取垃圾箱任务详情

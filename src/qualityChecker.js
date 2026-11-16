@@ -183,33 +183,23 @@ class QualityChecker {
       };
     }
 
-    // 1. 黑帧检测
-    try {
-      results.blackFrame = await this.checkBlackFrame(videoPath);
-    } catch (e) {
-      results.blackFrame = { passed: false, reason: '黑帧检测出错: ' + e.message, level: 'fail', detectorError: true };
-    }
-
-    // 2. 模糊检测
-    try {
-      results.blur = await this.checkBlur(videoPath);
-    } catch (e) {
-      results.blur = { passed: false, reason: '模糊检测出错: ' + e.message, level: 'fail', detectorError: true };
-    }
-
-    // 3. 重复帧检测
-    try {
-      results.duplicate = await this.checkDuplicate(videoPath);
-    } catch (e) {
-      results.duplicate = { passed: false, reason: '重复帧检测出错: ' + e.message, level: 'fail', detectorError: true };
-    }
-
-    // 4. 时长校验
-    try {
-      results.duration = await this.checkDuration(videoPath, expectedDuration);
-    } catch (e) {
-      results.duration = { passed: false, reason: '时长校验出错: ' + e.message, level: 'fail', detectorError: true };
-    }
+    // 1–4. 本地四项并行（黑帧/模糊/重复帧/时长）。
+    // 串行实测：6 秒片段约 8.9s，其中模糊 5.6s；并行后压到 ~5.6s，
+    // 对 60–180 段的长片能省下可观时间。四项互不依赖，结果键名保持不变。
+    const runLocal = async (key, fn, errPrefix) => {
+      try {
+        return [key, await fn()];
+      } catch (e) {
+        return [key, { passed: false, reason: errPrefix + ': ' + e.message, level: 'fail', detectorError: true }];
+      }
+    };
+    const localPairs = await Promise.all([
+      runLocal('blackFrame', () => this.checkBlackFrame(videoPath), '黑帧检测出错'),
+      runLocal('blur', () => this.checkBlur(videoPath), '模糊检测出错'),
+      runLocal('duplicate', () => this.checkDuplicate(videoPath), '重复帧检测出错'),
+      runLocal('duration', () => this.checkDuration(videoPath, expectedDuration), '时长校验出错')
+    ]);
+    for (const [key, value] of localPairs) results[key] = value;
 
     // 5. NSFW 合规检测（红线项：无 Key / 调用失败 / 解析失败一律判 fail，绝不默认通过）
     try {
