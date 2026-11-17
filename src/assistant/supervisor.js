@@ -369,7 +369,14 @@ function planSceneEntries(plan) {
     });
   }
   try {
-    return sceneCardLibrary.allocate(plan.clipCount).used;
+    // 计划阶段固定下来的卡（换卡后这里就是新卡）；旧计划没有 ids 时回退纯函数预览。
+    // 2026-11-17 V1：allocate 现在是**随机抽卡**，所以旧计划必须用 seed=planId 保证
+    // 「同一计划内反复问不变」（Q25=A）；同时 noCooling/不写冷却，避免只读预览改变冷却状态。
+    return sceneCardLibrary.allocate(plan.clipCount, {
+      seed: `legacy-preview:${plan.planId}`,
+      noCooling: true,
+      recordCooling: false
+    }).used;
   } catch (e) {
     return [];
   }
@@ -388,7 +395,7 @@ function replyForPlanScenes(sessionId) {
   const taskId = state && state.taskId ? state.taskId : null;
   const task = taskId ? taskManager.getTask(taskId) : null;
   if (task && task.sceneCards && Array.isArray(task.sceneCards.used) && task.sceneCards.used.length) {
-    return `任务 ${task.taskId} 实际分配到 ${task.sceneCards.used.length} 张场景卡（按章节顺序）：\n`
+    return `任务 ${task.taskId} 实际分配到 ${task.sceneCards.used.length} 张场景卡（按计划顺序）：\n`
       + formatSceneEntries(task.sceneCards.used)
       + '\n这些卡已写进各段提示词；要换卡得新开一条计划。';
   }
@@ -427,6 +434,113 @@ function replyForNoImage(sessionId) {
 }
 
 // ==========================================
+// 2026-11-17 小智 2.0 V1（设计定稿 §9.1-6）：最终确认时点（A7）
+// ------------------------------------------------------------
+// 用户问「确认生成吗？」时**只回确认语 + 回传计划**（前端据此展示计划卡），
+// 绝不在这里建任务：真正建任务只走 execute()，而 execute 只由卡片上的「确认执行」按钮触发
+// （web/src/components/assistant.js 的 confirmPlan）。
+// 共同契约 §0.2：L3（付费/建任务）必须用户点确认；未确认 → PAYMENT_NOT_APPROVED。
+// ==========================================
+function replyForConfirm(sessionId) {
+  const plan = memory.lastPlan(sessionId);
+  if (!plan) {
+    return '现在还没有计划卡，没有可确认的东西。先说总时长（比如「30 秒」「10 分钟」），'
+      + '我排好计划再让你确认。';
+  }
+  const cost = plan.requiresPaymentApproval && plan.estimate
+    ? `预估 ¥${Number(plan.estimate.totalCny || 0).toFixed(2)}`
+    : '零计费（Mock）';
+  const state = memory.getState(sessionId, plan.planId);
+  if (state && state.state && !['planned'].includes(state.state)) {
+    return `这条计划已经在走了（${stateMachine.LABELS[state.state] || state.state}），不用再确认；`
+      + '要看进度就说「现在进度怎样」。';
+  }
+  return `要现在开始吗？${plan.clipCount} 段 × ${plan.clipDurationSec} 秒（${plan.modelLabel} · ${plan.resolution}，${cost}）。\n`
+    + '点下面卡片上的「确认执行」我才开始：没点之前不会建任务，也不会花一分钱。'
+    + '要改哪里现在直接说，planId 不变。';
+}
+
+// ==========================================
+// 2026-11-17 小智 2.0 V1（设计定稿 §9.1-7）：只读环境（最小）
+// ------------------------------------------------------------
+// 只读四件事：会话内的计划 / 任务数与最近任务 / 预算余额 / Key 有·无。
+// 三条红线（写死）：
+//   · 不写任何文件、不建任务、不发请求、不产生费用；
+//   · Key **只报「有/无」**，任何调用方都拿不到 Key 值（contextOf 只输出 {label, present}）；
+//   · 全部走进程内模块（taskManager / budget），不经过 HTTP —— V1 刻意不加新端点。
+// V2 再扩成 A–E 全量环境感知（任务播报/失败诊断/偏好），本版不做。
+// ==========================================
+const CONTEXT_KEYS = [
+  { label: '视频生成·WhaleTV 中转', names: ['OPENAI_VIDEO_API_KEY', 'WHALETV_API_KEY'] },
+  { label: '视频生成·百炼万相', names: ['DASHSCOPE_API_KEY'] },
+  { label: '视频生成·可灵', names: ['KLING_API_KEY', 'KLING_ACCESS_KEY'] },
+  { label: '图片生成', names: ['IMAGE_GEN_API_KEY', 'DASHSCOPE_API_KEY'] },
+  { label: '多模态质检', names: ['MULTIMODAL_API_KEY'] },
+  { label: '文案 LLM', names: ['OPENAI_API_KEY'] }
+];
+
+// 只返回「有/无」。刻意不返回长度、前缀、后缀 —— 任何形式的部分回显都算泄露。
+function keyPresence() {
+  return CONTEXT_KEYS.map((k) => ({
+    label: k.label,
+    present: k.names.some((n) => String(process.env[n] || '').trim() !== '')
+  }));
+}
+
+function contextOf(sessionId) {
+  const plan = (sessionId ? memory.lastPlan(sessionId) : null) || null;
+  let tasks = [];
+  try { tasks = taskManager.getAllTasks() || []; } catch (e) { tasks = []; }
+  const recent = tasks
+    .slice()
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 3)
+    .map((t) => ({
+      taskId: t.taskId,
+      status: t.status || null,
+      prompt: String(t.prompt || '').slice(0, 30),
+      createdAt: t.createdAt || null
+    }));
+  let bud = null;
+  try {
+    const s = budget.status();
+    bud = {
+      currency: s.currency,
+      initialUsd: s.initialUsd,
+      spentUsd: s.spentUsd,
+      balanceUsd: s.balanceUsd
+    };
+  } catch (e) {
+    bud = null;
+  }
+  return {
+    version: 'assistant-context.v1',
+    plan: plan ? briefPlan(plan) : null,
+    tasks: { total: tasks.length, recent },
+    budget: bud,
+    keys: keyPresence()
+  };
+}
+
+function replyForContext(sessionId) {
+  const ctx = contextOf(sessionId);
+  const lines = [];
+  lines.push(ctx.plan
+    ? `当前计划：${ctx.plan.clipCount} 段 × ${ctx.plan.clipDurationSec} 秒（${ctx.plan.modelLabel} · ${ctx.plan.resolution}）· planId ${ctx.plan.planId}`
+    : '当前计划：还没有计划卡。');
+  lines.push(`任务：共 ${ctx.tasks.total} 个`
+    + (ctx.tasks.recent.length
+      ? `；最近 ${ctx.tasks.recent.map((t) => `${t.taskId}（${t.status || '未知'}）`).join('、')}`
+      : ''));
+  lines.push(ctx.budget
+    ? `预算：剩余 $${Number(ctx.budget.balanceUsd).toFixed(2)}（已花 $${Number(ctx.budget.spentUsd).toFixed(2)}，初始 $${Number(ctx.budget.initialUsd).toFixed(2)}）`
+    : '预算：读不到（budget 模块不可用）。');
+  lines.push('Key：' + ctx.keys.map((k) => `${k.label} ${k.present ? '有' : '无'}`).join('；'));
+  lines.push('（只读汇总：不会建任务、不会改任何东西；Key 只报有/无。）');
+  return lines.join('\n');
+}
+
+// ==========================================
 // P7-A：计划内精准修改（换单段场景卡 / 改单段提示词）
 // ------------------------------------------------------------
 // 硬性约束（写死在这里，测试逐条断言）：
@@ -462,12 +576,219 @@ function savePlanInPlace(sessionId, plan) {
   return plan;
 }
 
+// ==========================================
+// 2026-11-17 小智 2.0 V1（设计定稿 §9.1-2 / §9.1-3）
+// 提示词工作流：查看（A4）/ 原样替换（A5）/ 简单 diff（A6）
+// ------------------------------------------------------------
+// 硬性约束（写死在这里，verify-assistant 逐条断言）：
+//   · 不建任务、不调任何模型、不改 planId；只有「真的改了提示词」才写回计划；
+//   · 「查看」是纯只读：计划数据一个字节都不变（连「当前编辑段」也不写进 plan），
+//     所以调用方保证不要把 plan 回传给前端（否则会弹卡）；
+//   · 替换 = 用户原文（Q9=A：不润色、不加后缀）；diff = 按出现顺序逐处应用，一条消息多处全应用；
+//   · 回复只给改动点（Q10=B），不重贴整张计划。
+//
+// 目标段号来源（确定性，不猜；顺序固定）：
+//   ① 当前这句里显式写了「第 N 段/张/场景」；
+//   ② 会话里最近一条**用户消息**里写过「第 N 段/张/场景」（小智刚问过、用户接着说「用这个」）；
+//   ③ 计划只有 1 段 → 就是第 1 段；
+//   ④ 都没有 → 问「第几段」，不动计划。
+// ==========================================
+const RE_PROMPT_VIEW = /(?:提示词|画面内容|画面).{0,8}(?:给我看|看一下|看下|贴一下|贴出来|是什么|是啥|显示|念一下|读一下|发我|瞧一眼)|(?:给我看|看一下|看下|贴一下|贴出来|是什么|是啥|显示|念一下|读一下|发我|瞧一眼).{0,8}(?:提示词|画面内容)/;
+// 「第 N 段的提示词改成：…」是整段替换（既有路径），不能被「查看」抢走。
+const RE_PROMPT_SET_VERB = /(?:提示词|画面内容|画面)\s*(?:改成|换成|改为|写成|[:：])/;
+const RE_USE_THIS = /(?:^|[\s，,。；;])(?:就)?(?:用|按)\s*(?:这个|这段|这条|这版|此)\s*[：:，,]?\s*([\s\S]+)$/;
+const RE_DIFF_REPLACE = /(?:把|将)\s*[「『“"']?([^「」『』“”"',，。；;]{1,40}?)[」』”"']?\s*(?:改成|改为|换成|换为|变成)\s*[「『“"']?([^「」『』“”"',，。；;]{1,120})[」』”"']?/g;
+const RE_DIFF_REMOVE = /(?:去掉|删掉|删除|拿掉|抹掉|不要)\s*[「『“"']?([^「」『』“”"',，。；;]{1,60})[」』”"']?/g;
+
+function matchSegmentIndex(text) {
+  const m = String(text || '').match(RE_SEGMENT_INDEX);
+  if (!m) return null;
+  const n = planCard.parseCnNumber(m[1]);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+// 「用这个：……」里取出用户原文（原样，不润色）。取不到返回 ''。
+function extractUseThisText(text) {
+  const m = String(text || '').match(RE_USE_THIS);
+  if (!m) return '';
+  return cleanEditPayload(m[1]);
+}
+
+function resolvePromptTarget(sessionId, plan, text) {
+  const direct = matchSegmentIndex(text);
+  if (direct) return direct;
+  let msgs = [];
+  try { msgs = memory.listMessages(sessionId, 20); } catch (e) { msgs = []; }
+  for (let i = msgs.length - 1; i >= 0; i -= 1) {
+    const m = msgs[i];
+    if (!m || m.role !== 'user') continue;
+    if (String(m.text || '') === String(text || '')) continue; // 跳过当前句
+    const idx = matchSegmentIndex(m.text);
+    if (idx) return idx;
+  }
+  if (Number(plan.clipCount) === 1) return 1;
+  return null;
+}
+
+// 某一段“当前提示词”的原文：
+//   · 用户改过 → 覆盖文本原样返回（与 pipeline 的 promptSource=scene-card-user-edit 一致）；
+//   · 没改过 → 用 promptComposer 按场景卡拼出来，ctx 与 pipeline._composeSceneCardPrompts 完全一致
+//     （只有 theme，没有 userPrompt ——否则显示出来的不是真正会发出去的提示词）。
+function promptTextOfSegment(plan, index) {
+  const override = plan.promptOverrides && plan.promptOverrides[String(index)];
+  if (override) return { text: String(override), source: 'user-edit', card: null };
+  const ids = Array.isArray(plan.sceneCardIds) ? plan.sceneCardIds : [];
+  const cardId = ids[index];
+  if (!cardId) return null;
+  const card = sceneCardLibrary.getCardById(cardId);
+  if (!card) return null;
+  try {
+    const patch = promptComposer.composeClipPatch(card, {
+      theme: plan.theme || null,
+      promptOverride: null
+    });
+    return { text: patch.prompt, source: 'scene-card', card };
+  } catch (e) {
+    return null;
+  }
+}
+
+// A4：把第 N 段提示词原样贴出来。只读，不改计划、不建任务、不回传计划。
+function tryReplyPromptView(sessionId, text) {
+  const s = String(text || '');
+  if (!RE_PROMPT_VIEW.test(s)) return null;
+  if (RE_PROMPT_SET_VERB.test(s)) return null; // 「…提示词改成：X」走既有整段替换
+  const plan = memory.lastPlan(sessionId);
+  if (!plan) {
+    return '现在还没有计划卡，没有哪一段的提示词可看。先说总时长（比如「30 秒」「10 分钟」），我排好计划再贴给你。';
+  }
+  const n = resolvePromptTarget(sessionId, plan, s);
+  if (!n) {
+    return '要看第几段？说「把第 2 段的提示词给我看一下」；要改就说「第 2 段：把『A』改成『B』」。';
+  }
+  if (n < 1 || n > plan.clipCount) {
+    return `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
+  }
+  const seg = promptTextOfSegment(plan, n - 1);
+  if (!seg) {
+    return `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
+  }
+  const from = seg.source === 'user-edit'
+    ? '来源：你手动改过的文本'
+    : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`;
+  return `第 ${n} 段提示词（${seg.text.length} 字；${from}）：\n${seg.text}\n`
+    + '这条计划没有改动。要改就说「把『…』改成『…』」「去掉『…』」或「用这个：……」。';
+}
+
+function parseDiffs(text) {
+  const s = String(text || '');
+  // 「第 N 段的提示词改成：…」= 整段替换（既有路径），不做 diff。
+  if (RE_SEGMENT_INDEX.test(s) && /提示词|画面/.test(s)) return [];
+  const hits = [];
+  const collect = (re, kind) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const from = cleanEditPayload(m[1]);
+      const to = kind === 'replace' ? cleanEditPayload(m[2]) : '';
+      if (from) {
+        hits.push({ kind, at: m.index, end: m.index + m[0].length, from, to });
+      }
+      if (m.index === re.lastIndex) re.lastIndex += 1;
+    }
+  };
+  collect(RE_DIFF_REPLACE, 'replace');
+  collect(RE_DIFF_REMOVE, 'remove');
+  hits.sort((a, b) => a.at - b.at);
+  // 去重叠：先出现的优先（「把 X 改成 Y」里不会再被「去掉」二次匹配）
+  const out = [];
+  let lastEnd = -1;
+  for (const h of hits) {
+    if (h.at < lastEnd) continue;
+    if (h.kind === 'replace' && h.from === h.to) continue;
+    out.push(h);
+    lastEnd = h.end;
+  }
+  return out;
+}
+
+function planSceneCardsOffReply(plan) {  if (!plan || plan.sceneCards !== false) return null;
+  return '这条计划关了场景卡（自由提示词），不支持按段看/改提示词；'
+    + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
+}
+
+function writePromptOverride(sessionId, plan, index, payload) {
+  const merged = { ...(plan.promptOverrides || {}), [String(index)]: payload };
+  const norm = promptComposer.normalizePromptOverrides(merged, plan.clipCount);
+  if (!norm.ok) return { ok: false, error: norm.error };
+  plan.promptOverrides = Object.keys(norm.overrides).length ? norm.overrides : null;
+  savePlanInPlace(sessionId, plan);
+  return { ok: true, plan, warnings: norm.warnings || [] };
+}
+
+// A5：「用这个：…」→ 原样替换目标段提示词（不润色、不追加任何后缀）。
+function applyUseThis(sessionId, plan, text, payload) {
+  const off = planSceneCardsOffReply(plan);
+  if (off) return off;
+  const n = resolvePromptTarget(sessionId, plan, text);
+  if (!n) return '这套文本要用在第几段？先说「第 2 段」，再说「用这个：……」；计划现在没有改动。';
+  if (n < 1 || n > plan.clipCount) return `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
+  const res = writePromptOverride(sessionId, plan, n - 1, payload);
+  if (!res.ok) return `改第 ${n} 段提示词失败：${res.error}`;
+  const len = plan.promptOverrides[String(n - 1)].length;
+  const warn = res.warnings.length ? `（${res.warnings.join('；')}）` : '';
+  return `已按你的文本替换第 ${n} 段（${len} 字）${warn}\n`
+    + '其余段仍按场景卡；这条计划没有改动别的地方。';
+}
+
+// A6：「把 X 改成 Y / 去掉 Z」→ 按出现顺序逐处应用到该段**当前**提示词，只回改动点。
+function applyDiffs(sessionId, plan, text, diffs) {
+  const off = planSceneCardsOffReply(plan);
+  if (off) return off;
+  const n = resolvePromptTarget(sessionId, plan, text);
+  if (!n) return '要改第几段？说「第 2 段：把『缓慢横移』改成『缓慢推近』」。';
+  if (n < 1 || n > plan.clipCount) return `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
+  const seg = promptTextOfSegment(plan, n - 1);
+  if (!seg) return `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
+  let out = seg.text;
+  const applied = [];
+  const missed = [];
+  for (const d of diffs) {
+    if (d.kind === 'replace') {
+      if (!out.includes(d.from)) { missed.push(`「${d.from}」`); continue; }
+      out = out.split(d.from).join(d.to);
+      applied.push(`「${d.from}」→「${d.to}」`);
+    } else {
+      if (!out.includes(d.from)) { missed.push(`「${d.from}」`); continue; }
+      out = out.split(d.from).join('');
+      applied.push(`去掉「${d.from}」`);
+    }
+  }
+  if (!applied.length) {
+    return `没在这段的提示词里找到要改的文字：${missed.join('、')}。`
+      + `第 ${n} 段当前提示词 ${seg.text.length} 字；说「把第 ${n} 段的提示词给我看一下」可以先核对原文。`;
+  }
+  const res = writePromptOverride(sessionId, plan, n - 1, out);
+  if (!res.ok) return `改第 ${n} 段提示词失败：${res.error}`;
+  const now = plan.promptOverrides[String(n - 1)];
+  const warn = res.warnings.length ? `\n（${res.warnings.join('；')}）` : '';
+  const missLine = missed.length ? `\n没找到、未改动：${missed.join('、')}` : '';
+  return `已改第 ${n} 段（${applied.length} 处）：\n${applied.map((x) => '· ' + x).join('\n')}\n`
+    + `当前提示词（${now.length} 字）：${now}${warn}${missLine}`;
+}
+
 function replyForPlanEdit(sessionId, text) {
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
     return '现在还没有计划卡，所以没有哪一段可改。先说总时长（比如「30 秒」「10 分钟」），'
       + '我排好计划你再改第几段。';
   }
+  // 2026-11-17 V1（A5）：用户自带文本「用这个：…」→ 原样替换目标段（Q9=A，不润色、不加后缀）。
+  const useThis = extractUseThisText(text);
+  if (useThis) return applyUseThis(sessionId, plan, text, useThis);
+  // 2026-11-17 V1（A6）：「把 X 改成 Y / 去掉 Z」→ 按出现顺序逐处应用，只回改动点（Q10=B）。
+  const diffs = parseDiffs(text);
+  if (diffs.length) return applyDiffs(sessionId, plan, text, diffs);
   const m = String(text || '').match(RE_SEGMENT_INDEX);
   const batch = memory.isBatchSceneEdit(text);
   if (!m) {
@@ -475,7 +796,10 @@ function replyForPlanEdit(sessionId, text) {
     if (batch) return replyForBatchSwap(sessionId, plan);
     // 2026-11-16 Lead 复核：用户指代卡片（「这个地方的换一个」/「这一段不想要」）时没有段号，
     // 直接告诉他怎么补段号；不要掉回「这条视频要做多长」。
-    return '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」。';
+    // 2026-11-17 V1（A1/A2）：这里同时承担「场景/场景卡 + 换/改/不满意」的兜底，
+    // 顺带说明「换卡 vs 改提示词」的区别（A2 的验收点）。
+    return '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」，'
+      + '或者「把第 2 段的提示词给我看一下」再「用这个：……」/「把『A』改成『B』」。';
   }
   const n = planCard.parseCnNumber(m[1]);
   if (!Number.isInteger(n) || n < 1 || n > plan.clipCount) {
@@ -686,6 +1010,20 @@ function replyForBgm(sessionId, text) {
   return `${head}\n${lines.join('\n')}` + (plan ? `\n当前配乐：${bgmLabel(plan)}` : '');
 }
 
+// 「用这个：……」/「把 X 改成 Y / 去掉 Z」是**计划内**提示词编辑形态。
+// 刻意不在 memory.classify 里提升成全局意图：memory 是上下文无关的，
+// 把这两类口语加成全局 plan_edit 会抢走「把默认通道改成百炼」这类设置句（V2 才做）。
+// 这里由会话层兜底：只有 classify 给出 unknown/create（不是 bgm/查场景/确认等更明确的意图）时才改判。
+// 两类必须挡在外面（否则会把更明确的意图抢成 plan_edit）：
+//   ① 关开关句：不要场景卡 / 不要配乐 / 取消出图（「不要配乐」里的「不要」会被 diff 正则当删除）；
+//   ② 设置类：通道 / 设置 / 分辨率（V2 的 B6，V1 不处理）。
+function isPlanPromptEditForm(text) {
+  const s = String(text || '');
+  if (/(?:不用|不要|关闭|别用|取消)\s*(?:场景卡|配乐|音乐|出图|图片)/.test(s)) return false;
+  if (/通道|设置|分辨率|\b1080p\b|\b720p\b|\b4k\b/i.test(s)) return false;
+  return !!extractUseThisText(s) || parseDiffs(s).length > 0;
+}
+
 /**
  * 对话入口：听懂 → 排计划 / 检索记录 / 报进度。不创建任务、不发付费请求。
  * @param {object} opts { sessionId?, text, options? }
@@ -698,6 +1036,11 @@ function handleMessage(opts = {}) {
   memory.appendMessage(sessionId, { role: 'user', text });
 
   const intent = memory.classify(text);
+  // 2026-11-17 V1（A5/A6）：口语形态兜底（见 isPlanPromptEditForm 的注释）。
+  const promptEditForm = isPlanPromptEditForm(text);
+  const planEditBranch = intent.intent === 'plan_edit'
+    || (promptEditForm && (intent.intent === 'unknown' || intent.intent === 'create'));
+  const reportedIntent = planEditBranch ? 'plan_edit' : intent.intent;
   let reply;
   let plan = null;
   let missing = null;
@@ -713,13 +1056,28 @@ function handleMessage(opts = {}) {
   } else if (intent.intent === 'no_image') {
     // 2026-11-16 用户问题 b：要纯文生视频 → 告诉用户卡上的开关位置，不新建计划。
     reply = replyForNoImage(sessionId);
-  } else if (intent.intent === 'plan_edit') {
-    // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
-    reply = replyForPlanEdit(sessionId, text);
-    // 2026-11-16 Lead 复核：把更新后的计划一并回传（planId 不变）。
-    // 前端 sendXiaozhi 里的 `if (j.plan) setPlan(j.plan)` 依赖它刷新手上的计划卡；
-    // 只回 null 时卡片仍是旧对象，用户会觉得「换了但没反应」。
+  } else if (intent.intent === 'confirm') {
+    // 2026-11-17 V1（§9.1-6 / A7）：最终确认时点 —— 只回确认语 + 回传计划（前端给卡片）。
+    // 这里**不建任务**：建任务只能走 execute()，而 execute 只由卡片「确认执行」触发。
+    reply = replyForConfirm(sessionId);
     plan = memory.lastPlan(sessionId);
+  } else if (intent.intent === 'context') {
+    // 2026-11-17 V1（§9.1-7）：只读环境问答（预算/任务数/Key 有·无）；不改计划、不回传计划。
+    reply = replyForContext(sessionId);
+  } else if (planEditBranch) {
+    // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
+    // 2026-11-17 V1（A4）：先看是不是「把第 N 段的提示词给我看」这种**纯只读**请求；
+    // 是的话只贴原文、计划一个字节都不动，也不回传计划（前端据此不弹卡）。
+    const viewed = tryReplyPromptView(sessionId, text);
+    if (viewed) {
+      reply = viewed;
+    } else {
+      reply = replyForPlanEdit(sessionId, text);
+      // 2026-11-16 Lead 复核：把更新后的计划一并回传（planId 不变）。
+      // 前端 sendXiaozhi 里的 `if (j.plan) setPlan(j.plan)` 依赖它刷新手上的计划卡；
+      // 只回 null 时卡片仍是旧对象，用户会觉得「换了但没反应」。
+      plan = memory.lastPlan(sessionId);
+    }
   } else if (intent.intent === 'bgm') {
     // 2026-11-16 P7-A：配乐 —— 列库 / 选曲 / 关掉 / 设默认。
     reply = replyForBgm(sessionId, text);
@@ -772,7 +1130,7 @@ function handleMessage(opts = {}) {
     ok: true,
     version: SUPERVISOR_VERSION,
     sessionId,
-    intent: intent.intent,
+    intent: reportedIntent,
     reply,
     plan: plan ? briefPlan(plan) : null,
     missing,
@@ -1232,6 +1590,9 @@ module.exports = {
   retrieveRefs,
   resetRuntime,
   monitorCount,
+  // 2026-11-17 V1（§9.1-7）：只读环境的进程内入口（V2 扩成 HTTP 端点时直接复用）
+  contextOf,
+  keyPresence,
   _tick: tick,
   _attemptFill: attemptFill,
   _retryRun: retryRun,

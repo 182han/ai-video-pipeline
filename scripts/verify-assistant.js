@@ -56,6 +56,8 @@ process.env.PHOTOS_DIR = DIRS.photos;
 process.env.PROJECTS_DIR = DIRS.projects;
 process.env.LOG_DIR = DIRS.logs;
 process.env.BUDGET_FILE = DIRS.budget;
+// 2026-11-17 V1（§9.1-4）：场景卡冷却状态也必须隔离到本次临时目录（默认在 data/assistant）。
+process.env.SCENE_CARDS_COOLING_FILE = path.join(TMP, 'scene-card-cooling.json');
 process.env.DATABASE_TYPE = 'json';
 process.env.BUDGET_USD = '196';
 
@@ -90,6 +92,7 @@ const library = require('../src/library');
 const pipeline = require('../src/pipeline');
 const budget = require('../src/budget');
 const sceneCardLibrary = require('../src/sceneCards');
+const promptComposer = require('../src/promptComposer');
 const audioMixer = require('../src/processors/audioMixer');
 
 let pass = 0;
@@ -259,11 +262,21 @@ async function main() {
   ok('kling 每段 10 秒（关闭场景卡）→ 通过', planCard.buildPlan({ text: '10分钟极光，每段10秒', model: 'kling', sceneCards: false }).ok === true);
   ok('未知模型 → PLAN_UNKNOWN_MODEL', planCard.buildPlan({ text: '10分钟极光', model: 'nope' }).code === 'PLAN_UNKNOWN_MODEL');
   ok('非法分辨率 → PLAN_BAD_RESOLUTION', planCard.buildPlan({ text: '10分钟极光', resolution: '8k' }).code === 'PLAN_BAD_RESOLUTION');
-  ok('确定性：同输入两次除 planId 外一致', (() => {
+  // 2026-11-17 V1（§9.1-4）行为变更：场景卡改为「随机抽 N 张」，所以两次 buildPlan 抽到的
+  // sceneCardIds 本来就不同（这是刻意的，见 [12] 的 seed 复现断言）。这里只要求**其余槽位**确定，
+  // 并要求两次都真的固定了 clipCount 张卡（不是放宽成永真）。
+  ok('确定性：同输入两次除 planId / 随机抽到的场景卡外一致（§9.1-4 随机抽卡是刻意的）', (() => {
     const a = planCard.buildPlan({ text: '10分钟极光' }).plan;
     const b = planCard.buildPlan({ text: '10分钟极光' }).plan;
-    const strip = (p) => { const q = { ...p }; delete q.planId; delete q.createdAt; return JSON.stringify(q); };
-    return strip(a) === strip(b);
+    const strip = (p) => {
+      const q = { ...p };
+      delete q.planId; delete q.createdAt; delete q.sceneCardIds;
+      return JSON.stringify(q);
+    };
+    return strip(a) === strip(b)
+      && a.clipCount === 60 && b.clipCount === 60
+      && Array.isArray(a.sceneCardIds) && a.sceneCardIds.length === 60
+      && Array.isArray(b.sceneCardIds) && b.sceneCardIds.length === 60;
   })());
 
   // ================= [2] 状态机 =================
@@ -368,19 +381,30 @@ async function main() {
     && msgScenePlan.plan.clipCount === 3,
     msgScenePlan.ok ? `${msgScenePlan.plan.clipCount}段` : msgScenePlan.code);
   const planIdBeforeScene = assistantMemory.lastPlan(sidScene).planId;
+  const sceneIdsBefore = assistantMemory.lastPlan(sidScene).sceneCardIds.slice();
   const tasksBeforeScene = taskManager.getAllTasks().length;
   const sceneAsk = supervisor.handleMessage({
     sessionId: sidScene,
     text: '你可以给我看一下你选择的是哪三个场景吗'
   });
-  const expectedKeys = require('../src/sceneCards').allocate(3).used.map((e) => e.scene_key);
-  ok('问场景 → 按 chapter+sequence 列出 3 张卡的 scene_key（只读预览）',
+  // 2026-11-17 V1（§9.1-4 / Q25=A）行为变更：取卡改为「随机抽 N 张 + 跨计划冷却」，
+  // 所以期望值**不能**再靠「再 allocate 一次」（每次抽的都不一样）。改成用计划里已固定的
+  // sceneCardIds —— 这同时证明：对话里的「看场景」只是只读预览，没有重新抽卡。
+  const expectedKeys = sceneIdsBefore.map((id) => sceneCardLibrary.getCardById(id).scene_key);
+  ok('问场景 → 列出计划里已固定的 3 张卡（只读预览，没有重新 allocate）',
     sceneAsk.ok === true && sceneAsk.intent === 'plan_scenes' && sceneAsk.plan === null
     && expectedKeys.length === 3 && expectedKeys.every((k) => sceneAsk.reply.includes(k))
     && /取这 3 张/.test(sceneAsk.reply),
     String(sceneAsk.reply || '').split('\n').slice(0, 2).join(' | '));
-  ok('问场景不建任务、不重排计划（lastPlan 未变、任务数不变）',
+  ok('同一计划内反复问场景 → 仍是这 3 张、sceneCardIds 一个都不变（Q25=A 计划内稳定）', (() => {
+    const again = supervisor.handleMessage({ sessionId: sidScene, text: '你再给我看一下选的是哪些场景卡' });
+    return again.intent === 'plan_scenes' && again.plan === null
+      && expectedKeys.every((k) => again.reply.includes(k))
+      && JSON.stringify(assistantMemory.lastPlan(sidScene).sceneCardIds) === JSON.stringify(sceneIdsBefore);
+  })(), expectedKeys.join(','));
+  ok('问场景不建任务、不重排计划（planId / sceneCardIds 未变、任务数不变）',
     assistantMemory.lastPlan(sidScene).planId === planIdBeforeScene
+    && JSON.stringify(assistantMemory.lastPlan(sidScene).sceneCardIds) === JSON.stringify(sceneIdsBefore)
     && taskManager.getAllTasks().length === tasksBeforeScene,
     `${tasksBeforeScene} → ${taskManager.getAllTasks().length}`);
 
@@ -993,6 +1017,323 @@ async function main() {
     /PAGE_CHIPS = \[[^\]]*'10 分钟的长视频'/.test(assistantJs)
     && !/30 分钟的雪山/.test(assistantJs)
     && /场景卡库/.test(assistantJs));
+
+  // ================= [10] 小智 2.0 V1：A1–A10（§8.3 验收矩阵 / §9.1-1..7） =================
+  console.log('\n[10] 小智 2.0 V1 验收 A1–A10：意图兜底 / 提示词工作流 / 确认门 / 负向不误伤');
+  const taskCount = () => taskManager.getAllTasks().length;
+
+  // ---- 前置：3 段 mock 计划（场景卡默认开，3 张卡在计划阶段固定）----
+  const sidV1 = 's_v1_a_matrix_1';
+  const v1PlanMsg = supervisor.handleMessage({ sessionId: sidV1, text: 'mock 3段，每段10秒' });
+  const v1PlanId = v1PlanMsg.plan && v1PlanMsg.plan.planId;
+  const v1Ids = assistantMemory.lastPlan(sidV1).sceneCardIds.slice();
+  const v1Tasks = taskCount();
+  ok('V1 前置：3 段 mock 计划就绪（3 张卡在计划阶段已固定）',
+    v1PlanMsg.ok === true && !!v1PlanId && v1Ids.length === 3
+    && v1PlanMsg.plan.sceneCards === true,
+    v1PlanId || v1PlanMsg.code);
+
+  // ---- A1：换一个场景卡，我不太满意。→ plan_edit，问第几段，不重排、不改卡、不建任务 ----
+  const a1 = supervisor.handleMessage({ sessionId: sidV1, text: '换一个场景卡，我不太满意。' });
+  const planA1 = assistantMemory.lastPlan(sidV1);
+  ok('A1「换一个场景卡，我不太满意。」→ plan_edit；问第几段；不含「排好了/做多长」；planId 不变；不建任务；不改卡',
+    a1.ok === true && a1.intent === 'plan_edit'
+    && /要换第几段/.test(a1.reply)
+    && !/排好了/.test(a1.reply) && !/做多长/.test(a1.reply)
+    && planA1.planId === v1PlanId
+    && JSON.stringify(planA1.sceneCardIds) === JSON.stringify(v1Ids)
+    && taskCount() === v1Tasks,
+    String(a1.reply || '').slice(0, 50));
+
+  // ---- A2：场景不太满意，场景卡就是提示词的内容。→ plan_edit，并区分「换卡 vs 改词」 ----
+  const a2 = supervisor.handleMessage({ sessionId: sidV1, text: '场景不太满意，场景卡就是提示词的内容。' });
+  const planA2 = assistantMemory.lastPlan(sidV1);
+  ok('A2「场景不太满意，场景卡就是提示词的内容。」→ plan_edit；同时给出「换卡」与「改提示词」两条路径；planId 不变',
+    a2.ok === true && a2.intent === 'plan_edit'
+    && /要换第几段/.test(a2.reply) && /提示词/.test(a2.reply)
+    && !/排好了/.test(a2.reply)
+    && planA2.planId === v1PlanId
+    && JSON.stringify(planA2.sceneCardIds) === JSON.stringify(v1Ids)
+    && taskCount() === v1Tasks,
+    String(a2.reply || '').slice(0, 50));
+
+  // ---- A3：第 2 张换一个。→ 只换第 2 张，回显旧→新 ----
+  const a3 = supervisor.handleMessage({ sessionId: sidV1, text: '第 2 张换一个。' });
+  const idsA3 = assistantMemory.lastPlan(sidV1).sceneCardIds.slice();
+  const a3Old = sceneCardLibrary.getCardById(v1Ids[1]);
+  const a3New = sceneCardLibrary.getCardById(idsA3[1]);
+  ok('A3「第 2 张换一个。」→ 仅第 2 段变、其余两段不变、回显「旧 → 新」、planId 不变、不建任务',
+    a3.ok === true && a3.intent === 'plan_edit'
+    && idsA3[1] !== v1Ids[1] && idsA3[0] === v1Ids[0] && idsA3[2] === v1Ids[2]
+    && !!a3Old && !!a3New
+    && a3.reply.includes(a3Old.scene_key) && a3.reply.includes(a3New.scene_key)
+    && /→/.test(a3.reply)
+    && assistantMemory.lastPlan(sidV1).planId === v1PlanId
+    && taskCount() === v1Tasks,
+    `${v1Ids.join(',')} → ${idsA3.join(',')}`);
+
+  // ---- A4：把第 2 段的提示词给我看一下。→ 原样贴出全文，不改任何东西、不弹新卡 ----
+  // 期望文本按 pipeline 同口径现算（theme 来自计划；mock 计划没有主题 → null）。
+  const a4Expected = promptComposer.composeClipPatch(
+    sceneCardLibrary.getCardById(idsA3[1]),
+    { theme: assistantMemory.lastPlan(sidV1).theme || null, promptOverride: null }
+  ).prompt;
+  const a4 = supervisor.handleMessage({ sessionId: sidV1, text: '把第 2 段的提示词给我看一下。' });
+  const planA4 = assistantMemory.lastPlan(sidV1);
+  ok('A4「把第 2 段的提示词给我看一下。」→ 原样贴出该段全文；planId/卡/覆盖都没变；不建任务；不回传计划（不弹新卡）',
+    a4.ok === true && a4.intent === 'plan_edit'
+    && a4Expected.length > 20 && a4.reply.includes(a4Expected)
+    && planA4.planId === v1PlanId
+    && JSON.stringify(planA4.sceneCardIds) === JSON.stringify(idsA3)
+    && !planA4.promptOverrides
+    && a4.plan === null
+    && taskCount() === v1Tasks,
+    `${a4Expected.length} 字`);
+
+  // ---- A5：用这个：… → 原样替换第 2 段（目标段来自上一句「第 2 段」的上下文）----
+  const a5Text = '雪山日出，金光打在雪脊上，缓慢横移';
+  const a5 = supervisor.handleMessage({ sessionId: sidV1, text: `用这个：${a5Text}。` });
+  const planA5 = assistantMemory.lastPlan(sidV1);
+  ok('A5「用这个：…」→ promptOverrides["1"] 就是用户原文（17 字，不润色）；planId/卡不变；不建任务',
+    a5.ok === true && a5.intent === 'plan_edit'
+    && !!planA5.promptOverrides && planA5.promptOverrides['1'] === a5Text
+    && a5.reply.includes(`已按你的文本替换第 2 段（${a5Text.length} 字）`)
+    && planA5.planId === v1PlanId
+    && JSON.stringify(planA5.sceneCardIds) === JSON.stringify(idsA3)
+    && taskCount() === v1Tasks,
+    planA5.promptOverrides ? planA5.promptOverrides['1'] : '无覆盖');
+
+  // ---- A6：把「缓慢横移」改成「缓慢推近」，去掉「金光」。→ 两处都应用，只回改动点 ----
+  const a6 = supervisor.handleMessage({ sessionId: sidV1, text: '把「缓慢横移」改成「缓慢推近」，去掉「金光」。' });
+  const planA6 = assistantMemory.lastPlan(sidV1);
+  const a6Over = planA6.promptOverrides && planA6.promptOverrides['1'];
+  ok('A6「把 X 改成 Y / 去掉 Z」→ 两处都应用（含「推近」且不含「金光」）；planId 不变；不建任务',
+    a6.ok === true && a6.intent === 'plan_edit' && !!a6Over
+    && a6Over.includes('缓慢推近') && !a6Over.includes('金光')
+    && planA6.planId === v1PlanId
+    && taskCount() === v1Tasks,
+    a6Over || '无覆盖');
+  ok('A6 只回改动点：「缓慢横移」→「缓慢推近」+ 去掉「金光」；不重贴整张计划',
+    /「缓慢横移」→「缓慢推近」/.test(a6.reply)
+    && /去掉「金光」/.test(a6.reply)
+    && /已改第 2 段（2 处）/.test(a6.reply)
+    && !/排好了/.test(a6.reply) && !/预估费用/.test(a6.reply) && !/总时长/.test(a6.reply),
+    String(a6.reply || '').split('\n')[0]);
+  // 一条消息多处修改：按出现顺序全应用（③），并保持其它段不动
+  const a6b = supervisor.handleMessage({
+    sessionId: sidV1,
+    text: '把「雪山日出」改成「雪山日落」，把「缓慢推近」改成「缓慢拉远」，去掉「打在雪脊上」'
+  });
+  const a6bOver = assistantMemory.lastPlan(sidV1).promptOverrides['1'];
+  ok('A6b 一条消息 3 处按序全应用（改 2 处 + 去掉 1 处），只动第 2 段',
+    a6b.intent === 'plan_edit'
+    && a6bOver.includes('雪山日落') && a6bOver.includes('缓慢拉远')
+    && !a6bOver.includes('打在雪脊上') && !a6bOver.includes('缓慢推近')
+    && /已改第 2 段（3 处）/.test(a6b.reply)
+    && a6b.reply.indexOf('雪山日出') < a6b.reply.indexOf('去掉「打在雪脊上」')
+    && assistantMemory.lastPlan(sidV1).planId === v1PlanId
+    && taskCount() === v1Tasks,
+    a6bOver);
+  // 负向：改不到的文字必须明确说没找到，不能假装改了
+  const a6c = supervisor.handleMessage({ sessionId: sidV1, text: '把「根本不存在的句子」改成「X」' });
+  ok('A6c 负向：要改的文字不在该段提示词里 → 明确回「没找到」、计划不变、不建任务',
+    a6c.intent === 'plan_edit' && /没在|没找到/.test(a6c.reply)
+    && assistantMemory.lastPlan(sidV1).promptOverrides['1'] === a6bOver
+    && taskCount() === v1Tasks,
+    String(a6c.reply || '').slice(0, 60));
+
+  // ---- A7：确认生成吗？→ 回确认语 + 回传计划；未点确认不建任务，点确认才建 ----
+  const origRandomA7 = Math.random;
+  Math.random = () => 0.95; // mock 片段一律成功（与 [6] 同口径）
+  try {
+    const sidA7 = 's_v1_a7_confirm_1';
+    const planMsgA7 = supervisor.handleMessage({ sessionId: sidA7, text: 'mock 1段，每段10秒' });
+    const planIdA7 = planMsgA7.plan.planId;
+    const idsA7 = assistantMemory.lastPlan(sidA7).sceneCardIds.slice();
+    const tasksBeforeA7 = taskCount();
+    const askA7 = supervisor.handleMessage({ sessionId: sidA7, text: '确认生成吗？' });
+    ok('A7「确认生成吗？」→ intent=confirm、回确认语 + 回传同一计划；**未点确认时任务数不变**',
+      askA7.ok === true && askA7.intent === 'confirm'
+      && /确认执行/.test(askA7.reply) && /不会建任务/.test(askA7.reply)
+      && !!askA7.plan && askA7.plan.planId === planIdA7
+      && assistantMemory.lastPlan(sidA7).planId === planIdA7
+      && !askA7.taskId
+      && taskCount() === tasksBeforeA7,
+      String(askA7.reply || '').split('\n')[0]);
+    const exA7 = supervisor.execute({ sessionId: sidA7, planId: planIdA7, approved: true });
+    ok('A7 用户点确认（approved=true）后才建任务，且只建 1 条',
+      exA7.ok === true && !!exA7.taskId && taskCount() === tasksBeforeA7 + 1,
+      exA7.error || exA7.taskId);
+    if (exA7.ok) createdTasks.push(exA7.taskId);
+    const taskA7 = exA7.ok ? taskManager.getTask(exA7.taskId) : null;
+    ok('A7 execute 用的是计划阶段固定的那张卡（没有重新 allocate）',
+      !!taskA7 && !!taskA7.sceneCards && taskA7.sceneCards.used.length === 1
+      && taskA7.sceneCards.used[0].id === idsA7[0],
+      taskA7 && taskA7.sceneCards ? `${taskA7.sceneCards.used[0].id} vs ${idsA7[0]}` : '无任务');
+    const stA7 = await waitTerminal(sidA7, planIdA7, 180000);
+    ok('A7 点确认后任务正常跑到终态 done（确认门没有把执行流程改坏）',
+      stA7.state.state === 'done', stA7.state.reason || '');
+  } finally {
+    Math.random = origRandomA7;
+  }
+
+  // ---- A8/A9/A10 负向：新入口不许误伤（仍是 create / bgm，不是 plan_edit）----
+  ok('A8「换一个场景，30 秒。」→ intent=create（带时长词，不是 plan_edit）',
+    assistantMemory.classify('换一个场景，30 秒。').intent === 'create'
+    && assistantMemory.isSceneCardEdit('换一个场景，30 秒。') === false);
+  const sidA8 = 's_v1_a8_create_1';
+  const tasksBeforeA8 = taskCount();
+  const a8 = supervisor.handleMessage({ sessionId: sidA8, text: '换一个场景，30 秒。' });
+  ok('A8 实际对话：新建一条计划（新 planId、说「排好了」）、不建任务',
+    a8.ok === true && a8.intent === 'create' && !!a8.plan
+    && /排好了/.test(a8.reply)
+    && taskCount() === tasksBeforeA8,
+    a8.plan ? `${a8.plan.clipCount}段` : String(a8.reply || '').slice(0, 40));
+  ok('A9「10 分钟，场景从卡库选。」→ intent=create（无换卡动作，不被 plan_edit 抢）',
+    assistantMemory.classify('10 分钟，场景从卡库选。').intent === 'create'
+    && assistantMemory.isSceneCardEdit('10 分钟，场景从卡库选。') === false);
+  const sidA9 = 's_v1_a9_create_1';
+  const tasksBeforeA9 = taskCount();
+  const a9 = supervisor.handleMessage({ sessionId: sidA9, text: '10 分钟，场景从卡库选。' });
+  ok('A9 实际对话：新建一条 60 段计划、不建任务',
+    a9.ok === true && a9.intent === 'create' && !!a9.plan && a9.plan.clipCount === 60
+    && taskCount() === tasksBeforeA9,
+    a9.plan ? `${a9.plan.clipCount}段` : a9.code);
+  ok('A10「配乐换一首。」→ intent=bgm（配乐名词护栏，不被 plan_edit 抢）',
+    assistantMemory.classify('配乐换一首。').intent === 'bgm'
+    && assistantMemory.isSceneCardEdit('配乐换一首。') === false);
+  const tasksBeforeA10 = taskCount();
+  const a10 = supervisor.handleMessage({ sessionId: sidV1, text: '配乐换一首。' });
+  ok('A10 实际对话：配乐意图（不是 plan_edit）、planId 不变、不建任务',
+    a10.intent === 'bgm'
+    && assistantMemory.lastPlan(sidV1).planId === v1PlanId
+    && taskCount() === tasksBeforeA10,
+    String(a10.reply || '').split('\n')[0]);
+
+  // ---- §9.1-6：前端「确认门」静态接线（浏览器未验证）----
+  const assistantJsV1 = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'components', 'assistant.js'), 'utf8');
+  ok('卡片两时点：新增 planCardVisible 状态，两处 PlanCard 渲染点都受它控制（不再「有 plan 就渲染」）',
+    /const \[planCardVisible, setPlanCardVisible\] = useState\(false\)/.test(assistantJsV1)
+    && (assistantJsV1.match(/planCardVisible && plan && backend\.ok/g) || []).length === 2
+    && (assistantJsV1.match(/<\$\{PlanCard\}/g) || []).length === 2);
+  ok('卡片两时点：只有「新计划成型(intent=create)」与「最终确认(intent=confirm)」置 true；数据变化只 setPlan',
+    /const showCard = \(j\.intent === 'create' && isNewPlan\) \|\| j\.intent === 'confirm'/.test(assistantJsV1)
+    && /lastFormedPlanIdRef/.test(assistantJsV1)
+    && /setPlanCardVisible\(false\)/.test(assistantJsV1));
+  ok('确认生成流程：execute 只由卡片 onConfirm 触发；成功后再收起卡片（防重复建任务）',
+    /onConfirm=\$\{confirmPlan\}/.test(assistantJsV1)
+    && (assistantJsV1.match(/\/api\/assistant\/execute/g) || []).length === 1
+    && /planId: plan\.planId, approved: true/.test(assistantJsV1)
+    && /确认这一刻用过了/.test(assistantJsV1));
+
+  // ================= [11] §9.1-7：V1 只读环境（预算 / 任务数 / Key 有·无） =================
+  console.log('\n[11] §9.1-7 只读环境：预算余额 / 任务数 / Key 只报有·无（不建任务、不改计划）');
+  const budNow = budget.status();
+  const tasksBeforeCtx = taskCount();
+  const ctxMsg = supervisor.handleMessage({ sessionId: sidV1, text: '预算还有多少？' });
+  ok('预算问答 → intent=context；数字与 budget.status() 一致；不回传计划、不建任务',
+    ctxMsg.ok === true && ctxMsg.intent === 'context'
+    && ctxMsg.reply.includes('$' + Number(budNow.balanceUsd).toFixed(2))
+    && ctxMsg.reply.includes('$' + Number(budNow.spentUsd).toFixed(2))
+    && ctxMsg.plan === null
+    && taskCount() === tasksBeforeCtx,
+    String(ctxMsg.reply || '').split('\n').slice(0, 2).join(' | '));
+  const ctxTasksMsg = supervisor.handleMessage({ sessionId: sidV1, text: '现在几个任务了？' });
+  ok('任务数问答 → intent=context；数量与 taskManager.getAllTasks().length 一致',
+    ctxTasksMsg.intent === 'context'
+    && ctxTasksMsg.reply.includes(`共 ${taskCount()} 个`),
+    String(ctxTasksMsg.reply || '').split('\n')[1]);
+  const ctxOf = supervisor.contextOf(sidV1);
+  const ctxJson = JSON.stringify(ctxOf);
+  const leaked = Object.entries(process.env)
+    .filter(([, v]) => typeof v === 'string' && v.trim().length >= 16)
+    .filter(([, v]) => ctxJson.includes(v.trim()))
+    .map(([k]) => k);
+  ok('contextOf：会话内计划 + 任务数/最近任务 + 预算 + Key 有·无；**任何环境变量原值都不出现**（Key 绝不回显）',
+    !!ctxOf && Array.isArray(ctxOf.keys) && ctxOf.keys.length >= 4
+    && ctxOf.keys.every((k) => Object.keys(k).join(',') === 'label,present' && typeof k.present === 'boolean')
+    && !!ctxOf.plan && ctxOf.plan.planId === assistantMemory.lastPlan(sidV1).planId
+    && ctxOf.tasks.total === taskCount()
+    && !!ctxOf.budget && ctxOf.budget.balanceUsd === budNow.balanceUsd
+    && leaked.length === 0,
+    leaked.length ? `泄露字段: ${leaked.join(',')}` : `keys=${ctxOf.keys.length}`);
+
+  // ================= [12] §9.1-4：场景卡随机抽 + 跨计划冷却 =================
+  console.log('\n[12] §9.1-4 场景卡：随机抽 N 张 + 跨计划冷却 + 换单段随机（Q24=B / Q25=A / Q30=C）');
+  ok('冷却文件隔离在本次验收临时目录（不写用户真实的 data/assistant）',
+    path.resolve(sceneCardLibrary.coolingFile()) === path.resolve(path.join(TMP, 'scene-card-cooling.json')),
+    sceneCardLibrary.coolingFile());
+  sceneCardLibrary.resetCooling();
+  const seedIds = (seed, n) => sceneCardLibrary.allocate(n, { seed, noCooling: true, recordCooling: false })
+    .used.map((e) => e.id);
+  const seedA1 = seedIds('v1-seed-a', 5);
+  const seedA2 = seedIds('v1-seed-a', 5);
+  const seedB = seedIds('v1-seed-b', 5);
+  ok('随机抽卡：同一 seed 结果可复现；不同 seed 结果不同；同一次内不重复',
+    JSON.stringify(seedA1) === JSON.stringify(seedA2)
+    && JSON.stringify(seedA1) !== JSON.stringify(seedB)
+    && new Set(seedA1).size === 5,
+    `${seedA1.join(',')} / ${seedB.join(',')}`);
+  const libAll = sceneCardLibrary.loadLibrary();
+  ok('随机抽卡后仍按 chapter+sequence 排序（选哪些随机，播映顺序不乱）', (() => {
+    const entries = sceneCardLibrary.allocate(6, { noCooling: true, recordCooling: false }).used;
+    for (let i = 1; i < entries.length; i++) {
+      const p = entries[i - 1];
+      const c = entries[i];
+      if (c.chapter < p.chapter || (c.chapter === p.chapter && c.sequence <= p.sequence)) return false;
+    }
+    return true;
+  })());
+  ok('取满 180 张 → 与卡库顺序完全一致（全选后排序等价原顺序，零回归）', (() => {
+    const all = sceneCardLibrary.allocate(180, { noCooling: true, recordCooling: false }).used;
+    return all.length === 180 && all.every((e, i) => e.id === libAll.features[i].id);
+  })());
+  // 冷却：把 175 张写进「最近 3 个计划」→ 下一次抽卡只能来自剩下 5 张
+  const allIds = libAll.features.map((c) => c.id);
+  const cooled = allIds.slice(0, 175);
+  const remain = allIds.slice(175);
+  sceneCardLibrary.writeCooling({
+    version: sceneCardLibrary.COOLING_VERSION,
+    plans: [cooled.slice(0, 60), cooled.slice(60, 120), cooled.slice(120, 175)]
+      .map((ids, i) => ({ roundId: 'cool' + i, ids, at: new Date().toISOString() }))
+  });
+  const coolDraw = sceneCardLibrary.allocate(5, { seed: 'cool-draw', recordCooling: false }).used.map((e) => e.id);
+  ok('冷却生效：最近 3 个计划用过的 175 张全部避开，只给没进冷却的 5 张',
+    coolDraw.length === 5 && coolDraw.every((id) => remain.includes(id)),
+    `抽到 ${coolDraw.join(',')} / 期望 ⊆ ${remain.join(',')}`);
+  // 回退：全部卡都在冷却里 → 仍能取到，不报错
+  sceneCardLibrary.writeCooling({
+    version: sceneCardLibrary.COOLING_VERSION,
+    plans: [{ roundId: 'all', ids: allIds, at: new Date().toISOString() }]
+  });
+  let fallbackDraw = null;
+  try { fallbackDraw = sceneCardLibrary.allocate(5, { seed: 'fallback', recordCooling: false }); } catch (e) { fallbackDraw = null; }
+  ok('卡不够时回退：180 张全在冷却里也能取到 5 张且不重复（不报错、不静默复用）',
+    !!fallbackDraw && fallbackDraw.used.length === 5
+    && new Set(fallbackDraw.used.map((e) => e.id)).size === 5,
+    fallbackDraw ? fallbackDraw.used.map((e) => e.id).join(',') : '抛错');
+  // 换单段卡：随机 + 未用 + 避开冷却（Q30=C）
+  sceneCardLibrary.resetCooling();
+  const swapBase = sceneCardLibrary.allocate(3, { seed: 'swap-base', noCooling: true, recordCooling: false })
+    .used.map((e) => e.id);
+  const swapPicks = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6']
+    .map((seed) => sceneCardLibrary.nextSwapCandidate(swapBase[0], swapBase, { seed }).id);
+  ok('换单段卡：每次都挑一张「不在本计划已用集合」里的卡（随机，不是固定下一张）',
+    swapPicks.every((id) => !swapBase.includes(id))
+    && new Set(swapPicks).size >= 2,
+    swapPicks.join(','));
+  sceneCardLibrary.writeCooling({
+    version: sceneCardLibrary.COOLING_VERSION,
+    plans: [{ roundId: 'all2', ids: allIds.filter((id) => !remain.includes(id)), at: new Date().toISOString() }]
+  });
+  const swapCool = sceneCardLibrary.nextSwapCandidate(swapBase[0], swapBase, { seed: 'swap-cool' }).id;
+  ok('换单段卡也吃同一套冷却：冷却外的卡优先（这里只剩 5 张未冷却）',
+    remain.includes(swapCool), `${swapCool} ∈ ${remain.join(',')}`);
+  sceneCardLibrary.resetCooling();
+  let swapExhaust = null;
+  try { sceneCardLibrary.nextSwapCandidate(allIds[0], allIds); } catch (e) { swapExhaust = e; }
+  ok('全部正片都用过 → SCENE_CARDS_SWAP_EXHAUSTED（明确报错，不静默复用）',
+    !!swapExhaust && swapExhaust.code === 'SCENE_CARDS_SWAP_EXHAUSTED', swapExhaust && swapExhaust.code);
 
   console.log('\n[清理] 测试任务 / 临时产物');
   const cleaned = await cleanupAll();

@@ -157,6 +157,15 @@ export function Assistant({ page = false } = {}) {
     }
   });
   const [plan, setPlan] = useState(null);
+  // ===== 卡片两时点（2026-11-17 小智 2.0 V1 §9.1-5 / Q14=A）=====
+  // 共同契约 §0.1：卡片是**确认凭证**，不是聊天伴侣；只在两个时点显示：
+  //   ① 首次计划成型（intent=create 且换了新 planId）；
+  //   ② 最终确认（intent=confirm，用户问「确认生成吗」）。
+  // 中间讨论（换卡 / 看提示词 / 改提示词 / 选配乐）只更新 plan 数据，**不显示卡片**。
+  // 刻意不用「plan 存在就渲染」：那样每说一句都会弹一次卡（2026-11-17 用户投诉的原始现象）。
+  const [planCardVisible, setPlanCardVisible] = useState(false);
+  // 记住上一次「成型」的 planId，用来区分「新计划成型」与「同一计划的数据更新」。
+  const lastFormedPlanIdRef = useRef(null);
   const [xstate, setXstate] = useState(null);
   const [xbusy, setXbusy] = useState(false);
   const [greet, setGreet] = useState(() => {
@@ -198,7 +207,9 @@ export function Assistant({ page = false } = {}) {
         if (Array.isArray(j.messages) && j.messages.length) {
           setMsgs(j.messages.map((m) => ({ role: m.role, content: m.text })));
         }
-        if (j.lastPlan) setPlan(j.lastPlan);
+        // 恢复上次计划只更新数据、不弹卡（卡片只属于「成型」与「最终确认」两个时点）；
+        // 刷新后想再看到卡片就说「确认生成吗」。
+        if (j.lastPlan) { setPlan(j.lastPlan); setPlanCardVisible(false); }
         if (j.state) {
           fetch('/api/assistant/state?sessionId=' + encodeURIComponent(sessionId)
             + '&planId=' + encodeURIComponent(j.state.planId), { credentials: 'same-origin' })
@@ -456,10 +467,18 @@ export function Assistant({ page = false } = {}) {
         return;
       }
       setMsgs((m) => [...m, { role: 'assistant', content: j.reply || '（没有回复）' }]);
+      // 卡片两时点（2026-11-17 V1 §9.1-5 / Q14=A）：
+      //   ① intent=create 且 planId 是新的 → 首次计划成型，弹卡；
+      //   ② intent=confirm（用户问「确认生成吗」）→ 最终确认，弹卡；
+      //   其余（换卡 / 看提示词 / 改提示词 / 选配乐 / 查进度…）只更新 plan 数据，**不弹卡**。
+      const isNewPlan = !!(j.plan && j.plan.planId !== lastFormedPlanIdRef.current);
+      const showCard = (j.intent === 'create' && isNewPlan) || j.intent === 'confirm';
       if (j.plan) {
         setPlan(j.plan);
         setXstate(null);
+        if (isNewPlan) lastFormedPlanIdRef.current = j.plan.planId;
       }
+      setPlanCardVisible(showCard);
     } catch (e) {
       setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
     } finally {
@@ -543,6 +562,8 @@ export function Assistant({ page = false } = {}) {
       }
       setMsgs((m) => [...m, { role: 'assistant', content: j.reply || '已开始。' }]);
       setXstate({ ok: true, state: j.state, task: j.taskId ? { taskId: j.taskId, totalClips: 0 } : null });
+      // 确认这一刻用过了：收起卡片，避免重复点「确认执行」再建一条任务（防重复计费）。
+      setPlanCardVisible(false);
     } catch (e) {
       setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
     } finally {
@@ -860,7 +881,7 @@ export function Assistant({ page = false } = {}) {
               </div>
             `}
 
-            ${plan && backend.ok && html`
+            ${planCardVisible && plan && backend.ok && html`
               <div className="xz-block">
                 <${PlanCard}
                   plan=${plan}
@@ -1054,7 +1075,7 @@ export function Assistant({ page = false } = {}) {
             />
           `}
 
-          ${plan && backend.ok && html`
+          ${planCardVisible && plan && backend.ok && html`
             <${PlanCard}
               plan=${plan}
               busy=${xbusy}

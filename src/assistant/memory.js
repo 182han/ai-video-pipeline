@@ -250,10 +250,56 @@ const RE_SEGMENT_SWAP_WORD = /换一个|换一张|换个|换掉|换成别的|换
 // 故意不收「改成/换成（+分辨率）」这类词，避免抢「都换成 1080p」的分辨率续问。
 const RE_SEGMENT_BATCH_REF = /都|全部|全都|全换|三个|三张|3\s*[个张]|这几[个张]|这两个|这一批|这批|整批|一批|这一?组|整个|重抽|重新抽|重新选/;
 const RE_SEGMENT_BATCH_SWAP = /换掉|换一个|换一张|换一批|换个|全换|重抽|重新抽|重新选|换成别的|换别的|不满意|不想要|不要了|要换(?![成为])|都换(?![成为])/;
+// 2026-11-17 小智 2.0 V1（设计定稿 §9.1-1）：plan_edit 的**第 4 个入口**。
+// 用户真实原话（截图实证）：「换一个场景卡，我不太满意。」「场景不太满意，场景卡就是提示词的内容。」
+// 两句都没有「第 N 段」，所以进不了既有三个分支，会掉进 create 被重排成新计划（错）。
+// 判定 = 场景宾语 && 换卡/改动词，且**同时**满足三个护栏（这就是 A8/A9/A10 不误伤的全部逻辑）：
+//   · 带时长/段数词（秒/分钟/小时/段）→ 是排计划，不是改卡（A8「换一个场景，30 秒」→ create）；
+//   · 带配乐名词 → 交给 bgm（A10「配乐换一首」→ bgm，不许被这里抢）；
+//   · 带分辨率词（1080p/720p…）→ 是画质续问，不按段编辑；
+//   · 「不要场景卡/不用场景卡」→ 是关开关（保持既有 unknown/no_image 路径），不是换卡。
+const RE_SCENE_NOUN = /场景/;
+// 「不太满意 / 不满意 / 满意吗」都算，但单独一个「满意」不算（那是夸，不是要改）。
+const RE_SCENE_ACTION = /不太?满意|满意吗|满意不|不想要|换|改|重抽|重新抽/;
+const RE_RESOLUTION_WORD = /\d{3,4}\s*p\b|1080p|720p|480p|4k|2160p|分辨率/i;
+const RE_SCENE_CARDS_OFF = /(?:不用|不要|关闭|别用|取消)\s*场景卡/;
+
+function isSceneCardEdit(text) {
+  const s = String(text || '');
+  if (!RE_SCENE_NOUN.test(s)) return false;
+  if (!RE_SCENE_ACTION.test(s)) return false;
+  if (RE_TIME_WORD.test(s)) return false;
+  if (RE_BGM_NOUN.test(s)) return false;
+  if (RE_RESOLUTION_WORD.test(s)) return false;
+  if (RE_SCENE_CARDS_OFF.test(s)) return false;
+  return true;
+}
 
 function isBatchSceneEdit(text) {
   const s = String(text || '');
   return RE_SEGMENT_BATCH_REF.test(s) && RE_SEGMENT_BATCH_SWAP.test(s) && !RE_BGM_NOUN.test(s);
+}
+
+// 2026-11-17 小智 2.0 V1（§9.1-6）：最终确认时点（A7）。
+// 「确认生成吗？」现在会被 RE_CREATE 的「生成」抢走 → 回「这条视频要做多长？」（用户看到的答非所问）。
+// 这里只认**明确的确认/开工问句**，不动「生成一条 10 分钟的视频」这类排计划句。
+const RE_CONFIRM = /(?:确认|确定)\s*(?:生成|执行|开始|开工|做吧)|(?:可以|能|要不要|需不需要)\s*(?:开始|生成|执行|开工)\s*(?:了|吗|嘛|吧)?|现在(?:就)?(?:开始|开工|生成)|(?:开始|开工|执行)吧/;
+
+function isConfirmRequest(text) {
+  return RE_CONFIRM.test(String(text || ''));
+}
+
+// 2026-11-17 小智 2.0 V1（§9.1-7）：只读环境问答（预算 / 任务数 / Key 有·无）。
+// 只认显式名词，避免把「10 分钟，预算 100」这类排计划句抢成环境问答（见 classify 的优先级注释）。
+const RE_CTX_BUDGET = /预算|余额|花了多少|花了多少钱|花费|还剩多少(?:钱|美元|额度|预算)/;
+const RE_CTX_TASKS = /(?:几个|多少个|多少条|哪些|几条)\s*任务|任务(?:数量|列表|几个)|最近.{0,4}任务|在跑的任务|正在跑的任务/;
+const RE_CTX_KEY = /(?:api\s*key|key|密钥|秘钥)/i;
+const RE_CTX_KEY_ASK = /有没有|有吗|有没|配了|配置|填了|可用|能用|能不能用|是否/;
+
+function isContextQuery(text) {
+  const s = String(text || '');
+  if (RE_CTX_BUDGET.test(s) || RE_CTX_TASKS.test(s)) return true;
+  return RE_CTX_KEY.test(s) && RE_CTX_KEY_ASK.test(s);
 }
 
 function classify(text) {
@@ -265,15 +311,23 @@ function classify(text) {
   // 2026-11-16：查「选了哪些场景卡」不排新计划（只读预览）；「不要出图」只回开关位置。
   if (RE_PLAN_SCENES.test(s)) return { intent: 'plan_scenes' };
   if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
+  // 2026-11-17 V1（§9.1-6）：确认问句必须排在最前（RE_CREATE 的「生成」会把它抢成排计划）。
+  // 注意顺序：放在 plan_edit/bgm/create 之前，但仍在「查场景 / 不要出图」之后。
+  if (isConfirmRequest(s)) return { intent: 'confirm' };
   // 2026-11-16 P7-A：计划内修改必须排在 create 之前（否则「第 2 个场景换一个」会被当成新计划重排）；
   // 但只能匹配带「第 N 段/个」、「这个地方/这里 + 换一个」或「三个/都 + 换掉」的句子，
   // 不能抢「改成 1080p」「每段 15 秒」「再来一条」。
+  // 2026-11-17 V1：第 4 个 OR =「场景/场景卡 + 换/改/不满意」（护栏见 isSceneCardEdit）。
   if ((RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s))
     || (RE_SEGMENT_VAGUE.test(s) && RE_SEGMENT_SWAP_WORD.test(s))
-    || isBatchSceneEdit(s)) return { intent: 'plan_edit' };
+    || isBatchSceneEdit(s)
+    || isSceneCardEdit(s)) return { intent: 'plan_edit' };
   if ((RE_BGM_NOUN.test(s) && RE_BGM_ACTION.test(s))
     || (RE_BGM_INDEX.test(s) && !RE_TIME_WORD.test(s))
     || (RE_BGM_SWAP.test(s) && !RE_CREATE.test(s))) return { intent: 'bgm' };
+  // 2026-11-17 V1（§9.1-7）：只读环境问答。放在 bgm 之后、create 之前——
+  // 「配乐有哪些」这类句子里没有预算/任务/Key 名词，不会被抢。
+  if (isContextQuery(s)) return { intent: 'context' };
   if (RE_CREATE.test(s)) return { intent: 'create' };
   return { intent: 'unknown' };
 }
@@ -416,6 +470,9 @@ module.exports = {
   listSessions,
   classify,
   isBatchSceneEdit,
+  isSceneCardEdit,
+  isConfirmRequest,
+  isContextQuery,
   retrieveTasks,
   taskRef,
   formatWhen

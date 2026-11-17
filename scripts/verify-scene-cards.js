@@ -47,6 +47,9 @@ process.env.PROJECTS_DIR = DIRS.projects;
 // 本套件只验证场景卡取卡/提示词接线，不验证存储驱动：用 json 驱动隔离到临时目录，
 // 避免把 mock 任务写进真实数据库（也避开本机数据库间歇超时的噪声）。
 process.env.DATABASE_TYPE = 'json';
+// 2026-11-17 V1（§9.1-4）：取卡改为「随机 + 跨计划冷却」，冷却状态落 data/assistant/scene-card-cooling.json。
+// 验收必须隔离这个文件，否则会读写用户真实的冷却状态（也可能被真实状态干扰）。
+process.env.SCENE_CARDS_COOLING_FILE = path.join(TMP, 'scene-card-cooling.json');
 
 // Mock 生成器用 execSync 生成样片，本机 spawn cmd.exe 会 EPERM（AGENTS §2.3 已知环境限制）。
 // MockGenerator 的样片目录固定在 app/clips/_samples（不读 CLIPS_DIR），所以这里用
@@ -186,8 +189,11 @@ async function main() {
   }
 
   // ================= 2. 取满 180 张 =================
-  console.log('\n[2] 连续取满 180 张：顺序 / 唯一 / buffer 未误用');
-  const plan180 = sceneCards.allocate(180);
+  console.log('\n[2] 连续取满 180 张：唯一 / 全部正片 / 随机后仍按章节顺序 / buffer 未误用');
+  // 2026-11-17 V1（§9.1-4 / Q24=B）：allocate 已从「按顺序取前 N 张」改为「随机抽 N 张 + 跨计划冷却」。
+  // 行为变更点：抽到哪 N 张不再固定；不变的是「选完仍按 chapter+sequence 排序、不放回、不用 buffer」。
+  // 本套件用 noCooling/recordCooling:false，既不读也不写冷却状态。
+  const plan180 = sceneCards.allocate(180, { noCooling: true, recordCooling: false });
   const entries = plan180.used;
   ok('取满 180 张', entries.length === 180, String(entries.length));
   const keySet = new Set(entries.map(e => e.scene_key));
@@ -206,9 +212,10 @@ async function main() {
     }
     return true;
   })(), `第1张 ${entries[0].chapter}:${entries[0].sequence} 第180张 ${entries[179].chapter}:${entries[179].sequence}`);
-  ok('首张 = chapter 1 / sequence 1', entries[0].chapter === 1 && entries[0].sequence === 1,
+  ok('首张 = chapter 1 / sequence 1（全选后排序仍等价于原顺序）', entries[0].chapter === 1 && entries[0].sequence === 1,
     `${entries[0].id} ${entries[0].scene_key}`);
-  ok('末张 = chapter 6 / sequence 30', entries[179].chapter === 6 && entries[179].sequence === 30,
+  ok('末张 = chapter 6 / sequence 30（全选后排序仍等价于原顺序）',
+    entries[179].chapter === 6 && entries[179].sequence === 30,
     `${entries[179].id} ${entries[179].scene_key}`);
   ok('状态：used=180 / remaining=0 / exhausted=true',
     plan180.status.used === 180 && plan180.status.remaining === 0 && plan180.status.exhausted === true,
@@ -217,27 +224,41 @@ async function main() {
 
   // 超过 180：必须报错，不静默复用/截断
   let over = null;
-  try { sceneCards.allocate(181); } catch (e) { over = e; }
+  try { sceneCards.allocate(181, { noCooling: true, recordCooling: false }); } catch (e) { over = e; }
   ok('取 181 张 → SCENE_CARDS_EXHAUSTED（提示扩卡库）',
     !!over && over.code === 'SCENE_CARDS_EXHAUSTED' && /扩卡库/.test(over.message),
     over ? over.message : '未抛错');
   let zero = null;
-  try { sceneCards.allocate(0); } catch (e) { zero = e; }
+  try { sceneCards.allocate(0, { noCooling: true, recordCooling: false }); } catch (e) { zero = e; }
   ok('取 0 张 → SCENE_CARDS_BAD_COUNT', !!zero && zero.code === 'SCENE_CARDS_BAD_COUNT',
     zero ? zero.code : '未抛错');
   ok('容量预检 checkCapacity(181) 同样拒绝',
     sceneCards.checkCapacity(181).ok === false && sceneCards.checkCapacity(181).code === 'SCENE_CARDS_EXHAUSTED');
-  ok('两次取卡互不影响（每条任务一轮，均从第 1 张开始）', (() => {
-    const a = sceneCards.allocate(3);
-    const b = sceneCards.allocate(3);
+  // 2026-11-17 V1 行为变更（§9.1-4）：旧断言「两次取卡首张相同 = 都从第 1 张开始」已不成立
+  // （现在是随机抽）。改成两条更强的断言：
+  //   ① 抽卡确实是随机的（固定 seed 抽 3 张 ≠ 顺序取前 3 张；确定性，不靠概率）；
+  //   ② 两次取卡互不影响：roundId 不同、各 3 张、各自不重复、都不含 buffer。
+  ok('取卡已改为随机：seed 固定时抽到的 3 张 ≠ 卡库顺序前 3 张（旧「顺序取卡」行为已废弃）', (() => {
+    const picked = sceneCards.allocate(3, { seed: 'seq-order-check', noCooling: true, recordCooling: false })
+      .used.map(e => e.id);
+    const firstThree = lib.features.slice(0, 3).map(c => c.id);
+    return picked.length === 3 && new Set(picked).size === 3
+      && JSON.stringify(picked) !== JSON.stringify(firstThree);
+  })());
+  ok('两次取卡互不影响（每条任务一轮）：roundId 不同 / 各 3 张 / 各自唯一 / 不含 buffer', (() => {
+    const a = sceneCards.allocate(3, { noCooling: true, recordCooling: false });
+    const b = sceneCards.allocate(3, { noCooling: true, recordCooling: false });
     return a.roundId !== b.roundId
-      && a.used[0].id === b.used[0].id
+      && a.used.length === 3 && b.used.length === 3
+      && new Set(a.used.map(e => e.id)).size === 3
+      && new Set(b.used.map(e => e.id)).size === 3
+      && a.used.concat(b.used).every(e => e.role === 'feature')
       && a.buffers.length === 0 && b.buffers.length === 0;
   })());
 
   // ================= 3. buffer 替换 =================
   console.log('\n[3] buffer 替换：只在失败时、同一任务不复用、用尽返回 null');
-  const plan3 = sceneCards.allocate(3);
+  const plan3 = sceneCards.allocate(3, { noCooling: true, recordCooling: false });
   const original = plan3.used[1];
   const rep1 = sceneCards.replaceWithBuffer(plan3, 1, '生成失败：模拟 timeout');
   ok('替换成功并返回 buffer 卡', !!rep1 && !!rep1.card && rep1.card.role === 'buffer',
@@ -258,12 +279,14 @@ async function main() {
     !!rep2 && rep2.card.id !== rep1.card.id && plan3.buffers.length === 2,
     rep2 ? `${rep1.card.id} vs ${rep2.card.id}` : '返回 null');
   ok('替换后 scene_key 仍唯一（buffer 替换不制造重复键）', (() => {
-    const p = sceneCards.allocate(20);
+    // 2026-11-17：取卡改为随机后，buffer 的 scene_key 可能与计划里别的段相同（buffer 是原卡的变体）。
+    // replaceWithBuffer 已改为优先挑不撞 key 的 buffer；这里用固定 seed 钉住抽到的 20 张，避免随机抖动。
+    const p = sceneCards.allocate(20, { seed: 'buffer-unique', noCooling: true, recordCooling: false });
     for (let i = 0; i < 2; i++) sceneCards.replaceWithBuffer(p, i, '失败');
     return new Set(p.used.map(e => e.scene_key)).size === p.used.length;
   })());
 
-  const plan21 = sceneCards.allocate(21);
+  const plan21 = sceneCards.allocate(21, { noCooling: true, recordCooling: false });
   let bufferOk = true;
   for (let i = 0; i < 20; i++) {
     if (!sceneCards.replaceWithBuffer(plan21, i, '失败')) { bufferOk = false; break; }
@@ -354,11 +377,18 @@ async function main() {
   ok('创建任务即写入 sceneCards 计划',
     !!task.sceneCards && task.sceneCards.enabled === true && task.sceneCards.used.length === 3,
     task.sceneCards ? `round=${task.sceneCards.roundId}` : '无计划');
-  ok('任务 scene_key 顺序与卡库一致', (() => {
+  // 2026-11-17 V1（§9.1-4）行为变更：取卡改为「随机抽」，任务拿到的 3 张不再等于「卡库前 3 张」。
+  // 断言改成新契约：3 张都来自卡库、互不重复；任务实际使用的就是 task.sceneCards.used 记录的那批
+  // （clip 顺序 = 计划顺序，prompt 按这个顺序拼，见下一条）。不是放宽成永真：库外卡 / 重复卡仍然 fail。
+  ok('任务 scene_key 全部来自卡库、互不重复、与 task.sceneCards.used 顺序一致', (() => {
     if (!task.sceneCards) return false;
-    return task.sceneCards.used.every((e, i) => e.id === plan180.used[i].id
-      && e.scene_key === plan180.used[i].scene_key);
-  })());
+    const used = task.sceneCards.used;
+    const libIds = new Set(lib.features.map((c) => c.id));
+    return used.length === 3
+      && used.every((e) => libIds.has(e.id) && typeof e.scene_key === 'string' && e.scene_key)
+      && new Set(used.map((e) => e.scene_key)).size === 3
+      && task.clips.every((c, i) => c.sceneCardId === used[i].id && c.sceneKey === used[i].scene_key);
+  })(), task.sceneCards ? task.sceneCards.used.map((e) => e.scene_key).join(',') : '无计划');
   ok('初始分配未用 buffer', task.sceneCards && task.sceneCards.status.bufferUsed === 0);
   const expectedPatches = task.sceneCards.used.map((e, i) => promptComposer.composeClipPatch(
     sceneCards.getCardById(e.id),
