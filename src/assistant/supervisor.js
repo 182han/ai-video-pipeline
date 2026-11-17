@@ -39,6 +39,16 @@ const fillLib = require('./fillFromLibrary');
 const sceneCardLibrary = require('../sceneCards');
 const promptComposer = require('../promptComposer');
 const audioMixer = require('../processors/audioMixer');
+// 2026-11-17 V2（半自主任务管家）：
+//   · context：只读环境 A–E（任务/预算/素材/设置/错误摘要；Key 只报有/无）；
+//   · diagnose：失败诊断 + 修复建议（只读；执行必须用户确认）；
+//   · preferences / audit：服务端用户级偏好 + 审计（L3 确认后才写）；
+//   · broadcast：全局任务播报（由 server.js 定时 scan 并推 WS；本模块只导出/转接）。
+const assistantContext = require('./context');
+const diagnose = require('./diagnose');
+const preferences = require('./preferences');
+const audit = require('./audit');
+const assistantBroadcast = require('./broadcast');
 
 const SUPERVISOR_VERSION = 'assistant-supervisor.v1';
 const ACTIVE_STATUS = new Set([
@@ -259,7 +269,7 @@ function replyForPlan(plan) {
 
 function replyForGreeting() {
   return '我是小智。说个总时长就能排计划，例如「10 分钟」或「30 分钟」——'
-    + '场景由场景卡库按章节顺序自动抽取（默认 10 秒/段，10 分钟 = 60 个不同场景；也可以说「每段 15 秒」），不需要指定主题；'
+    + '场景由场景卡库随机抽取后按章节顺序播映（默认 10 秒/段，10 分钟 = 60 个不同场景；也可以说「每段 15 秒」），不需要指定主题；'
     + '也可以问「上一次的视频」或「现在进度怎样」。语音按钮在输入框左侧。';
 }
 
@@ -300,7 +310,18 @@ function replyForLast(query) {
 
 function replyForStatus(sessionId) {
   const state = memory.getState(sessionId);
-  if (!state) return '现在没有正在执行的任务。说个时长，我来排计划。';
+  if (!state) {
+    // 2026-11-17 V2（B1）：「现在跑到哪了？」要能回答**全局**任务，而不只是本会话自己的。
+    // 只读 taskManager 快照；不建任务、不改任何状态。
+    let live = [];
+    try { live = assistantContext.contextOf(sessionId).tasks.active; } catch (e) { live = []; }
+    if (live.length) {
+      return `【小智简报】现在有 ${live.length} 个任务在跑（全局）：\n`
+        + live.map((t) => `· ${t.taskId}：${t.status}，成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
+        + '\n（只读播报：不会新建任务、不会重跑。）';
+    }
+    return '现在没有正在执行的任务。说个时长，我来排计划。';
+  }
   const task = state.finalTaskId ? taskManager.getTask(state.finalTaskId) : (state.taskId ? taskManager.getTask(state.taskId) : null);
   if (state.state === stateMachine.STATES.DONE) {
     const file = task && task.outputPath ? `，成片 ${require('path').basename(task.outputPath)}` : '';
@@ -461,84 +482,410 @@ function replyForConfirm(sessionId) {
 }
 
 // ==========================================
-// 2026-11-17 小智 2.0 V1（设计定稿 §9.1-7）：只读环境（最小）
+// 2026-11-17 小智 2.0 V2（设计文档 §2 V2）：只读环境感知 A–E + 管家简报口吻（Q21=B）
 // ------------------------------------------------------------
-// 只读四件事：会话内的计划 / 任务数与最近任务 / 预算余额 / Key 有·无。
-// 三条红线（写死）：
-//   · 不写任何文件、不建任务、不发请求、不产生费用；
-//   · Key **只报「有/无」**，任何调用方都拿不到 Key 值（contextOf 只输出 {label, present}）；
-//   · 全部走进程内模块（taskManager / budget），不经过 HTTP —— V1 刻意不加新端点。
-// V2 再扩成 A–E 全量环境感知（任务播报/失败诊断/偏好），本版不做。
+// A 任务 / B 预算 / C 素材 / D 设置与能力 / E 最近错误摘要，全部只读；
+// 数据源是 src/assistant/context.js（进程内模块，不经 HTTP，不新建实例）。
+// 三条红线不变：不建任务、不写文件、不调模型、不产生费用；Key 只报「有/无」。
 // ==========================================
-const CONTEXT_KEYS = [
-  { label: '视频生成·WhaleTV 中转', names: ['OPENAI_VIDEO_API_KEY', 'WHALETV_API_KEY'] },
-  { label: '视频生成·百炼万相', names: ['DASHSCOPE_API_KEY'] },
-  { label: '视频生成·可灵', names: ['KLING_API_KEY', 'KLING_ACCESS_KEY'] },
-  { label: '图片生成', names: ['IMAGE_GEN_API_KEY', 'DASHSCOPE_API_KEY'] },
-  { label: '多模态质检', names: ['MULTIMODAL_API_KEY'] },
-  { label: '文案 LLM', names: ['OPENAI_API_KEY'] }
-];
+const CONTEXT_KEYS = assistantContext.CONTEXT_KEYS;
 
-// 只返回「有/无」。刻意不返回长度、前缀、后缀 —— 任何形式的部分回显都算泄露。
 function keyPresence() {
-  return CONTEXT_KEYS.map((k) => ({
-    label: k.label,
-    present: k.names.some((n) => String(process.env[n] || '').trim() !== '')
-  }));
+  return assistantContext.keyPresence();
 }
 
-function contextOf(sessionId) {
+// 只读上下文：context.js 负责环境数据，本函数补上「当前会话的计划/草稿」。
+function contextOf(sessionId, opts = {}) {
+  const base = assistantContext.contextOf(sessionId, {
+    ...opts,
+    server: {
+      ...(opts && opts.server && typeof opts.server === 'object' ? opts.server : {}),
+      supervisorVersion: SUPERVISOR_VERSION,
+      planVersion: planCard.PLAN_VERSION
+    }
+  });
   const plan = (sessionId ? memory.lastPlan(sessionId) : null) || null;
-  let tasks = [];
-  try { tasks = taskManager.getAllTasks() || []; } catch (e) { tasks = []; }
-  const recent = tasks
-    .slice()
-    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    .slice(0, 3)
-    .map((t) => ({
-      taskId: t.taskId,
-      status: t.status || null,
-      prompt: String(t.prompt || '').slice(0, 30),
-      createdAt: t.createdAt || null
-    }));
-  let bud = null;
-  try {
-    const s = budget.status();
-    bud = {
-      currency: s.currency,
-      initialUsd: s.initialUsd,
-      spentUsd: s.spentUsd,
-      balanceUsd: s.balanceUsd
-    };
-  } catch (e) {
-    bud = null;
-  }
-  return {
-    version: 'assistant-context.v1',
-    plan: plan ? briefPlan(plan) : null,
-    tasks: { total: tasks.length, recent },
-    budget: bud,
-    keys: keyPresence()
-  };
+  const bp = plan ? briefPlan(plan) : null;
+  // 兼容 V1（§9.1-7）契约：顶层继续保留 keys（只含 label/present）。
+  // V2 的完整分组在 settings.keys，两者是同一份数据，不额外查询。
+  return { ...base, plan: bp, ui: { ...(base.ui || {}), draft: bp }, keys: base.settings.keys };
 }
 
-function replyForContext(sessionId) {
-  const ctx = contextOf(sessionId);
+function fmtUsd(n) {
+  return `$${Number(n || 0).toFixed(2)}`;
+}
+
+function replyForContext(sessionId, opts = {}) {
+  const ctx = contextOf(sessionId, opts);
   const lines = [];
+  lines.push(`【小智简报】环境只读汇总（${ctx.version}）`);
   lines.push(ctx.plan
     ? `当前计划：${ctx.plan.clipCount} 段 × ${ctx.plan.clipDurationSec} 秒（${ctx.plan.modelLabel} · ${ctx.plan.resolution}）· planId ${ctx.plan.planId}`
     : '当前计划：还没有计划卡。');
   lines.push(`任务：共 ${ctx.tasks.total} 个`
+    + (ctx.tasks.active.length ? `，在跑 ${ctx.tasks.active.length} 个` : '')
     + (ctx.tasks.recent.length
-      ? `；最近 ${ctx.tasks.recent.map((t) => `${t.taskId}（${t.status || '未知'}）`).join('、')}`
+      ? `；最近 ${ctx.tasks.recent.slice(0, 3).map((t) => `${t.taskId}（${t.status || '未知'}）`).join('、')}`
       : ''));
+  if (ctx.tasks.active.length) {
+    lines.push('在跑：\n' + ctx.tasks.active
+      .map((t) => `· ${t.taskId}：${t.status}，成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`)
+      .join('\n'));
+  }
+  if (ctx.tasks.failedRecent.length) {
+    lines.push('最近失败：' + ctx.tasks.failedRecent.slice(0, 3)
+      .map((t) => `${t.taskId}（${t.status}）：${t.reason || '原因未记录'}`).join('；'));
+  }
   lines.push(ctx.budget
-    ? `预算：剩余 $${Number(ctx.budget.balanceUsd).toFixed(2)}（已花 $${Number(ctx.budget.spentUsd).toFixed(2)}，初始 $${Number(ctx.budget.initialUsd).toFixed(2)}）`
+    ? `预算：剩余 ${fmtUsd(ctx.budget.balanceUsd)}（已花 ${fmtUsd(ctx.budget.spentUsd)}，初始 ${fmtUsd(ctx.budget.initialUsd)}）`
     : '预算：读不到（budget 模块不可用）。');
-  lines.push('Key：' + ctx.keys.map((k) => `${k.label} ${k.present ? '有' : '无'}`).join('；'));
+  const p = ctx.assets.photos;
+  lines.push(`素材：图片库可用 ${p.usable} 张 / 共 ${p.all}（待审 ${p.pending}，通过 ${p.approved}，打回 ${p.rejected}）；`
+    + `成片库 ${ctx.assets.library.finals} 条，片段库 ${ctx.assets.library.clips} 条；场景卡 ${ctx.assets.sceneCards.features} 张；配乐 ${ctx.assets.bgm.tracks} 首。`);
+  lines.push(`设置：默认视频 ${ctx.settings.models.defaults.model} · ${ctx.settings.models.defaults.resolution}；`
+    + `图生视频支持 ${ctx.settings.models.i2v.supported.join(' / ')}；跨会话偏好 ${ctx.settings.preferences ? '已保存' : '未保存'}；`
+    + `任务播报 ${ctx.settings.broadcast.broadcastEnabled ? '开' : '关'}（节流 ${ctx.settings.broadcast.throttleSec} 秒）。`);
+  // 2026-11-17 V1 遗留 ③：口径必须写清「服务端环境变量」。
+  // 用户真实 Key 存在设置页浏览器 localStorage（vs_config），服务端 process.env 读不到；
+  // 只写「Key 无」会让用户以为自己的 Key 丢了（Lead 实证 M6：重启后小智答「WhaleTV 中转 无」）。
+  lines.push('Key（服务端环境变量，只报有/无）：' + ctx.settings.keys.map((k) => `${k.label} ${k.present ? '有' : '无'}`).join('；'));
+  lines.push('（设置页里填的 Key 存在浏览器本地，小智看不到；只有写进 app/.env 并重启服务的那份才算「有」。）');
+  if (ctx.recentErrors.length) {
+    lines.push(`最近错误摘要（已脱敏）：${ctx.recentErrors[0].text.slice(0, 160)}`);
+  }
   lines.push('（只读汇总：不会建任务、不会改任何东西；Key 只报有/无。）');
   return lines.join('\n');
 }
+
+// B5：素材库存（与 /api/photos 同口径：文件缺失的图片不计入；只读）。
+function replyForAssets(sessionId) {
+  const ctx = contextOf(sessionId);
+  const p = ctx.assets.photos;
+  return [
+    '【小智简报】素材库存（只读）：',
+    `图片库：可用 ${p.usable} 张 / 共 ${p.all}（待审 ${p.pending}，通过 ${p.approved}，打回 ${p.rejected}）——与 /api/photos 同口径（文件缺失不计入）。`,
+    `成片库 ${ctx.assets.library.finals} 条；片段库 ${ctx.assets.library.clips} 条；场景卡 ${ctx.assets.sceneCards.features} 张（缓冲 ${ctx.assets.sceneCards.buffers}）；配乐 ${ctx.assets.bgm.tracks} 首。`,
+    '（不会删除/改动任何素材；要清理成片或片段请去「库」页手动操作。）'
+  ].join('\n');
+}
+
+// ==========================================
+// V2：失败诊断 + 一键修复建议（B2/B3，Q20=B：只给建议，用户点了才执行）
+// ==========================================
+function pickTaskForDiagnosis(sessionId) {
+  const state = sessionId ? memory.getState(sessionId) : null;
+  if (state) {
+    const id = state.finalTaskId || state.taskId;
+    const t = id ? taskManager.getTask(id) : null;
+    if (t) return t;
+  }
+  let tasks = [];
+  try { tasks = taskManager.getAllTasks(); } catch (e) { tasks = []; }
+  const bad = tasks
+    .filter((t) => t && (['failed', 'partial'].includes(t.status)
+      || (Array.isArray(t.clips) && t.clips.some((c) => c && c.status !== 'success' && c.status !== 'pending'))))
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  return bad[0] || null;
+}
+
+function replyForRepair(sessionId) {
+  const task = pickTaskForDiagnosis(sessionId);
+  if (!task) {
+    return {
+      reply: '现在没有失败的任务可诊断。要我看别的任务，把任务 id 发我；'
+        + '要排新计划就说总时长。这次只做了只读检查，没有建任务。',
+      diagnosis: null
+    };
+  }
+  const d = diagnose.diagnose(task);
+  const lines = ['【小智简报】失败诊断（只读）：', d.summary, `分类：${d.categoryLabel}`
+    + (d.failedClips.length ? `；失败片段 ${d.failedClips.map((f) => '#' + (f.index + 1)).join('、')}` : '')];
+  lines.push('修复选项（都要你点确认才执行，未确认不会重跑、不会花钱）：');
+  d.suggestions.forEach((s, i) => {
+    lines.push(`${i + 1}. ${s.label}${s.executable ? '' : '（仅提示，需到设置页/库页手动处理）'}${s.where ? ` — ${s.where}` : ''}`);
+  });
+  lines.push('这条回复只做了诊断：没有创建任务、没有重跑、没有改设置。');
+  return { reply: lines.join('\n'), diagnosis: d };
+}
+
+// ==========================================
+// V2：跨会话偏好 + 设置变更的 L3 确认（Q15=B / B6 / Q18=A）
+// ------------------------------------------------------------
+// 契约（server / 前端 / verify 共用）：
+//   1) 用户说「把默认通道改成百炼」→ 只返回 pendingChange（changeId + label + requiresConfirm），**不改任何东西**；
+//   2) 确认必须显式 approved=true + 同一 changeId；未确认/不匹配/过期 → 明确错误码，持久状态不变；
+//   3) 确认成功才写 preferences（服务端用户级）+ 写 audit（谁/何时/改了什么）；
+//   4) 未登录墙场景 userId='local'；有登录墙时用 req.auth.userId（由 server.js 传入）。
+// ==========================================
+const CHANGE_TTL_MS = 10 * 60 * 1000;
+let changeSeq = 0;
+const pendingChanges = new Map(); // sessionId -> { changeId, key, value, label, createdAt, expiresAt }
+
+function newChangeId() {
+  changeSeq += 1;
+  return 'chg_' + Date.now().toString(36) + '_' + changeSeq.toString(36);
+}
+
+// 解析「要改什么」。只认显式设置变更句式；解析不了返回 null（由调用方给可选项）。
+function parsePreferenceChange(text) {
+  const s = String(text || '');
+  // 清空偏好
+  if (/(?:清空|清除|忘记|删掉|删除)\s*(?:我的)?\s*(?:跨会话)?\s*(?:偏好|常用设置|常用偏好)/.test(s)) {
+    return { key: 'clear', value: true, label: '清空跨会话偏好（服务端用户级）' };
+  }
+  // 任务播报开关（全局设置）
+  if (/(?:任务播报|播报|广播)/.test(s)) {
+    if (/(?:关掉|关闭|取消|停止|停掉|别播|关)/.test(s)) return { key: 'broadcast', value: false, label: '关闭任务播报' };
+    if (/(?:打开|开启|恢复|开)/.test(s)) return { key: 'broadcast', value: true, label: '打开任务播报' };
+  }
+  // 默认视频通道 / 模型
+  if (/(?:通道|模型|视频生成)/.test(s) && /(?:改|换|设|默认)/.test(s)) {
+    let value = null;
+    if (/百炼|万相|dashscope/i.test(s)) value = 'dashscope';
+    else if (/whale|中转|openai-video/i.test(s)) value = 'openai-video';
+    else if (/可灵|kling/i.test(s)) value = 'kling';
+    else if (/即梦|seedance/i.test(s)) value = 'seedance';
+    else if (/mock/i.test(s)) value = 'mock';
+    if (value) {
+      return { key: 'model', value, label: `默认视频通道 → ${planCard.MODELS[value].label}` };
+    }
+  }
+  // 默认分辨率
+  const rm = s.match(/(480p|720p|1080p|4k|2160p)/i);
+  if (rm && /(?:分辨率|默认|设置)/.test(s)) {
+    return { key: 'resolution', value: rm[1].toLowerCase(), label: `默认分辨率 → ${rm[1].toLowerCase()}` };
+  }
+  // 默认 BGM 风格
+  const bm = s.match(/(?:默认配乐风格|BGM\s*风格|配乐风格)\s*(?:改成|换成|设为|设成|用|[:：])?\s*[:：]?\s*(.+)$/i);
+  if (bm && /(?:配乐|音乐|bgm)/i.test(s) && /(?:默认|风格|记住)/.test(s)) {
+    const style = String(bm[1] || '').trim().replace(/[。；;]+$/, '').slice(0, 40);
+    if (style) return { key: 'bgmStyle', value: style, label: `默认 BGM 风格 → ${style}` };
+  }
+  return null;
+}
+
+function replyForSettings(sessionId, text) {
+  const change = parsePreferenceChange(text);
+  if (!change) {
+    return {
+      reply: '要改哪一项设置？可以说：\n'
+        + '· 「把默认通道改成百炼」\n· 「把默认分辨率改成 1080p」\n· 「把默认 BGM 风格改成轻音乐」\n'
+        + '· 「把任务播报关掉」/「把任务播报打开」\n· 「清空偏好」\n'
+        + '这些都会先请你确认（L3），确认前不会写任何东西。',
+      pending: null
+    };
+  }
+  const pending = {
+    changeId: newChangeId(),
+    sessionId,
+    key: change.key,
+    value: change.value,
+    label: change.label,
+    requiresConfirm: true,
+    approved: false,
+    createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + CHANGE_TTL_MS
+  };
+  pendingChanges.set(sessionId, pending);
+  return {
+    reply: `【小智简报】这是设置变更（L3 级），需要你确认：\n· ${change.label}\n`
+      + '确认后才会写入服务端偏好并记审计；现在**没有改任何东西**。\n'
+      + `（确认项 changeId=${pending.changeId}；10 分钟内有效。前端设置页在浏览器本地，本轮前端读取偏好未集成。）`,
+    pending
+  };
+}
+
+function confirmSettingChange(opts = {}) {
+  const sessionId = String(opts.sessionId || '');
+  const userId = opts.userId ? String(opts.userId) : 'local';
+  const p = pendingChanges.get(sessionId);
+  if (!p) {
+    return { ok: false, code: 'SETTINGS_NO_PENDING', error: '没有待确认的设置变更；先说要改哪一项（例如「把默认通道改成百炼」）' };
+  }
+  if (opts.changeId && String(opts.changeId) !== p.changeId) {
+    return { ok: false, code: 'SETTINGS_CHANGE_MISMATCH', error: 'changeId 不匹配（可能已有新的待确认项）', pending: p };
+  }
+  if (p.expiresAt < Date.now()) {
+    pendingChanges.delete(sessionId);
+    return { ok: false, code: 'SETTINGS_CHANGE_EXPIRED', error: '待确认项已过期（10 分钟），请重新说一次要改什么' };
+  }
+  if (opts.approved !== true) {
+    return { ok: false, code: 'SETTINGS_NOT_APPROVED', error: '设置变更必须确认（approved=true）后才会写入；现在没有改任何东西', pending: p };
+  }
+  let before = null;
+  let after = null;
+  if (p.key === 'clear') {
+    const r = preferences.clear(userId);
+    before = r.before;
+    after = null;
+  } else if (p.key === 'broadcast') {
+    const r = preferences.setGlobal({ broadcastEnabled: !!p.value });
+    if (!r.ok) return { ok: false, code: r.code, error: r.error, rejected: r.rejected };
+    before = r.before;
+    after = r.after;
+  } else {
+    const r = preferences.set(userId, { [p.key]: p.value });
+    if (!r.ok) return { ok: false, code: r.code, error: r.error, rejected: r.rejected };
+    before = r.before;
+    after = r.pref;
+  }
+  const logged = audit.record({
+    actor: userId,
+    kind: 'settings',
+    action: 'confirm',
+    target: { key: p.key, sessionId },
+    before,
+    after,
+    note: p.label
+  });
+  pendingChanges.delete(sessionId);
+  return {
+    ok: true,
+    applied: { key: p.key, value: p.value, label: p.label, changeId: p.changeId },
+    before,
+    after,
+    preferences: preferences.describe(userId),
+    broadcast: preferences.globalSettings(),
+    audit: logged.ok ? logged.entry : null,
+    auditError: logged.ok ? null : logged.error,
+    reply: `已按你的确认写入服务端偏好：${p.label}。`
+  };
+}
+
+function getPreferences(opts = {}) {
+  const userId = opts.userId ? String(opts.userId) : 'local';
+  return {
+    ok: true,
+    version: preferences.PREFS_VERSION,
+    userId,
+    preferences: preferences.describe(userId),
+    broadcast: preferences.globalSettings(),
+    clearable: true
+  };
+}
+
+function clearPreferences(opts = {}) {
+  const userId = opts.userId ? String(opts.userId) : 'local';
+  if (opts.approved !== true) {
+    return { ok: false, code: 'SETTINGS_NOT_APPROVED', error: '清空偏好是设置变更，必须确认（approved=true）后才会执行' };
+  }
+  const r = preferences.clear(userId);
+  const logged = audit.record({
+    actor: userId, kind: 'preferences', action: 'clear',
+    target: { userId }, before: r.before, after: null, note: '清空跨会话偏好'
+  });
+  return {
+    ok: true,
+    removed: r.removed,
+    preferences: null,
+    audit: logged.ok ? logged.entry : null,
+    auditError: logged.ok ? null : logged.error,
+    reply: r.removed ? '已清空服务端跨会话偏好。' : '之前没有保存过偏好，无需清空。'
+  };
+}
+
+// B7：读跨会话偏好（新窗口/新会话仍读服务端用户级存储）
+function replyForPrefs(sessionId, opts = {}) {
+  const userId = opts.userId ? String(opts.userId) : 'local';
+  const p = preferences.describe(userId);
+  if (!p) {
+    return {
+      reply: '还没有保存过跨会话偏好。可以说「把默认通道改成百炼」「把默认分辨率改成 1080p」——'
+        + '我会先给出确认项，你确认后才保存（服务端用户级，换窗口/换浏览器仍在）。',
+      preferences: null
+    };
+  }
+  const lines = ['【小智简报】跨会话偏好（服务端用户级，可清空）：'];
+  if (p.model) lines.push(`· 默认视频通道：${p.modelLabel || p.model}（${p.model}）`);
+  if (p.resolution) lines.push(`· 默认分辨率：${p.resolution}`);
+  if (p.clipDurationSec) lines.push(`· 常用每段时长：${p.clipDurationSec} 秒`);
+  if (p.bgmStyle) lines.push(`· 默认 BGM 风格：${p.bgmStyle}`);
+  if (p.updatedAt) lines.push(`（最近更新：${p.updatedAt}）`);
+  lines.push('要清空就说「清空偏好」（会先请你确认）。前端设置页本轮尚未读取这份偏好（待集成），'
+    + '新的对话窗口里说「用我常用的设置」即可读到。');
+  return { reply: lines.join('\n'), preferences: p };
+}
+
+// ==========================================
+// V2：修复执行（Q20=B：只能用户确认后执行；未确认一律 PAYMENT_NOT_APPROVED 语义）
+// ==========================================
+async function repairTask(opts = {}) {
+  const userId = opts.userId ? String(opts.userId) : 'local';
+  const task = opts.taskId
+    ? taskManager.getTask(String(opts.taskId))
+    : pickTaskForDiagnosis(opts.sessionId);
+  if (!task) {
+    return { ok: false, code: 'REPAIR_NO_TASK', error: '没有可修复的任务（先说哪条任务失败）' };
+  }
+  const d = diagnose.diagnose(task);
+  const wanted = opts.action ? String(opts.action) : null;
+  const act = wanted
+    ? d.suggestions.find((s) => s.action === wanted || s.id === wanted)
+    : d.suggestions.find((s) => s.executable);
+  if (!act) {
+    return { ok: false, code: 'REPAIR_ACTION_UNKNOWN', error: `没有可执行的修复项（${wanted || '默认'}）`, diagnosis: d };
+  }
+  if (ACTIVE_STATUS.has(task.status)) {
+    return { ok: false, code: 'REPAIR_TASK_ACTIVE', error: '任务还在运行中，先等它结束再修', diagnosis: d };
+  }
+  if (opts.approved !== true) {
+    return {
+      ok: false,
+      code: 'PAYMENT_NOT_APPROVED',
+      error: `修复会续跑任务（可能计费），必须你点确认后才会执行：${act.label}`,
+      diagnosis: d,
+      suggestion: act
+    };
+  }
+  if (!act.executable) {
+    return {
+      ok: false,
+      code: 'REPAIR_NOT_EXECUTABLE',
+      error: `「${act.label}」需要到设置页/库页手动处理，聊天里不能代改`,
+      diagnosis: d,
+      suggestion: act
+    };
+  }
+  const before = { status: task.status, failedClips: d.failedClips.length };
+  let res = null;
+  try {
+    res = await pipeline.continueTask(task.taskId, {
+      preset: 'final',
+      ...(opts.runtimeConfig ? { runtimeConfig: opts.runtimeConfig } : {})
+    });
+  } catch (e) {
+    res = { success: false, error: (e && e.message) || String(e) };
+  }
+  if (!res || res.success !== true) {
+    const logged = audit.record({
+      actor: userId, kind: 'repair', action: act.action, target: { taskId: task.taskId },
+      before, after: { error: (res && res.error) || 'unknown' }, note: '修复执行失败'
+    });
+    return {
+      ok: false, code: 'REPAIR_FAILED',
+      error: `修复执行失败：${(res && res.error) || '未知原因'}`,
+      diagnosis: d, audit: logged.ok ? logged.entry : null
+    };
+  }
+  const afterTask = taskManager.getTask(task.taskId);
+  const logged = audit.record({
+    actor: userId, kind: 'repair', action: act.action, target: { taskId: task.taskId },
+    before, after: { status: afterTask ? afterTask.status : 'pending', pendingSteps: (res.pending || []).length },
+    note: act.label
+  });
+  return {
+    ok: true,
+    taskId: task.taskId,
+    action: act.action,
+    diagnosis: d,
+    resume: res.resume || null,
+    pending: res.pending || [],
+    audit: logged.ok ? logged.entry : null,
+    auditError: logged.ok ? null : logged.error,
+    reply: `已按你的确认补跑 ${task.taskId}（复用已成功部分，待跑 ${(res.pending || []).length} 个环节）。`
+  };
+}
+
 
 // ==========================================
 // P7-A：计划内精准修改（换单段场景卡 / 改单段提示词）
@@ -1019,7 +1366,10 @@ function replyForBgm(sessionId, text) {
 //   ② 设置类：通道 / 设置 / 分辨率（V2 的 B6，V1 不处理）。
 function isPlanPromptEditForm(text) {
   const s = String(text || '');
-  if (/(?:不用|不要|关闭|别用|取消)\s*(?:场景卡|配乐|音乐|出图|图片)/.test(s)) return false;
+  // 2026-11-17 V1 遗留 ⑤：关开关句（含「去掉场景卡 / 场景卡不要了」两种语序）不能进 diff。
+  if (memory.isSceneCardsOff(s)) return false;
+  if (/(?:不用|不要|关闭|别用|取消|去掉|删掉)\s*(?:了)?\s*(?:配乐|音乐|出图|图片)/.test(s)) return false;
+  if (/(?:配乐|音乐|出图|图片)\s*(?:不要了?|不用了?|关闭|关掉|取消|去掉|删掉)/.test(s)) return false;
   if (/通道|设置|分辨率|\b1080p\b|\b720p\b|\b4k\b/i.test(s)) return false;
   return !!extractUseThisText(s) || parseDiffs(s).length > 0;
 }
@@ -1038,13 +1388,20 @@ function handleMessage(opts = {}) {
   const intent = memory.classify(text);
   // 2026-11-17 V1（A5/A6）：口语形态兜底（见 isPlanPromptEditForm 的注释）。
   const promptEditForm = isPlanPromptEditForm(text);
+  // 2026-11-17 V1 遗留 ⑤：关场景卡句（「去掉场景卡 / 场景卡不要了」）不是续问，
+  // 不能被 isFollowUp 的「去掉」带进「按上次参数重排一条新计划」；与「不要场景卡」同一路径。
+  const sceneCardsOff = memory.isSceneCardsOff(text);
   const planEditBranch = intent.intent === 'plan_edit'
     || (promptEditForm && (intent.intent === 'unknown' || intent.intent === 'create'));
   const reportedIntent = planEditBranch ? 'plan_edit' : intent.intent;
+  const userId = opts.userId ? String(opts.userId) : 'local';
   let reply;
   let plan = null;
   let missing = null;
   let refs = null;
+  let pendingChange = null;
+  let diagnosis = null;
+  let preferencesView = null;
 
   if (intent.intent === 'greeting') {
     reply = replyForGreeting();
@@ -1061,9 +1418,27 @@ function handleMessage(opts = {}) {
     // 这里**不建任务**：建任务只能走 execute()，而 execute 只由卡片「确认执行」触发。
     reply = replyForConfirm(sessionId);
     plan = memory.lastPlan(sessionId);
+  } else if (intent.intent === 'repair') {
+    // 2026-11-17 V2（B2/B3）：失败诊断 + 修复建议。只读，不自动重跑。
+    const r = replyForRepair(sessionId);
+    reply = r.reply;
+    diagnosis = r.diagnosis;
+  } else if (intent.intent === 'settings') {
+    // 2026-11-17 V2（B6）：设置变更（L3）→ 只返回 pendingChange，确认前什么都不改。
+    const r = replyForSettings(sessionId, text);
+    reply = r.reply;
+    pendingChange = r.pending;
+  } else if (intent.intent === 'prefs') {
+    // 2026-11-17 V2（B7）：读跨会话偏好（服务端用户级，换会话仍在）。
+    const r = replyForPrefs(sessionId, { userId });
+    reply = r.reply;
+    preferencesView = r.preferences;
+  } else if (intent.intent === 'assets') {
+    // 2026-11-17 V2（B5）：素材库存（与 /api/photos 同口径）。
+    reply = replyForAssets(sessionId);
   } else if (intent.intent === 'context') {
-    // 2026-11-17 V1（§9.1-7）：只读环境问答（预算/任务数/Key 有·无）；不改计划、不回传计划。
-    reply = replyForContext(sessionId);
+    // 2026-11-17 V1（§9.1-7）/ V2（B4）：只读环境问答；不改计划、不回传计划。
+    reply = replyForContext(sessionId, { userId });
   } else if (planEditBranch) {
     // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
     // 2026-11-17 V1（A4）：先看是不是「把第 N 段的提示词给我看」这种**纯只读**请求；
@@ -1096,7 +1471,7 @@ function handleMessage(opts = {}) {
     // 用户直觉是「改上次那个」，不该被当成"没说时长"再问一遍（2026-11-16 用户反馈）。
     const slotOnly = parsed.totalMinutes === null && parsed.clipCount === null
       && (parsed.resolution !== null || parsed.clipDurationSec !== null || parsed.model !== null);
-    const follow = last && (isFollowUp(text) || isRepeat(text) || slotOnly);
+    const follow = !sceneCardsOff && last && (isFollowUp(text) || isRepeat(text) || slotOnly);
     if (follow) input = { ...inputFromLast(last, parsed, text), sessionId };
     else {
       input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;
@@ -1135,7 +1510,11 @@ function handleMessage(opts = {}) {
     plan: plan ? briefPlan(plan) : null,
     missing,
     refs,
-    canExecute: !!plan
+    canExecute: !!plan,
+    // 2026-11-17 V2：以下字段只在前端要用时才有值（不影响 V1 既有调用方）。
+    pendingChange,          // B6：设置变更待确认项（changeId + label + requiresConfirm）
+    diagnosis,              // B2：失败诊断（reasons + suggestions）
+    preferences: preferencesView // B7：跨会话偏好摘要
   };
 }
 
@@ -1593,6 +1972,28 @@ module.exports = {
   // 2026-11-17 V1（§9.1-7）：只读环境的进程内入口（V2 扩成 HTTP 端点时直接复用）
   contextOf,
   keyPresence,
+  CONTEXT_KEYS,
+  // 2026-11-17 V2：环境感知 / 诊断 / 偏好 / 审计 / 播报的进程内入口。
+  // server.js 的 HTTP 端点只做参数校验后调用这些函数；verify-assistant 直接进程内断言。
+  assistantContext,
+  assistantBroadcast,
+  assistantDiagnose: diagnose,
+  assistantPreferences: preferences,
+  assistantAudit: audit,
+  replyForContext,
+  replyForStatus,
+  replyForAssets,
+  replyForPrefs,
+  replyForSettings,
+  replyForRepair,
+  parsePreferenceChange,
+  confirmSettingChange,
+  getPreferences,
+  clearPreferences,
+  repairTask,
+  pickTaskForDiagnosis,
+  _clearPendingChanges: () => pendingChanges.clear(),
+  _pendingChangeCount: () => pendingChanges.size,
   _tick: tick,
   _attemptFill: attemptFill,
   _retryRun: retryRun,

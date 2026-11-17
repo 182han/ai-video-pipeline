@@ -58,6 +58,9 @@ process.env.LOG_DIR = DIRS.logs;
 process.env.BUDGET_FILE = DIRS.budget;
 // 2026-11-17 V1（§9.1-4）：场景卡冷却状态也必须隔离到本次临时目录（默认在 data/assistant）。
 process.env.SCENE_CARDS_COOLING_FILE = path.join(TMP, 'scene-card-cooling.json');
+// 2026-11-17 V2：跨会话偏好 / 审计落盘同样隔离（默认在 data/assistant，属运行期数据）。
+process.env.ASSISTANT_PREFS_FILE = path.join(TMP, 'assistant-preferences.json');
+process.env.ASSISTANT_AUDIT_FILE = path.join(TMP, 'assistant-audit.jsonl');
 process.env.DATABASE_TYPE = 'json';
 process.env.BUDGET_USD = '196';
 
@@ -94,6 +97,11 @@ const budget = require('../src/budget');
 const sceneCardLibrary = require('../src/sceneCards');
 const promptComposer = require('../src/promptComposer');
 const audioMixer = require('../src/processors/audioMixer');
+// 2026-11-17 V2：偏好 / 审计 / 播报 / 图片库（直接进程内断言，不起第二实例）
+const assistantPreferences = require('../src/assistant/preferences');
+const assistantAudit = require('../src/assistant/audit');
+const assistantBroadcast = require('../src/assistant/broadcast');
+const photoLibrary = require('../src/photoLibrary');
 
 let pass = 0;
 let fail = 0;
@@ -171,6 +179,84 @@ async function main() {
   console.log('P5 小智（计划卡 / 状态机 / 记忆 / 语音 / 补位 / Mock 全流程）');
   console.log('='.repeat(64));
 
+  // ================= [0] V2 开窗第一组：V1 遗留 ①–⑤ =================
+  // 来源：docs/交接/2026-11-17-V1-验收与V2交接.md §5（Lead 独立验收发现）。
+  // 本组只做小改：冷却隔离 / 预览只读 / Key 口径 / 随机抽卡文案 / 关开关护栏。
+  console.log('\n[0] V1 遗留 ①–⑤：冷却隔离 / 预览只读 / Key 口径 / 随机抽卡文案 / 关开关护栏');
+
+  // ① verify-whaletv-video 必须在 require planCard 之前隔离冷却文件
+  const whaletvSrc = fs.readFileSync(path.join(APP_DIR, 'scripts', 'verify-whaletv-video.js'), 'utf8');
+  const coolingIdx = whaletvSrc.indexOf('SCENE_CARDS_COOLING_FILE');
+  const planCardRequireIdx = whaletvSrc.indexOf("require('../src/assistant/planCard')");
+  ok('① verify-whaletv-video 在 require 计划卡之前隔离 SCENE_CARDS_COOLING_FILE（跑门禁不再写用户真实冷却）',
+    coolingIdx !== -1 && planCardRequireIdx !== -1 && coolingIdx < planCardRequireIdx,
+    `冷却赋值@${coolingIdx} / planCard require@${planCardRequireIdx}`);
+
+  // ② /api/scene-cards/preview 是只读预览：allocate 必须显式 recordCooling:false
+  const serverSrc = fs.readFileSync(path.join(APP_DIR, 'server.js'), 'utf8');
+  const prevStart = serverSrc.indexOf("app.get('/api/scene-cards/preview'");
+  const prevBlock = prevStart === -1 ? '' : serverSrc.slice(prevStart, prevStart + 2000);
+  ok('② /api/scene-cards/preview 的 allocate 显式 recordCooling:false（点一次预览不再消耗冷却窗口）',
+    /sceneCardLibrary\.allocate\(count,\s*\{\s*recordCooling:\s*false\s*\}\)/.test(prevBlock));
+
+  // ③ Key 口径：必须说明是「服务端环境变量」，并提示设置页 Key 小智看不到
+  const keyLegacy = supervisor.handleMessage({ sessionId: 's_v2_legacy_key', text: 'WhaleTV 的 Key 配了吗' });
+  ok('③ Key 问答口径：写明「服务端环境变量」+ 提示设置页 Key 小智看不到（不再只说「无」误导）',
+    keyLegacy.ok === true && keyLegacy.intent === 'context'
+    && /服务端环境变量/.test(keyLegacy.reply)
+    && /设置页/.test(keyLegacy.reply)
+    && /小智看不到/.test(keyLegacy.reply),
+    String(keyLegacy.reply || '').split('\n').slice(-2).join(' | ').slice(0, 120));
+
+  // ④ 随机抽卡文案同步（4 处：planCard / supervisor 问候 / xiaozhiPlan / createSmart）
+  const legacyPlan = planCard.buildPlan({ text: '10 分钟' });
+  ok('④ 计划摘要文案：随机抽取 + 按章节顺序播映（不再写「按章节顺序自动抽取」）',
+    legacyPlan.ok === true
+    && planCard.describe(legacyPlan.plan).some((l) => l.includes('场景：场景卡库随机抽取 60 个不同场景（按章节顺序播映，不重复）')),
+    legacyPlan.ok ? planCard.describe(legacyPlan.plan).find((l) => l.startsWith('场景：')) : legacyPlan.code);
+  const legacyGreet = supervisor.handleMessage({ sessionId: 's_v2_legacy_greet', text: '你好' });
+  ok('④ 问候语文案：随机抽取后按章节顺序播映',
+    legacyGreet.ok === true && legacyGreet.intent === 'greeting'
+    && /随机抽取后按章节顺序播映/.test(legacyGreet.reply)
+    && !/按章节顺序自动抽取/.test(legacyGreet.reply));
+  const xiaozhiPlanSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'components', 'xiaozhiPlan.js'), 'utf8');
+  const createSmartSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'createSmart.js'), 'utf8');
+  // 2026-11-17 V2：i18n 窗口在并发迁移 xiaozhiPlan.js（21:46 起），中文话术已进
+  // web/src/i18n/messages/xiaozhi.js。断言同时接受「文件内字面量」与「i18n zh 文案」，
+  // 但仍要求中文话术本身存在（随机抽取 + 按章节顺序播映），不是永真。
+  const i18nMessagesDir = path.join(APP_DIR, 'web', 'src', 'i18n', 'messages');
+  const i18nZhTexts = (() => {
+    try {
+      return fs.readdirSync(i18nMessagesDir).filter((n) => /\.js$/.test(n))
+        .map((n) => fs.readFileSync(path.join(i18nMessagesDir, n), 'utf8')).join('\n');
+    } catch (e) { return ''; }
+  })();
+  ok('④ 前端两处文案同步（xiaozhiPlan 计划卡 / createSmart 向导；兼容 i18n 键）',
+    (/场景卡库随机抽取/.test(xiaozhiPlanSrc) || /场景卡库随机抽取 \{n\} 个不同场景/.test(i18nZhTexts))
+    && (/按章节顺序播映/.test(xiaozhiPlanSrc) || /按章节顺序播映/.test(i18nZhTexts))
+    && (/场景从卡库随机抽/.test(createSmartSrc) || /场景从卡库随机抽/.test(i18nZhTexts)));
+
+  // ⑤ 关场景卡两种语序（「去掉场景卡」「场景卡不要了」）不许被 diff 正则误接成改提示词
+  const sidOff = 's_v2_legacy_off';
+  const offSeed = supervisor.handleMessage({ sessionId: sidOff, text: 'mock 2段，每段10秒' });
+  const offPlanBefore = assistantMemory.lastPlan(sidOff);
+  const offMsgA = supervisor.handleMessage({ sessionId: sidOff, text: '去掉场景卡' });
+  const offPlanMid = assistantMemory.lastPlan(sidOff);
+  const offMsgB = supervisor.handleMessage({ sessionId: sidOff, text: '场景卡不要了' });
+  const offPlanAfter = assistantMemory.lastPlan(sidOff);
+  ok('⑤ 关场景卡两种语序：不算改提示词（不回「已改第 N 段」）、不写 promptOverrides、不重排计划',
+    offSeed.ok === true && !!offPlanBefore
+    && assistantMemory.isSceneCardsOff('去掉场景卡') === true
+    && assistantMemory.isSceneCardsOff('场景卡不要了') === true
+    && assistantMemory.isSceneCardEdit('去掉场景卡') === false
+    && assistantMemory.isSceneCardEdit('场景卡不要了') === false
+    && !/已改第|已按你的文本替换/.test(String(offMsgA.reply || ''))
+    && !/已改第|已按你的文本替换/.test(String(offMsgB.reply || ''))
+    && JSON.stringify(offPlanMid.promptOverrides || null) === JSON.stringify(offPlanBefore.promptOverrides || null)
+    && JSON.stringify(offPlanAfter.promptOverrides || null) === JSON.stringify(offPlanBefore.promptOverrides || null)
+    && offPlanAfter.planId === offPlanBefore.planId,
+    `A: ${String(offMsgA.reply || '').slice(0, 30)} / B: ${String(offMsgB.reply || '').slice(0, 30)}`);
+
   // ================= [1] 计划卡 =================
   console.log('\n[1] 计划卡：解析 / 上限 / 预算 / 补位上限');
   const p30 = planCard.buildPlan({ text: '来一条 30 分钟的极光视频，每段 10 秒' });
@@ -190,16 +276,16 @@ async function main() {
     pDurOnly.ok && pDurOnly.plan.clipCount === 60 && pDurOnly.plan.theme === null
     && (pDurOnly.plan.warnings || []).length === 0,
     pDurOnly.ok ? `${pDurOnly.plan.clipCount}段` : pDurOnly.code);
-  ok('describe() 按「场景卡库自动抽取」描述、不再有主题行', (() => {
+  ok('describe() 按「场景卡库随机/自动抽取」描述、不再有主题行', (() => {
     if (!pDurOnly.ok) return false;
     const lines = planCard.describe(pDurOnly.plan);
-    return lines.some((l) => l.includes('场景：场景卡库自动抽取 60 个不同场景'))
+    return lines.some((l) => /场景：场景卡库(随机|自动)抽取 60 个不同场景/.test(l))
       && !lines.some((l) => l.startsWith('主题：'));
   })(), pDurOnly.ok ? planCard.describe(pDurOnly.plan).join(' | ') : '');
   const msgDurOnly = supervisor.handleMessage({ sessionId: 's_reply_dur_1', text: '10 分钟' });
   ok('对话回复按总时长排，不出现「我按「某主题」排好了」',
     msgDurOnly.ok && msgDurOnly.plan && /我按 10\.0 分钟排好了/.test(msgDurOnly.reply)
-    && /场景：场景卡库自动抽取 60 个不同场景/.test(msgDurOnly.reply)
+    && /场景：场景卡库(随机|自动)抽取 60 个不同场景/.test(msgDurOnly.reply)
     && !/我按「/.test(msgDurOnly.reply),
     String(msgDurOnly.reply || '').slice(0, 120));
   ok('预算：720p 30 分钟 = ¥1080，重试上限 ¥108（10%），最多 2 次',
@@ -1000,8 +1086,14 @@ async function main() {
     assistantJs.includes('/api/assistant/info') && /backend\.ok/.test(assistantJs));
   ok('语音按钮走 /api/assistant/asr（失败回退打字）',
     planJs.includes('/api/assistant/asr') && /改用打字/.test(planJs));
-  ok('面板显示名改为「小智」（旧的提示词助手标题已替换）',
-    /<span className="text-\[12px\] font-medium text-ink">小智<\/span>/.test(assistantJs));
+  // 2026-11-17 V2：i18n 窗口正在把 assistant.js 的中文标签迁到 web/src/i18n（行内 `tr(...)`）。
+  // 断言同时接受「旧字面量」与「i18n 键」，但仍要求**中文话术本身存在**（zh 消息必须是「小智」/「10 分钟的长视频」），
+  // 不是放宽成永真：键名与 zh 文案任一缺失都会失败。
+  const i18nAssistantSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'i18n', 'messages', 'assistant.js'), 'utf8');
+  ok('面板显示名改为「小智」（旧的提示词助手标题已替换；兼容 i18n 键）',
+    (/assistant\.page\.title/.test(assistantJs) && /assistant\.panel\.title/.test(assistantJs))
+    && /title: '小智'/.test(i18nAssistantSrc)
+    && !/>提示词助手</.test(assistantJs));
   ok('首页气泡只在创作页出现（currentRoute() === \'/\'）',
     /currentRoute\(\) === '\/'/.test(assistantJs));
   ok('shell.js 不再挂载 <Assistant />（2026-11-16 P4：悬浮小助手已下线）',
@@ -1012,9 +1104,12 @@ async function main() {
   ok('确认执行带上运行 Key（readRuntimeConfig + ...runtime）',
     /readRuntimeConfig/.test(assistantJs) && /\.\.\.runtime/.test(assistantJs)
     && /planId: plan\.planId, approved: true, \.\.\.runtime/.test(assistantJs));
-  ok('首页示例改为「时长优先」（不再出现主题式长片示例）',
+  ok('首页示例改为「时长优先」（不再出现主题式长片示例；兼容 i18n 键）',
     // 2026-11-16 用户反馈「30 秒」：chips 前面加了「30 秒（快速试）」，断言改成「包含 10 分钟长片示例」
-    /PAGE_CHIPS = \[[^\]]*'10 分钟的长视频'/.test(assistantJs)
+    // 2026-11-17 V2：i18n 后 chips 变成 tr('assistant.chips.long')，要求 zh 文案仍是「10 分钟的长视频」。
+    (/PAGE_CHIPS = \[[^\]]*'10 分钟的长视频'/.test(assistantJs)
+      || /PAGE_CHIPS = \[[^\]]*assistant\.chips\.long/.test(assistantJs))
+    && /long: '10 分钟的长视频'/.test(i18nAssistantSrc)
     && !/30 分钟的雪山/.test(assistantJs)
     && /场景卡库/.test(assistantJs));
 
@@ -1334,6 +1429,325 @@ async function main() {
   try { sceneCardLibrary.nextSwapCandidate(allIds[0], allIds); } catch (e) { swapExhaust = e; }
   ok('全部正片都用过 → SCENE_CARDS_SWAP_EXHAUSTED（明确报错，不静默复用）',
     !!swapExhaust && swapExhaust.code === 'SCENE_CARDS_SWAP_EXHAUSTED', swapExhaust && swapExhaust.code);
+
+  // ================= [13] 小智 2.0 V2：B1–B8（进程内；不起第二实例）=================
+  console.log('\n[13] 小智 2.0 V2 验收 B1–B8：全局环境 / 诊断播报 / 偏好 L3 / 素材计数 / 播报开关');
+  const taskCountV2 = () => taskManager.getAllTasks().length;
+  const mkTaskV2 = (prompt, opts = {}) => {
+    const t = taskManager.createTask(prompt, {
+      model: 'mock',
+      totalClips: opts.totalClips || 2,
+      clipDuration: 10,
+      ...(opts.extra || {})
+    });
+    createdTasks.push(t.taskId);
+    return t;
+  };
+
+  // ---- B1：现在跑到哪了？ → 全局任务/进度（不只本会话），不建任务 ----
+  const b1Task = mkTaskV2('V2-B1 运行中的任务', { totalClips: 3 });
+  taskManager.updateTaskStatus(b1Task.taskId, 'generating', { currentStep: '片段生成' });
+  taskManager.updateClip(b1Task.taskId, 0, { status: 'success' });
+  const b1Before = taskCountV2();
+  const b1 = supervisor.handleMessage({ sessionId: 's_v2_b1_status', text: '现在跑到哪了？' });
+  ok('B1「现在跑到哪了？」→ status；读全局在跑任务（taskId + 进度），不建任务',
+    b1.ok === true && b1.intent === 'status'
+    && b1.reply.includes(b1Task.taskId)
+    && /成功 1\/3 段（33%）/.test(b1.reply)
+    && taskCountV2() === b1Before,
+    String(b1.reply || '').split('\n').slice(0, 2).join(' | '));
+
+  // ---- B2：这条为什么失败？ → 读任务 + 诊断摘要；不自动重跑 ----
+  const b2Task = mkTaskV2('V2-B2 失败任务', { totalClips: 2 });
+  taskManager.updateClip(b2Task.taskId, 0, { status: 'failed', error: '模型不支持图生视频（i2v）：wan-old' });
+  taskManager.updateTaskStatus(b2Task.taskId, 'failed', { error: '模型不支持图生视频（i2v）：wan-old' });
+  const b2Before = taskCountV2();
+  const b2 = supervisor.handleMessage({ sessionId: 's_v2_b2_diag', text: '这条为什么失败？' });
+  ok('B2「这条为什么失败？」→ repair；含任务 id + 失败原因 + 修复建议；不自动重跑（任务数不变、任务仍 failed）',
+    b2.ok === true && b2.intent === 'repair'
+    && b2.reply.includes(b2Task.taskId)
+    && /图生视频/.test(b2.reply)
+    && /修复选项|建议/.test(b2.reply)
+    && b2.diagnosis && b2.diagnosis.category === 'model'
+    && b2.diagnosis.suggestions.some((s) => s.executable === true)
+    && taskCountV2() === b2Before
+    && taskManager.getTask(b2Task.taskId).status === 'failed',
+    b2.diagnosis ? `${b2.diagnosis.category}/${b2.diagnosis.suggestions.length}条建议` : b2.code);
+
+  // ---- B3：任务失败 → 主动简报 + 修复建议；未点修复不执行，点了才执行（L3）----
+  assistantBroadcast.reset({ primeExisting: true });
+  assistantPreferences.setGlobal({ broadcastEnabled: true, throttleSec: 0 });
+  const b3Task = mkTaskV2('V2-B3 失败播报任务', { totalClips: 2 });
+  taskManager.updateClip(b3Task.taskId, 0, { status: 'failed', error: '余额不足：本次预计 $1.00，剩余 $0.00' });
+  taskManager.updateTaskStatus(b3Task.taskId, 'failed', { error: '余额不足：本次预计 $1.00，剩余 $0.00' });
+  const b3Pushed = [];
+  const b3Unsub = assistantBroadcast.subscribe((p) => b3Pushed.push(p));
+  let b3Scan = null;
+  try { b3Scan = assistantBroadcast.scan(); } catch (e) { b3Scan = { error: e && e.message }; }
+  const b3Item = b3Scan && b3Scan.payload
+    ? b3Scan.payload.items.find((i) => i.taskId === b3Task.taskId)
+    : null;
+  ok('B3 任务失败 → 主动简报（合并一条、管家口吻）；含 taskId + 失败原因 + 修复建议；推送一次',
+    !!b3Scan && b3Scan.delivered === 1 && !!b3Item && b3Item.node === 'task_failed'
+    && /^【小智简报】/.test(b3Scan.payload.text)
+    && /余额不足/.test(b3Scan.payload.text)
+    && /建议：/.test(b3Scan.payload.text)
+    && /未点「修复」不会执行/.test(b3Scan.payload.text)
+    && b3Pushed.length === 1,
+    b3Scan && b3Scan.payload ? b3Scan.payload.text.split('\n')[1] : (b3Scan && b3Scan.error));
+  const b3Scan2 = assistantBroadcast.scan();
+  ok('B3 同一节点只播一次：再次 scan 不重复推送（announced 去重 + 有界 ring）',
+    b3Scan2.delivered === 0 && b3Pushed.length === 1,
+    `delivered=${b3Scan2.delivered} pushed=${b3Pushed.length}`);
+  const origContinue = pipeline.continueTask;
+  let b3ContinueCalls = 0;
+  pipeline.continueTask = async (taskId) => {
+    b3ContinueCalls += 1;
+    return { success: true, taskId, pending: ['clip_generation'], resume: { pending: ['clip_generation'] } };
+  };
+  try {
+    const b3No = await supervisor.repairTask({ taskId: b3Task.taskId, action: 'continue', approved: false });
+    ok('B3 未点修复不执行：approved=false → PAYMENT_NOT_APPROVED，continueTask 调用 0 次，任务仍 failed',
+      b3No.ok === false && b3No.code === 'PAYMENT_NOT_APPROVED'
+      && b3ContinueCalls === 0 && taskManager.getTask(b3Task.taskId).status === 'failed',
+      b3No.code);
+    const b3Yes = await supervisor.repairTask({ taskId: b3Task.taskId, action: 'continue', approved: true, userId: 'local' });
+    ok('B3 点了修复才执行：approved=true → continueTask 调用 1 次 + 审计记录一条 repair',
+      b3Yes.ok === true && b3ContinueCalls === 1
+      && assistantAudit.list({ kind: 'repair' }).length >= 1,
+      b3Yes.ok ? b3Yes.action : b3Yes.code);
+  } finally {
+    pipeline.continueTask = origContinue;
+    b3Unsub();
+  }
+
+  // ---- B4：预算还有多少？ → 与 /api/budget 同源（同一 budget.status()）----
+  const b4Budget = budget.status();
+  const b4Before = taskCountV2();
+  const b4 = supervisor.handleMessage({ sessionId: 's_v2_b4_budget', text: '预算还有多少？' });
+  ok('B4「预算还有多少？」→ context；剩余/已花数字与 /api/budget（budget.status）一致；不建任务',
+    b4.ok === true && b4.intent === 'context'
+    && /^【小智简报】/.test(b4.reply)
+    && b4.reply.includes(`剩余 $${Number(b4Budget.balanceUsd).toFixed(2)}`)
+    && b4.reply.includes(`已花 $${Number(b4Budget.spentUsd).toFixed(2)}`)
+    && taskCountV2() === b4Before,
+    `$${b4Budget.balanceUsd}/$${b4Budget.spentUsd}`);
+
+  // ---- B5：图片库还有多少能用的？ → 与 /api/photos 同口径（文件缺失不计入）----
+  const b5Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
+  const b5FileA = path.join(TMP, 'b5_photo_approved.png');
+  const b5FileB = path.join(TMP, 'b5_photo_pending.png');
+  fs.writeFileSync(b5FileA, b5Png);
+  fs.writeFileSync(b5FileB, b5Png);
+  const b5PhotoA = photoLibrary.ingest({ filePath: b5FileA, taskId: 'v2_b5', index: 0, prompt: 'B5 图片A', model: 'dashscope', status: 'approved' });
+  photoLibrary.markReviewed(b5PhotoA.id, 'approved', 'B5 验收');
+  const b5PhotoB = photoLibrary.ingest({ filePath: b5FileB, taskId: 'v2_b5', index: 1, prompt: 'B5 图片B', model: 'dashscope' });
+  const b5Visible = photoLibrary.listAll().filter((p) => p && p.filePath && fs.existsSync(p.filePath));
+  const b5Totals = photoLibrary.totals(b5Visible);
+  const b5Before = taskCountV2();
+  const b5 = supervisor.handleMessage({ sessionId: 's_v2_b5_assets', text: '图片库还有多少能用的？' });
+  ok('B5「图片库还有多少能用的？」→ assets；可用/总数/三态与 /api/photos 同口径一致；不建任务',
+    b5.ok === true && b5.intent === 'assets'
+    && b5.reply.includes(`可用 ${b5Totals.approved} 张 / 共 ${b5Totals.all}`)
+    && b5.reply.includes(`待审 ${b5Totals.pending}`)
+    && b5.reply.includes(`通过 ${b5Totals.approved}`)
+    && b5.reply.includes(`打回 ${b5Totals.rejected}`)
+    && taskCountV2() === b5Before,
+    `approved=${b5Totals.approved}/all=${b5Totals.all}/pending=${b5Totals.pending}`);
+  ok('B5 图片条目本身创建成功（两张：一通过一待审）',
+    !!b5PhotoA && !!b5PhotoB && b5Totals.approved >= 1 && b5Totals.pending >= 1,
+    `A=${b5PhotoA && b5PhotoA.status} B=${b5PhotoB && b5PhotoB.status}`);
+  ok('V2 新意图不抢 V1 既有分类（改成1080p→unknown / 每段15秒→create / 再来一条→create / 不要场景卡→unknown / 配乐有哪些→bgm / 你选了哪些场景卡→plan_scenes）',
+    assistantMemory.classify('改成 1080p').intent === 'unknown'
+    && assistantMemory.classify('每段 15 秒').intent === 'create'
+    && assistantMemory.classify('再来一条').intent === 'create'
+    && assistantMemory.classify('不要场景卡').intent === 'unknown'
+    && assistantMemory.classify('配乐有哪些').intent === 'bgm'
+    && assistantMemory.classify('你选了哪些场景卡').intent === 'plan_scenes',
+    `${assistantMemory.classify('改成 1080p').intent}/${assistantMemory.classify('配乐有哪些').intent}`);
+
+  // ---- B6：把默认通道改成百炼 → 提示 L3；未确认不改设置 ----
+  supervisor._clearPendingChanges();
+  const b6BeforeTasks = taskCountV2();
+  const b6 = supervisor.handleMessage({ sessionId: 's_v2_b6_settings', text: '把默认通道改成百炼' });
+  ok('B6「把默认通道改成百炼」→ settings；提示这是设置变更（L3）+ 返回 pendingChange；未确认不改设置、不建任务、不建计划',
+    b6.ok === true && b6.intent === 'settings'
+    && /设置变更（L3/.test(b6.reply) && /百炼/.test(b6.reply) && /没有改任何东西/.test(b6.reply)
+    && !!b6.pendingChange && b6.pendingChange.requiresConfirm === true
+    && b6.pendingChange.key === 'model' && b6.pendingChange.value === 'dashscope'
+    && assistantPreferences.get('local') === null
+    && taskCountV2() === b6BeforeTasks && b6.plan === null,
+    b6.pendingChange ? b6.pendingChange.label : b6.reply.slice(0, 60));
+  const b6No = supervisor.confirmSettingChange({
+    sessionId: 's_v2_b6_settings', changeId: b6.pendingChange.changeId, approved: false, userId: 'local'
+  });
+  ok('B6 未确认（approved=false）→ SETTINGS_NOT_APPROVED；偏好仍未写入',
+    b6No.ok === false && b6No.code === 'SETTINGS_NOT_APPROVED'
+    && assistantPreferences.get('local') === null,
+    b6No.code);
+  const b6Yes = supervisor.confirmSettingChange({
+    sessionId: 's_v2_b6_settings', changeId: b6.pendingChange.changeId, approved: true, userId: 'local'
+  });
+  const b6Audit = assistantAudit.list({ kind: 'settings', limit: 5 });
+  ok('B6 确认后才写入服务端偏好（model=dashscope）+ 审计（actor/at/action/before/after）',
+    b6Yes.ok === true && b6Yes.preferences && b6Yes.preferences.model === 'dashscope'
+    && b6Audit.length >= 1 && !!b6Audit[0].at && b6Audit[0].actor === 'local'
+    && JSON.stringify(b6Audit[0]).includes('dashscope'),
+    b6Yes.ok ? b6Yes.applied.label : b6Yes.code);
+
+  // ---- B7：新窗口（新 sessionId）说「用我常用的设置」→ 读到跨会话偏好 ----
+  const b7Prep = supervisor.handleMessage({ sessionId: 's_v2_b7_prep', text: '把默认分辨率改成 1080p' });
+  const b7Conf = supervisor.confirmSettingChange({
+    sessionId: 's_v2_b7_prep', changeId: b7Prep.pendingChange.changeId, approved: true, userId: 'local'
+  });
+  const b7BeforeTasks = taskCountV2();
+  const b7 = supervisor.handleMessage({ sessionId: 's_v2_b7_new_window', text: '用我常用的设置' });
+  ok('B7 新窗口「用我常用的设置」→ prefs；不同 sessionId 仍读到服务端用户级偏好（百炼 + 1080p）；不建任务/计划',
+    b7Conf.ok === true
+    && b7.ok === true && b7.intent === 'prefs'
+    && b7.sessionId !== b7Prep.sessionId
+    && /百炼/.test(b7.reply) && /1080p/.test(b7.reply)
+    && !!b7.preferences && b7.preferences.model === 'dashscope' && b7.preferences.resolution === '1080p'
+    && taskCountV2() === b7BeforeTasks && b7.plan === null,
+    b7.preferences ? `${b7.preferences.model}/${b7.preferences.resolution}` : b7.reply.slice(0, 60));
+  const b7ClearNo = supervisor.clearPreferences({ userId: 'local', approved: false });
+  ok('B7 清空偏好也是 L3：未确认 → SETTINGS_NOT_APPROVED、偏好仍在',
+    b7ClearNo.ok === false && b7ClearNo.code === 'SETTINGS_NOT_APPROVED'
+    && !!assistantPreferences.get('local'),
+    b7ClearNo.code);
+  const b7Clear = supervisor.clearPreferences({ userId: 'local', approved: true });
+  ok('B7 确认后可清空：偏好归 null + 审计记一条 preferences/clear',
+    b7Clear.ok === true && b7Clear.removed === true && assistantPreferences.get('local') === null
+    && assistantAudit.list({ kind: 'preferences' }).length >= 1,
+    b7Clear.ok ? `removed=${b7Clear.removed}` : b7Clear.code);
+
+  // ---- B8：另一个窗口新建任务 → 全局可见 + 关键节点播报一次不重复 + 合并节流 + 设置可关 ----
+  assistantBroadcast.reset({ primeExisting: true });
+  assistantPreferences.setGlobal({ broadcastEnabled: true, throttleSec: 0 });
+  const b8Pushed = [];
+  const b8Unsub = assistantBroadcast.subscribe((p) => b8Pushed.push(p));
+  try {
+    const b8Task = mkTaskV2('V2-B8 另一窗口新建的任务', { totalClips: 2 });
+    const b8Scan1 = assistantBroadcast.scan();
+    const b8Item = b8Scan1.payload ? b8Scan1.payload.items.find((i) => i.taskId === b8Task.taskId) : null;
+    ok('B8 另一窗口新建任务 → 全局可见：播报含该 taskId（新建节点）+ 只推一次',
+      b8Scan1.delivered === 1 && !!b8Item && b8Item.node === 'task_created'
+      && b8Pushed.length === 1,
+      b8Item ? b8Item.node : '未播报');
+    const b8Scan2 = assistantBroadcast.scan();
+    ok('B8 同一关键节点不重复播报（第二次 scan：delivered=0，推送数仍 1）',
+      b8Scan2.delivered === 0 && b8Pushed.length === 1,
+      `delivered=${b8Scan2.delivered}`);
+    taskManager.updateTaskStatus(b8Task.taskId, 'completed');
+    const b8Done = assistantBroadcast.scan();
+    ok('B8 关键节点「完成」也播报（task_completed，含 taskId）',
+      b8Done.delivered === 1
+      && b8Done.payload.items.some((i) => i.taskId === b8Task.taskId && i.node === 'task_completed'),
+      b8Done.delivered ? 'ok' : '未播报');
+
+    // 合并节流：throttleSec>0 时第二次事件被缓冲，到点合并成一条再推
+    assistantBroadcast.reset({ primeExisting: true });
+    assistantPreferences.setGlobal({ broadcastEnabled: true, throttleSec: 60 });
+    const tMergeA = mkTaskV2('B8 合并节流 A');
+    const tNow = Date.now();
+    const mMerge1 = assistantBroadcast.scan(tNow);
+    const tMergeB = mkTaskV2('B8 合并节流 B');
+    const mMerge2 = assistantBroadcast.scan(tNow + 1000);
+    const mMerge3 = assistantBroadcast.scan(tNow + 61000);
+    ok('B8 合并节流：60 秒内不重复推（第二次 delivered=0、进入缓冲），到点合并推一次且含两条',
+      mMerge1.delivered === 1 && mMerge2.delivered === 0 && mMerge2.buffered >= 1
+      && mMerge3.delivered === 1
+      && mMerge3.payload.items.some((i) => i.taskId === tMergeB.taskId)
+      && Array.isArray(mMerge3.payload.items) && mMerge3.payload.items.length >= 1,
+      `1:${mMerge1.delivered}/2:${mMerge2.delivered}(buffered ${mMerge2.buffered})/3:${mMerge3.delivered}`);
+
+    // 设置可关：关闭后不推送（仍登记），重新打开不补播
+    assistantBroadcast.reset({ primeExisting: true });
+    assistantPreferences.setGlobal({ broadcastEnabled: false, throttleSec: 0 });
+    const tOff = mkTaskV2('B8 关闭播报期间的新任务');
+    const mOff = assistantBroadcast.scan();
+    assistantPreferences.setGlobal({ broadcastEnabled: true, throttleSec: 0 });
+    const mOn = assistantBroadcast.scan();
+    ok('B8 设置可关：关闭后关键节点不推送（disabled=true），重新打开后不补播关闭期间事件',
+      mOff.delivered === 0 && mOff.disabled === true
+      && mOn.delivered === 0,
+      `off delivered=${mOff.delivered} disabled=${mOff.disabled}; on delivered=${mOn.delivered}`);
+    ok('B8 播报状态可查询（有界 ring/announced/buffer 计数）',
+      (() => {
+        const st = assistantBroadcast.status();
+        return st && st.ring >= 0 && st.announced >= 0 && st.buffered >= 0
+          && st.ring <= assistantBroadcast.RING_CAP && st.buffered <= assistantBroadcast.BUFFER_CAP;
+      })(), JSON.stringify(assistantBroadcast.status()));
+  } finally {
+    b8Unsub();
+    assistantPreferences.setGlobal({ broadcastEnabled: true, throttleSec: 30 });
+  }
+
+  // ---- V2 context A–E：完整、只读、脱敏（Key 只 label/present；无 env 原值/绝对路径）----
+  const logFixture = path.join(DIRS.logs, 'server-2026-11-17.log');
+  fs.writeFileSync(logFixture, '[2026-11-17T10:00:00.000Z] [ERROR] fetch failed: Authorization: Bearer sk-live-secret-1234567890\n');
+  const ctxV2 = supervisor.contextOf('s_v2_b4_budget', { userId: 'local', page: '/app/assistant' });
+  const ctxV2Json = JSON.stringify(ctxV2);
+  const ctxLeak = Object.entries(process.env)
+    .filter(([, v]) => typeof v === 'string' && v.trim().length >= 16)
+    .filter(([, v]) => ctxV2Json.includes(v.trim()))
+    .map(([k]) => k);
+  ok('V2 context A–E 字段齐全：ui/tasks(active+failedRecent)/budget/assets/settings/server/recentErrors；Key 仅 {label,present}',
+    !!ctxV2 && !!ctxV2.version && ctxV2.version === 'assistant-context.v2'
+    && !!ctxV2.ui && ctxV2.ui.page === '/app/assistant'
+    && Array.isArray(ctxV2.tasks.active) && Array.isArray(ctxV2.tasks.failedRecent)
+    && !!ctxV2.budget && !!ctxV2.assets && !!ctxV2.assets.photos
+    && !!ctxV2.assets.library && !!ctxV2.assets.sceneCards && !!ctxV2.assets.bgm
+    && Array.isArray(ctxV2.settings.keys)
+    && ctxV2.settings.keys.every((k) => Object.keys(k).join(',') === 'label,present')
+    && !!ctxV2.settings.models && Array.isArray(ctxV2.settings.models.i2v.supported)
+    && !!ctxV2.server && !!ctxV2.server.pid
+    && Array.isArray(ctxV2.recentErrors),
+    `tasks=${ctxV2.tasks.total} keys=${ctxV2.settings.keys.length} errors=${ctxV2.recentErrors.length}`);
+  ok('V2 context 脱敏：日志里的 Bearer/sk- 已打码（原值不出现）；无环境变量原值 / 无上下文资产文件路径回显',
+    ctxV2.recentErrors.length >= 1
+    && /sk-\*\*\*/.test(ctxV2.recentErrors[0].text)
+    && !ctxV2Json.includes('sk-live-secret-1234567890')
+    && ctxLeak.length === 0
+    // 注意：任务失败原因（V1 流水线）本身可能带绝对路径，这是既有事实、不属于 context 的泄露面；
+    // 这里断言 context **自己产出**的数据不含文件路径（素材只有计数、日志摘要已脱敏、不出现本次临时目录名）。
+    && !/"filePath"/.test(ctxV2Json)
+    && !ctxV2Json.includes(path.basename(TMP)),
+    ctxLeak.length ? `泄露 env: ${ctxLeak.join(',')}` : `ok tmp=${path.basename(TMP)}`);
+  ok('V2 context 只读：调用前后任务数不变、没有新增任务',
+    (() => {
+      const before = taskCountV2();
+      supervisor.contextOf('s_v2_b4_budget');
+      return taskCountV2() === before;
+    })());
+
+  // ---- V2 端点契约（静态断言；真实 HTTP e2e 待用户重启后由 Lead/用户验）----
+  const serverSrcV2 = fs.readFileSync(path.join(APP_DIR, 'server.js'), 'utf8');
+  const ctxRouteStart = serverSrcV2.indexOf("app.get('/api/assistant/context'");
+  const ctxRouteBlock = ctxRouteStart === -1 ? '' : serverSrcV2.slice(ctxRouteStart, ctxRouteStart + 1200);
+  ok('V2 端点静态契约：6 个新端点已注册（context/preferences×3/audit/settings/confirm/repair）',
+    ["app.get('/api/assistant/context'", "app.get('/api/assistant/preferences'",
+      "app.post('/api/assistant/preferences'", "app.post('/api/assistant/preferences/clear'",
+      "app.get('/api/assistant/audit'", "app.post('/api/assistant/settings/confirm'",
+      "app.post('/api/assistant/repair'"].every((s) => serverSrcV2.includes(s)));
+  ok('V2 端点静态契约：context GET 只读（只调 contextOf，不 createTask/startTask/pipeline）',
+    ctxRouteBlock.includes('assistantSupervisor.contextOf')
+    && !/createTask|startTask|pipeline\./.test(ctxRouteBlock));
+  ok('V2 端点静态契约：三个改动型端点都强制 approved=true（未确认不产生副作用）',
+    /app\.post\('\/api\/assistant\/preferences'[\s\S]{0,800}?body\.approved !== true/.test(serverSrcV2)
+    && /app\.post\('\/api\/assistant\/settings\/confirm'[\s\S]{0,1200}?approved: body\.approved === true/.test(serverSrcV2)
+    && /app\.post\('\/api\/assistant\/repair'[\s\S]{0,1200}?approved: body\.approved === true/.test(serverSrcV2));
+  ok('V2 WS 播报出口存在（wsManager.broadcastAssistant，服务端只读扫描后推送；前端客户端待集成）',
+    /broadcastAssistant\(payload\)/.test(fs.readFileSync(path.join(APP_DIR, 'src', 'wsManager.js'), 'utf8')));
+  const auditLines = fs.readFileSync(path.join(TMP, 'assistant-audit.jsonl'), 'utf8').split(/\r?\n/).filter((l) => l.trim());
+  ok('审计 append-only JSONL：每条可解析、含 actor/at/kind/action；无 Key 原值；条数与 list() 一致',
+    auditLines.length >= 3
+    && auditLines.every((l) => {
+      try { const o = JSON.parse(l); return !!(o.at && o.actor && o.kind && typeof o.action === 'string'); } catch (e) { return false; }
+    })
+    && !auditLines.join('\n').includes('sk-live-secret')
+    && assistantAudit.count() === auditLines.length,
+    `${auditLines.length} 条`);
 
   console.log('\n[清理] 测试任务 / 临时产物');
   const cleaned = await cleanupAll();

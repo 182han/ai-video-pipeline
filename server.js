@@ -80,6 +80,11 @@ const assistantSupervisor = require('./src/assistant/supervisor');
 const assistantPlanCard = require('./src/assistant/planCard');
 const assistantAsr = require('./src/assistant/asr');
 const assistantMemory = require('./src/assistant/memory');
+// 2026-11-17 V2（半自主任务管家）：只读环境上下文 / 偏好 / 审计 / 全局任务播报。
+// 这些模块都只做进程内读写；新端点一律只读或要求 approved:true（L3）。
+const assistantBroadcast = require('./src/assistant/broadcast');
+const assistantPreferences = require('./src/assistant/preferences');
+const assistantAudit = require('./src/assistant/audit');
 
 const app = express();
 const server = http.createServer(app);
@@ -114,6 +119,30 @@ const SERVER_FILE_MTIME = (() => {
 // 第二个参数是「握手鉴权」：没有有效会话 cookie 就直接拒绝握手。
 // 不传（或 AUTH_ENABLED=false）时行为与改造前完全一致。
 wsManager.init(server, auth.isEnabled() ? { authorize: (req) => auth.authorizeRequest(req) } : null);
+
+// ===== 小智 2.0 V2：全局任务播报（Q23=B）=====
+// 只读扫描 taskManager 的关键节点（新建/开始/失败/完成），合并节流后推给所有登录客户端。
+// 三条约束：
+//   · 不建任务、不改任务、不调模型；诊断只读 diagnose；
+//   · 服务启动后第一拍只登记已有任务、不补播历史（避免重启刷屏）；
+//   · 前端 WS 客户端在 i18n 提交后再接（本轮未集成 → 交付标「未验证/待集成」）。
+assistantBroadcast.subscribe((payload) => {
+  try { wsManager.broadcastAssistant(payload); } catch (e) { /* 推送失败不影响服务 */ }
+});
+let assistantBroadcastPrimed = false;
+const assistantBroadcastTimer = setInterval(() => {
+  try {
+    if (!assistantBroadcastPrimed) {
+      assistantBroadcast.reset({ primeExisting: true });
+      assistantBroadcastPrimed = true;
+      return;
+    }
+    assistantBroadcast.scan();
+  } catch (e) {
+    console.error('[assistant] 任务播报扫描失败:', e && e.message);
+  }
+}, 5000);
+if (assistantBroadcastTimer && typeof assistantBroadcastTimer.unref === 'function') assistantBroadcastTimer.unref();
 
 // ===== 登录墙 =====
 //
@@ -2153,7 +2182,10 @@ app.get('/api/assistant/info', (req, res) => {
     endpoints: [
       '/api/assistant/info', '/api/assistant/message', '/api/assistant/execute',
       '/api/assistant/state', '/api/assistant/memory', '/api/assistant/understand',
-      '/api/assistant/asr'
+      '/api/assistant/asr',
+      // 2026-11-17 V2（只读或显式 approved:true）
+      '/api/assistant/context', '/api/assistant/preferences', '/api/assistant/preferences/clear',
+      '/api/assistant/audit', '/api/assistant/settings/confirm', '/api/assistant/repair'
     ]
   });
 });
@@ -2165,7 +2197,9 @@ app.post('/api/assistant/message', (req, res) => {
   try {
     const out = assistantSupervisor.handleMessage({
       sessionId: body.sessionId ? String(body.sessionId) : undefined,
-      text
+      text,
+      // 2026-11-17 V2：跨会话偏好按登录用户隔离；无登录墙/验收环境为 'local'。
+      userId: (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local'
     });
     res.json(out);
   } catch (e) {
@@ -2284,6 +2318,150 @@ app.get('/api/assistant/memory', (req, res) => {
     });
   } catch (e) {
     res.json({ ok: false, code: 'ASSISTANT_ERROR', error: e.message });
+  }
+});
+
+// ==========================================
+// 2026-11-17 小智 2.0 V2：只读环境上下文 / 跨会话偏好 / 审计 / 修复 / 设置确认
+// ------------------------------------------------------------
+// 共同契约（与 supervisor / verify-assistant 一致）：
+//   · GET 一律只读：不建任务、不写文件、不调模型；
+//   · 任何会改状态或可能花钱的动作（偏好写入、修复执行、设置变更确认）**必须显式 approved:true**，
+//     否则返回 SETTINGS_NOT_APPROVED / PAYMENT_NOT_APPROVED，且不产生任何副作用；
+//   · Key 只报有/无；审计经 redact 脱敏，Key 值不落盘、不回显；
+//   · 登录中间件已在这些路由之前（AUTH_PUBLIC_API 未放行它们）。
+// ==========================================
+function assistantRequestUserId(req) {
+  return (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local';
+}
+
+// 只读环境上下文 A–E（B1/B2/B4/B5 的数据源；前端页面由 ?page= 上报）
+app.get('/api/assistant/context', (req, res) => {
+  try {
+    const ctx = assistantSupervisor.contextOf(
+      req.query.sessionId ? String(req.query.sessionId) : null,
+      {
+        page: req.query.page ? String(req.query.page) : null,
+        userId: assistantRequestUserId(req),
+        // 版本探针只读，不含 Key/路径清单
+        server: { startedAt: SERVER_STARTED_AT, serverMtime: SERVER_FILE_MTIME, pid: process.pid }
+      }
+    );
+    res.json({ ok: true, ...ctx });
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_CONTEXT_ERROR', error: '读取环境失败：' + (e && e.message ? e.message : String(e)) });
+  }
+});
+
+// 读跨会话偏好（只读）
+app.get('/api/assistant/preferences', (req, res) => {
+  try {
+    res.json(assistantSupervisor.getPreferences({ userId: assistantRequestUserId(req) }));
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e) });
+  }
+});
+
+// 写跨会话偏好（L3：必须 approved:true）
+app.post('/api/assistant/preferences', (req, res) => {
+  const body = req.body || {};
+  if (body.approved !== true) {
+    return res.json({
+      ok: false,
+      code: 'SETTINGS_NOT_APPROVED',
+      error: '偏好写入是设置变更（L3），需要明确确认（approved=true）；现在没有改任何东西'
+    });
+  }
+  const userId = assistantRequestUserId(req);
+  const patch = (body.patch && typeof body.patch === 'object')
+    ? body.patch
+    : {
+      model: body.model,
+      resolution: body.resolution,
+      clipDurationSec: body.clipDurationSec,
+      bgmStyle: body.bgmStyle
+    };
+  const r = assistantPreferences.set(userId, patch);
+  if (!r.ok) {
+    return res.json({ ok: false, code: r.code || 'PREFS_WRITE_FAILED', error: r.error, rejected: r.rejected || [] });
+  }
+  const logged = assistantAudit.record({
+    actor: userId,
+    kind: 'preferences',
+    action: 'set',
+    target: { userId },
+    before: r.before,
+    after: r.pref,
+    note: 'HTTP 写入跨会话偏好'
+  });
+  res.json({
+    ok: true,
+    preferences: assistantPreferences.describe(userId),
+    broadcast: assistantPreferences.globalSettings(),
+    accepted: r.accepted,
+    rejected: r.rejected,
+    audit: logged.ok ? logged.entry : null,
+    auditError: logged.ok ? null : logged.error
+  });
+});
+
+// 清空跨会话偏好（L3：必须 approved:true）
+app.post('/api/assistant/preferences/clear', (req, res) => {
+  const body = req.body || {};
+  try {
+    res.json(assistantSupervisor.clearPreferences({
+      userId: assistantRequestUserId(req),
+      approved: body.approved === true
+    }));
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e) });
+  }
+});
+
+// 审计记录（只读；append-only JSONL，已脱敏）
+app.get('/api/assistant/audit', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      entries: assistantAudit.list({ limit: Number(req.query.limit) || 50, kind: req.query.kind ? String(req.query.kind) : null }),
+      total: assistantAudit.count()
+    });
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_AUDIT_ERROR', error: (e && e.message) || String(e) });
+  }
+});
+
+// 确认对话里给出的设置变更（B6：pendingChange → confirmed；未确认不改）
+app.post('/api/assistant/settings/confirm', (req, res) => {
+  const body = req.body || {};
+  try {
+    res.json(assistantSupervisor.confirmSettingChange({
+      sessionId: body.sessionId ? String(body.sessionId) : '',
+      changeId: body.changeId ? String(body.changeId) : null,
+      approved: body.approved === true,
+      userId: assistantRequestUserId(req)
+    }));
+  } catch (e) {
+    res.json({ ok: false, code: 'ASSISTANT_SETTINGS_ERROR', error: (e && e.message) || String(e) });
+  }
+});
+
+// 执行失败修复（Q20=B：必须 approved:true；未确认 → PAYMENT_NOT_APPROVED，不重跑）
+app.post('/api/assistant/repair', async (req, res) => {
+  const body = req.body || {};
+  try {
+    const out = await assistantSupervisor.repairTask({
+      taskId: body.taskId ? String(body.taskId) : null,
+      action: body.action ? String(body.action) : null,
+      sessionId: body.sessionId ? String(body.sessionId) : null,
+      approved: body.approved === true,
+      userId: assistantRequestUserId(req),
+      runtimeConfig: (body.runtimeConfig && typeof body.runtimeConfig === 'object') ? body.runtimeConfig : null
+    });
+    res.json(out);
+  } catch (e) {
+    console.error('[assistant] repair 失败:', e && e.message);
+    res.json({ ok: false, code: 'ASSISTANT_REPAIR_ERROR', error: '修复执行失败：' + (e && e.message ? e.message : String(e)) });
   }
 });
 
@@ -2725,7 +2903,10 @@ app.get('/api/scene-cards/preview', (req, res) => {
   const count = Math.max(1, Math.min(180, parseInt(req.query.count, 10) || 10));
   try {
     const promptComposer = require('./src/promptComposer');
-    const plan = sceneCardLibrary.allocate(count);
+    // 2026-11-17 V1 遗留 ②：本接口注释写着「只读、不持久化」，但 allocate() 默认
+    // recordCooling=true，点一次「看场景卡」就消耗一次最近 3 个计划的冷却窗口。
+    // 预览不是真实排计划，必须显式关闭冷却写入。
+    const plan = sceneCardLibrary.allocate(count, { recordCooling: false });
     const cards = plan.used.map((entry, i) => {
       const card = sceneCardLibrary.getCardById(entry.id);
       if (!card) {

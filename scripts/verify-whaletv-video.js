@@ -20,6 +20,19 @@
 // ============================================================
 'use strict';
 
+// 2026-11-17 V1 遗留 ①：本套件用 planCard.buildPlan 构造计划（→ sceneCards.allocate()），
+// 而 allocate 默认 recordCooling=true，会写「最近 3 个计划」的场景卡冷却状态。
+// 不隔离就会消耗用户真实冷却（Lead 复跑实证：18:18:46 写入 3 个计划 × 30 张）。
+// 必须在 require planCard 之前重定向到系统临时目录，退出时清理。
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const COOLING_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-whaletv-cooling-'));
+process.env.SCENE_CARDS_COOLING_FILE = path.join(COOLING_TMP, 'scene-card-cooling.json');
+process.on('exit', () => {
+  try { fs.rmSync(COOLING_TMP, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+});
+
 const ASSERT = true;
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {

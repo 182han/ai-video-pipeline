@@ -112,6 +112,30 @@ class WebSocketManager {
     }
   }
 
+  // ==========================================
+  // 2026-11-17 V2：小智任务播报（全局，不依赖任务订阅）
+  // ------------------------------------------------------------
+  // 与 broadcastProgress 不同：播报是「全局关键节点」，任何已登录客户端都该收到；
+  // 因此不查 taskSubscriptions，直接推给全部 OPEN 连接。
+  // 前端 WS 客户端在 i18n 提交后接入（本轮未集成，属未验证路径）。
+  // ==========================================
+  broadcastAssistant(payload) {
+    if (!payload || typeof payload !== 'object') return 0;
+    let message;
+    try {
+      message = JSON.stringify({ ...payload, type: payload.type || 'assistantBroadcast' });
+    } catch (e) {
+      return 0;
+    }
+    let count = 0;
+    for (const ws of this.clients.values()) {
+      if (ws && ws.readyState === 1) { // OPEN
+        try { ws.send(message); count += 1; } catch (e) { /* 单个客户端失败不影响其它人 */ }
+      }
+    }
+    return count;
+  }
+
   // 推送任务进度更新
   broadcastProgress(taskId, progress) {
     const subscribers = this.taskSubscriptions.get(taskId);

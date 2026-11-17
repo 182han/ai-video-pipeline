@@ -262,7 +262,16 @@ const RE_SCENE_NOUN = /场景/;
 // 「不太满意 / 不满意 / 满意吗」都算，但单独一个「满意」不算（那是夸，不是要改）。
 const RE_SCENE_ACTION = /不太?满意|满意吗|满意不|不想要|换|改|重抽|重新抽/;
 const RE_RESOLUTION_WORD = /\d{3,4}\s*p\b|1080p|720p|480p|4k|2160p|分辨率/i;
-const RE_SCENE_CARDS_OFF = /(?:不用|不要|关闭|别用|取消)\s*场景卡/;
+// 2026-11-17 V1 遗留 ⑤：关场景卡的语序补全。
+// 原来只认动词在前（不要/不用/关闭/别用/取消 + 场景卡），用户真实语序还有两种：
+//   · 「去掉场景卡」（去掉/删掉 + 场景卡）——旧实现漏掉，会被 supervisor 的 diff 正则
+//     当成「删除提示词内容」，回一句「已改第 N 段」；
+//   · 「场景卡不要了」（场景卡 + 不要了/不用了/关掉/去掉）——宾语前置。
+const RE_SCENE_CARDS_OFF = /(?:(?:不用|不要|关闭|别用|取消|去掉|删掉)\s*(?:了)?\s*场景卡|场景卡\s*(?:不要了?|不用了?|关闭|关掉|取消|去掉|删掉))/;
+
+function isSceneCardsOff(text) {
+  return RE_SCENE_CARDS_OFF.test(String(text || ''));
+}
 
 function isSceneCardEdit(text) {
   const s = String(text || '');
@@ -271,7 +280,7 @@ function isSceneCardEdit(text) {
   if (RE_TIME_WORD.test(s)) return false;
   if (RE_BGM_NOUN.test(s)) return false;
   if (RE_RESOLUTION_WORD.test(s)) return false;
-  if (RE_SCENE_CARDS_OFF.test(s)) return false;
+  if (isSceneCardsOff(s)) return false;
   return true;
 }
 
@@ -302,6 +311,36 @@ function isContextQuery(text) {
   return RE_CTX_KEY.test(s) && RE_CTX_KEY_ASK.test(s);
 }
 
+// ==========================================
+// 2026-11-17 小智 2.0 V2（设计文档 §8.3 B1–B8）：
+//   ④ repair   —— 失败诊断（B2）：「这条为什么失败？」「怎么修」「补跑」
+//   ⑤ settings —— 设置变更（B6）：「把默认通道改成百炼」「把任务播报关掉」「清空偏好」
+//   ⑥ prefs    —— 读跨会话偏好（B7）：「用我常用的设置」
+//   ⑦ assets   —— 素材库存（B5）：「图片库还有多少能用的？」
+// 放在 V1 的 plan_edit / bgm 之后、context / create 之前：只认显式词，
+// 不能抢「改成 1080p」（V1 断言仍是 unknown）、「配乐有哪些」（bgm）、「你选了哪些场景卡」（plan_scenes）。
+// ==========================================
+const RE_REPAIR = /(?:为什么|为何|怎么|咋)\s*(?:会)?\s*(?:失败|没成|没成功|没出片|挂了)|失败\s*(?:原因|了|怎么办)|诊断|(?:怎么|如何|帮我)\s*(?:修|修复|解决)|修复建议|一键修复|补跑|重跑/;
+const RE_SETTINGS_CHANGE = /(?:默认|全局)\s*(?:通道|模型|分辨率|配乐风格)|(?:通道|模型|分辨率|设置)\s*(?:改成|改为|换成|设成|设为)|任务播报|播报\s*(?:关掉|关闭|打开|开启|恢复|开|停)|清空\s*(?:我的)?\s*(?:跨会话)?\s*(?:偏好|常用设置|常用偏好)|清除\s*(?:偏好|常用设置)/i;
+const RE_PREFS = /用我常用的设置|用我常用的|我常用的设置|常用设置是什么|我的(?:跨会话)?偏好|偏好是什么|跨会话偏好|上次的设置/;
+const RE_ASSETS = /图片库|图片库存|素材(?:库)?\s*(?:还有|剩|有多少)|能用的图片|多少张(?:能用的)?图|成片库|片段库|场景卡\s*(?:还有|剩|库存)/;
+
+function isRepairQuery(text) {
+  return RE_REPAIR.test(String(text || ''));
+}
+
+function isSettingsChange(text) {
+  return RE_SETTINGS_CHANGE.test(String(text || ''));
+}
+
+function isPrefsQuery(text) {
+  return RE_PREFS.test(String(text || ''));
+}
+
+function isAssetsQuery(text) {
+  return RE_ASSETS.test(String(text || ''));
+}
+
 function classify(text) {
   const s = String(text || '').trim();
   if (!s) return { intent: 'unknown', reason: 'empty' };
@@ -325,6 +364,12 @@ function classify(text) {
   if ((RE_BGM_NOUN.test(s) && RE_BGM_ACTION.test(s))
     || (RE_BGM_INDEX.test(s) && !RE_TIME_WORD.test(s))
     || (RE_BGM_SWAP.test(s) && !RE_CREATE.test(s))) return { intent: 'bgm' };
+  // 2026-11-17 V2（B2/B6/B7/B5）：新增四个显式意图，排在 context/create 之前。
+  // 判定都要求显式词，不能抢 V1 既有分类（见上方注释与 verify-assistant 的负向断言）。
+  if (isRepairQuery(s)) return { intent: 'repair' };
+  if (isSettingsChange(s)) return { intent: 'settings' };
+  if (isPrefsQuery(s)) return { intent: 'prefs' };
+  if (isAssetsQuery(s)) return { intent: 'assets' };
   // 2026-11-17 V1（§9.1-7）：只读环境问答。放在 bgm 之后、create 之前——
   // 「配乐有哪些」这类句子里没有预算/任务/Key 名词，不会被抢。
   if (isContextQuery(s)) return { intent: 'context' };
@@ -471,8 +516,13 @@ module.exports = {
   classify,
   isBatchSceneEdit,
   isSceneCardEdit,
+  isSceneCardsOff,
   isConfirmRequest,
   isContextQuery,
+  isRepairQuery,
+  isSettingsChange,
+  isPrefsQuery,
+  isAssetsQuery,
   retrieveTasks,
   taskRef,
   formatWhen

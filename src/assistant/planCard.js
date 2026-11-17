@@ -570,7 +570,7 @@ function describe(plan) {
   if (plan.themeLabel) lines.push(`主题：${plan.themeLabel}`);
   lines.push(`模型：${plan.modelLabel} · ${plan.resolution}`);
   lines.push(plan.sceneCards
-    ? `场景：场景卡库自动抽取 ${plan.clipCount} 个不同场景（按章节顺序，不重复）`
+    ? `场景：场景卡库随机抽取 ${plan.clipCount} 个不同场景（按章节顺序播映，不重复）`
     : '场景：自由提示词（已关闭场景卡）');
   if (plan.estimate) {
     if (plan.estimate.totalCny > 0) {
