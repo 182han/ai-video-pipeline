@@ -380,6 +380,12 @@ const SUITES = [
     desc: '小智前端出图开关（默认开/单价来自 info/请求体 imagePerClip 与图片字段）+ 审图暂停卡片与继续按钮（静态 + 3001 只读）'
   },
   {
+    name: 'assistant-frontend',
+    script: 'verify-assistant-frontend.js',
+    group: 'fast',
+    desc: '小智 V2 前端集成（任务播报 WS/eventId 去重/退避重连/卸载关闭、context 页面上报、偏好清空与一键修复/设置确认的 approved 门；静态 + 纯函数 + 桩 WS，零计费）'
+  },
+  {
     name: 'image-first-http',
     script: 'verify-image-first-http.js',
     group: 'real',

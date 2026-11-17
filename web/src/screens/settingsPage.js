@@ -13,6 +13,8 @@
 // ============================================================
 import { t, tp } from '../i18n/index.js';
 import { LangSwitch } from '../components/langSwitch.js';
+// 小智 2.0 V2：服务端跨会话偏好（只读展示 + 二次确认后清空）。
+import { AssistantPreferencesSection } from '../components/assistantPreferences.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -278,6 +280,11 @@ export function SettingsView() {
           </label>
           <span className="text-[11px] text-ink3">${t('settings.general.colorMatchHint')}</span>
         </div>
+      </div>
+
+      <div className=${sec}>
+        <b className="block text-[12.5px] font-medium text-ink mb-2">${t('settings.xiaozhi.title')}</b>
+        <${AssistantPreferencesSection} />
       </div>
 
       <div className=${sec}>

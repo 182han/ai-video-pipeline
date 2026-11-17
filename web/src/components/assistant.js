@@ -15,12 +15,26 @@ import { navigate, currentRoute } from '../router.js';
 import { createOrb } from './assistantOrb.js';
 import { PlanCard, StateStrip, GreetingBubble, VoiceButton, ImageReviewCard } from './xiaozhiPlan.js';
 import { t as tr } from '../i18n/index.js';
+// 小智 2.0 V2 前端集成（2026-11-17）：
+//   · assistantBroadcast：任务播报 WS 客户端（eventId 去重 / 退避重连 / 卸载关闭）；
+//   · assistantContext：GET /api/assistant/context 只读环境小卡片（页面上报 + Key 只报有/无）；
+//   · assistantRepair：失败诊断「一键修复」与 B6「设置变更确认」（确认门都在组件内）。
+import { connectAssistantBroadcast } from './assistantBroadcast.js';
+import { AssistantContextCard, fetchAssistantContext, contextPageParam } from './assistantContext.js';
+import { RepairCard, PendingChangeCard, executableRepairs } from './assistantRepair.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
 
 const POS_KEY = 'vs_assistant_pos';
+
+// V2 任务播报是「系统消息」：与普通回复区分（香槟金描边），沿用既有 xz-bubble，
+// 只加内联样式——web/styles 的 CSS 是离线生成的，本次不动样式表。
+const SYSTEM_BUBBLE_STYLE = {
+  border: '1px solid rgba(214,179,106,.30)',
+  background: 'rgba(214,179,106,.07)'
+};
 
 // 逐段出图开关（2026-11-16 20:4x 用户决定）：**默认关闭**，用户可在计划卡手动打开。
 // localStorage：'1' = 开；'0' 或缺失 = 关（缺失=关，避免一提交就先把图片钱花掉）。
@@ -178,6 +192,18 @@ export function Assistant({ page = false } = {}) {
     try { return localStorage.getItem('vs_xiaozhi_greet_dismissed') !== '1'; } catch (e) { return true; }
   });
 
+  // ===== 小智 2.0 V2：播报 / 环境上下文 / 修复与设置确认 =====
+  //   · ctx：GET /api/assistant/context 的只读环境（A–E），页面路径由 location 上报；
+  //   · diagnosis：/api/assistant/message 返回的失败诊断（B2），有 executable continue 才出按钮；
+  //   · pendingChange：B6 设置变更待确认项（changeId + label，10 分钟 TTL）；
+  //   · refreshContextRef：对话后/播报后刷新环境卡片（不建任务、不触发付费）。
+  const [ctx, setCtx] = useState(null);
+  const [ctxLoading, setCtxLoading] = useState(false);
+  const [ctxError, setCtxError] = useState('');
+  const [diagnosis, setDiagnosis] = useState(null);
+  const [pendingChange, setPendingChange] = useState(null);
+  const refreshContextRef = useRef(null);
+
   // 出图运行态（2026-11-16 契约 §3.1/§3.2）：
   //   · 5 个图片字段与 Key 走 store.readRuntimeConfig()（只读 localStorage，不打印、不上报）；
   //   · 单价**只信** GET /api/assistant/info 的 image.unitCny，拿不到就是 null → 计划卡写「单价未知」，
@@ -202,6 +228,59 @@ export function Assistant({ page = false } = {}) {
       .catch(() => { if (alive) setBackend({ checked: true, ok: false, info: null }); });
     return () => { alive = false; };
   }, []);
+
+  // ===== V2：只读环境上下文（A–E）=====
+  // 打开页面 / 路由变化（popstate）/ 对话后 / 播报后各刷一次；只读，不建任务、不触发付费。
+  // 上报页面 = location.pathname + location.search（含 /app 前缀），由 contextPageParam 组装。
+  useEffect(() => {
+    if (!visible || !backend.ok) return undefined;
+    let alive = true;
+    const load = () => {
+      setCtxLoading(true);
+      fetchAssistantContext(sessionId, { page: contextPageParam() })
+        .then((j) => {
+          if (!alive) return;
+          if (j && j.ok === true) { setCtx(j); setCtxError(''); }
+          else {
+            setCtxError(tr('assistant.context.error', {
+              error: (j && (j.error || j.code)) || 'HTTP'
+            }));
+          }
+        })
+        .catch((e) => {
+          if (alive) {
+            setCtxError(tr('assistant.context.error', { error: (e && e.message) || String(e) }));
+          }
+        })
+        .finally(() => { if (alive) setCtxLoading(false); });
+    };
+    refreshContextRef.current = load;
+    load();
+    const onRoute = () => load();
+    window.addEventListener('popstate', onRoute);
+    return () => {
+      alive = false;
+      refreshContextRef.current = null;
+      window.removeEventListener('popstate', onRoute);
+    };
+  }, [visible, backend.ok, sessionId]);
+
+  // ===== V2：任务播报（WS assistantBroadcast）=====
+  // 只在此页（page 模式）连；鉴权靠同源 cookie（未登录握手 401，不绕过）。
+  // 收到简报 → 追加一条系统消息（正文用服务端 text；客户端不伪造历史），
+  // 同时刷新环境卡片；组件卸载时 close()（清定时器 + 断开连接）。
+  useEffect(() => {
+    if (!page || !backend.ok) return undefined;
+    const client = connectAssistantBroadcast({
+      onBrief: (brief) => {
+        const text = brief && typeof brief.text === 'string' ? brief.text.trim() : '';
+        if (!text) return;
+        setMsgs((m) => [...m, { role: 'system', content: text }]);
+        if (refreshContextRef.current) refreshContextRef.current();
+      }
+    });
+    return () => { client.close(); };
+  }, [page, backend.ok]);
 
   // 打开面板 / 进入首页时恢复本会话记忆（消息 + 上次计划 + 状态机快照）
   useEffect(() => {
@@ -488,12 +567,37 @@ export function Assistant({ page = false } = {}) {
         if (isNewPlan) lastFormedPlanIdRef.current = j.plan.planId;
       }
       setPlanCardVisible(showCard);
+      // V2：B6 设置变更待确认 / B2 失败诊断（本次没有就清空，避免残留上一轮的卡片）
+      setDiagnosis(j.diagnosis || null);
+      setPendingChange(j.pendingChange && j.pendingChange.requiresConfirm === true ? j.pendingChange : null);
+      // 对话后刷新只读环境（任务/预算数字跟着变；不建任务、不触发付费）
+      if (refreshContextRef.current) refreshContextRef.current();
     } catch (e) {
       setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.network', { msg: e.message }) }]);
     } finally {
       setThinking(false);
       setStreamText('');
     }
+  }
+
+  // V2：只读刷新状态机（继续/修复后立刻拉一次，别等 2 秒轮询）。
+  function refreshState() {
+    fetch('/api/assistant/state?sessionId=' + encodeURIComponent(sessionId)
+      + (plan && plan.planId ? '&planId=' + encodeURIComponent(plan.planId) : ''), { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j && j.ok) setXstate(j); })
+      .catch(() => {});
+  }
+
+  // V2：修复 / 设置确认的回执。成功才清掉待确认项并刷新状态与上下文；
+  // 失败只追加失败文案（不假装成功）。
+  function afterAction(ok, text) {
+    if (text) setMsgs((m) => [...m, { role: 'assistant', content: text }]);
+    if (!ok) return;
+    setPendingChange(null);
+    setDiagnosis(null);
+    refreshState();
+    if (refreshContextRef.current) refreshContextRef.current();
   }
 
   // 确认执行计划卡：真实模型必须这里点确认（approved=true）；
@@ -854,6 +958,17 @@ export function Assistant({ page = false } = {}) {
               </div>
             `}
 
+            ${backend.ok && (ctx || ctxError) && html`
+              <div className="xz-block">
+                <${AssistantContextCard}
+                  ctx=${ctx}
+                  loading=${ctxLoading}
+                  error=${ctxError}
+                  onRefresh=${() => { if (refreshContextRef.current) refreshContextRef.current(); }}
+                />
+              </div>
+            `}
+
             ${msgs.length > 0 && html`
               <div className="xz-thread">
                 ${msgs.map((m, i) => html`
@@ -861,7 +976,10 @@ export function Assistant({ page = false } = {}) {
                     key=${i}
                     className=${'xz-msg-row ' + (m.role === 'user' ? 'is-user' : 'is-bot')}
                   >
-                    <div className=${'xz-bubble ' + (m.role === 'user' ? 'is-user' : 'is-bot')}>${m.content}</div>
+                    <div
+                      className=${'xz-bubble ' + (m.role === 'user' ? 'is-user' : 'is-bot')}
+                      style=${m.role === 'system' ? SYSTEM_BUBBLE_STYLE : undefined}
+                    >${m.content}</div>
                   </div>
                 `)}
                 ${thinking && html`
@@ -907,6 +1025,26 @@ export function Assistant({ page = false } = {}) {
                   state=${xstate.state}
                   task=${xstate.task}
                   onOpenTask=${() => { try { navigate('/gen'); } catch (e) { /* ignore */ } }}
+                />
+              </div>
+            `}
+
+            ${diagnosis && executableRepairs(diagnosis).length > 0 && html`
+              <div className="xz-block">
+                <${RepairCard}
+                  diagnosis=${diagnosis}
+                  sessionId=${sessionId}
+                  onResult=${afterAction}
+                />
+              </div>
+            `}
+
+            ${pendingChange && html`
+              <div className="xz-block">
+                <${PendingChangeCard}
+                  pendingChange=${pendingChange}
+                  sessionId=${sessionId}
+                  onResult=${afterAction}
                 />
               </div>
             `}
