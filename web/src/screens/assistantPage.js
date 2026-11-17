@@ -11,6 +11,8 @@
 // 只改 web/，不重启 3001（express.static 刷新即生效）。
 // ============================================================
 import { navigate } from '../router.js';
+import { t } from '../i18n/index.js';
+import { LangSwitch } from '../components/langSwitch.js';
 import { Assistant } from '../components/assistant.js';
 
 const { React } = window;
@@ -22,9 +24,9 @@ const RAIL_KEY = 'vs_rail_collapsed';
 // 4 项：创作（2026-11-16 起默认 /create-smart 智能向导）/ 剪辑 / 库 / 设置（底部）
 // 首页 = 小智，不占导航项；用户草图里的「库存」沿用现有文案「库」。旧六步向导仍在 /create 可回退。
 const NAV = [
-  { route: '/create-smart', label: '创作', icon: '◆', title: '智能创作向导（场景卡 → 出图 → 视频）' },
-  { route: '/edit', label: '剪辑', icon: '✂', title: '剪辑台' },
-  { route: '/library', label: '库', icon: '▤', title: '成片 / 片段 / 图片' }
+  { route: '/create-smart', labelKey: 'nav.create', icon: '◆', titleKey: 'nav.createTitle' },
+  { route: '/edit', labelKey: 'nav.edit', icon: '✂', titleKey: 'nav.editTitle' },
+  { route: '/library', labelKey: 'nav.library', icon: '▤', titleKey: 'nav.libraryTitle' }
 ];
 
 function RailItem({ item, collapsed, foot = false }) {
@@ -56,26 +58,31 @@ export function AssistantPage() {
 
   return html`
     <div className=${'xz-root' + (collapsed ? ' is-rail-collapsed' : '')}>
-      <aside className=${'xz-rail' + (collapsed ? ' is-collapsed' : '')} aria-label="主导航">
+      <aside className=${'xz-rail' + (collapsed ? ' is-collapsed' : '')} aria-label=${t('nav.mainAria')}>
         <div className="xz-rail-head">
           <div className="xz-brand">Video Studio</div>
           <button
             type="button"
             className="xz-dots"
             onClick=${() => setCollapsed((v) => !v)}
-            aria-label=${collapsed ? '展开导航' : '收起导航'}
+            aria-label=${collapsed ? t('nav.expand') : t('nav.collapse')}
             aria-expanded=${!collapsed}
-            title=${collapsed ? '展开导航' : '收起导航'}
+            title=${collapsed ? t('nav.expand') : t('nav.collapse')}
           >•••</button>
         </div>
 
         <nav className="xz-nav">
-          ${NAV.map((n) => html`<${RailItem} key=${n.route} item=${n} collapsed=${collapsed} />`)}
+          ${NAV.map((n) => html`<${RailItem} key=${n.route}
+            item=${{ route: n.route, label: t(n.labelKey), title: t(n.titleKey), icon: n.icon }}
+            collapsed=${collapsed} />`)}
         </nav>
 
         <div className="xz-rail-foot">
+          <div style=${{ display: 'flex', justifyContent: collapsed ? 'center' : 'flex-start', padding: '0 4px 8px' }}>
+            <${LangSwitch} collapsed=${collapsed} />
+          </div>
           <${RailItem}
-            item=${{ route: '/settings', label: '设置', icon: '⚙', title: '设置' }}
+            item=${{ route: '/settings', label: t('nav.settings'), icon: '⚙', title: t('nav.settings') }}
             collapsed=${collapsed}
             foot=${true}
           />

@@ -23,6 +23,7 @@
 //   - 旧页的关键帧编辑未迁；已有关键帧数据在保存时原样保留，不会丢。
 // ============================================================
 import { navigate } from '../router.js';
+import { t as tr } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -131,7 +132,7 @@ function loadPeaks(trackId) {
     .then((d) => ({
       peaks: d && Array.isArray(d.peaks) ? d.peaks : [],
       durationSec: Number(d && d.durationSec) || 0,
-      reason: d && d.ok === false ? (d.error || '波形数据不可用') : ''
+      reason: d && d.ok === false ? (d.error || tr('bgm.waveDataUnavailable')) : ''
     }))
     .catch((e) => ({ peaks: [], durationSec: 0, reason: e.message }));
   waveCache.set(trackId, p);
@@ -264,12 +265,12 @@ function ClipBlock({ clip, kind, track, pxPerSec, selected, duration, onSelect, 
   const trackTitle = track ? (track.title || track.id) : clip.trackId;
   const tags = [];
   if (Number(clip.speed) !== 1) tags.push(clip.speed + '×');
-  if (clip.fillMode === 'loop') tags.push('循环');
-  if (clip.fillMode === 'stretch') tags.push('拉伸');
-  if (Number(clip.volume) !== 1) tags.push('音量' + clip.volume);
+  if (clip.fillMode === 'loop') tags.push(tr('bgm.clipLoop'));
+  if (clip.fillMode === 'stretch') tags.push(tr('bgm.clipStretch'));
+  if (Number(clip.volume) !== 1) tags.push(tr('bgm.clipVolume', { n: clip.volume }));
   const name = trackTitle + (tags.length ? ' · ' + tags.join(' · ') : '');
   const titleText = name + '\n' + fmtClock(clip.timelineStart) + ' → ' + fmtClock(clip.timelineEnd)
-    + (wave.reason ? '\n波形不可用：' + wave.reason : '');
+    + (wave.reason ? '\n' + tr('bgm.waveUnavailable', { reason: wave.reason }) : '');
 
   // 拖动/裁剪：每次指针移动都换算成「基于按下时原值」的绝对 patch，
   // 交给上层写进 plan（因此数值输入框会同步刷新，拖拽与输入天然一致）。
@@ -378,8 +379,8 @@ function ClipBlock({ clip, kind, track, pxPerSec, selected, duration, onSelect, 
     >
       <canvas ref=${canvasRef}></canvas>
       <div className="bgm-clip-name">${name}</div>
-      <div className="bgm-clip-handle left" onPointerDown=${beginDrag('left')} title="拖动裁剪左边缘"></div>
-      <div className="bgm-clip-handle right" onPointerDown=${beginDrag('right')} title="拖动裁剪右边缘"></div>
+      <div className="bgm-clip-handle left" onPointerDown=${beginDrag('left')} title=${tr('bgm.dragLeftEdge')}></div>
+      <div className="bgm-clip-handle right" onPointerDown=${beginDrag('right')} title=${tr('bgm.dragRightEdge')}></div>
     </div>
   `;
 }
@@ -448,33 +449,33 @@ function Timeline({
   return html`
     <section className="bgm-tl">
       <div className="bgm-tl-head">
-        <span className="bgm-tl-title">时间轴</span>
-        <span className="bgm-tl-hint">拖片段移动 · 拖两端裁剪 · 点标尺定位</span>
+        <span className="bgm-tl-title">${tr('bgm.timeline')}</span>
+        <span className="bgm-tl-hint">${tr('bgm.timelineHint')}</span>
         ${dragInfo && html`
           <span className="bgm-drag-readout">
-            ${dragInfo.mode === 'move' ? '移动中' : dragInfo.mode === 'left' ? '左裁剪中' : '右裁剪中'}
+            ${dragInfo.mode === 'move' ? tr('bgm.dragMove') : dragInfo.mode === 'left' ? tr('bgm.dragLeft') : tr('bgm.dragRight')}
             <b>${fmtClock(dragInfo.start)} → ${fmtClock(dragInfo.end)}</b>
             ${dragInfo.mode !== 'move' && html`
-              <span>源 ${fmtClock(dragInfo.sourceIn)} – ${fmtClock(dragInfo.sourceOut)}</span>
+              <span>${tr('bgm.source', { in: fmtClock(dragInfo.sourceIn), out: fmtClock(dragInfo.sourceOut) })}</span>
             `}
           </span>
         `}
         <span className="bgm-spacer"></span>
         <span className="bgm-tl-stat">
-          轻音乐 ${(plan.music || []).length} 段 · 环境音 ${(plan.ambient || []).length} 段 · 覆盖 ${fmtClock(coverage)}
+          ${tr('bgm.tlStat', { music: (plan.music || []).length, ambient: (plan.ambient || []).length, coverage: fmtClock(coverage) })}
         </span>
-        <button className="bgm-btn sm" onClick=${() => onZoom(1 / 1.4)} title="缩小">−</button>
+        <button className="bgm-btn sm" onClick=${() => onZoom(1 / 1.4)} title=${tr('bgm.zoomOut')}>−</button>
         <span className="bgm-zoom-label">${Math.round(pxPerSec * 10) / 10} px/s</span>
-        <button className="bgm-btn sm" onClick=${() => onZoom(1.4)} title="放大">＋</button>
-        <button className="bgm-btn sm" onClick=${onFit} title="按窗口宽度适配">适应</button>
+        <button className="bgm-btn sm" onClick=${() => onZoom(1.4)} title=${tr('bgm.zoomIn')}>＋</button>
+        <button className="bgm-btn sm" onClick=${onFit} title=${tr('bgm.fitTitle')}>${tr('bgm.fit')}</button>
       </div>
 
       <div className="bgm-tl-body">
         <div className="bgm-tl-labels">
           <div className="bgm-ruler-spacer" style=${{ height: RULER_H + 'px' }}></div>
-          <div className="bgm-lane-label" style=${{ height: VIDEO_LANE_H + 'px' }}><b>视频</b>母版</div>
-          <div className="bgm-lane-label" style=${{ height: AUDIO_LANE_H + 'px' }}><b>轻音乐</b></div>
-          <div className="bgm-lane-label" style=${{ height: AUDIO_LANE_H + 'px' }}><b>环境音</b></div>
+          <div className="bgm-lane-label" style=${{ height: VIDEO_LANE_H + 'px' }}><b>${tr('bgm.videoLane')}</b>${tr('bgm.masterLane')}</div>
+          <div className="bgm-lane-label" style=${{ height: AUDIO_LANE_H + 'px' }}><b>${tr('bgm.musicLane')}</b></div>
+          <div className="bgm-lane-label" style=${{ height: AUDIO_LANE_H + 'px' }}><b>${tr('bgm.ambientLane')}</b></div>
         </div>
 
         <div className="bgm-tl-scroll" ref=${scrollRef}>
@@ -483,7 +484,7 @@ function Timeline({
               className="bgm-ruler"
               style=${{ height: RULER_H + 'px' }}
               onPointerDown=${startScrub}
-              title="点击/拖动定位播放头"
+              title=${tr('bgm.rulerTitle')}
             >
               ${ticks.map((t) => html`
                 <div key=${'tick' + t} className=${'bgm-tick' + (Math.round(t) % (step * 2) === 0 ? ' major' : '')}
@@ -495,35 +496,35 @@ function Timeline({
 
             <div className="bgm-lane" style=${{ height: VIDEO_LANE_H + 'px' }} onPointerDown=${startScrub}>
               <div className="bgm-master" style=${{ width: durationX + 'px' }}>
-                母版（成片）${duration > 0 ? ' · ' + fmtClock(duration) : ' · 时长未探测'}
+                ${duration > 0 ? tr('bgm.master', { dur: ' · ' + fmtClock(duration) }) : tr('bgm.masterNoDur')}
               </div>
             </div>
 
             <div className="bgm-lane" style=${{ height: AUDIO_LANE_H + 'px' }} onPointerDown=${startScrub}>
               ${(plan.music || []).length === 0 && html`
-                <div className="bgm-lane-empty">从右侧曲库点击曲目，或点上方「自动配乐」</div>
+                <div className="bgm-lane-empty">${tr('bgm.laneMusicEmpty')}</div>
               `}
               ${laneClips('music')}
             </div>
 
             <div className="bgm-lane" style=${{ height: AUDIO_LANE_H + 'px' }} onPointerDown=${startScrub}>
               ${(plan.ambient || []).length === 0 && html`
-                <div className="bgm-lane-empty">可选：环境音铺底（添加后默认循环填充）</div>
+                <div className="bgm-lane-empty">${tr('bgm.laneAmbientEmpty')}</div>
               `}
               ${laneClips('ambient')}
             </div>
 
-            <div className="bgm-endline" style=${{ left: durationX + 'px' }} title="成片片尾"></div>
+            <div className="bgm-endline" style=${{ left: durationX + 'px' }} title=${tr('bgm.endTitle')}></div>
             <div className="bgm-playhead" style=${{ left: playX + 'px' }}></div>
           </div>
         </div>
       </div>
 
       <div className="bgm-tl-foot">
-        <span>播放头 <code>${fmtClock(playhead)}</code></span>
-        <span>成片时长 <code>${duration > 0 ? fmtClock(duration) : '未探测'}</code></span>
-        <span>${previewActive ? '当前播放：预览文件（不覆盖原成片）' : '当前播放：原成片'}</span>
-        <span>保存只写计划；预览写临时文件；导出才会覆盖成片</span>
+        <span>${tr('bgm.playhead', { time: fmtClock(playhead) })}</span>
+        <span>${tr('bgm.filmDuration', { dur: duration > 0 ? fmtClock(duration) : tr('bgm.durationUnknown') })}</span>
+        <span>${previewActive ? tr('bgm.playingPreview') : tr('bgm.playingOriginal')}</span>
+        <span>${tr('bgm.footNote')}</span>
       </div>
     </section>
   `;
@@ -541,44 +542,44 @@ function LibraryPanel({ lib, cat, setCat, q, setQ, onAdd }) {
   return html`
     <section className="bgm-card">
       <div className="bgm-card-h">
-        <span>曲库</span>
-        <span className="meta">${tracks.length} 首</span>
+        <span>${tr('bgm.library')}</span>
+        <span className="meta">${tr('bgm.tracksCount', { n: tracks.length })}</span>
       </div>
       <div className="bgm-tabs">
         <button className=${'bgm-tab' + (cat === 'music' ? ' active' : '')} onClick=${() => setCat('music')}>
-          轻音乐 ${counts.music}
+          ${tr('bgm.musicCount', { n: counts.music })}
         </button>
         <button className=${'bgm-tab' + (cat === 'ambient' ? ' active' : '')} onClick=${() => setCat('ambient')}>
-          环境音 ${counts.ambient}
+          ${tr('bgm.ambientCount', { n: counts.ambient })}
         </button>
         <span className="bgm-spacer"></span>
         <input
           className="bgm-input"
           style=${{ width: '104px', height: '26px', fontSize: '11px' }}
           value=${q}
-          placeholder="搜索…"
+          placeholder=${tr('bgm.search')}
           onInput=${(e) => setQ(e.target.value)}
         />
       </div>
       <div className="bgm-lib">
-        ${lib.loading && html`<div className="bgm-lib-empty">加载曲库…</div>`}
+        ${lib.loading && html`<div className="bgm-lib-empty">${tr('bgm.libLoading')}</div>`}
         ${!lib.loading && lib.error && html`
-          <div className="bgm-lib-empty" style=${{ color: 'var(--danger)' }}>曲库读取失败：${lib.error}</div>
+          <div className="bgm-lib-empty" style=${{ color: 'var(--danger)' }}>${tr('bgm.libReadFailed', { error: lib.error })}</div>
         `}
         ${!lib.loading && !lib.error && list.length === 0 && html`
-          <div className="bgm-lib-empty">${tracks.length ? '这个分类没有匹配曲目' : '曲库还是空的'}</div>
+          <div className="bgm-lib-empty">${tracks.length ? tr('bgm.libNoMatch') : tr('bgm.libEmpty')}</div>
         `}
         ${!lib.loading && !lib.error && list.map((t) => html`
           <button
             key=${t.id}
             className="bgm-lib-item"
             onClick=${() => onAdd(t)}
-            title=${'添加到时间轴：' + (t.title || t.id)}
+            title=${tr('bgm.addTitle', { title: t.title || t.id })}
           >
             <span className="bgm-lib-main">
               <span className="bgm-lib-title">${t.title || t.id}</span>
               <span className="bgm-lib-meta">
-                ${t.id} · ${t.durationSec ? Math.round(t.durationSec) + 's' : '时长未知'}${t.bpm ? ' · ' + t.bpm + ' BPM' : ''}
+                ${t.id} · ${t.durationSec ? tr('bgm.trackDuration', { n: Math.round(t.durationSec) }) : tr('bgm.unknownDuration')}${t.bpm ? tr('bgm.trackBpm', { n: t.bpm }) : ''}
               </span>
             </span>
             <span className="bgm-lib-add">＋</span>
@@ -587,8 +588,7 @@ function LibraryPanel({ lib, cat, setCat, q, setQ, onAdd }) {
       </div>
       <div className="bgm-card-b" style=${{ paddingTop: '8px' }}>
         <p className="bgm-note">
-          点曲目把片段加到对应轨道末尾。上传通道暂未接入（<code>POST /api/bgm</code> 只收元信息），
-          新音频需手工放进 <code>assets/bgm/</code> 再登记。
+          ${tr('bgm.libNote')}
         </p>
       </div>
     </section>
@@ -600,11 +600,10 @@ function ClipProps({ selected, tracks, trackMap, duration, onUpdate, onDelete, o
   if (!selected) {
     return html`
       <section className="bgm-card">
-        <div className="bgm-card-h"><span>片段参数</span></div>
+        <div className="bgm-card-h"><span>${tr('bgm.clipProps')}</span></div>
         <div className="bgm-card-b">
           <p className="bgm-props-empty">
-            点击时间轴上的片段编辑参数；从上方曲库点曲目添加片段。<br/>
-            拖动片段可移动，拖两端可裁剪；选中后按 Delete 也能删除。
+            ${tr('bgm.propsEmpty')}
           </p>
         </div>
       </section>
@@ -621,8 +620,8 @@ function ClipProps({ selected, tracks, trackMap, duration, onUpdate, onDelete, o
   return html`
     <section className="bgm-card">
       <div className="bgm-card-h">
-        <span>片段参数</span>
-        <span className="meta">${kind === 'ambient' ? '环境音' : '轻音乐'}</span>
+        <span>${tr('bgm.clipProps')}</span>
+        <span className="meta">${kind === 'ambient' ? tr('bgm.kindAmbient') : tr('bgm.kindMusic')}</span>
       </div>
       <div className="bgm-card-b">
         <div className="bgm-props-head">
@@ -634,58 +633,57 @@ function ClipProps({ selected, tracks, trackMap, duration, onUpdate, onDelete, o
 
         <div className="bgm-props-grid">
           <label className="bgm-field" style=${{ gridColumn: '1 / -1' }}>
-            <span>音轨</span>
+            <span>${tr('bgm.track')}</span>
             <select value=${clip.trackId} onChange=${(e) => upd({ trackId: e.target.value })}>
-              ${!hasCurrent && html`<option value=${clip.trackId}>${clip.trackId}（不在当前库存）</option>`}
+              ${!hasCurrent && html`<option value=${clip.trackId}>${tr('bgm.trackMissing', { id: clip.trackId })}</option>`}
               ${sameKind.map((t) => html`
                 <option key=${t.id} value=${t.id}>${t.title || t.id}</option>
               `)}
             </select>
           </label>
 
-          <${NumField} label="时间轴起点（秒）" value=${clip.timelineStart}
+          <${NumField} label=${tr('bgm.timelineStart')} value=${clip.timelineStart}
             min=${0} max=${Math.max(0, clip.timelineEnd - MIN_SEG)} step=${0.1}
             onCommit=${(v) => upd({ timelineStart: v })} />
-          <${NumField} label="时间轴终点（秒）" value=${clip.timelineEnd}
+          <${NumField} label=${tr('bgm.timelineEnd')} value=${clip.timelineEnd}
             min=${clip.timelineStart + MIN_SEG} max=${duration > 0 ? duration : 100000} step=${0.1}
             onCommit=${(v) => upd({ timelineEnd: v })} />
-          <${NumField} label="源内起点（秒）" value=${clip.sourceIn}
+          <${NumField} label=${tr('bgm.sourceIn')} value=${clip.sourceIn}
             min=${0} max=${Math.max(0, clip.sourceOut - MIN_SEG)} step=${0.1}
             onCommit=${(v) => upd({ sourceIn: v })} />
-          <${NumField} label="源内终点（秒）" value=${clip.sourceOut}
+          <${NumField} label=${tr('bgm.sourceOut')} value=${clip.sourceOut}
             min=${clip.sourceIn + MIN_SEG} max=${100000} step=${0.1}
             onCommit=${(v) => upd({ sourceOut: v })} />
-          <${NumField} label="基础音量（1 = 原声）" value=${clip.volume}
+          <${NumField} label=${tr('bgm.baseVolume')} value=${clip.volume}
             min=${0} max=${4} step=${0.05}
             onCommit=${(v) => upd({ volume: v })} />
-          <${NumField} label="变速（0.5–2，保音高）" value=${clip.speed}
+          <${NumField} label=${tr('bgm.speed')} value=${clip.speed}
             min=${0.5} max=${2} step=${0.05}
             onCommit=${(v) => upd({ speed: v })} />
-          <${NumField} label="淡入（秒）" value=${clip.fadeIn}
+          <${NumField} label=${tr('bgm.fadeIn')} value=${clip.fadeIn}
             min=${0} max=${60} step=${0.1}
             onCommit=${(v) => upd({ fadeIn: v })} />
-          <${NumField} label="淡出（秒）" value=${clip.fadeOut}
+          <${NumField} label=${tr('bgm.fadeOut')} value=${clip.fadeOut}
             min=${0} max=${60} step=${0.1}
             onCommit=${(v) => upd({ fadeOut: v })} />
 
           <label className="bgm-field" style=${{ gridColumn: '1 / -1' }}>
-            <span>素材不足时</span>
+            <span>${tr('bgm.fillMode')}</span>
             <select value=${clip.fillMode} onChange=${(e) => upd({ fillMode: e.target.value })}>
-              <option value="none">不填充</option>
-              <option value="loop">循环填充</option>
-              <option value="stretch">匀速拉伸</option>
+              <option value="none">${tr('bgm.fillNone')}</option>
+              <option value="loop">${tr('bgm.fillLoop')}</option>
+              <option value="stretch">${tr('bgm.fillStretch')}</option>
             </select>
           </label>
         </div>
 
         <p className="bgm-props-note">
-          片段时长 ${fmtClock(clip.timelineEnd - clip.timelineStart)} ·
-          关键帧 ${keyframeCount} 个${keyframeCount ? '（沿用旧版数据，保存时原样保留；本页暂不编辑）' : ''}
+          ${tr('bgm.clipDuration', { dur: fmtClock(clip.timelineEnd - clip.timelineStart), n: keyframeCount })}${keyframeCount ? tr('bgm.keyframesKept') : ''}
         </p>
 
         <div className="bgm-props-actions">
-          <button className="bgm-btn sm" onClick=${() => onSeek(clip.timelineStart)}>定位到片段</button>
-          <button className="bgm-btn sm danger" onClick=${() => onDelete(kind, clip.id)}>删除片段</button>
+          <button className="bgm-btn sm" onClick=${() => onSeek(clip.timelineStart)}>${tr('bgm.seekClip')}</button>
+          <button className="bgm-btn sm danger" onClick=${() => onDelete(kind, clip.id)}>${tr('bgm.deleteClip')}</button>
         </div>
       </div>
     </section>
@@ -705,51 +703,50 @@ function TaskPicker({ list, onPick, onReload }) {
   return html`
     <div className="bgm-page">
       <div className="bgm-head">
-        <h1 className="bgm-title">配乐编辑器</h1>
-        <span className="bgm-sub">已完成成片 · ${tasks.length} 条</span>
+        <h1 className="bgm-title">${tr('bgm.editorTitle')}</h1>
+        <span className="bgm-sub">${tr('bgm.listSub', { n: tasks.length })}</span>
         <span className="bgm-spacer"></span>
         <input
           className="bgm-input grow"
           style=${{ maxWidth: '260px' }}
           value=${q}
-          placeholder="搜索提示词 / 任务 ID…"
+          placeholder=${tr('bgm.searchTask')}
           onInput=${(e) => setQ(e.target.value)}
         />
-        <button className="bgm-btn" onClick=${onReload} disabled=${list.loading}>刷新</button>
+        <button className="bgm-btn" onClick=${onReload} disabled=${list.loading}>${tr('bgm.refresh')}</button>
       </div>
 
       <p className="bgm-note">
-        选择一条已完成成片进入编辑：自动配乐或手工排时间轴 → 预览（<span className="accent">不覆盖原片</span>）→ 保存。
-        导出会覆盖 <code>output/</code> 里的成片，页面会二次确认。
+        ${tr('bgm.listNote')}
       </p>
 
-      ${list.loading && html`<div className="bgm-loading">加载已完成任务…</div>`}
+      ${list.loading && html`<div className="bgm-loading">${tr('bgm.loadingTasks')}</div>`}
       ${!list.loading && list.error && html`
         <div className="bgm-error">
-          读取任务失败：${list.error}<br/>
-          <button className="bgm-btn" onClick=${onReload}>重试</button>
+          ${tr('bgm.loadTasksFailed', { error: list.error })}<br/>
+          <button className="bgm-btn" onClick=${onReload}>${tr('bgm.retry')}</button>
         </div>
       `}
       ${!list.loading && !list.error && filtered.length === 0 && html`
         <div className="bgm-loading">
-          ${tasks.length ? '没有匹配的任务' : '还没有已完成（completed / partial）的成片。'}
+          ${tasks.length ? tr('bgm.noMatch') : tr('bgm.emptyTasks')}
         </div>
       `}
       ${!list.loading && !list.error && filtered.length > 0 && html`
         <div className="bgm-task-grid">
           ${filtered.map((t) => html`
-            <button key=${t.taskId} className="bgm-task" onClick=${() => onPick(t.taskId)} title="打开配乐编辑器">
-              <span className="bgm-task-title">${t.prompt || '（无提示词）'}</span>
+            <button key=${t.taskId} className="bgm-task" onClick=${() => onPick(t.taskId)} title=${tr('bgm.openEditor')}>
+              <span className="bgm-task-title">${t.prompt || tr('bgm.noPrompt')}</span>
               <span className="bgm-task-meta">
-                <span>${t.totalDuration ? fmtClock(t.totalDuration) : '时长未知'}</span>
+                <span>${t.totalDuration ? fmtClock(t.totalDuration) : tr('bgm.unknownDuration')}</span>
                 <span>${t.resolution || '-'}</span>
-                <span>${(t.totalClips || 0) + ' 段'}</span>
+                <span>${tr('bgm.clips', { n: t.totalClips || 0 })}</span>
                 ${t.completedAt && html`<span>${String(t.completedAt).slice(0, 10)}</span>`}
               </span>
               <span className="bgm-task-foot">
-                <span className=${'bgm-badge ' + (t.hasBgm ? 'ok' : 'plain')}>${t.hasBgm ? '已配乐' : '无配乐'}</span>
+                <span className=${'bgm-badge ' + (t.hasBgm ? 'ok' : 'plain')}>${t.hasBgm ? tr('bgm.hasBgm') : tr('bgm.noBgm')}</span>
                 <span className="bgm-sub">${t.taskId}</span>
-                <span className="go">进入编辑 →</span>
+                <span className="go">${tr('bgm.enter')}</span>
               </span>
             </button>
           `)}
@@ -851,7 +848,7 @@ export function BgmEditorView({ route }) {
 
     let alive = true;
     setBusy('load');
-    setStatus({ kind: 'busy', text: '加载配乐计划…' });
+    setStatus({ kind: 'busy', text: tr('bgm.loadingPlan') });
     setConfirmExport(false);
     setTask(null);
     setPlan(EMPTY_PLAN());
@@ -878,7 +875,7 @@ export function BgmEditorView({ route }) {
         if (!alive) return;
         setBusy('');
         setTask({ error: e.message });
-        setStatus({ kind: 'err', text: '加载失败：' + e.message });
+        setStatus({ kind: 'err', text: tr('bgm.loadPlanFailed', { error: e.message }) });
       });
 
     return () => { alive = false; };
@@ -979,7 +976,7 @@ export function BgmEditorView({ route }) {
     let end = start + trackDur;
     if (total > 0) end = Math.min(end, total);
     if (end - start < 0.5) {
-      setStatus({ kind: 'err', text: '成片剩余空间不足，无法添加片段。' });
+      setStatus({ kind: 'err', text: tr('bgm.addNoSpace') });
       return;
     }
     const id = kind + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1000).toString(36);
@@ -999,7 +996,7 @@ export function BgmEditorView({ route }) {
     };
     setPlan((p) => ({ ...p, [kind]: [...p[kind], seg] }));
     setSelection({ kind, id });
-    setStatus({ kind: 'ok', text: '已添加：' + (track.title || track.id) + '（未保存）' });
+    setStatus({ kind: 'ok', text: tr('bgm.adding', { name: track.title || track.id }) });
   }
 
   function updateSegment(kind, id, patch) {
@@ -1024,23 +1021,23 @@ export function BgmEditorView({ route }) {
     }
     updateSegment(kind, id, patch);
     setDragInfo(null);
-    const verb = info.mode === 'move' ? '已移动片段'
-      : info.mode === 'left' ? '已裁剪左边缘' : '已裁剪右边缘';
+    const verb = info.mode === 'move' ? tr('bgm.movedClip')
+      : info.mode === 'left' ? tr('bgm.trimmedLeft') : tr('bgm.trimmedRight');
     setStatus({
       kind: '',
-      text: verb + '：' + fmtClock(info.start) + ' → ' + fmtClock(info.end) + '（未保存）'
+      text: tr('bgm.movedStatus', { verb, start: fmtClock(info.start), end: fmtClock(info.end) })
     });
   }
 
   function deleteSegment(kind, id) {
     setPlan((p) => ({ ...p, [kind]: p[kind].filter((s) => s.id !== id) }));
     setSelection((sel) => (sel && sel.id === id ? null : sel));
-    setStatus({ kind: '', text: '已删除片段（未保存）' });
+    setStatus({ kind: '', text: tr('bgm.deletedSegment') });
   }
 
   // ---------- 保存 / 预览 / 导出 ----------
   async function savePlanOrThrow() {
-    if (!taskId) throw new Error('缺少任务 ID');
+    if (!taskId) throw new Error(tr('bgm.missingTask'));
     const data = await api('/api/tasks/' + encodeURIComponent(taskId) + '/bgm-plan', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1055,13 +1052,13 @@ export function BgmEditorView({ route }) {
   async function onSave() {
     if (!taskId || busy) return;
     setBusy('save');
-    setStatus({ kind: 'busy', text: '保存中…' });
+    setStatus({ kind: 'busy', text: tr('bgm.saving') });
     try {
       await savePlanOrThrow();
       setWarnings([]);
-      setStatus({ kind: 'ok', text: '已保存 · ' + new Date().toLocaleTimeString() });
+      setStatus({ kind: 'ok', text: tr('bgm.savedAt', { time: new Date().toLocaleTimeString() }) });
     } catch (e) {
-      setStatus({ kind: 'err', text: '保存失败：' + e.message });
+      setStatus({ kind: 'err', text: tr('bgm.saveFailed', { error: e.message }) });
     } finally {
       setBusy('');
     }
@@ -1069,23 +1066,21 @@ export function BgmEditorView({ route }) {
 
   async function onAuto() {
     if (!taskId || busy) return;
-    if (dirty && !window.confirm('用自动配乐草稿替换当前时间轴？未保存的修改会丢失。')) return;
+    if (dirty && !window.confirm(tr('bgm.autoConfirm'))) return;
     setBusy('auto');
-    setStatus({ kind: 'busy', text: '正在生成自动配乐草稿…' });
+    setStatus({ kind: 'busy', text: tr('bgm.autoGenerating') });
     try {
       const data = await api('/api/tasks/' + encodeURIComponent(taskId) + '/bgm-auto-plan', { method: 'POST' });
-      if (!data || data.ok === false || !data.plan) throw new Error((data && data.error) || '自动配乐没有返回计划');
+      if (!data || data.ok === false || !data.plan) throw new Error((data && data.error) || tr('bgm.autoNoPlan'));
       const p = normalizePlan(data.plan);
       setPlan(p);
       setSelection(null);
       setPreview({ url: null, sig: null });
       setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
-      setStatus({ kind: 'ok', text: '已填入自动配乐草稿，请检查后保存' });
+      setStatus({ kind: 'ok', text: tr('bgm.autoDone') });
     } catch (e) {
-      const hint = /至少勾选/.test(e.message)
-        ? '（该任务创建时未启用轻音乐/环境音，可从右侧曲库手动添加）'
-        : '';
-      setStatus({ kind: 'err', text: '自动配乐失败：' + e.message + hint });
+      const hint = /至少勾选/.test(e.message) ? tr('bgm.autoAtLeast') : '';
+      setStatus({ kind: 'err', text: tr('bgm.autoFailed', { error: e.message, hint }) });
     } finally {
       setBusy('');
     }
@@ -1094,19 +1089,19 @@ export function BgmEditorView({ route }) {
   async function onPreview() {
     if (!taskId || busy) return;
     if (!hasSegs) {
-      setStatus({ kind: 'err', text: '时间轴是空的：后端会拒绝保存/预览。先点「自动配乐」或从曲库添加片段。' });
+      setStatus({ kind: 'err', text: tr('bgm.emptyTimelinePreview') });
       return;
     }
     if (preview.url && preview.sig === planSignature(plan)) {
-      setStatus({ kind: 'ok', text: '预览已就绪（计划未变化，直接在上方播放）' });
+      setStatus({ kind: 'ok', text: tr('bgm.previewReady') });
       return;
     }
     setBusy('preview');
     const started = Date.now();
-    setStatus({ kind: 'busy', text: '服务端混音中… 0s' });
+    setStatus({ kind: 'busy', text: tr('bgm.mixing', { sec: 0 }) });
     if (busyTimerRef.current) clearInterval(busyTimerRef.current);
     busyTimerRef.current = setInterval(() => {
-      setStatus({ kind: 'busy', text: '服务端混音中… ' + Math.round((Date.now() - started) / 1000) + 's（首次渲染较慢）' });
+      setStatus({ kind: 'busy', text: tr('bgm.mixingSlow', { sec: Math.round((Date.now() - started) / 1000) }) });
     }, 1000);
     try {
       const clean = await savePlanOrThrow();
@@ -1115,11 +1110,11 @@ export function BgmEditorView({ route }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: clean })
       });
-      if (!data || !data.previewUrl) throw new Error('预览接口没有返回 previewUrl');
+      if (!data || !data.previewUrl) throw new Error(tr('bgm.noPreviewUrl'));
       setPreview({ url: withBust(data.previewUrl, Date.now()), sig: JSON.stringify(clean) });
-      setStatus({ kind: 'ok', text: '预览就绪：这是预览文件，不覆盖原成片' });
+      setStatus({ kind: 'ok', text: tr('bgm.previewDone') });
     } catch (e) {
-      setStatus({ kind: 'err', text: '预览失败：' + e.message });
+      setStatus({ kind: 'err', text: tr('bgm.previewFailed', { error: e.message }) });
     } finally {
       if (busyTimerRef.current) {
         clearInterval(busyTimerRef.current);
@@ -1132,19 +1127,19 @@ export function BgmEditorView({ route }) {
   function onExport() {
     if (!taskId || busy) return;
     if (!hasSegs) {
-      setStatus({ kind: 'err', text: '时间轴是空的：后端会拒绝保存/导出。先点「自动配乐」或从曲库添加片段。' });
+      setStatus({ kind: 'err', text: tr('bgm.emptyTimelineExport') });
       return;
     }
     // 用页面内确认条而不是 window.confirm：样式统一，也便于自动化验收点击。
     setConfirmExport(true);
-    setStatus({ kind: 'warn', text: '导出会覆盖原成片，请在下方确认。' });
+    setStatus({ kind: 'warn', text: tr('bgm.exportOverwriteWarn') });
   }
 
   async function doExport() {
     if (!taskId || busy) return;
     setConfirmExport(false);
     setBusy('export');
-    setStatus({ kind: 'busy', text: '正在导出（服务端 ffmpeg 混音 + 覆盖成片）…' });
+    setStatus({ kind: 'busy', text: tr('bgm.exporting') });
     try {
       const clean = await savePlanOrThrow();
       const data = await api('/api/tasks/' + encodeURIComponent(taskId) + '/audio', {
@@ -1163,13 +1158,13 @@ export function BgmEditorView({ route }) {
       setPlayhead(0);
       setStatus({
         kind: 'ok',
-        text: '导出完成'
-          + (data && data.duration ? ' · ' + Number(data.duration).toFixed(2) + 's' : '')
-          + '（已覆盖原成片）'
+        text: tr('bgm.exportDone')
+          + (data && data.duration ? tr('bgm.exportDoneSuffix', { dur: Number(data.duration).toFixed(2) }) : '')
+          + tr('bgm.overwritten')
       });
       loadList();
     } catch (e) {
-      setStatus({ kind: 'err', text: '导出失败：' + e.message });
+      setStatus({ kind: 'err', text: tr('bgm.exportFailed', { error: e.message }) });
     } finally {
       setBusy('');
     }
@@ -1178,11 +1173,11 @@ export function BgmEditorView({ route }) {
   function onRestoreOriginal() {
     setPreview({ url: null, sig: null });
     setPlayhead(0);
-    setStatus({ kind: '', text: '已切回原成片' });
+    setStatus({ kind: '', text: tr('bgm.restored') });
   }
 
   function goList() {
-    if (dirty && !window.confirm('有未保存的修改，确定返回任务列表？')) return;
+    if (dirty && !window.confirm(tr('bgm.dirtyLeave'))) return;
     setConfirmExport(false);
     navigate('/bgm');
   }
@@ -1216,12 +1211,12 @@ export function BgmEditorView({ route }) {
 
   let body = null;
   if (!task) {
-    body = html`<div className="bgm-loading">加载配乐计划…</div>`;
+    body = html`<div className="bgm-loading">${tr('bgm.loadingPlan')}</div>`;
   } else if (task.error) {
     body = html`
       <div className="bgm-error">
         ${task.error}<br/>
-        <button className="bgm-btn" onClick=${goList}>返回任务列表</button>
+        <button className="bgm-btn" onClick=${goList}>${tr('bgm.backToTasks')}</button>
       </div>
     `;
   } else {
@@ -1239,32 +1234,32 @@ export function BgmEditorView({ route }) {
                   playsInline=${true}
                   onLoadedMetadata=${onVideoMeta}
                   onTimeUpdate=${onVideoTime}
-                  onEnded=${() => setStatus({ kind: '', text: '播放结束' })}
+                  onEnded=${() => setStatus({ kind: '', text: tr('bgm.playbackEnded') })}
                 ></video>`
-              : html`<div className="bgm-video-empty">该任务没有可播放的成片文件（videoUrl 为空）</div>`}
+              : html`<div className="bgm-video-empty">${tr('bgm.videoEmpty')}</div>`}
           </div>
 
           <div className="bgm-player-meta">
-            <span className=${'bgm-badge ' + (hasBgm ? 'ok' : 'plain')}>${hasBgm ? '已配乐' : '无配乐'}</span>
-            <span className="num">${metaDuration > 0 ? fmtClock(metaDuration) : '时长未知'}</span>
+            <span className=${'bgm-badge ' + (hasBgm ? 'ok' : 'plain')}>${hasBgm ? tr('bgm.hasBgm') : tr('bgm.noBgm')}</span>
+            <span className="num">${metaDuration > 0 ? fmtClock(metaDuration) : tr('bgm.unknownDuration')}</span>
             <span>${(summaryTask && summaryTask.resolution) || '-'}</span>
-            <span>${summaryTask && summaryTask.totalClips ? summaryTask.totalClips + ' 段' : ''}</span>
-            <span>计划 ${segmentCount(plan)} 段</span>
+            <span>${summaryTask && summaryTask.totalClips ? tr('bgm.clips', { n: summaryTask.totalClips }) : ''}</span>
+            <span>${tr('bgm.planClips', { n: segmentCount(plan) })}</span>
             <span className="bgm-spacer"></span>
-            <span>${task.masterPath ? '母版已就绪' : '无母版（导出时会尝试用本任务片段重建）'}</span>
+            <span>${task.masterPath ? tr('bgm.masterReady') : tr('bgm.masterMissing')}</span>
           </div>
 
           ${previewActive && html`
             <div className="bgm-previewbar">
-              <span>当前播放：预览文件（不覆盖原成片）</span>
-              ${previewStale && html`<span className="bgm-badge warn">计划已改动，预览可能过期</span>`}
+              <span>${tr('bgm.previewBar')}</span>
+              ${previewStale && html`<span className="bgm-badge warn">${tr('bgm.previewStale')}</span>`}
               <span className="bgm-spacer"></span>
-              <button className="bgm-btn sm" onClick=${onRestoreOriginal}>切回原成片</button>
+              <button className="bgm-btn sm" onClick=${onRestoreOriginal}>${tr('bgm.restoreOriginal')}</button>
             </div>
           `}
 
           ${resultError && html`
-            <p className="bgm-note" style=${{ color: 'var(--warn)' }}>上次配乐记录有错误：${resultError}</p>
+            <p className="bgm-note" style=${{ color: 'var(--warn)' }}>${tr('bgm.resultError', { error: resultError })}</p>
           `}
 
           ${prompt && html`
@@ -1272,8 +1267,8 @@ export function BgmEditorView({ route }) {
           `}
 
           <p className="bgm-note">
-            预览与导出都由服务端用同一份 plan 渲染，听到即导出。预览写临时文件，<span className="accent">不覆盖原成片</span>；
-            导出会覆盖 <b>output/${taskId}_final.mp4</b>，本页会二次确认。
+            ${tr('bgm.editorNote', { taskId })}
+          </p>
           </p>
         </section>
 
@@ -1322,18 +1317,18 @@ export function BgmEditorView({ route }) {
   return html`
     <div className="bgm-page">
       <div className="bgm-head">
-        <button className="bgm-btn" onClick=${goList}>← 任务列表</button>
-        <h1 className="bgm-title">配乐编辑器</h1>
+        <button className="bgm-btn" onClick=${goList}>${tr('bgm.backTasks')}</button>
+        <h1 className="bgm-title">${tr('bgm.editorTitle')}</h1>
         <span className="bgm-sub">${taskId}</span>
         <span className="bgm-spacer"></span>
         ${task && !task.error && html`
-          <span className=${'bgm-dirty' + (dirty ? '' : ' saved')}>${dirty ? '未保存修改' : '已保存'}</span>
-          <button className="bgm-btn accent" onClick=${onAuto} disabled=${!!busy}>自动配乐</button>
-          <button className="bgm-btn" onClick=${onSave} disabled=${!!busy}>保存</button>
+          <span className=${'bgm-dirty' + (dirty ? '' : ' saved')}>${dirty ? tr('bgm.dirty') : tr('bgm.saved')}</span>
+          <button className="bgm-btn accent" onClick=${onAuto} disabled=${!!busy}>${tr('bgm.auto')}</button>
+          <button className="bgm-btn" onClick=${onSave} disabled=${!!busy}>${tr('bgm.save')}</button>
           <button className="bgm-btn" onClick=${onPreview} disabled=${!!busy || !hasSegs}
-            title="服务端渲染预览，不覆盖原成片">预览</button>
+            title=${tr('bgm.previewTitle')}>${tr('bgm.preview')}</button>
           <button className="bgm-btn primary" onClick=${onExport} disabled=${!!busy || !hasSegs}
-            title="会覆盖 output 里的成片，需二次确认">导出</button>
+            title=${tr('bgm.exportTitle')}>${tr('bgm.export')}</button>
         `}
       </div>
 
@@ -1347,15 +1342,14 @@ export function BgmEditorView({ route }) {
       ${confirmExport && html`
         <div className="bgm-confirm">
           <span>
-            导出会用新配乐覆盖 <b>output/${taskId}_final.mp4</b>
-            （服务端先写临时文件，校验通过才替换；失败保留原成片）。确定继续？
+            ${tr('bgm.exportConfirm', { taskId })}
           </span>
           <span className="bgm-spacer"></span>
-          <button className="bgm-btn sm danger" onClick=${doExport} disabled=${!!busy}>确认覆盖并导出</button>
+          <button className="bgm-btn sm danger" onClick=${doExport} disabled=${!!busy}>${tr('bgm.confirmExport')}</button>
           <button className="bgm-btn sm" onClick=${() => {
             setConfirmExport(false);
-            setStatus({ kind: '', text: '已取消导出' });
-          }}>取消</button>
+            setStatus({ kind: '', text: tr('bgm.exportingCancelled') });
+          }}>${tr('bgm.cancel')}</button>
         </div>
       `}
 

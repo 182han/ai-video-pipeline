@@ -11,6 +11,8 @@
 //   engine.play(); engine.pause(); engine.seek(sec); engine.destroy();
 // ============================================================
 
+import { t as tr } from '../i18n/index.js';
+
 const LUT_SIZE = 17;
 const FALLBACK_F = 0.4;
 
@@ -92,7 +94,7 @@ function compile(gl, type, src) {
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
     const log = gl.getShaderInfoLog(sh);
     gl.deleteShader(sh);
-    throw new Error('shader 编译失败: ' + log);
+    throw new Error(tr('editor.preview.shaderCompile', { log }));
   }
   return sh;
 }
@@ -102,7 +104,7 @@ export class PreviewEngine {
     this.canvas = canvas;
     this.opts = opts;
     this.gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false });
-    if (!this.gl) throw new Error('当前浏览器不支持 WebGL2，实时预览不可用');
+    if (!this.gl) throw new Error(tr('editor.preview.webgl2'));
     this.segments = [];
     this.starts = [];
     this.duration = 0;
@@ -139,7 +141,7 @@ export class PreviewEngine {
     gl.bindAttribLocation(prog, 1, 'aUv');
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      throw new Error('预览着色器链接失败: ' + gl.getProgramInfoLog(prog));
+      throw new Error(tr('editor.preview.shaderLink', { log: gl.getProgramInfoLog(prog) }));
     }
     this.prog = prog;
     this.buf = gl.createBuffer();
@@ -214,7 +216,7 @@ export class PreviewEngine {
       v.crossOrigin = 'anonymous';
       v.style.display = 'none';
       v.addEventListener('error', () => {
-        if (this.opts.onError) this.opts.onError('素材加载失败：' + (v.currentSrc || ''));
+        if (this.opts.onError) this.opts.onError(tr('editor.preview.mediaLoad', { src: v.currentSrc || '' }));
       });
       this.host.appendChild(v);
       return { video: v, src: null, lutKey: null, lutTex: null, lutTimer: null, ready: false };
@@ -563,7 +565,7 @@ export class PreviewEngine {
     try {
       this._draw();
     } catch (e) {
-      if (this.opts.onError) this.opts.onError('预览渲染失败: ' + (e && e.message ? e.message : e));
+      if (this.opts.onError) this.opts.onError(tr('editor.preview.renderFailed', { msg: e && e.message ? e.message : e }));
     }
   }
 

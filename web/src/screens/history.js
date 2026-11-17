@@ -15,6 +15,7 @@
 // ============================================================
 import { TaskDrawer } from '../components/taskDrawer.js';
 import { statusMeta } from '../components/pauseControl.js';
+import { t as tr, tp, fmtDateTime } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -61,13 +62,13 @@ export function HistoryView({ onChanged }) {
   useEffect(() => { load(); }, [tab]);
 
   async function moveToTrash(t) {
-    if (!window.confirm('把这条记录移入垃圾箱？\n\n' + (t.prompt || '').slice(0, 40))) return;
+    if (!window.confirm(tr('history.moveConfirm', { preview: (t.prompt || tr('history.noPrompt')).slice(0, 40) }))) return;
     setBusy(t.taskId);
     try {
       await fetchJson('/api/tasks/' + encodeURIComponent(t.taskId), { method: 'DELETE' });
       await load();
       if (onChanged) onChanged();
-    } catch (e) { setErr('移入垃圾箱失败：' + e.message); }
+    } catch (e) { setErr(tr('history.moveFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -77,7 +78,7 @@ export function HistoryView({ onChanged }) {
       await fetchJson('/api/trash/' + encodeURIComponent(id) + '/restore', { method: 'POST' });
       await load();
       if (onChanged) onChanged();
-    } catch (e) { setErr('恢复失败：' + e.message); }
+    } catch (e) { setErr(tr('history.restoreFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -86,7 +87,7 @@ export function HistoryView({ onChanged }) {
     try {
       await fetchJson('/api/trash/' + encodeURIComponent(id), { method: 'DELETE' });
       await load();
-    } catch (e) { setErr('彻底删除失败：' + e.message); }
+    } catch (e) { setErr(tr('history.purgeFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -94,9 +95,9 @@ export function HistoryView({ onChanged }) {
   const trashIds = trash.map((t) => t.taskId || t.id);
 
   async function batch(kind) {
-    if (!selIds.length) { setErr('先勾选要处理的记录'); return; }
-    const label = kind === 'purge' ? '彻底删除' : '恢复';
-    if (kind === 'purge' && !window.confirm('彻底删除选中的 ' + selIds.length + ' 条？此操作不可恢复。')) return;
+    if (!selIds.length) { setErr(tr('history.needSelect')); return; }
+    const label = kind === 'purge' ? tr('history.labelPurge') : tr('history.labelRestore');
+    if (kind === 'purge' && !window.confirm(tr('history.purgeConfirm', { n: selIds.length }))) return;
     setErr('');
     let ok = 0, fail = 0;
     for (const id of selIds) {
@@ -109,25 +110,27 @@ export function HistoryView({ onChanged }) {
     setSel({});
     await load();
     if (onChanged) onChanged();
-    setErr(`${label}完成：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ''}`);
+    setErr(fail
+      ? tr('history.batchDoneFail', { label, ok, fail })
+      : tr('history.batchDone', { label, ok }));
   }
 
   return html`
     <div className="px-6 py-5">
       <div className="flex items-center gap-3 mb-3">
-        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">历史记录</h1>
+        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">${tr('history.title')}</h1>
         <span className="text-[11px] text-ink3 font-num">
-          ${tab === 'all' ? tasks.length + ' 条' : '垃圾箱 ' + trash.length + ' 条'}
+          ${tab === 'all' ? tp('history.count', tasks.length) : tr('history.trashCount', { n: trash.length })}
         </span>
         <span className="flex-1"></span>
         <button onClick=${() => setTab('all')}
           className=${'h-8 px-3 rounded-[6px] text-[12px] ' +
             (tab === 'all' ? 'bg-accent text-onaccent' : 'border border-white/[.10] text-ink2 hover:bg-white/[.05]')}
-        >全部</button>
+        >${tr('history.all')}</button>
         <button onClick=${() => setTab('trash')}
           className=${'h-8 px-3 rounded-[6px] text-[12px] ' +
             (tab === 'trash' ? 'bg-accent text-onaccent' : 'border border-white/[.10] text-ink2 hover:bg-white/[.05]')}
-        >垃圾箱</button>
+        >${tr('history.trash')}</button>
       </div>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
@@ -144,19 +147,19 @@ export function HistoryView({ onChanged }) {
                 setSel(m);
               }}
               className="w-[15px] h-[15px] accent-accent" />
-            全选
+            ${tr('history.selectAll')}
           </label>
-          <span className="text-[11px] text-ink3 font-num">已选 ${selIds.length}</span>
+          <span className="text-[11px] text-ink3 font-num">${tr('history.selected', { n: selIds.length })}</span>
           <span className="flex-1"></span>
           <button onClick=${() => batch('restore')}
-            className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]">恢复</button>
+            className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]">${tr('history.restore')}</button>
           <button onClick=${() => batch('purge')}
-            className="h-8 px-3 rounded-[6px] border border-danger/50 text-[12px] text-danger hover:bg-danger/[.08]">彻底删除</button>
+            className="h-8 px-3 rounded-[6px] border border-danger/50 text-[12px] text-danger hover:bg-danger/[.08]">${tr('history.purge')}</button>
         </div>
       `}
 
       ${tab === 'all' && html`
-        ${tasks.length === 0 && html`<p className="py-9 text-center text-[12px] text-ink3">还没有记录</p>`}
+        ${tasks.length === 0 && html`<p className="py-9 text-center text-[12px] text-ink3">${tr('history.emptyAll')}</p>`}
         <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
           ${tasks.map((t) => {
             const st = statusMeta(t.status, t);
@@ -166,25 +169,25 @@ export function HistoryView({ onChanged }) {
                 <button onClick=${() => setOpenId(t.taskId)}
                   className="flex-1 min-w-0 text-left">
                   <b className="block text-[12.5px] font-normal text-ink truncate">
-                    ${(t.prompt || '(无提示词)').slice(0, 70)}
+                    ${(t.prompt || tr('history.noPrompt')).slice(0, 70)}
                   </b>
                   <span className="block text-[10px] text-ink3 font-num">
-                    ${(t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-')}
-                    ${' · ' + ({ library: '片段库成片', editor: '剪辑台导出' }[t.model] || t.model || '-')}
+                    ${(t.createdAt ? fmtDateTime(t.createdAt) : '-')}
+                    ${' · ' + (t.model === 'library' ? tr('history.modelLibrary') : (t.model === 'editor' ? tr('history.modelEditor') : (t.model || '-')))}
                     ${t.cost && t.cost.amount != null ? ' · ¥' + Number(t.cost.amount).toFixed(2) : ''}
                   </span>
                 </button>
                 <span className=${'text-[11px] shrink-0 ' + st.cls}>${st.text}</span>
-                ${t.adjust && html`<span className="text-[10px] text-accent shrink-0">已调节</span>`}
+                ${t.adjust && html`<span className="text-[10px] text-accent shrink-0">${tr('history.adjusted')}</span>`}
                 ${['completed', 'partial'].includes(t.status) && t.outputPath && html`
                   <button onClick=${() => openEdit(t.taskId)}
                     className="h-7 px-2 rounded-[5px] text-[11px] text-accent hover:bg-white/[.06]"
-                    title="在剪辑台打开调节面板"
-                  >剪辑</button>
+                    title=${tr('history.openEditor')}
+                  >${tr('history.edit')}</button>
                 `}
                 <button onClick=${() => moveToTrash(t)} disabled=${busy === t.taskId}
                   className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06] disabled:opacity-40"
-                >删除</button>
+                >${tr('history.delete')}</button>
               </div>
             `;
           })}
@@ -192,7 +195,7 @@ export function HistoryView({ onChanged }) {
       `}
 
       ${tab === 'trash' && html`
-        ${trash.length === 0 && html`<p className="py-9 text-center text-[12px] text-ink3">垃圾箱是空的</p>`}
+        ${trash.length === 0 && html`<p className="py-9 text-center text-[12px] text-ink3">${tr('history.emptyTrash')}</p>`}
         <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
           ${trash.map((t) => {
             const id = t.taskId || t.id;
@@ -203,14 +206,14 @@ export function HistoryView({ onChanged }) {
                   className="w-[15px] h-[15px] accent-accent" />
                 <span className="flex-1 min-w-0">
                   <b className="block text-[12.5px] font-normal text-ink truncate">
-                    ${(t.prompt || '(无提示词)').slice(0, 70)}
+                    ${(t.prompt || tr('history.noPrompt')).slice(0, 70)}
                   </b>
                   <span className="block text-[10px] text-ink3 font-num">${t.taskId || id}</span>
                 </span>
                 <button onClick=${() => restoreOne(id)} disabled=${busy === id}
-                  className="h-7 px-2 rounded-[5px] text-[11px] text-ink2 hover:bg-white/[.06] disabled:opacity-40">恢复</button>
+                  className="h-7 px-2 rounded-[5px] text-[11px] text-ink2 hover:bg-white/[.06] disabled:opacity-40">${tr('history.restore')}</button>
                 <button onClick=${() => purgeOne(id)} disabled=${busy === id}
-                  className="h-7 px-2 rounded-[5px] text-[11px] text-danger hover:bg-white/[.06] disabled:opacity-40">彻底删除</button>
+                  className="h-7 px-2 rounded-[5px] text-[11px] text-danger hover:bg-white/[.06] disabled:opacity-40">${tr('history.purge')}</button>
               </div>
             `;
           })}

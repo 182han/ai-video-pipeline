@@ -33,6 +33,18 @@ const SUITES = [
     desc: '档位/依赖/补跑计算（纯函数）'
   },
   {
+    name: 'i18n',
+    script: 'verify-i18n.js',
+    group: 'fast',
+    desc: '中英词条对等/占位符一致/使用中 key 存在/硬编码中文扫描（--strict 收口）'
+  },
+  {
+    name: 'i18n-runtime',
+    script: 'verify-i18n-runtime.js',
+    group: 'fast',
+    desc: 'i18n 运行时（检测/切换/cookie/复数/Intl/订阅；DOM 桩，不替代浏览器视觉验收）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',

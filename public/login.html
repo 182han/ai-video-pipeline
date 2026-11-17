@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -266,6 +266,19 @@
     letter-spacing:.02em;
   }
 
+  /* 语言切换（P0）：登录墙之前也要能用；显示「目标语言」 */
+  .lang-toggle{
+    position:fixed;z-index:70;top:18px;right:18px;
+    height:28px;min-width:50px;padding:0 10px;
+    border:1px solid rgba(255,255,255,.28);border-radius:999px;
+    background:rgba(6,19,14,.55);color:rgba(255,255,255,.9);
+    font-size:11px;letter-spacing:.08em;cursor:pointer;
+    backdrop-filter:blur(10px);transition:background .18s ease,border-color .18s ease;
+  }
+  .lang-toggle:hover{background:rgba(6,19,14,.8);border-color:rgba(255,255,255,.5)}
+  body.lang-en .brand-cn{letter-spacing:.03em;font-size:clamp(18px,1.75vw,30px)}
+  body.lang-en .brand-hook{letter-spacing:.03em}
+
   /* ===== 登录成功过渡（2026-10-27）：白雾渐起 → 工作台 → 雾渐渐淡去 ===== */
   .fog-out{
     position:fixed;inset:-10%;z-index:60;pointer-events:none;
@@ -368,6 +381,8 @@
 </head>
 <body>
 
+<button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">EN</button>
+
 <div class="scene" aria-hidden="true">
   <div class="fallback-scene" aria-hidden="true">
     <div class="fs-sky"></div>
@@ -386,7 +401,7 @@
 <div class="brand">
   <span class="brand-name">Video Studio</span>
   <span class="brand-en">One sentence, an entire landscape film</span>
-  <span class="brand-cn">一句话，换一整夜的风景</span>
+  <span class="brand-cn" id="brandCn">一句话，换一整夜的风景</span>
   <span class="brand-rule"></span>
   <span class="brand-feats">
     <span class="brand-feat"><b>自动分镜</b><i>Storyboard</i></span>
@@ -394,7 +409,7 @@
     <span class="brand-feat"><b>自动配乐</b><i>Soundtrack</i></span>
     <span class="brand-feat"><b>循环播放</b><i>Loop ready</i></span>
   </span>
-  <span class="brand-hook">说一句你想要的山，剩下的它自己会拍</span>
+  <span class="brand-hook" id="brandHook">说一句你想要的山，剩下的它自己会拍</span>
 </div>
 
 <div class="hints" aria-hidden="true">
@@ -444,6 +459,127 @@
   var submit = document.getElementById("submitBtn");
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var asked = false, formed = false;
+
+  // ---------- 语言（P0）：登录墙之前自包含实现 ----------
+  // 与 web/src/i18n 使用同一持久化键与 cookie，登录后工作台会继承这里的语言。
+  var fine = document.querySelector(".fine");
+  var langToggle = document.getElementById("langToggle");
+  var brandCn = document.getElementById("brandCn");
+  var brandHook = document.getElementById("brandHook");
+  var featB = document.querySelectorAll(".brand-feat b");
+  var featI = document.querySelectorAll(".brand-feat i");
+  var fieldLabels = document.querySelectorAll("#loginForm .field span");
+  var LANG_KEY = "vs_lang";
+  var I18N = {
+    zh: {
+      title: "登录 · Video Studio",
+      hitAria: "点击任意位置进入登录",
+      askAria: "确认进入登录",
+      brandCn: "一句话，换一整夜的风景",
+      brandHook: "说一句你想要的山，剩下的它自己会拍",
+      feats: ["自动分镜", "无缝拼接", "自动配乐", "循环播放"],
+      featI: ["Storyboard", "Seamless cut", "Soundtrack", "Loop ready"],
+      account: "账号",
+      password: "密码",
+      accountPh: "请输入账号",
+      passwordPh: "请输入密码",
+      signIn: "Sign in",
+      signingIn: "Signing in…",
+      fine: "会话只保留在本次浏览器会话中；关闭浏览器后需要重新登录。",
+      needUser: "请输入账号",
+      needPass: "请输入密码",
+      err429: "尝试次数过多，请稍后再试",
+      err503: "认证服务不可用，请联系部署者检查数据库连接",
+      err401: "账号或密码错误",
+      errOther: "登录失败（HTTP {status}）",
+      errNet: "无法连接到服务器，请确认服务是否已启动"
+    },
+    en: {
+      title: "Sign in · Video Studio",
+      hitAria: "Click anywhere to sign in",
+      askAria: "Continue to sign in",
+      brandCn: "One sentence, an entire night of scenery.",
+      brandHook: "Describe the mountains you want. It films the rest on its own.",
+      feats: ["Storyboard", "Seamless cut", "Soundtrack", "Loop ready"],
+      featI: ["自动分镜", "无缝拼接", "自动配乐", "循环播放"],
+      account: "Account",
+      password: "Password",
+      accountPh: "Enter your account",
+      passwordPh: "Enter your password",
+      signIn: "Sign in",
+      signingIn: "Signing in…",
+      fine: "Your session lasts only until you close this browser. You will need to sign in again next time.",
+      needUser: "Please enter your account",
+      needPass: "Please enter your password",
+      err429: "Too many attempts. Please try again later.",
+      err503: "Authentication is unavailable. Ask the deployer to check the database connection.",
+      err401: "Incorrect account or password",
+      errOther: "Sign-in failed (HTTP {status})",
+      errNet: "Cannot reach the server. Please check that it is running."
+    }
+  };
+
+  function normLang(value) {
+    var s = String(value || "").toLowerCase();
+    if (s.indexOf("zh") === 0) return "zh";
+    if (s.indexOf("en") === 0) return "en";
+    return "";
+  }
+
+  function readLang() {
+    try {
+      var fromQuery = normLang(new URLSearchParams(location.search).get("lang"));
+      if (fromQuery) return fromQuery;
+    } catch (e) { /* ignore */ }
+    try {
+      var stored = normLang(localStorage.getItem(LANG_KEY));
+      if (stored) return stored;
+    } catch (e) { /* ignore */ }
+    var parts = String(document.cookie || "").split(";");
+    for (var i = 0; i < parts.length; i++) {
+      var kv = parts[i].split("=");
+      if (kv[0] && kv[0].trim() === LANG_KEY) {
+        var cookieLang = normLang(decodeURIComponent(kv[1] || ""));
+        if (cookieLang) return cookieLang;
+      }
+    }
+    var nav = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+    return normLang(nav) || "zh";
+  }
+
+  var lang = readLang();
+  function T() { return I18N[lang] || I18N.zh; }
+
+  function applyLang(code) {
+    lang = code === "en" ? "en" : "zh";
+    try { localStorage.setItem(LANG_KEY, lang); } catch (e) { /* ignore */ }
+    try { document.cookie = LANG_KEY + "=" + lang + "; path=/; max-age=31536000; SameSite=Lax"; } catch (e) { /* ignore */ }
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.title = T().title;
+    body.classList.toggle("lang-en", lang === "en");
+    if (langToggle) langToggle.textContent = lang === "zh" ? "EN" : "中文";
+    if (brandCn) brandCn.textContent = T().brandCn;
+    if (brandHook) brandHook.textContent = T().brandHook;
+    for (var i = 0; i < featB.length; i++) {
+      featB[i].textContent = T().feats[i];
+      if (featI[i]) featI[i].textContent = T().featI[i];
+    }
+    if (fieldLabels[0]) fieldLabels[0].textContent = T().account;
+    if (fieldLabels[1]) fieldLabels[1].textContent = T().password;
+    user.placeholder = T().accountPh;
+    pass.placeholder = T().passwordPh;
+    if (fine) fine.textContent = T().fine;
+    hit.setAttribute("aria-label", T().hitAria);
+    ask.setAttribute("aria-label", T().askAria);
+    if (!submit.disabled) submit.textContent = T().signIn;
+  }
+
+  if (langToggle) {
+    langToggle.addEventListener("click", function () {
+      applyLang(lang === "zh" ? "en" : "zh");
+    });
+  }
+  applyLang(lang);
 
   var v = document.getElementById("bg");
   var fallbackDone = false;
@@ -519,7 +655,7 @@
 
   function setBusy(busy){
     submit.disabled = busy;
-    submit.textContent = busy ? "Signing in…" : "Sign in";
+    submit.textContent = busy ? T().signingIn : T().signIn;
   }
 
   // 已登录过就直接进去（浏览器后退回登录页时）
@@ -540,14 +676,18 @@
   form.addEventListener("submit", function(e){
     e.preventDefault();
     var u = user.value.trim(), p = pass.value;
-    if(!u){ err.textContent = "请输入账号"; user.focus(); return; }
-    if(!p){ err.textContent = "请输入密码"; pass.focus(); return; }
+    if(!u){ err.textContent = T().needUser; user.focus(); return; }
+    if(!p){ err.textContent = T().needPass; pass.focus(); return; }
     err.textContent = "";
     setBusy(true);
 
     fetch("/api/auth/login", {
       method: "POST",
-      headers: { "content-type": "application/json", "accept": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "accept": "application/json",
+        "accept-language": lang === "zh" ? "zh-CN,zh;q=0.9" : "en-US,en;q=0.9"
+      },
       body: JSON.stringify({ username: u, password: p })
     })
       .then(function(r){
@@ -559,14 +699,16 @@
         if (res.status === 200) { goThrough(); return; }
         setBusy(false);
         try { pass.select(); } catch(e){}
-        if (res.status === 429) err.textContent = res.body.error || "尝试次数过多，请稍后再试";
-        else if (res.status === 503) err.textContent = "认证服务不可用，请联系部署者检查数据库连接";
-        else if (res.status === 401) err.textContent = res.body.error || "账号或密码错误";
-        else err.textContent = res.body.error || ("登录失败（HTTP " + res.status + "）");
+        if (res.status === 429) err.textContent = lang === "zh" ? (res.body.error || T().err429) : T().err429;
+        else if (res.status === 503) err.textContent = T().err503;
+        else if (res.status === 401) err.textContent = lang === "zh" ? (res.body.error || T().err401) : T().err401;
+        else err.textContent = lang === "zh"
+          ? (res.body.error || T().errOther.replace("{status}", res.status))
+          : T().errOther.replace("{status}", res.status);
       })
       .catch(function(){
         setBusy(false);
-        err.textContent = "无法连接到服务器，请确认服务是否已启动";
+        err.textContent = T().errNet;
       });
   });
 

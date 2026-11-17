@@ -10,6 +10,7 @@
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
+import { t as tr } from '../i18n/index.js';
 
 function fmtDur(sec) {
   const s = Math.max(0, Math.round(Number(sec) || 0));
@@ -51,8 +52,8 @@ export function Waveform({ trackId }) {
 }
 
 const KINDS = [
-  { key: 'music', label: '音乐', hint: '整片铺底' },
-  { key: 'ambient', label: '环境音', hint: '自然声景' }
+  { key: 'music', labelKey: 'editor.audio.kind.musicLabel', hintKey: 'editor.audio.kind.musicHint' },
+  { key: 'ambient', labelKey: 'editor.audio.kind.ambientLabel', hintKey: 'editor.audio.kind.ambientHint' }
 ];
 
 export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
@@ -88,17 +89,17 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       if (!a) { a = new window.Audio(); audioElRef.current = a; }
       if (playingId === t.id) { a.pause(); setPlayingId(''); return; }
       a.onended = () => setPlayingId('');
-      a.onerror = () => { setLibErr('试听失败：' + (t.title || t.id) + '（文件可能不存在）'); setPlayingId(''); };
+      a.onerror = () => { setLibErr(tr('editor.audio.listenFailed') + (t.title || t.id) + tr('editor.audio.fileMissingParen')); setPlayingId(''); };
       a.src = bgmUrl(t);
       const p = a.play();
       if (p && p.catch) {
         p.catch((e) => {
-          setLibErr('试听失败：' + (e && e.message ? e.message : '浏览器拒绝播放'));
+          setLibErr(tr('editor.audio.listenFailed') + (e && e.message ? e.message : tr('editor.audio.browserBlocked')));
           setPlayingId('');
         });
       }
       setPlayingId(t.id);
-    } catch (e) { setLibErr('试听失败：' + e.message); }
+    } catch (e) { setLibErr(tr('editor.audio.listenFailed') + e.message); }
   }
 
   async function setDefaultTrack(id) {
@@ -110,21 +111,21 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
         body: JSON.stringify({ defaultTrackId: id })
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      setLibMsg('已设为默认曲目');
+      setLibMsg(tr('editor.audio.setDefaultDone'));
       if (onReloadBgm) await onReloadBgm();
-    } catch (e) { setLibErr('设为默认失败：' + e.message); }
+    } catch (e) { setLibErr(tr('editor.audio.setDefaultFailed') + e.message); }
   }
 
   async function removeTrack(t) {
-    if (!window.confirm('删除配乐「' + (t.title || t.id) + '」？会先移入回收站，可在回收站恢复。')) return;
+    if (!window.confirm(tr('editor.audio.deleteConfirm', { title: (t.title || t.id) }))) return;
     setLibErr(''); setLibMsg(''); setBusyId(t.id);
     try {
       const r = await fetch('/api/bgm/' + encodeURIComponent(t.id), { method: 'DELETE', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setLibMsg(j.trashed ? '已移入回收站' : '已删除');
+      setLibMsg(j.trashed ? tr('editor.audio.trashed') : tr('editor.audio.deleted'));
       if (onReloadBgm) await onReloadBgm();
-    } catch (e) { setLibErr('删除失败：' + e.message); }
+    } catch (e) { setLibErr(tr('editor.audio.deleteFailed') + e.message); }
     finally { setBusyId(''); }
   }
 
@@ -133,7 +134,7 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
     setLibErr(''); setLibMsg('');
     if (!file) return;
     if (file.size > MAX_AUDIO_MB * 1024 * 1024) {
-      setLibErr(`文件 ${(file.size / 1048576).toFixed(1)}MB，超过 ${MAX_AUDIO_MB}MB 上限`);
+      setLibErr(tr('editor.audio.fileTooLarge', { size: (file.size / 1048576).toFixed(1), max: MAX_AUDIO_MB }));
       return;
     }
     setUploading(true);
@@ -141,7 +142,7 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       const dataUrl = await new Promise((res, rej) => {
         const fr = new FileReader();
         fr.onload = () => res(String(fr.result || ''));
-        fr.onerror = () => rej(new Error('读取文件失败'));
+        fr.onerror = () => rej(new Error(tr('editor.audio.readFailed')));
         fr.readAsDataURL(file);
       });
       const durationSec = await new Promise((res) => {
@@ -169,10 +170,10 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setLibMsg('已上传：' + file.name);
+      setLibMsg(tr('editor.audio.uploaded', { name: file.name }));
       if (onReloadBgm) await onReloadBgm();
     } catch (e) {
-      setLibErr('上传失败：' + e.message);
+      setLibErr(tr('editor.audio.uploadFailed') + e.message);
     } finally {
       setUploading(false);
     }
@@ -212,15 +213,15 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       const options = tracks.filter((t) => t.category === k.key).slice(0, 8);
       return html`<div className="ed-audio-track" key=${k.key}>
         <div className="ed-audio-head">
-          <b>${k.label}</b>
-          <span className="ed-sub">${k.hint}</span>
+           <b>${tr(k.labelKey)}</b>
+          <span className="ed-sub">${tr(k.hintKey)}</span>
         </div>
         ${seg
           ? html`<div className="ed-audio-seg">
               <div className="ed-audio-title">${track ? track.title : seg.trackId}</div>
               <${Waveform} trackId=${seg.trackId} />
               <label className="ed-audio-row">
-                <span>音量</span>
+                <span>${tr('editor.audio.volume')}</span>
                 <input
                   className="ed-slider-input"
                   type="range"
@@ -233,29 +234,29 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
                 <span className="ed-slider-val">${Math.round((Number(seg.volume) || 0) * 100)}%</span>
               </label>
               <div className="ed-audio-row">
-                <span>入点</span>
+                <span>${tr('editor.audio.inPoint')}</span>
                 <input className="ed-num" type="number" min="0" step="0.5"
                   value=${Number(seg.sourceIn) || 0}
                   onInput=${(e) => update(k.key, { sourceIn: Number(e.target.value) })} />
-                <span>出点</span>
+                <span>${tr('editor.audio.outPoint')}</span>
                 <input className="ed-num" type="number" min="0" step="0.5"
                   value=${Number(seg.sourceOut) || 0}
                   onInput=${(e) => update(k.key, { sourceOut: Number(e.target.value) })} />
-                <span className="ed-sub">秒</span>
+                <span className="ed-sub">${tr('editor.audio.seconds')}</span>
               </div>
               <div className="ed-audio-row">
-                <span>淡入</span>
+                <span>${tr('editor.audio.fadeIn')}</span>
                 <input className="ed-num" type="number" min="0" max="10" step="0.5"
                   value=${Number(seg.fadeIn) || 0}
                   onInput=${(e) => update(k.key, { fadeIn: Number(e.target.value) })} />
-                <span className="ed-sub">秒</span>
-                <span>淡出</span>
+                <span className="ed-sub">${tr('editor.audio.seconds')}</span>
+                <span>${tr('editor.audio.fadeOut')}</span>
                 <input className="ed-num" type="number" min="0" max="10" step="0.5"
                   value=${Number(seg.fadeOut) || 0}
                   onInput=${(e) => update(k.key, { fadeOut: Number(e.target.value) })} />
-                <span className="ed-sub">秒</span>
+                <span className="ed-sub">${tr('editor.audio.seconds')}</span>
               </div>
-              <button className="ed-btn" onClick=${() => remove(k.key)}>移除</button>
+              <button className="ed-btn" onClick=${() => remove(k.key)}>${tr('editor.audio.remove')}</button>
             </div>`
           : html`<div className="ed-audio-pick">
               ${options.map((t) => html`
@@ -264,18 +265,18 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
                   <span className="ed-sub">${fmtDur(t.durationSec)}</span>
                 </button>
               `)}
-              ${options.length === 0 && html`<p className="ed-sub">配乐库为空（把 mp3 放进 assets/bgm 并登记）</p>`}
+              ${options.length === 0 && html`<p className="ed-sub">${tr('editor.audio.emptyPick')}</p>`}
             </div>`}
       </div>`;
     })}
 
     <div className="ed-audio-track">
       <div className="ed-audio-head">
-        <b>配乐库</b>
-        <span className="ed-sub">${tracks.length} 首</span>
+        <b>${tr('editor.audio.library')}</b>
+        <span className="ed-sub">${tr('editor.audio.tracksCount', { n: tracks.length })}</span>
         <span style=${{ flex: 1 }}></span>
         <label className="ed-btn" style=${{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-          ${uploading ? '上传中…' : '＋ 上传音频'}
+          ${uploading ? tr('editor.audio.uploading') : tr('editor.audio.upload')}
           <input type="file" accept=".mp3,.wav,.m4a,.ogg,audio/*" className="hidden"
             disabled=${uploading}
             onChange=${(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) uploadFile(f); }} />
@@ -283,11 +284,11 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       </div>
       ${libErr && html`<p style=${{ margin: '0 0 6px', fontSize: '11px', color: 'var(--danger)' }}>${libErr}</p>`}
       ${libMsg && html`<p style=${{ margin: '0 0 6px', fontSize: '11px', color: 'var(--ink3)' }}>${libMsg}</p>`}
-      ${tracks.length === 0 && html`<p className="ed-sub">配乐库为空：可上传 mp3 / wav / m4a / ogg（单文件 ≤${MAX_AUDIO_MB}MB）。</p>`}
+      ${tracks.length === 0 && html`<p className="ed-sub">${tr('editor.audio.emptyLibrary', { max: MAX_AUDIO_MB })}</p>`}
       ${tracks.map((t) => html`
         <div key=${t.id} style=${{ padding: '5px 0', borderTop: '1px solid rgba(244,247,245,.05)' }}>
           <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button className="ed-btn" title=${playingId === t.id ? '停止试听' : '试听'}
+            <button className="ed-btn" title=${playingId === t.id ? tr('editor.audio.stop') : tr('editor.audio.play')}
               style=${{ width: '26px', height: '26px', borderRadius: '50%', padding: 0, flex: '0 0 auto' }}
               onClick=${() => togglePlay(t)}>${playingId === t.id ? '⏸' : '▶'}</button>
             <span style=${{ flex: 1, minWidth: 0, fontSize: '11.5px', color: 'var(--ink2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.title || t.id}</span>
@@ -295,10 +296,10 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
           </div>
           <div style=${{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '6px', marginTop: '2px', paddingLeft: '34px' }}>
             ${defaultId === t.id
-              ? html`<span style=${{ fontSize: '10px', padding: '2px 6px', borderRadius: '3px', background: 'var(--accent)', color: 'var(--onaccent)', flex: '0 0 auto' }}>默认</span>`
-              : html`<button className="ed-btn" onClick=${() => setDefaultTrack(t.id)}>设为默认</button>`}
+              ? html`<span style=${{ fontSize: '10px', padding: '2px 6px', borderRadius: '3px', background: 'var(--accent)', color: 'var(--onaccent)', flex: '0 0 auto' }}>${tr('editor.audio.defaultBadge')}</span>`
+              : html`<button className="ed-btn" onClick=${() => setDefaultTrack(t.id)}>${tr('editor.audio.setDefault')}</button>`}
             <button className="ed-btn" disabled=${busyId === t.id} onClick=${() => removeTrack(t)}
-              style=${{ color: 'var(--danger)' }}>删除</button>
+              style=${{ color: 'var(--danger)' }}>${tr('editor.audio.delete')}</button>
           </div>
         </div>
       `)}

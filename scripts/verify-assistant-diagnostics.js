@@ -324,8 +324,8 @@ const OPTS = { apiKey: SECRET, baseUrl: 'https://relay.example/v1/', model: 'dee
   check(/getReader\(\)/.test(assistantSrc), '前端读流（getReader）');
   check(/ndjson/.test(assistantSrc), '前端按 content-type 判断是否流式（不认就回退）');
   check(/failureText\(/.test(assistantSrc), '流式与整段两条路径共用失败气泡格式');
-  check(/正在想…/.test(assistantSrc), '思考期仍有文字反馈');
-  check(/已 /.test(assistantSrc), '思考期显示已等待秒数（不再是死的三个点）');
+  check(/assistant\.thinking/.test(assistantSrc), '思考期仍有文字反馈');
+  check(/assistant\.elapsed/.test(assistantSrc), '思考期显示已等待秒数（不再是死的三个点）');
 
   restoreFetch();
 

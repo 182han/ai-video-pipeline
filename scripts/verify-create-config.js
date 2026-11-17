@@ -15,6 +15,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const CREATE = path.join(ROOT, 'web', 'src', 'screens', 'create.js');
+const CREATE_MSGS = path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'create.js');
 const SETTINGS = path.join(ROOT, 'web', 'src', 'screens', 'settingsPage.js');
 
 let pass = 0;
@@ -40,6 +41,7 @@ if (!fs.existsSync(CREATE)) {
   process.exit(1);
 }
 const src = fs.readFileSync(CREATE, 'utf8');
+const createMsgs = fs.readFileSync(CREATE_MSGS, 'utf8');
 const settings = fs.existsSync(SETTINGS) ? fs.readFileSync(SETTINGS, 'utf8') : '';
 
 // ---- 0. 契约对齐：设置页存的键名必须还是这三个（防止改设置页把 E1 打回旧样） ----
@@ -62,7 +64,7 @@ check(!/model:\s*'seedance',\s*resolution:\s*'1080p',\s*preset:\s*'final'/.test(
 // ---- 3. 确认页（step === 5）有「生成参数」块，三个控件可改 p ----
 const confirm = section(src, 'if (step === 5) {', 'return null;');
 check(confirm.length > 0, '找到 step === 5（确认页）代码块');
-check(/生成参数/.test(confirm), '确认页含「生成参数」区块');
+check(/create\.p5\.genParamsTitle/.test(confirm) && /生成参数/.test(createMsgs), '确认页含「生成参数」区块（i18n 词条）');
 check(/set\('model'/.test(confirm), '确认页可改模型（set(\'model\')）');
 check(/set\('resolution'/.test(confirm), '确认页可改分辨率（set(\'resolution\')）');
 check(/set\('preset'/.test(confirm), '确认页可改档位（set(\'preset\')）');
@@ -73,10 +75,11 @@ check(/final/.test(confirm) && /daily/.test(confirm) && /quick/.test(confirm) &&
   '档位选项含 final / daily / quick / clips_only');
 
 // ---- 4. 确认清单里补了只读「档位」行 ----
-check(/<dt[^>]*>档位<\/dt>/.test(confirm), '确认清单含只读「档位」行');
+check(/create\.p5\.presetLabel/.test(confirm) && /档位/.test(createMsgs), '确认清单含只读「档位」行（i18n 词条）');
 check(/p\.preset/.test(confirm), '确认清单的档位取自 p.preset');
-check(/<dt[^>]*>模型<\/dt>/.test(confirm) && /<dt[^>]*>分辨率<\/dt>/.test(confirm),
-  '确认清单原有「模型 / 分辨率」行保留');
+check(/create\.p5\.modelLabel/.test(confirm) && /create\.p5\.resolutionLabel/.test(confirm)
+  && /模型/.test(createMsgs) && /分辨率/.test(createMsgs),
+  '确认清单原有「模型 / 分辨率」行保留（i18n 词条）');
 
 // ---- 5. 请求体语义不变：model 仍是 generator 名，不是 modelId ----
 const submitBody = section(src, 'const body = {', '...rt');

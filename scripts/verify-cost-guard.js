@@ -53,13 +53,15 @@ async function waitReady(base, timeoutMs = 25000) {
   const settingsSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'settingsPage.js'), 'utf8');
   const createSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'create.js'), 'utf8');
   const serverSrc = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  const settingsMsgs = fs.readFileSync(path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'settings.js'), 'utf8');
+  const createMsgs = fs.readFileSync(path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'create.js'), 'utf8');
 
   // ---------- 1. 静态接线 ----------
-  check(/账户余额/.test(settingsSrc), '设置页有「账户余额」输入');
+  check(/settings\.general\.balance/.test(settingsSrc) && /账户余额/.test(settingsMsgs), '设置页有「账户余额」输入（i18n 词条）');
   check(/balance/.test(settingsSrc), '设置页把余额写进配置（balance）');
   check(/\/api\/estimate/.test(createSrc), '创作页调用 /api/estimate');
-  check(/预计花费|预计成本/.test(createSrc), '确认页显示预计花费');
-  check(/已拦截/.test(createSrc), '超额时提示「已拦截」');
+  check(/create\.p5\.costLabel/.test(createSrc) && /预计花费/.test(createMsgs), '确认页显示预计花费（i18n 词条）');
+  check(/create\.errors\.balanceBlocked/.test(createSrc) && /已拦截/.test(createMsgs), '超额时提示「已拦截」（i18n 词条）');
   check(/parseFloat\([^)]*balance/.test(createSrc) || /balance\)/.test(createSrc), '提交前读取余额做比对');
   check(/est(imate)?\s*>\s*balance|estimatedCost\s*>\s*balance/.test(createSrc), '预估 > 余额 时拦截（不发请求）');
   check(/app\.post\('\/api\/estimate'/.test(serverSrc), '服务端新增 POST /api/estimate');

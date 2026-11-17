@@ -18,40 +18,48 @@ import {
   getImageState, onImageState, startImage,
   takeSeedPhoto, adoptPhoto
 } from '../createDraft.js';
+import { t as tr } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState, useRef } = React;
 
-const STEPS = ['提示词', '图片生成', '图片审核', '运镜', '时长与配乐', '确认'];
+const STEPS = [
+  'create.steps.prompt',
+  'create.steps.images',
+  'create.steps.review',
+  'create.steps.motion',
+  'create.steps.duration',
+  'create.steps.confirm'
+];
 
 // 8 个执行环节（与 src/pipelineStages.js 的 ALL_STAGES 一致；核心链 3 步锁定必选）
 const STAGE_OPTS = [
-  { key: 'prompt_optimize', name: '提示词优化', core: true },
-  { key: 'storyboard', name: '分镜拆解', core: true },
-  { key: 'clip_generation', name: '片段生成', core: true },
-  { key: 'concatenation', name: '拼接' },
-  { key: 'loop_processing', name: '无缝循环' },
-  { key: 'audio_mix', name: '配乐混音' },
-  { key: 'transcoding', name: '转码导出' },
-  { key: 'final_qc', name: '最终质检' }
+  { key: 'prompt_optimize', nameKey: 'create.stage.prompt_optimize', core: true },
+  { key: 'storyboard', nameKey: 'create.stage.storyboard', core: true },
+  { key: 'clip_generation', nameKey: 'create.stage.clip_generation', core: true },
+  { key: 'concatenation', nameKey: 'create.stage.concatenation' },
+  { key: 'loop_processing', nameKey: 'create.stage.loop_processing' },
+  { key: 'audio_mix', nameKey: 'create.stage.audio_mix' },
+  { key: 'transcoding', nameKey: 'create.stage.transcoding' },
+  { key: 'final_qc', nameKey: 'create.stage.final_qc' }
 ];
 
 // 13 个质检项（与 src/qualityChecker.js 的 QC_ITEMS 一致；nsfw 永远要紧，不可关闭）
 const QC_OPTS = [
-  { key: 'prompt', name: '提示词质检' },
-  { key: 'storyboard', name: '分镜头质检' },
-  { key: 'blackFrame', name: '黑帧检测' },
-  { key: 'blur', name: '模糊检测' },
-  { key: 'duplicate', name: '重复帧检测' },
-  { key: 'duration', name: '时长校验' },
-  { key: 'nsfw', name: 'NSFW 合规检测' },
-  { key: 'concat', name: '拼接质检' },
-  { key: 'seam', name: '接缝质量检测' },
-  { key: 'colorContinuity', name: '镜头色彩连续性' },
-  { key: 'loop', name: '循环质检' },
-  { key: 'transcode', name: '转码质检' },
-  { key: 'final', name: '最终综合质检' }
+  { key: 'prompt', nameKey: 'create.qc.prompt' },
+  { key: 'storyboard', nameKey: 'create.qc.storyboard' },
+  { key: 'blackFrame', nameKey: 'create.qc.blackFrame' },
+  { key: 'blur', nameKey: 'create.qc.blur' },
+  { key: 'duplicate', nameKey: 'create.qc.duplicate' },
+  { key: 'duration', nameKey: 'create.qc.duration' },
+  { key: 'nsfw', nameKey: 'create.qc.nsfw' },
+  { key: 'concat', nameKey: 'create.qc.concat' },
+  { key: 'seam', nameKey: 'create.qc.seam' },
+  { key: 'colorContinuity', nameKey: 'create.qc.colorContinuity' },
+  { key: 'loop', nameKey: 'create.qc.loop' },
+  { key: 'transcode', nameKey: 'create.qc.transcode' },
+  { key: 'final', nameKey: 'create.qc.final' }
 ];
 
 const ALL_STAGE_KEYS = STAGE_OPTS.map((s) => s.key);
@@ -116,10 +124,10 @@ function findPromptConflict(base, motion) {
   for (const [a, bWords] of pairs) {
     const inBaseA = hit(b, a);
     const inMotionB = hit(m, bWords);
-    if (inBaseA.length && inMotionB.length) return `图里是「${inBaseA[0]}」，你写的是「${inMotionB[0]}」`;
+    if (inBaseA.length && inMotionB.length) return tr('create.conflict.text', { base: inBaseA[0], motion: inMotionB[0] });
     const inBaseB = hit(b, bWords);
     const inMotionA = hit(m, a);
-    if (inBaseB.length && inMotionA.length) return `图里是「${inBaseB[0]}」，你写的是「${inMotionA[0]}」`;
+    if (inBaseB.length && inMotionA.length) return tr('create.conflict.text', { base: inBaseB[0], motion: inMotionA[0] });
   }
   return '';
 }
@@ -219,7 +227,7 @@ export function CreateWizard({ onChanged }) {
       setStep(2);
       setSeedNotice(seedPhoto.id || '');
     } catch (e) {
-      setImgErrLocal('从照片库带入失败：' + e.message);
+      setImgErrLocal(tr('create.errors.seedFailed') + e.message);
     }
   }, []);
 
@@ -279,7 +287,7 @@ export function CreateWizard({ onChanged }) {
 
   async function optimize() {
     setOptErr('');
-    if (!prompt.trim()) { setOptErr('先写点内容再优化'); return; }
+    if (!prompt.trim()) { setOptErr(tr('create.errors.optimizeEmpty')); return; }
     setOptimizing(true);
     try {
       let cfg = {};
@@ -298,9 +306,9 @@ export function CreateWizard({ onChanged }) {
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       const out = j.optimizedPrompt || j.prompt || j.optimized || j.result || '';
       if (out && typeof out === 'string') setPrompt(out);
-      else setOptErr('接口没有返回优化后的提示词');
+      else setOptErr(tr('create.errors.optimizeNoResult'));
     } catch (e) {
-      setOptErr('优化失败：' + e.message + '（需在设置里配 LLM Key）');
+      setOptErr(tr('create.errors.optimizeFailed', { msg: e.message }));
     } finally {
       setOptimizing(false);
     }
@@ -328,7 +336,7 @@ export function CreateWizard({ onChanged }) {
 
   async function genTestImage() {
     setImgErrLocal('');
-    if (!prompt.trim()) { setImgErrLocal('先在第一步写提示词'); return; }
+    if (!prompt.trim()) { setImgErrLocal(tr('create.errors.imagePromptRequired')); return; }
     let cfg = {};
     try { cfg = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { cfg = {}; }
     const st = imgStatus;
@@ -361,7 +369,7 @@ export function CreateWizard({ onChanged }) {
         throw new Error(j.error || ('HTTP ' + r.status));
       }
     } catch (e) {
-      setImgErrLocal('审核状态保存失败：' + e.message);
+      setImgErrLocal(tr('create.errors.reviewFailed') + e.message);
     }
   }
 
@@ -372,26 +380,24 @@ export function CreateWizard({ onChanged }) {
 
   async function submit() {
     setErr('');
-    if (!prompt.trim()) { setErr('提示词不能为空'); setStep(0); return; }
+    if (!prompt.trim()) { setErr(tr('create.errors.emptyPrompt')); setStep(0); return; }
 
     // 图生视频（2026-11-11 用户口径）：第③步通过 + 勾选「用这张图」→ 把图片库 id 交给后端。
     // 没有已实现的通道就明确拦下，绝不静默退回文字生成。
     const wantImage = !!(imgResult && imgResult.photoId && useImage);
     if (wantImage && !i2vSupported) {
-      setErr(`当前视频模型「${p.model}」没有已实现的图生视频通道（已实现：${i2vModels.join(' / ') || '暂无'}）。`
-        + '请切换模型，或取消勾选「用这张图生成视频」。');
+      setErr(tr('create.errors.i2vUnsupported', { model: p.model, models: i2vModels.join(' / ') || tr('create.errors.noModels') }));
       return;
     }
     if (wantImage && isMultiPrompt) {
-      setErr('图生视频目前只支持单行提示词（多行会被当成多个场景，但只有同一张首帧）。请合并成一行再提交。');
+      setErr(tr('create.errors.i2vMultiPrompt'));
       return;
     }
 
     // 余额守门（旧版口径）：预计花费 > 余额 → 直接拦截，不发请求；余额留空 = 不拦截
     const balance = readBalance();
     if (est && est.estimate > 0 && Number.isFinite(balance) && balance > 0 && est.estimate > balance) {
-      setErr(`已拦截：预计花费 ¥${est.estimate.toFixed(2)} 超过账户余额 ¥${balance.toFixed(2)}。`
-        + '请减少片段数或单段时长、降低分辨率，或先到「设置」更新余额。');
+      setErr(tr('create.errors.balanceBlocked', { estimate: est.estimate.toFixed(2), balance: balance.toFixed(2) }));
       return;
     }
 
@@ -406,10 +412,10 @@ export function CreateWizard({ onChanged }) {
       const composedPrompt = wantImage
         ? [imageBase, motionText].filter(Boolean).join('。')
         : motionText;
-      if (!composedPrompt) { setErr('提示词不能为空'); setSubmitting(false); return; }
+      if (!composedPrompt) { setErr(tr('create.errors.emptyPrompt')); setSubmitting(false); return; }
       if (wantImage && imageBase) {
         const conflict = findPromptConflict(imageBase, motionText);
-        if (conflict && !window.confirm(`提示词可能与图片冲突：${conflict}。\n\n仍要提交吗？`)) {
+        if (conflict && !window.confirm(tr('create.conflict.confirm', { conflict }))) {
           setSubmitting(false);
           return;
         }
@@ -457,7 +463,7 @@ export function CreateWizard({ onChanged }) {
       // 重复提交拦截（服务端 409）：给一次显式确认，确认后带 force 再发一次。
       // 默认不自动重发——账单事故就是「点一次落多个任务」，这里必须由人确认。
       if (!r.ok && j.code === 'DUPLICATE_TASK'
-        && window.confirm(j.error + '\n\n确认要再创建一次吗？（会真实计费）')) {
+        && window.confirm(j.error + tr('create.errors.duplicateConfirm'))) {
         body.force = true;
         r = await fetch('/api/tasks', {
           method: 'POST', credentials: 'same-origin',
@@ -472,7 +478,7 @@ export function CreateWizard({ onChanged }) {
       saveDraft({ step: 0 });
       navigate('/gen');
     } catch (e) {
-      setErr(e.message || '提交失败');
+      setErr(e.message || tr('create.errors.submitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -481,37 +487,36 @@ export function CreateWizard({ onChanged }) {
   const body = (() => {
     if (step === 0) {
       return html`
-        <${Section} title="提示词"
+        <${Section} title=${tr('create.p0.title')}
           extra=${html`<button onClick=${() => navigate('/templates')}
-            className="text-[11px] text-accent underline">模板库 →</button>`}>
+            className="text-[11px] text-accent underline">${tr('create.p0.template')}</button>`}>
           <textarea
             value=${prompt}
             onInput=${(e) => setPrompt(e.target.value)}
             rows=${big ? 18 : 8}
-            placeholder="例如：清晨的喀斯特峰林，低雾在谷间缓慢流动，侧逆光，长焦压缩，缓慢推近……"
+            placeholder=${tr('create.p0.placeholder')}
             className="w-full resize-y rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5
                        text-[14px] leading-[1.75] text-ink outline-none placeholder:text-ink3
                        focus:border-accent/40"
           ></textarea>
           <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
-            单行 = 单场景 × 段数；<b className="text-ink2">多行 = 每行一个场景（行数覆盖段数设置）</b>；
-            行尾可加【主题】标签（如「雪山日出【雪山】」）。
-            ${isMultiPrompt ? html`<span className="text-accent"> / 当前 ${promptLines.length} 行 → 将生成 ${promptLines.length} 段</span>` : null}
+            ${tr('create.p0.hint')}
+            ${isMultiPrompt ? html`<span className="text-accent">${tr('create.p0.multiStatus', { lines: promptLines.length, clips: promptLines.length })}</span>` : null}
           </p>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <button onClick=${optimize} disabled=${optimizing}
               className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
                          hover:bg-white/[.06] disabled:opacity-40"
-            >${optimizing ? '优化中…' : '✨ 智能优化'}</button>
+            >${optimizing ? tr('create.p0.optimizing') : tr('create.p0.smartOptimize')}</button>
             <button onClick=${() => setBig((v) => !v)}
               className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
                          hover:bg-white/[.06]"
-            >${big ? '收起编辑区' : '⤢ 放大编辑'}</button>
-            <span className="text-[11px] text-ink3">${prompt.length} 字</span>
+            >${big ? tr('create.p0.collapse') : tr('create.p0.expand')}</button>
+            <span className="text-[11px] text-ink3">${tr('create.p0.charCount', { n: prompt.length })}</span>
             <span className="flex-1"></span>
             <button onClick=${() => navigate('/templates')}
               className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-accent
-                         hover:bg-white/[.06]">模板库 →</button>
+                         hover:bg-white/[.06]">${tr('create.p0.templateLink')}</button>
           </div>
           ${optErr && html`<p className="mt-1.5 text-[11px] text-danger">${optErr}</p>`}
         </${Section}>
@@ -526,13 +531,13 @@ export function CreateWizard({ onChanged }) {
       const providerOk = !!(st && st.providerImplemented);
       const ready = providerOk && ((st && st.usable) || hasLocalImgKey);
       const keyLabel = st && st.usable
-        ? '服务端 Key 已配置'
-        : (hasLocalImgKey ? '本机 Key 已填写' : 'Key 未配置');
+        ? tr('create.p1.keyServer')
+        : (hasLocalImgKey ? tr('create.p1.keyLocal') : tr('create.p1.keyNone'));
       return html`
-        <${Section} title="图片生成（wan2.7-image）">
+        <${Section} title=${tr('create.p1.title')}>
           ${!st && html`
             <div className="rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5">
-              <p className="text-[12px] text-ink2">正在读取出图配置…</p>
+              <p className="text-[12px] text-ink2">${tr('create.p1.reading')}</p>
             </div>
           `}
           ${st && html`
@@ -541,21 +546,21 @@ export function CreateWizard({ onChanged }) {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-num text-[12px] text-ink">${st.imageGen.provider} / ${st.imageGen.model}</span>
                 <span className=${'text-[11px] ' + (ready ? 'text-accent' : 'text-warn')}>
-                  ${ready ? '已就绪' : '未就绪'}
+                  ${ready ? tr('create.p1.ready') : tr('create.p1.notReady')}
                 </span>
-                <span className="text-[11px] text-ink3">尺寸 ${st.imageGen.size}</span>
+                <span className="text-[11px] text-ink3">${tr('create.p1.size', { size: st.imageGen.size })}</span>
                 <span className="text-[11px] text-ink3">${keyLabel}</span>
               </div>
               ${!ready && html`<p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
                 ${providerOk
-                  ? (hasLocalImgKey ? '服务端未启用图片生成；请检查服务端适配器。' : (st.hint || '出图配置未就绪。'))
-                  : '服务端出图适配器未注册。'}
+                  ? (hasLocalImgKey ? tr('create.p1.serverDisabled') : (st.hint || tr('create.p1.serverDisabled')))
+                  : tr('create.p1.adapterMissing')}
               </p>`}
               ${ready && html`<p className="mt-1.5 text-[11px] leading-[1.7] text-ink2">
-                后端已接入。这里只做「单张测试出图」，用来确认 Key 与画质；图片不会自动并入任务。
+                ${tr('create.p1.readyNote')}
               </p>`}
               ${ready && html`<p className="mt-1 text-[11px] leading-[1.7] text-ink3">
-                已经生成过图？去左侧「照片」页，对那张图点「用它生成视频」，会自动把它带回这里并跳到第③步。
+                ${tr('create.p1.historyNote')}
               </p>`}
             </div>
           `}
@@ -563,27 +568,27 @@ export function CreateWizard({ onChanged }) {
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button onClick=${genTestImage} disabled=${imgBusy}
                 className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px] disabled:opacity-40"
-              >${imgBusy ? '生成中…' : '生成 1 张测试图'}</button>
-              <span className="text-[11px] text-ink3">会真实调用厂商并计费（1 张）</span>
+              >${imgBusy ? tr('create.p1.generateBusy') : tr('create.p1.generateOne')}</button>
+              <span className="text-[11px] text-ink3">${tr('create.p1.billing')}</span>
             </div>
           `}
           ${imgErr && html`<p className="mt-2 text-[11px] text-danger">${imgErr}</p>`}
           ${imgResult && html`
             <div className="mt-3 rounded-[6px] border border-white/[.09] bg-s2 p-2.5">
-              <img src=${imgResult.url} alt="生成结果"
+              <img src=${imgResult.url} alt=${tr('create.p1.alt')}
                 className="max-h-[260px] rounded-[4px] border border-white/[.08]" />
               <p className="mt-1.5 text-[11px] text-ink3 font-num">
                 ${imgResult.width} × ${imgResult.height} · ${imgResult.model} · ${imgResult.url}
               </p>
               ${imgResult.prompt && imgResult.prompt !== prompt.trim() && html`
                 <p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
-                  这张图是按旧提示词出的（当前提示词已改），建议点「打回重做」重新出。
+                  ${tr('create.p1.stalePrompt')}
                 </p>
               `}
             </div>
           `}
           <div className="mt-3">
-            <${Info}>生成后点「下一步」，第③步可以放大看这张图，决定通过（进入运镜）或打回重做。</${Info}>
+            <${Info}>${tr('create.p1.info')}</${Info}>
           </div>
         </${Section}>
       `;
@@ -591,38 +596,38 @@ export function CreateWizard({ onChanged }) {
 
     if (step === 2) {
       return html`
-        <${Section} title="图片审核">
+        <${Section} title=${tr('create.p2.title')}>
           ${!imgResult && !imgBusy && html`
             <div className="rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5">
-              <p className="text-[12px] text-ink2">还没有图。可以回上一步生成，或直接在这里生成一张。</p>
+              <p className="text-[12px] text-ink2">${tr('create.p2.noImage')}</p>
               <button onClick=${genTestImage}
                 className="mt-2 h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
-              >生成 1 张</button>
+              >${tr('create.p2.generateOne')}</button>
             </div>
           `}
-          ${imgBusy && html`<p className="text-[12px] text-ink2">出图中…（会真实调用厂商，计费 1 张）</p>`}
+          ${imgBusy && html`<p className="text-[12px] text-ink2">${tr('create.p2.generating')}</p>`}
           ${imgErr && html`<p className="mt-2 text-[11px] text-danger">${imgErr}</p>`}
           ${!imgBusy && imgResult && imgResult.url && html`
             <div className="rounded-[6px] border border-white/[.09] bg-s2 p-2.5">
-              <img src=${imgResult.url} alt="待审核图片"
+              <img src=${imgResult.url} alt=${tr('create.p2.alt')}
                 className="max-h-[380px] rounded-[4px] border border-white/[.08]" />
               <p className="mt-1.5 text-[11px] text-ink3 font-num">
                 ${imgResult.width} × ${imgResult.height} · ${imgResult.model}${imgResult.size ? ' · ' + imgResult.size : ''}
               </p>
               ${imgResult.prompt && imgResult.prompt !== prompt.trim() && html`
                 <p className="mt-1.5 text-[11px] leading-[1.7] text-warn">
-                  这张图是按旧提示词出的（当前提示词已改），建议点「打回重做」重新出。
+                  ${tr('create.p1.stalePrompt')}
                 </p>
               `}
             </div>
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button onClick=${async () => { await reviewPhoto('approved'); setStep(3); }}
                 className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
-              >通过，继续下一步</button>
+              >${tr('create.p2.approve')}</button>
               <button onClick=${async () => { await reviewPhoto('rejected'); await genTestImage(); }}
                 className="h-8 px-3 rounded-[6px] border border-white/[.12] text-ink text-[12px]"
-              >打回重做（只重做这一张）</button>
-              <span className="text-[11px] text-ink3">「通过」= 这张图可用于下一步图生视频；打回会再调用 1 次出图（计费 1 张）</span>
+              >${tr('create.p2.reject')}</button>
+              <span className="text-[11px] text-ink3">${tr('create.p2.note')}</span>
             </div>
           `}
         </${Section}>
@@ -631,18 +636,18 @@ export function CreateWizard({ onChanged }) {
 
     if (step === 3) {
       return html`
-        <${Section} title="运镜与动作" extra=${html`<${Info}>只写「怎么动」，画面内容由提示词决定</${Info}>`}>
+        <${Section} title=${tr('create.p3.title')} extra=${html`<${Info}>${tr('create.p3.info')}</${Info}>`}>
           <textarea
             value=${vprompt}
             onInput=${(e) => setVprompt(e.target.value)}
             rows="4"
-            placeholder="缓慢推近，轻微手持感，雾在流动……"
+            placeholder=${tr('create.p3.placeholder')}
             className="w-full resize-y rounded-[6px] border border-white/[.09] bg-s2 px-3 py-2.5
                        text-[13.5px] leading-[1.7] text-ink outline-none placeholder:text-ink3
                        focus:border-accent/40"
           ></textarea>
           <p className="mt-2 text-[11px] text-ink3">
-            当前流水线按单条提示词生成，此处的运镜描述会附加到主提示词末尾。
+            ${tr('create.p3.note')}
           </p>
         </${Section}>
       `;
@@ -650,13 +655,13 @@ export function CreateWizard({ onChanged }) {
 
     if (step === 4) {
       return html`
-        <${Section} title="时长与片段">
+        <${Section} title=${tr('create.p4.durationTitle')}>
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-[12px] text-ink2 w-[70px]">每段时长</span>
+            <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p4.clipDuration')}</span>
             <input type="number" min="2" max="30" value=${p.clipDuration}
               onChange=${(e) => set('clipDuration', Number(e.target.value) || 5)}
               className="h-8 w-[86px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink font-num outline-none" />
-            <span className="text-[11px] text-ink3">秒</span>
+            <span className="text-[11px] text-ink3">${tr('create.p4.seconds')}</span>
             ${[5, 10, 15].map((d) => html`
               <button key=${d} onClick=${() => set('clipDuration', d)}
                 className=${'h-7 px-2 rounded-[5px] text-[11px] border ' +
@@ -664,7 +669,7 @@ export function CreateWizard({ onChanged }) {
               >${d}s</button>`)}
           </div>
           <div className="mt-2.5 flex items-center gap-3 flex-wrap">
-            <span className="text-[12px] text-ink2 w-[70px]">片段数量</span>
+            <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p4.clipCount')}</span>
             <input type="number" min="1" max="100" value=${p.clipCount}
               onChange=${(e) => set('clipCount', Number(e.target.value) || 4)}
               className="h-8 w-[86px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink font-num outline-none" />
@@ -672,25 +677,25 @@ export function CreateWizard({ onChanged }) {
               <button key=${n} onClick=${() => set('clipCount', n)}
                 className=${'h-7 px-2 rounded-[5px] text-[11px] border ' +
                   (p.clipCount === n ? 'border-accent/50 text-accent' : 'border-white/[.09] text-ink2 hover:bg-white/[.05]')}
-              >${n} 段</button>`)}
+              >${tr('create.p4.clipsUnit', { n })}</button>`)}
           </div>
           ${isMultiPrompt && html`
             <p className="mt-2 text-[11px] leading-[1.7] text-warn">
-              已输入 ${promptLines.length} 行提示词 → 片段数量按行数生成（${promptLines.length} 段），上面的「片段数量」被覆盖。
+              ${tr('create.p4.multiOverride', { n: promptLines.length })}
             </p>
           `}
-          <p className="mt-2 text-[12px] text-ink2 font-num">成片预计 ${totalSec.toFixed(1)} 秒</p>
+          <p className="mt-2 text-[12px] text-ink2 font-num">${tr('create.p4.totalSec', { sec: totalSec.toFixed(1) })}</p>
         </${Section}>
 
         <div className="mt-4">
-          <${Section} title="配乐">
+          <${Section} title=${tr('create.p4.bgmTitle')}>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-[12px] text-ink2 w-[70px]">配乐模式</span>
+              <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p4.bgmMode')}</span>
               <select value=${p.bgmMode} onChange=${(e) => set('bgmMode', e.target.value)}
                 className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-                <option value="auto">自动（按情绪接续）</option>
-                <option value="manual">手动指定</option>
-                <option value="none">不加配乐</option>
+                <option value="auto">${tr('create.p4.auto')}</option>
+                <option value="manual">${tr('create.p4.manual')}</option>
+                <option value="none">${tr('create.p4.none')}</option>
               </select>
             </div>
             ${p.bgmMode !== 'none' && html`
@@ -699,32 +704,32 @@ export function CreateWizard({ onChanged }) {
                   <input type="checkbox" checked=${p.wantMusic}
                     onChange=${(e) => set('wantMusic', e.target.checked)}
                     className="w-[15px] h-[15px] accent-accent" />
-                  要音乐
+                  ${tr('create.p4.wantMusic')}
                 </label>
                 <label className="flex items-center gap-2 text-[12px] text-ink">
                   <input type="checkbox" checked=${p.wantAmb}
                     onChange=${(e) => set('wantAmb', e.target.checked)}
                     className="w-[15px] h-[15px] accent-accent" />
-                  要环境音
+                  ${tr('create.p4.wantAmbient')}
                 </label>
               </div>
               <div className="mt-2 flex items-center gap-3 flex-wrap">
-                <span className="text-[12px] text-ink2 w-[70px]">起始曲</span>
+                <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p4.startTrack')}</span>
                 <select value=${p.startTrack} onChange=${(e) => set('startTrack', e.target.value)}
                   className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-                  <option value="">（默认）</option>
+                  <option value="">${tr('create.p4.defaultTrack')}</option>
                   ${tracks.map((t) => html`<option key=${t.id} value=${t.id}>${t.title || t.id}</option>`)}
                 </select>
-                <span className="text-[12px] text-ink2 w-[70px]">环境音曲</span>
+                <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p4.ambTrack')}</span>
                 <select value=${p.ambTrack} onChange=${(e) => set('ambTrack', e.target.value)}
                   className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-                  <option value="">（无）</option>
+                  <option value="">${tr('create.p4.noTrack')}</option>
                   ${tracks.map((t) => html`<option key=${t.id} value=${t.id}>${t.title || t.id}</option>`)}
                 </select>
               </div>
             `}
             <p className="mt-2 text-[11px] text-ink3">
-              曲目与顺序在「库存 → 配乐」里管理；选「不加配乐」则为无声成片。
+              ${tr('create.p4.bgmNote')}
             </p>
           </${Section}>
         </div>
@@ -733,24 +738,24 @@ export function CreateWizard({ onChanged }) {
 
     if (step === 5) {
       return html`
-        <${Section} title="衔接">
+        <${Section} title=${tr('create.p5.transitionTitle')}>
           <label className="flex items-center gap-2 text-[12px] text-ink">
             <input type="checkbox" checked=${p.transition} onChange=${(e) => set('transition', e.target.checked)}
               className="w-[15px] h-[15px] accent-accent" />
-            片段之间交叉淡化
+            ${tr('create.p5.crossfade')}
           </label>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <span className="text-[12px] text-ink2">每处</span>
+            <span className="text-[12px] text-ink2">${tr('create.p5.each')}</span>
             <input type="number" step="0.1" min="0.1" max="2" value=${p.transitionDuration}
               onChange=${(e) => set('transitionDuration', Number(e.target.value) || 0.4)}
               className="h-8 w-[76px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink font-num outline-none" />
-            <span className="text-[11px] text-ink3">秒</span>
-            <span className="text-[12px] text-ink2 ml-2">转场类型</span>
+            <span className="text-[11px] text-ink3">${tr('create.p5.seconds')}</span>
+            <span className="text-[12px] text-ink2 ml-2">${tr('create.p5.transitionType')}</span>
             <select value=${p.transitionType} onChange=${(e) => set('transitionType', e.target.value)}
               className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-              <option value="fade">交叉淡化</option>
-              <option value="black">经黑场过渡</option>
-              <option value="cut">直切（不重编码）</option>
+              <option value="fade">${tr('create.p5.fade')}</option>
+              <option value="black">${tr('create.p5.black')}</option>
+              <option value="cut">${tr('create.p5.cut')}</option>
             </select>
           </div>
           <label className="mt-2.5 flex items-center gap-2 text-[12px] text-ink">
@@ -760,71 +765,69 @@ export function CreateWizard({ onChanged }) {
                 setP((s) => ({ ...s, colorMatch: on, transition: on ? true : s.transition }));
               }}
               className="w-[15px] h-[15px] accent-accent" />
-            接缝校色
+            ${tr('create.p5.colorMatch')}
           </label>
-          <p className="mt-1.5 text-[11px] text-ink3">校色依赖转场：打开校色会自动打开转场。</p>
+          <p className="mt-1.5 text-[11px] text-ink3">${tr('create.p5.colorMatchHint')}</p>
         </${Section}>
 
         <div className="mt-4">
-          <${Section} title="图生视频"
-            extra=${html`<${Info}>用第③步通过的那张图作首帧${imgResult && imgResult.photoId ? '' : '（当前没有可用的图片）'}</${Info}>`}>
+          <${Section} title=${tr('create.p5.i2vTitle')}
+            extra=${html`<${Info}>${tr('create.p5.i2vInfo')}${imgResult && imgResult.photoId ? '' : tr('create.p5.noPhotoSuffix')}</${Info}>`}>
             ${imgResult && imgResult.photoId ? html`
               <label className="flex items-center gap-2 text-[12px] text-ink">
                 <input type="checkbox" checked=${useImage}
                   onChange=${(e) => setUseImage(e.target.checked)}
                   className="w-[15px] h-[15px] accent-accent" />
-                用这张图生成视频（图片库：${imgResult.photoId}）
+                ${tr('create.p5.useImage', { id: imgResult.photoId })}
               </label>
               <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
                 ${i2vSupported
-                  ? `当前模型 ${p.model} 有已实现的图生视频通道。`
-                  : `当前模型 ${p.model} 没有已实现的图生视频通道（已实现：${i2vModels.join(' / ') || '暂无'}）。`}
+                  ? tr('create.p5.modelHasChannel', { model: p.model })
+                  : tr('create.p5.modelNoChannel', { model: p.model, models: i2vModels.join(' / ') || tr('create.errors.noModels') })}
               </p>
               ${i2vSupported && p.model === 'openai-video' && html`
                 <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
-                  WhaleTV 中转：图生视频走 NewAPI 的 <code className="font-num">POST /v1/video/generations</code>
-                  + <code className="font-num">image</code>（data URL）；2026-11-16 已实测出片（5 秒 → SUCCESS）。
-                  按次计费，建议先用 5 秒试一段。
+                  ${tr('create.p5.whaleNote')}
                 </p>
               `}
               ${useImage && !i2vSupported && html`
-                <p className="mt-1.5 text-[12px] text-warn">请切换视频模型，或取消勾选（取消后按文字提示词生成，图片不参与）。</p>
+                <p className="mt-1.5 text-[12px] text-warn">${tr('create.p5.switchModel')}</p>
               `}
             ` : html`
               <p className="text-[11px] leading-[1.7] text-ink3">
-                还没有图片库记录。请先在第②步生成、第③步点「通过」；历史草稿里的旧图没有库记录，不能用于图生视频。
+                ${tr('create.p5.noPhotoRecord')}
               </p>
             `}
           </${Section}>
         </div>
 
         <div className="mt-4">
-          <${Section} title="生成参数"
-            extra=${html`<${Info}>默认取自「设置 → 生成参数」；这里改只影响本次任务</${Info}>`}>
+          <${Section} title=${tr('create.p5.genParamsTitle')}
+            extra=${html`<${Info}>${tr('create.p5.genParamsInfo')}</${Info}>`}>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-[12px] text-ink2 w-[70px]">模型</span>
+              <span className="text-[12px] text-ink2 w-[70px]">${tr('create.p5.model')}</span>
               <select value=${p.model} onChange=${(e) => set('model', e.target.value)}
                 className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
                 <option value="seedance">Seedance 2.5</option>
-                <option value="kling">可灵 Kling 3.0</option>
-                <option value="dashscope">万相 3.0（DashScope）</option>
-                <option value="openai-video">OpenAI 兼容视频（WhaleTV / 中转）</option>
+                <option value="kling">${tr('settings.group.kling')}</option>
+                <option value="dashscope">${tr('settings.group.dashscope')}</option>
+                <option value="openai-video">${tr('settings.group.whaletv')}</option>
               </select>
-              <span className="text-[12px] text-ink2 w-[54px]">分辨率</span>
+              <span className="text-[12px] text-ink2 w-[54px]">${tr('create.p5.resolution')}</span>
               <select value=${p.resolution} onChange=${(e) => set('resolution', e.target.value)}
                 className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
                 ${['720p', '1080p', '4K'].map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
               </select>
-              <span className="text-[12px] text-ink2 w-[40px]">档位</span>
+              <span className="text-[12px] text-ink2 w-[40px]">${tr('create.p5.preset')}</span>
               <select value=${p.preset} onChange=${(e) => set('preset', e.target.value)}
                 className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
                 ${['final', 'daily', 'quick', 'clips_only'].map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
-                <option value="custom">custom（自定义环节）</option>
+                <option value="custom">${tr('create.p5.customOption')}</option>
               </select>
             </div>
             ${p.preset === 'custom' && html`
               <div className="mt-2">
-                <div className="text-[11px] text-ink3 mb-1">自定义环节（核心链 3 步始终执行；依赖由后端自动补齐）</div>
+                <div className="text-[11px] text-ink3 mb-1">${tr('create.p5.customStagesHint')}</div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
                   ${STAGE_OPTS.map((s) => html`
                     <label key=${s.key} className="flex items-center gap-1.5 text-[11px] text-ink2">
@@ -833,14 +836,14 @@ export function CreateWizard({ onChanged }) {
                         disabled=${s.core}
                         onChange=${(e) => toggleStage(s.key, e.target.checked)}
                         className="w-[13px] h-[13px] accent-accent" />
-                      ${s.name}
+                      ${tr(s.nameKey)}
                     </label>
                   `)}
                 </div>
               </div>
             `}
             <div className="mt-2">
-              <div className="text-[11px] text-ink3 mb-1">质检严格度（勾选项失败会阻塞任务；NSFW 永远阻塞，不可关闭）</div>
+              <div className="text-[11px] text-ink3 mb-1">${tr('create.p5.qcHint')}</div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 ${QC_OPTS.map((q) => html`
                   <label key=${q.key} className="flex items-center gap-1.5 text-[11px] text-ink2">
@@ -849,60 +852,60 @@ export function CreateWizard({ onChanged }) {
                       disabled=${q.key === 'nsfw'}
                       onChange=${(e) => toggleQc(q.key, e.target.checked)}
                       className="w-[13px] h-[13px] accent-accent" />
-                    ${q.name}
+                    ${tr(q.nameKey)}
                   </label>
                 `)}
               </div>
             </div>
             <p className="mt-2 text-[11px] leading-[1.7] text-ink3">
-              模型决定生成器与 Key 来源；请求体里的 model 仍是 generator 名（如 dashscope），modelId 由后端按厂商补全。
+              ${tr('create.p5.modelNote')}
             </p>
           </${Section}>
         </div>
 
         <div className="mt-4">
-          <${Section} title="确认">
+          <${Section} title=${tr('create.p5.confirmTitle')}>
             <dl className="grid grid-cols-[92px_1fr] gap-y-1.5 text-[12px]">
-              <dt className="text-ink3">提示词</dt><dd className="text-ink break-words">${prompt || '（未填写）'}</dd>
-              <dt className="text-ink3">运镜</dt><dd className="text-ink break-words">${vprompt || '（未填写）'}</dd>
-              <dt className="text-ink3">模型</dt><dd className="text-ink">${p.model}</dd>
-              <dt className="text-ink3">分辨率</dt><dd className="text-ink">${p.resolution}</dd>
-              <dt className="text-ink3">档位</dt><dd className="text-ink">${p.preset}</dd>
-              <dt className="text-ink3">片段</dt><dd className="text-ink">${effectiveClips} 段 × ${p.clipDuration}s${isMultiPrompt ? `（${promptLines.length} 个场景，按行生成）` : ''}</dd>
-              <dt className="text-ink3">成片</dt><dd className="text-ink">${totalSec.toFixed(1)} 秒</dd>
-              <dt className="text-ink3">预计花费</dt>
+              <dt className="text-ink3">${tr('create.p5.promptLabel')}</dt><dd className="text-ink break-words">${prompt || tr('create.p5.unfilled')}</dd>
+              <dt className="text-ink3">${tr('create.p5.motionLabel')}</dt><dd className="text-ink break-words">${vprompt || tr('create.p5.unfilled')}</dd>
+              <dt className="text-ink3">${tr('create.p5.modelLabel')}</dt><dd className="text-ink">${p.model}</dd>
+              <dt className="text-ink3">${tr('create.p5.resolutionLabel')}</dt><dd className="text-ink">${p.resolution}</dd>
+              <dt className="text-ink3">${tr('create.p5.presetLabel')}</dt><dd className="text-ink">${p.preset}</dd>
+              <dt className="text-ink3">${tr('create.p5.clipsLabel')}</dt><dd className="text-ink">${tr('create.p5.clipsSummary', { n: effectiveClips, dur: p.clipDuration })}${isMultiPrompt ? tr('create.p5.multiScenesSuffix', { n: promptLines.length }) : ''}</dd>
+              <dt className="text-ink3">${tr('create.p5.finalLabel')}</dt><dd className="text-ink">${tr('create.p5.finalDuration', { sec: totalSec.toFixed(1) })}</dd>
+              <dt className="text-ink3">${tr('create.p5.costLabel')}</dt>
               <dd className="text-ink font-num">
                 ${est
-                  ? (est.estimate > 0 ? '约 ¥' + Number(est.estimate).toFixed(2) : '免费（mock，不产生费用）')
-                  : '计算中…'}
-                ${est && est.usd > 0 ? '（$' + Number(est.usd).toFixed(2) + '）' : ''}
+                  ? (est.estimate > 0 ? tr('create.p5.approx', { amount: Number(est.estimate).toFixed(2) }) : tr('create.p5.freeMock'))
+                  : tr('create.p5.calculating')}
+                ${est && est.usd > 0 ? tr('create.p5.usdSuffix', { amount: Number(est.usd).toFixed(2) }) : ''}
                 ${Number.isFinite(readBalance()) && readBalance() > 0
-                  ? '｜余额 ¥' + readBalance().toFixed(2)
+                  ? tr('create.p5.balanceSuffix', { amount: readBalance().toFixed(2) })
                   : ''}
-                ${est && est.budget ? '｜服务端余额 $' + Number(est.budget.balanceUsd).toFixed(2) : ''}
+                ${est && est.budget ? tr('create.p5.serverBalanceSuffix', { amount: Number(est.budget.balanceUsd).toFixed(2) }) : ''}
               </dd>
-              <dt className="text-ink3">配乐</dt>
+              <dt className="text-ink3">${tr('create.p5.bgmLabel')}</dt>
               <dd className="text-ink">
-                ${p.bgmMode === 'none' ? '不添加（无声）'
-                  : p.bgmMode + (p.wantMusic ? ' · 音乐' : '') + (p.wantAmb ? ' · 环境音' : '')}
+                ${p.bgmMode === 'none' ? tr('create.p5.bgmNone')
+                  : p.bgmMode + (p.wantMusic ? tr('create.p5.bgmMusic') : '') + (p.wantAmb ? tr('create.p5.bgmAmbient') : '')}
               </dd>
-              <dt className="text-ink3">衔接</dt>
+              <dt className="text-ink3">${tr('create.p5.transitionLabel')}</dt>
               <dd className="text-ink">
                 ${p.transition
-                  ? (p.transitionType === 'fade' ? '交叉淡化' : (p.transitionType === 'black' ? '经黑场' : '直切')) +
+                  ? (p.transitionType === 'fade' ? tr('create.p5.fade') : (p.transitionType === 'black' ? tr('create.p5.black') : tr('create.p5.cut'))) +
                     ' ' + p.transitionDuration + 's'
-                  : '直切'}
-                ${p.colorMatch ? ' · 校色开' : ''}
+                  : tr('create.p5.cut')}
+                ${p.colorMatch ? tr('create.p5.colorMatchOn') : ''}
               </dd>
             </dl>
             ${Number.isFinite(readBalance()) && readBalance() > 0 && est && est.estimate > readBalance() && html`
               <p className="mt-2 text-[12px] text-danger">
-                预计花费 ¥${Number(est.estimate).toFixed(2)} 超过余额 ¥${readBalance().toFixed(2)}，提交会被拦截。
+                ${tr('create.p5.overBalance', { estimate: Number(est.estimate).toFixed(2), balance: readBalance().toFixed(2) })}
               </p>
             `}
             ${est && est.budget && est.budget.affordable === false && html`
               <p className="mt-2 text-[12px] text-danger">
-                服务端预算不足：本次约 $${Number(est.usd).toFixed(2)}，剩余 $${Number(est.budget.balanceUsd).toFixed(2)}，提交会被拦截。
+                ${tr('create.p5.budgetShort', { usd: Number(est.usd).toFixed(2), balance: Number(est.budget.balanceUsd).toFixed(2) })}
               </p>
             `}
             ${err && html`<p className="mt-2 text-[12px] text-danger">${err}</p>`}
@@ -923,7 +926,7 @@ export function CreateWizard({ onChanged }) {
               (i < step ? 'bg-accent text-onaccent' : (i === step ? 'bg-accent text-onaccent' : 'bg-s2 text-ink3 border border-white/[.09]'))}>
               ${i < step ? '✓' : (i + 1)}
             </span>
-            <span className=${'text-[12px] ' + (i === step ? 'text-ink' : 'text-ink3')}>${s}</span>
+            <span className=${'text-[12px] ' + (i === step ? 'text-ink' : 'text-ink3')}>${tr(s)}</span>
             ${i < STEPS.length - 1 && html`<span className="w-4 h-px bg-white/[.10] ml-1.5"></span>`}
           </div>
         `)}
@@ -932,7 +935,7 @@ export function CreateWizard({ onChanged }) {
       ${seedNotice && html`
         <div className="mb-2 flex items-center gap-2 flex-wrap rounded-[6px] border border-accent/25 bg-accent/[.06] px-3 py-2">
           <span className="text-[11px] text-accent">
-            🖼 已从照片库带入这张图（${seedNotice}）——先在第③步确认，再继续下一步
+            ${tr('create.seedNotice', { id: seedNotice })}
           </span>
         </div>
       `}
@@ -940,12 +943,12 @@ export function CreateWizard({ onChanged }) {
       ${restoredHint && html`
         <div className="mb-2 flex items-center gap-2 flex-wrap rounded-[6px] border border-accent/25 bg-accent/[.06] px-3 py-2">
           <span className="text-[11px] text-accent">
-            ↺ 已恢复上次未做完的草稿${restoredAtText ? '（保存于 ' + restoredAtText + '）' : ''}
+            ${tr('create.draft.restored')}${restoredAtText ? tr('create.draft.savedAt', { time: restoredAtText }) : ''}
           </span>
           <span className="flex-1"></span>
           <button onClick=${resetAll}
             className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2 hover:bg-white/[.06]"
-          >清空草稿</button>
+          >${tr('create.draft.clear')}</button>
         </div>
       `}
 
@@ -957,18 +960,18 @@ export function CreateWizard({ onChanged }) {
           onClick=${() => setStep((s) => Math.max(0, s - 1))}
           className="h-9 px-4 rounded-[6px] border border-white/[.10] text-[13px] text-ink2
                      hover:bg-white/[.05] disabled:opacity-40"
-        >上一步</button>
+        >${tr('create.nav.prev')}</button>
         <span className="flex-1"></span>
         ${step === STEPS.length - 1
           ? html`<button
               disabled=${submitting}
               onClick=${submit}
               className="h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px] disabled:opacity-40"
-            >${submitting ? '提交中…' : '提交并生成'}</button>`
+            >${submitting ? tr('create.nav.submitting') : tr('create.nav.submit')}</button>`
           : html`<button
               onClick=${() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
               className="h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px]"
-            >下一步</button>`}
+            >${tr('create.nav.next')}</button>`}
       </div>
     </div>
   `;

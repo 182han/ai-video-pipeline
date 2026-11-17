@@ -66,19 +66,19 @@ console.log('源码: ' + path.relative(APP, SRC_PATH));
 
 // ---------------- 定位 PhotosPanel 与「手动调色」区 ----------------
 const panel = between(src, 'export function PhotosPanel(', '\n\n// ---------------- 成片 · 未完成（P6）');
-const adjSection = between(src, '>手动调色<', '${versions.length > 1 && html`');
+const adjSection = between(src, "tr('library.photos.manualAdjust')", '${versions.length > 1 && html`');
 const drawer = between(src, '${detail && html`', '${zoomImg && html`');
 
 check(panel.length > 2000, '能定位到 PhotosPanel 的源码（防止断言空转）', panel.length + ' 字符');
 check(adjSection.length > 500, '能定位到「手动调色」区域源码', adjSection.length + ' 字符');
-check(drawer.includes('>手动调色<'), '调色区在图片详情抽屉里（点开某张图才出现）');
+check(drawer.includes("tr('library.photos.manualAdjust')"), '调色区在图片详情抽屉里（点开某张图才出现）');
 
 // ---------------- 1. 4 条滑杆：label / min / max / step / 默认 0 ----------------
 console.log('\n[1] 4 条滑杆');
 check(src.includes('const ADJUST_KEYS = ['), '定义了调色参数表 ADJUST_KEYS（4 项）');
-for (const [key, label] of [['brightness', '亮度'], ['contrast', '对比度'], ['saturation', '饱和度'], ['temperature', '色温']]) {
-  const re = new RegExp("\\{ key: '" + key + "', label: '" + label + "' \\}");
-  check(re.test(src), `滑杆「${label}」对应契约字段 ${key}`);
+for (const [key, labelKey] of [['brightness', 'tasks.adjust.brightness'], ['contrast', 'tasks.adjust.contrast'], ['saturation', 'tasks.adjust.saturation'], ['temperature', 'tasks.adjust.temperature']]) {
+  const re = new RegExp("\\{ key: '" + key + "', labelKey: '" + labelKey + "' \\}");
+  check(re.test(src), `滑杆「${labelKey}」对应契约字段 ${key}`);
 }
 check(adjSection.includes('type="range"'), '滑杆是 input[type=range]');
 check(adjSection.includes('min="-100"') && adjSection.includes('max="100"'), '滑杆范围 min=-100 / max=100');
@@ -86,13 +86,13 @@ check(adjSection.includes('step="1"'), '滑杆步长 step=1');
 check(src.includes('const ADJUST_ZERO = { brightness: 0, contrast: 0, saturation: 0, temperature: 0 };'),
   '默认值全 0（ADJUST_ZERO）');
 check(adjSection.includes('${adjParams[key]}'), '每条滑杆旁边显示当前数值');
-check(adjSection.includes('aria-label=${label}'), '滑杆带 aria-label（无障碍 / 自动化可定位）');
+check(adjSection.includes('aria-label=${tr(labelKey)}'), '滑杆带 aria-label（无障碍 / 自动化可定位）');
 
 // ---------------- 2. 三个按钮 ----------------
 console.log('\n[2] 按钮');
-check(adjSection.includes('>应用</button>'), '有「应用」按钮');
-check(adjSection.includes('>重置为 0</button>'), '有「重置为 0」按钮');
-check(adjSection.includes('>恢复原图</button>'), '有「恢复原图」按钮');
+check(adjSection.includes(">${tr('library.photos.apply')}</button>"), '有「应用」按钮');
+check(adjSection.includes(">${tr('library.photos.resetZero')}</button>"), '有「重置为 0」按钮');
+check(adjSection.includes(">${tr('library.photos.revert')}</button>"), '有「恢复原图」按钮');
 check(adjSection.includes('onClick=${applyAdjust}'), '「应用」接 applyAdjust');
 check(adjSection.includes('onClick=${resetAdjustSliders}'), '「重置为 0」接 resetAdjustSliders（只清滑杆）');
 check(adjSection.includes('onClick=${revertAdjust}'), '「恢复原图」接 revertAdjust');
@@ -131,7 +131,7 @@ check(panel.includes("if (!r.ok || !j || j.ok !== true) throw new Error((j && j.
   '非 2xx / ok!=true 一律抛错，错误取后端 error 原文');
 // 2026-11-16 集成修订：后端 error 已带「调色失败：」前缀时不再叠一层（实测会出现
 // 「调色失败：调色失败：ffmpeg…」）。断言改为「错误进 adjErr + 保留后端原文 + 有场景前缀兜底」。
-check(/setAdjErr\(/.test(panel) && /调色失败：/.test(panel) && /恢复原图失败：/.test(panel)
+check(/setAdjErr\(/.test(panel) && /library\.photos\.adjustFailed/.test(panel) && /library\.photos\.revertFailed/.test(panel)
   && /test\(msg\)/.test(panel) && /e\.message/.test(panel),
   '错误写进调色面板状态 adjErr（保留后端原文；后端无前缀时补场景前缀，不重复叠加）');
 check(adjSection.includes('${adjErr && html`'), 'adjErr 在面板里渲染出来');
@@ -144,9 +144,9 @@ check(!/成功|已应用/.test(catchBlock), 'catch 分支里没有伪造成功�
 // ---------------- 6. 已调色 vN + 参数摘要 + 载入上次参数 ----------------
 console.log('\n[6] 已调色状态');
 check(src.includes('function adjustVersion(') && src.includes('adjust.current'), '版本号取 photo.adjust.current.version');
-check(adjSection.includes('已调色 v${adjustVer}'), '有调色时显示「已调色 vN」');
+check(adjSection.includes("tr('library.photos.adjustedVersion'"), '有调色时显示「已调色 vN」');
 check(panel.includes('adjustSummary(detail.adjust.params)'), '显示参数摘要（来自 photo.adjust.params）');
-check(adjSection.includes('载入上次参数'), '提供「载入上次参数」按钮');
+check(adjSection.includes("tr('library.photos.loadLast')"), '提供「载入上次参数」按钮');
 check(panel.includes('setAdjParams(adjustParamsOf(detail))'), '「载入上次参数」把滑杆设回 photo.adjust.params');
 check(src.includes('photo.adjust && photo.adjust.params'), '参数来源是 photo.adjust.params（契约结构）');
 
@@ -177,8 +177,8 @@ check(badTokens.length === 0, '调色区只用页面里已有的 class（不依�
   badTokens.length ? '别处未出现: ' + badTokens.join(', ') : classNames.length + ' 处 className');
 check(panel.includes('style=${{'), '调色区用内联样式 style=${{...}}');
 const imports = (src.match(/^import .*$/gm) || []);
-check(imports.length === 4 && imports.every((l) => /from '\.\.\/(router|createDraft|components\/taskDrawer|components\/pauseControl)\.js'/.test(l)),
-  'import 仍是原来的 4 个模块（无新增依赖）', String(imports.length) + ' 行');
+check(imports.length === 5 && imports.every((l) => /from '\.\.\/(router|createDraft|components\/taskDrawer|components\/pauseControl|i18n\/index)\.js'/.test(l)),
+  'import 仍是原有 4 个模块 + i18n（无第三方依赖）', String(imports.length) + ' 行');
 check(!/\brequire\s*\(/.test(src), '前端文件不出现 require（浏览器原生 ESM）');
 
 // ---------------- 9. 不硬编码图片尺寸 ----------------

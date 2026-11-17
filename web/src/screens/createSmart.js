@@ -14,6 +14,7 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { readRuntimeConfig } from '../store.js';
+import { t as tr } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -57,7 +58,13 @@ function Btn({ children, onClick, disabled, primary, danger }) {
 }
 
 function StepBar({ step }) {
-  const names = ['① 时长 + 场景卡', '② 提示词', '③ 出图 + 审核', '④ 生成设置', '⑤ 确认'];
+  const names = [
+    tr('createSmart.steps.s1'),
+    tr('createSmart.steps.s2'),
+    tr('createSmart.steps.s3'),
+    tr('createSmart.steps.s4'),
+    tr('createSmart.steps.s5')
+  ];
   return html`<div className="flex items-center gap-1 flex-wrap mb-4">
     ${names.map((n, i) => html`<span key=${i}
       className=${'h-7 px-2.5 rounded-[5px] text-[11px] ' + (step === i + 1 ? 'bg-accent/[.16] text-accent' : (step > i + 1 ? 'text-ink2' : 'text-ink3'))}
@@ -98,7 +105,7 @@ export function CreateSmartWizard() {
   }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model]);
 
   function restart() {
-    if (!window.confirm('清空当前进度，从第 ① 步重新开始？（已出的图仍在图片库里，不会丢）')) return;
+    if (!window.confirm(tr('createSmart.restartConfirm'))) return;
     clearDraft();
     setStep(1); setMinutes('5'); setClipDur(10); setCards(null);
     setPrompts([]); setImagePrompts([]); setPhotos([]); setRes('720p');
@@ -117,7 +124,8 @@ export function CreateSmartWizard() {
   const useImages = approved.length === prompts.length && prompts.length > 0;
   // 通道完全按用户选择（model），不静默换通道；两种通道均支持图生视频（2026-11-16 20:30 实测）。
   const effectiveModel = model;
-  const MODEL_LABEL = { 'openai-video': 'WhaleTV 万相 3.0（中转）', dashscope: '百炼万相 3.0（官方）' };
+  const MODEL_LABEL = { 'openai-video': 'settings.group.whaletv', dashscope: 'settings.group.dashscope' };
+  const modelLabel = (k) => (MODEL_LABEL[k] ? tr(MODEL_LABEL[k]) : k);
 
   // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
   async function openPicker() {
@@ -129,7 +137,7 @@ export function CreateSmartWizard() {
         .filter((p) => p.status === 'approved' && p.url && !p.fileMissing);
       setLibPhotos(list);
       setPickerOpen(true);
-    } catch (e) { setErr('读取图片库失败：' + e.message); }
+    } catch (e) { setErr(tr('createSmart.errors.readLibrary') + e.message); }
     finally { setLibBusy(''); }
   }
 
@@ -139,7 +147,7 @@ export function CreateSmartWizard() {
       return;
     }
     if (photos.length >= clips) {
-      setErr(`最多选 ${clips} 张（当前已选 ${photos.length} 张）。先移除一张再选。`);
+      setErr(tr('createSmart.errors.maxPick', { max: clips, n: photos.length }));
       return;
     }
     setErr('');
@@ -147,27 +155,30 @@ export function CreateSmartWizard() {
   }
 
   async function loadCards() {
-    if (tooMany) { setErr(`场景卡正片只有 180 张，本次 ${clips} 段超了；请缩短时长或改成 15 秒/段。`); return; }
+    if (tooMany) { setErr(tr('createSmart.errors.tooMany', { n: clips })); return; }
     setErr(''); setBusy('cards');
     try {
       const r = await fetch('/api/scene-cards/preview?count=' + clips, { credentials: 'same-origin' });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
         throw new Error((j && (j.error || j.code)) || ('HTTP ' + r.status)
-          + '（若是 404：服务端还没有预览接口，需要重启一次 3001）');
+          + tr('createSmart.errors.card404'));
       }
       setCards(j.cards || []);
       setPrompts((j.cards || []).map((c) => c.prompt));
       setImagePrompts((j.cards || []).map((c) => c.imagePrompt));
       setStep(2);
-    } catch (e) { setErr('读取场景卡失败：' + e.message); }
+    } catch (e) { setErr(tr('createSmart.errors.readCards') + e.message); }
     finally { setBusy(''); }
   }
 
   async function genImages() {
     const cfg = readConfig();
-    if (!cfg.imageKey) { setErr('设置里还没填图片生成的 Key（设置 → 图片生成）。'); return; }
-    if (!window.confirm(`将生成 ${imagePrompts.length} 张图（真实计费 ${yuan(imagePrompts.length * IMAGE_UNIT)}），继续？`)) return;
+    if (!cfg.imageKey) { setErr(tr('createSmart.errors.noImageKey')); return; }
+    if (!window.confirm(tr('createSmart.errors.genConfirm', {
+      n: imagePrompts.length,
+      cost: yuan(imagePrompts.length * IMAGE_UNIT)
+    }))) return;
     setErr(''); setInfo(''); setBusy('images');
     try {
       const r = await fetch('/api/images/generate-batch', {
@@ -196,8 +207,8 @@ export function CreateSmartWizard() {
         const it = all.find((p) => p.id === id) || {};
         return { id, url: it.url || '', status: it.status || 'unchecked', paid: true };
       }).sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)));
-      setInfo(`已出图 ${ids.length} 张（${yuan(ids.length * IMAGE_UNIT)}）。请逐张看，打回不满意的；确认后点下一步。`);
-    } catch (e) { setErr('出图失败：' + e.message); }
+      setInfo(tr('createSmart.generated', { n: ids.length, cost: yuan(ids.length * IMAGE_UNIT) }));
+    } catch (e) { setErr(tr('createSmart.errors.genFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -208,14 +219,21 @@ export function CreateSmartWizard() {
         method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
       });
-    } catch (e) { setErr('审核写回失败：' + e.message); }
+    } catch (e) { setErr(tr('createSmart.errors.reviewFailed') + e.message); }
   }
 
   async function submit() {
     const cfg = readConfig();
     const rejected = photos.filter((p) => p.status === 'rejected').length;
-    if (rejected > 0) { setErr(`有 ${rejected} 张图被打回：请改成「通过」或点「不出图/跳过」，否则图与段对不上。`); return; }
-    if (!window.confirm(`提交任务：${clips} 段 × ${clipDur} 秒（${useImages ? '图生视频 · ' : '文生视频 · '}${MODEL_LABEL[effectiveModel] || effectiveModel}）\n视频约 ${yuan(videoCost)}${imageCost ? '，本次图片 ' + yuan(imageCost) : ''}\n确认执行？`)) return;
+    if (rejected > 0) { setErr(tr('createSmart.errors.rejected', { n: rejected })); return; }
+    if (!window.confirm(tr('createSmart.errors.submitConfirm', {
+      clips,
+      dur: clipDur,
+      mode: useImages ? tr('createSmart.mode.i2v') : tr('createSmart.mode.t2v'),
+      model: modelLabel(effectiveModel),
+      video: yuan(videoCost),
+      image: imageCost ? tr('createSmart.errors.imagePart', { cost: yuan(imageCost) }) : ''
+    }))) return;
     setErr(''); setBusy('submit');
     try {
       // 运行时配置按通道取（百炼：Key + 由 WorkspaceId/Region 拼出的 baseUrl；中转：whaletvKey/BaseUrl）
@@ -236,7 +254,7 @@ export function CreateSmartWizard() {
       if (!r.ok || !j || !j.taskId) throw new Error((j && j.error) || ('HTTP ' + r.status));
       clearDraft(); setRestored(false);   // 任务已建：草稿作废，避免下次进来「恢复」出个重复任务
       navigate('/gen');
-    } catch (e) { setErr('提交失败：' + e.message); }
+    } catch (e) { setErr(tr('createSmart.errors.submitFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -253,12 +271,12 @@ export function CreateSmartWizard() {
         .xz2 .rounded-\\[8px\\] { padding: 18px 20px; }
       `}</style>
       <div className="flex items-baseline gap-3 mb-1">
-        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">创作</h1>
-        <span className="text-[11px] text-ink3">场景卡 → 提示词 → 出图（可选）→ 视频 → 拼接 → 配乐</span>
+        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">${tr('createSmart.pageTitle')}</h1>
+        <span className="text-[11px] text-ink3">${tr('createSmart.pageSub')}</span>
         <span className="flex-1"></span>
-        ${restored && html`<span className="text-[11px] text-accent">已恢复上次进度</span>`}
-        <${Btn} onClick=${restart}>重新开始</${Btn}>
-        <${Btn} onClick=${() => navigate('/create')}>用旧版六步向导</${Btn}>
+        ${restored && html`<span className="text-[11px] text-accent">${tr('createSmart.restored')}</span>`}
+        <${Btn} onClick=${restart}>${tr('createSmart.restart')}</${Btn}>
+        <${Btn} onClick=${() => navigate('/create')}>${tr('createSmart.legacy')}</${Btn}>
       </div>
       <${StepBar} step=${step} />
 
@@ -267,28 +285,28 @@ export function CreateSmartWizard() {
 
       ${step === 1 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
-          <p className="text-[12px] text-ink2 mb-3">说总时长，场景从卡库按章节顺序自动抽（同一任务不重复）。</p>
+          <p className="text-[12px] text-ink2 mb-3">${tr('createSmart.step1.intro')}</p>
           <div className="flex items-center gap-3 flex-wrap">
-            <label className="text-[12px] text-ink3">总时长</label>
+            <label className="text-[12px] text-ink3">${tr('createSmart.step1.totalDuration')}</label>
             <input value=${minutes} onInput=${(e) => setMinutes(e.target.value)} type="number" min="1" max="60"
               className="h-8 w-[90px] px-2 rounded-[5px] bg-s2 text-[12px] text-ink border border-white/[.12] outline-none" />
-            <span className="text-[12px] text-ink3">分钟</span>
+            <span className="text-[12px] text-ink3">${tr('createSmart.step1.minutes')}</span>
             <span className="w-4"></span>
-            <label className="text-[12px] text-ink3">每段</label>
+            <label className="text-[12px] text-ink3">${tr('createSmart.step1.perClip')}</label>
             ${[10, 15].map((d) => html`<button key=${d} onClick=${() => setClipDur(d)}
               className=${'h-8 px-2.5 rounded-[5px] text-[12px] border ' + (clipDur === d ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
-            >${d} 秒</button>`)}
+            >${tr('createSmart.step1.seconds', { n: d })}</button>`)}
           </div>
           <div className="mt-3 text-[12px] text-ink2">
-            预计 <b className="text-ink">${clips} 段</b> × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟
-            ${tooMany ? html`<span className="text-danger"> · 超过卡库 180 张</span>` : ''}
+            ${tr('createSmart.step1.estimate', { clips, dur: clipDur, mins: (clips * clipDur / 60).toFixed(2) })}
+            ${tooMany ? html`<span className="text-danger">${tr('createSmart.step1.overCapacity')}</span>` : ''}
           </div>
           <p className="mt-1 text-[11px] text-ink3">
-            分辨率（480P / 720P / 1080P）在下一步「④ 生成设置」里选；当前 ${res}。
+            ${tr('createSmart.step1.resNote', { res })}
           </p>
           <div className="mt-4 flex gap-2">
             <${Btn} primary=${true} disabled=${busy === 'cards' || tooMany} onClick=${loadCards}>
-              ${busy === 'cards' ? '读卡中…' : '看场景卡（' + clips + ' 段）'}
+              ${busy === 'cards' ? tr('createSmart.step1.reading') : tr('createSmart.step1.viewCards', { n: clips })}
             </${Btn}>
           </div>
         </div>`}
@@ -296,122 +314,127 @@ export function CreateSmartWizard() {
       ${step === 2 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[12px] text-ink2">提示词（按卡片字段自动合成，可逐段改）</span>
-            <span className="text-[10px] text-ink3">共 ${prompts.length} 段</span>
+            <span className="text-[12px] text-ink2">${tr('createSmart.step2.promptTitle')}</span>
+            <span className="text-[10px] text-ink3">${tr('createSmart.step2.totalClips', { n: prompts.length })}</span>
             <span className="flex-1"></span>
-            <${Btn} onClick=${() => setShowAll(!showAll)}>${showAll ? '收起' : '显示全部'}</${Btn}>
+            <${Btn} onClick=${() => setShowAll(!showAll)}>${showAll ? tr('createSmart.step2.collapse') : tr('createSmart.step2.showAll')}</${Btn}>
           </div>
           ${list.map((p, i) => html`
             <div key=${i} className="border-t border-white/[.05] py-2">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-[10px] text-ink3 font-num">第 ${i + 1} 段</span>
+                <span className="text-[10px] text-ink3 font-num">${tr('createSmart.step2.segment', { n: i + 1 })}</span>
                 <span className="text-[10px] text-ink3">${cards && cards[i] ? cards[i].sceneKey : ''}</span>
-                <span className="text-[10px] text-ink3">${cards && cards[i] && cards[i].adjust ? '· 有卡色调参数' : ''}</span>
+                <span className="text-[10px] text-ink3">${cards && cards[i] && cards[i].adjust ? tr('createSmart.step2.adjustParams') : ''}</span>
               </div>
               <textarea value=${p} rows="2"
                 onInput=${(e) => { const v = e.target.value; setPrompts((arr) => arr.map((x, k) => (k === i ? v : x))); }}
                 className="w-full resize-y rounded-[5px] bg-s2 text-[12px] text-ink border border-white/[.12] px-2 py-1.5 outline-none leading-[1.7]"></textarea>
             </div>`)}
-          ${!showAll && prompts.length > 12 && html`<p className="mt-2 text-[11px] text-ink3">还有 ${prompts.length - 12} 段未展开（不改就是自动合成的结果）。</p>`}
+          ${!showAll && prompts.length > 12 && html`<p className="mt-2 text-[11px] text-ink3">${tr('createSmart.step2.hidden', { n: prompts.length - 12 })}</p>`}
           <div className="mt-4 flex gap-2">
-            <${Btn} onClick=${() => setStep(1)}>上一步</${Btn}>
-            <${Btn} primary=${true} onClick=${() => setStep(3)}>下一步：出图（可选）</${Btn}>
+            <${Btn} onClick=${() => setStep(1)}>${tr('createSmart.step2.prev')}</${Btn}>
+            <${Btn} primary=${true} onClick=${() => setStep(3)}>${tr('createSmart.step2.next')}</${Btn}>
           </div>
         </div>`}
 
       ${step === 3 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
-          <p className="text-[12px] text-ink2 mb-1">这一步是<b className="text-ink">可选</b>的：出图后走图生视频（画面更可控），跳过就是纯文生视频。</p>
-          <p className="text-[11px] text-ink3 mb-3">新出图真实计费 ${yuan(IMAGE_UNIT)}/张，本次 ${imagePrompts.length} 张 ≈ ${yuan(imagePrompts.length * IMAGE_UNIT)}；<b className="text-ink2">已付费的图可直接从图片库选，不重复计费</b>。</p>
+          <p className="text-[12px] text-ink2 mb-1">${tr('createSmart.step3.optionalPrefix')}<b className="text-ink">${tr('createSmart.step3.optionalBold')}</b>${tr('createSmart.step3.optionalSuffix')}</p>
+          <p className="text-[11px] text-ink3 mb-3">${tr('createSmart.step3.billingPrefix', { unit: yuan(IMAGE_UNIT), n: imagePrompts.length, total: yuan(imagePrompts.length * IMAGE_UNIT) })}<b className="text-ink2">${tr('createSmart.step3.billingBold')}</b>${tr('createSmart.step3.billingSuffix')}</p>
           <div className="flex gap-2 mb-3 flex-wrap">
             <${Btn} primary=${true} disabled=${busy === 'images'} onClick=${genImages}>
-              ${busy === 'images' ? '出图中…' : '出图 ' + imagePrompts.length + ' 张'}
+              ${busy === 'images' ? tr('createSmart.step3.generating') : tr('createSmart.step3.generate', { n: imagePrompts.length })}
             </${Btn}>
-            <${Btn} disabled=${libBusy === 'open'} onClick=${openPicker}>${libBusy === 'open' ? '读取图片库…' : '从图片库选图'}</${Btn}>
-            <${Btn} onClick=${() => { setPhotos([]); setStep(4); }}>不出图，直接下一步</${Btn}>
+            <${Btn} disabled=${libBusy === 'open'} onClick=${openPicker}>${libBusy === 'open' ? tr('createSmart.step3.readingLib') : tr('createSmart.step3.pickLib')}</${Btn}>
+            <${Btn} onClick=${() => { setPhotos([]); setStep(4); }}>${tr('createSmart.step3.skip')}</${Btn}>
           </div>
           <p className="text-[11px] text-ink3 mb-3">
-            已选 <b className=${photoCountMismatch ? 'text-danger' : 'text-ink2'}>${photos.length}</b> / ${clips} 张${pickedCount ? `（其中 ${pickedCount} 张来自图片库，不重复计费）` : ''}
+            ${tr('createSmart.step3.selected', { n: photos.length, max: clips })}${pickedCount ? tr('createSmart.step3.pickedSuffix', { n: pickedCount }) : ''}
           </p>
-          ${photoCountMismatch && html`<p className="text-[12px] text-danger mb-2">数量必须等于段数（${clips} 张）：要么补齐，要么全部移除改走文生视频。</p>`}
+          ${photoCountMismatch && html`<p className="text-[12px] text-danger mb-2">${tr('createSmart.step3.mismatch', { n: clips })}</p>`}
           ${photos.length > 0 && html`
             <div className="grid grid-cols-4 gap-2">
               ${photos.map((p, i) => html`
                 <div key=${p.id} className="rounded-[6px] border border-white/[.10] overflow-hidden bg-s2">
-                  ${p.url ? html`<img src=${p.url} alt="出图" className="w-full h-[110px] object-cover" />` : html`<div className="w-full h-[110px] grid place-items-center text-[10px] text-ink3">无预览</div>`}
+                  ${p.url ? html`<img src=${p.url} alt=${tr('createSmart.step3.alt')} className="w-full h-[110px] object-cover" />` : html`<div className="w-full h-[110px] grid place-items-center text-[10px] text-ink3">${tr('createSmart.step3.noPreview')}</div>`}
                   <div className="flex items-center gap-1 p-1.5">
                     <span className="text-[10px] text-ink3 font-num">${i + 1}</span>
-                    <span className=${'text-[10px] ' + (p.status === 'rejected' ? 'text-danger' : 'text-ink3')}>${p.paid === false ? '库选' : (p.status === 'rejected' ? '已打回' : (p.status === 'approved' ? '已通过' : '待看'))}</span>
+                    <span className=${'text-[10px] ' + (p.status === 'rejected' ? 'text-danger' : 'text-ink3')}>${p.paid === false ? tr('createSmart.step3.tagPicked') : (p.status === 'rejected' ? tr('createSmart.step3.tagRejected') : (p.status === 'approved' ? tr('createSmart.step3.tagApproved') : tr('createSmart.step3.tagPending')))}</span>
                     <span className="flex-1"></span>
                     ${p.paid === false
-                      ? html`<button onClick=${() => togglePick({ id: p.id })} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">移除</button>`
-                      : html`<button onClick=${() => review(p.id, 'approved')} className="h-5 px-1 rounded-[3px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>
-                             <button onClick=${() => review(p.id, 'rejected')} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">打回</button>`}
+                      ? html`<button onClick=${() => togglePick({ id: p.id })} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">${tr('createSmart.step3.remove')}</button>`
+                      : html`<button onClick=${() => review(p.id, 'approved')} className="h-5 px-1 rounded-[3px] text-[10px] text-accent hover:bg-white/[.06]">${tr('createSmart.step3.approve')}</button>
+                             <button onClick=${() => review(p.id, 'rejected')} className="h-5 px-1 rounded-[3px] text-[10px] text-ink3 hover:text-danger">${tr('createSmart.step3.reject')}</button>`}
                   </div>
                 </div>`)}
             </div>`}
           <div className="mt-4 flex gap-2">
-            <${Btn} onClick=${() => setStep(2)}>上一步</${Btn}>
-            <${Btn} primary=${true} disabled=${photoCountMismatch} onClick=${() => setStep(4)}>下一步：生成设置</${Btn}>
+            <${Btn} onClick=${() => setStep(2)}>${tr('createSmart.step2.prev')}</${Btn}>
+            <${Btn} primary=${true} disabled=${photoCountMismatch} onClick=${() => setStep(4)}>${tr('createSmart.step3.next')}</${Btn}>
           </div>
         </div>`}
 
       ${step === 4 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <label className="text-[12px] text-ink3">视频通道</label>
-            ${[['openai-video', 'WhaleTV 中转'], ['dashscope', '百炼官方']].map(([k, lab]) => html`
+            <label className="text-[12px] text-ink3">${tr('createSmart.step4.channel')}</label>
+            ${[['openai-video', tr('createSmart.step4.whale')], ['dashscope', tr('createSmart.step4.bailian')]].map(([k, lab]) => html`
               <button key=${k} onClick=${() => setModel(k)}
                 className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (effectiveModel === k ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
                 style=${{ cursor: 'pointer' }}
-                title=${k === 'openai-video'
-                  ? 'WhaleTV 中转：图生视频走 data URL（2026-11-16 实测出片）；纯文生视频走 /videos'
-                  : '百炼官方：图生视频走临时 OSS（48h 私有），不需要你自己的公网存储'}
+                title=${k === 'openai-video' ? tr('createSmart.step4.whaleTitle') : tr('createSmart.step4.bailianTitle')}
               >${lab}</button>`)}
           </div>
           ${useImages && html`<p className="text-[11px] text-ink3 mb-3">
             ${effectiveModel === 'openai-video'
-              ? html`图生视频走 <b className="text-ink2">WhaleTV 中转</b>：首帧图以 data URL 随请求发送（已实测，无需公网图床）。`
-              : html`图生视频走 <b className="text-ink2">百炼官方</b>：图片先传到百炼临时 OSS（48h 私有），不需要你的公网存储。`}
+              ? html`${tr('createSmart.step4.i2vWhalePrefix')}<b className="text-ink2">${tr('createSmart.step4.i2vWhaleBold')}</b>${tr('createSmart.step4.i2vWhaleSuffix')}`
+              : html`${tr('createSmart.step4.i2vBailianPrefix')}<b className="text-ink2">${tr('createSmart.step4.i2vBailianBold')}</b>${tr('createSmart.step4.i2vBailianSuffix')}`}
           </p>`}
           <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <label className="text-[12px] text-ink3">分辨率</label>
+            <label className="text-[12px] text-ink3">${tr('createSmart.step4.resolution')}</label>
             ${RES.map((r) => html`<button key=${r.key} onClick=${() => setRes(r.key)}
               className=${'h-7 px-2.5 rounded-[5px] text-[11px] border ' + (res === r.key ? 'border-accent text-accent bg-accent/[.10]' : 'border-white/[.12] text-ink2')}
             >${r.label}</button>`)}
           </div>
           <label className="flex items-center gap-2 text-[12px] text-ink2 mb-2">
             <input type="checkbox" checked=${transition} onChange=${(e) => setTransition(e.target.checked)} />
-            片段间 0.4s 交叉淡化（关掉 = 直拼，接缝偏硬）
+            ${tr('createSmart.step4.crossfade')}
           </label>
           <label className="flex items-center gap-2 text-[12px] text-ink2 mb-3">
             <input type="checkbox" checked=${bgm} onChange=${(e) => setBgm(e.target.checked)} />
-            自动配乐（从 BGM 库选曲并混音）
+            ${tr('createSmart.step4.autoBgm')}
           </label>
           <div className="text-[12px] text-ink2 leading-[1.9]">
-            片段：${clips} 段 × ${clipDur} 秒<br/>
-            视频：${yuan(videoCost)}（${res} ¥${rate}/s）${photos.length ? html`<br/>图片：${yuan(imageCost)}（本次出图 ${photos.length - pickedCount} 张${pickedCount ? ` · 从库选 ${pickedCount} 张已付费` : ''}）` : ''}<br/>
-            <b className="text-ink">合计：${yuan(videoCost + imageCost)}</b>
+            ${tr('createSmart.step4.clipsLine', { clips, dur: clipDur })}<br/>
+            ${tr('createSmart.step4.videoLine', { cost: yuan(videoCost), res, rate })}${photos.length ? html`<br/>${tr('createSmart.step4.imageLine', { cost: yuan(imageCost), n: photos.length - pickedCount, picked: pickedCount ? tr('createSmart.step4.pickedLine', { n: pickedCount }) : '' })}` : ''}<br/>
+            <b className="text-ink">${tr('createSmart.step4.total', { cost: yuan(videoCost + imageCost) })}</b>
           </div>
           <div className="mt-4 flex gap-2">
-            <${Btn} onClick=${() => setStep(3)}>上一步</${Btn}>
-            <${Btn} primary=${true} disabled=${i2vUnsupported} onClick=${() => setStep(5)}>下一步：确认</${Btn}>
+            <${Btn} onClick=${() => setStep(3)}>${tr('createSmart.step4.prev')}</${Btn}>
+            <${Btn} primary=${true} disabled=${i2vUnsupported} onClick=${() => setStep(5)}>${tr('createSmart.step4.next')}</${Btn}>
           </div>
         </div>`}
 
       ${step === 5 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <div className="text-[12px] text-ink2 leading-[1.9]">
-            模型：${MODEL_LABEL[effectiveModel] || effectiveModel} · ${res}<br/>
-            时长：${clips} 段 × ${clipDur} 秒 = ${(clips * clipDur / 60).toFixed(2)} 分钟<br/>
-            画面：${approved.length === prompts.length && prompts.length ? '图生视频（' + approved.length + ' 张首帧）' : '文生视频（场景卡提示词）'}<br/>
-            转场：${transition ? '0.4s 淡化' : '关闭'} · 配乐：${bgm ? '自动' : '关闭'}<br/>
-            费用：视频 ${yuan(videoCost)}${imageCost ? ' + 图片 ' + yuan(imageCost) : ''}${pickedCount ? `（另用库图 ${pickedCount} 张，已付费不再计）` : ''} = <b className="text-ink">${yuan(videoCost + imageCost)}</b>
+            ${tr('createSmart.step5.modelLine', { model: modelLabel(effectiveModel), res })}<br/>
+            ${tr('createSmart.step5.durationLine', { clips, dur: clipDur, mins: (clips * clipDur / 60).toFixed(2) })}<br/>
+            ${approved.length === prompts.length && prompts.length ? tr('createSmart.step5.visualI2v', { n: approved.length }) : tr('createSmart.step5.visualT2v')}<br/>
+            ${tr('createSmart.step5.transitionLine', {
+              transition: transition ? tr('createSmart.step5.transitionFade') : tr('createSmart.step5.transitionOff'),
+              bgm: bgm ? tr('createSmart.step5.bgmAuto') : tr('createSmart.step5.bgmOff')
+            })}<br/>
+            ${tr('createSmart.step5.costPrefix', {
+              video: yuan(videoCost),
+              image: imageCost ? tr('createSmart.step5.imagePart', { cost: yuan(imageCost) }) : '',
+              picked: pickedCount ? tr('createSmart.step5.pickedCost', { n: pickedCount }) : ''
+            })}<b className="text-ink">${yuan(videoCost + imageCost)}</b>
           </div>
-          <p className="mt-3 text-[11px] text-ink3">提交后进入「生成中」：逐段生成 → 质检 → 转场拼接 → 无缝循环 → 配乐 → 转码。真实计费，确认后才开始。</p>
+          <p className="mt-3 text-[11px] text-ink3">${tr('createSmart.step5.note')}</p>
           <div className="mt-4 flex gap-2">
-            <${Btn} onClick=${() => setStep(4)}>上一步</${Btn}>
-            <${Btn} primary=${true} disabled=${busy === 'submit' || i2vUnsupported} onClick=${submit}>${busy === 'submit' ? '提交中…' : '确认提交（' + yuan(videoCost + imageCost) + '）'}</${Btn}>
+            <${Btn} onClick=${() => setStep(4)}>${tr('createSmart.step5.prev')}</${Btn}>
+            <${Btn} primary=${true} disabled=${busy === 'submit' || i2vUnsupported} onClick=${submit}>${busy === 'submit' ? tr('createSmart.step5.submitting') : tr('createSmart.step5.submit', { cost: yuan(videoCost + imageCost) })}</${Btn}>
           </div>
         </div>`}
 
@@ -422,22 +445,22 @@ export function CreateSmartWizard() {
             style=${{ maxHeight: '80vh' }}
             onClick=${(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <span className="text-[13px] text-ink">从图片库选图（仅列已通过审核的）</span>
-              <span className="text-[11px] text-ink3">按点击顺序作为第 1…${clips} 段首帧 · 需要 ${clips} 张</span>
+              <span className="text-[13px] text-ink">${tr('createSmart.picker.title')}</span>
+              <span className="text-[11px] text-ink3">${tr('createSmart.picker.subtitle', { clips })}</span>
               <span className="flex-1"></span>
-              <span className="text-[12px] text-accent">已选 ${photos.length} / ${clips}</span>
-              <${Btn} primary=${true} onClick=${() => setPickerOpen(false)}>完成</${Btn}>
+              <span className="text-[12px] text-accent">${tr('createSmart.picker.selected', { n: photos.length, max: clips })}</span>
+              <${Btn} primary=${true} onClick=${() => setPickerOpen(false)}>${tr('createSmart.picker.done')}</${Btn}>
             </div>
-            ${libPhotos.length === 0 && html`<p className="text-[12px] text-ink3 py-6">图片库里还没有「已通过」的图。</p>`}
+            ${libPhotos.length === 0 && html`<p className="text-[12px] text-ink3 py-6">${tr('createSmart.picker.empty')}</p>`}
             <div className="grid gap-2" style=${{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
               ${libPhotos.map((p) => {
                 const idx = photos.findIndex((x) => x.id === p.id);
                 return html`<button key=${p.id} onClick=${() => togglePick(p)}
                   className=${'rounded-[6px] overflow-hidden border text-left ' + (idx >= 0 ? 'border-accent' : 'border-white/[.10]')}
                   style=${{ position: 'relative', background: '#0f1712' }}>
-                  ${p.url ? html`<img src=${p.url} alt="" className="w-full h-[86px] object-cover" />` : html`<div className="w-full h-[86px] grid place-items-center text-[10px] text-ink3">无预览</div>`}
+                  ${p.url ? html`<img src=${p.url} alt=${tr('createSmart.step3.alt')} className="w-full h-[86px] object-cover" />` : html`<div className="w-full h-[86px] grid place-items-center text-[10px] text-ink3">${tr('createSmart.step3.noPreview')}</div>`}
                   ${idx >= 0 && html`<span style=${{ position: 'absolute', top: '4px', left: '4px', height: '16px', minWidth: '16px', padding: '0 4px', borderRadius: '3px', background: 'var(--accent)', color: '#0b100d', fontSize: '10px', lineHeight: '16px', textAlign: 'center' }}>${idx + 1}</span>`}
-                  <div className="px-1.5 py-1 text-[10px] text-ink3 truncate">${p.label || ''}${p.isFinal ? ' · 最终版' : ''}</div>
+                  <div className="px-1.5 py-1 text-[10px] text-ink3 truncate">${p.label || ''}${p.isFinal ? tr('createSmart.picker.finalSuffix') : ''}</div>
                 </button>`;
               })}
             </div>

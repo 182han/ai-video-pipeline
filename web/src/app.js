@@ -8,6 +8,7 @@
 import { currentRoute } from './router.js';
 import { AppShell } from './screens/shell.js';
 import { Boundary } from './components/boundary.js';
+import { getLocale, subscribe, t } from './i18n/index.js';
 
 const { React, ReactDOM } = window;
 const html = window.htm.bind(React.createElement);
@@ -16,6 +17,9 @@ const { useEffect, useState } = React;
 function Router() {
   const [route, setRoute] = useState(currentRoute());
   const [stale, setStale] = useState(false);
+  // 语言切换只触发整棵树重渲染，不 remount：向导进度、输入框内容都保留。
+  const [, forceLocaleRender] = useState(getLocale());
+  useEffect(() => subscribe(forceLocaleRender), []);
 
   useEffect(() => {
     const onPop = () => setRoute(currentRoute());
@@ -37,8 +41,7 @@ function Router() {
     ${stale && html`
       <div className="fixed bottom-0 left-0 right-0 z-[9999] bg-warn text-black text-center
                       text-[12px] leading-[1.6] py-1.5 px-3">
-        服务端代码是旧版本（缺少 imageGen 探针）。当前页面可能已更新，但后端接口还没加载；
-        请重启：<code className="font-num">cd app && node server.js</code>
+        ${t('shell.staleServer')}
       </div>
     `}
     <${Boundary}><${AppShell} route=${route} /></${Boundary}>

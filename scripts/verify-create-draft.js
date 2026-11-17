@@ -24,6 +24,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const CREATE = path.join(ROOT, 'web', 'src', 'screens', 'create.js');
+const CREATE_MSGS = path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'create.js');
 const DRAFT = path.join(ROOT, 'web', 'src', 'createDraft.js');
 const KEY = 'vs_create_draft_v1';
 
@@ -194,6 +195,7 @@ async function runWizard() {
   console.log('================================================================');
 
   const createSrc = fs.readFileSync(CREATE, 'utf8');
+const createMsgs = fs.readFileSync(CREATE_MSGS, 'utf8');
   const draftSrc = fs.readFileSync(DRAFT, 'utf8');
 
   // ---------- 1. 静态接线 ----------
@@ -204,9 +206,9 @@ async function runWizard() {
   check(/startImage\s*\(/.test(createSrc) && !/fetch\('\/api\/images\/generate'/.test(createSrc),
     '出图请求在草稿模块里（切页不中断、结果不丢）');
   check(!/setImgResult\(null\)/.test(createSrc), '不再「先清空上一张图再请求」（失败会连已付费的图一起丢）');
-  check(/已恢复上次未做完的草稿/.test(createSrc), '界面有「已恢复上次未做完的草稿」提示');
+  check(/create\.draft\.restored/.test(createSrc) && /已恢复上次未做完的草稿/.test(createMsgs), '界面有「已恢复上次未做完的草稿」提示（i18n 词条）');
   check(/清空草稿/.test(createSrc), '界面有「清空草稿」按钮（可主动从头开始）');
-  check(/这张图是按旧提示词出的/.test(createSrc), '提示词改过后会标注「这是旧图」');
+  check(/create\.p1\.stalePrompt/.test(createSrc) && /这张图是按旧提示词出的/.test(createMsgs), '提示词改过后会标注「这是旧图」（i18n 词条）');
   check(/sessionStorage/.test(draftSrc), '草稿走 sessionStorage（同标签页 F5 也在）');
   check(/apiKey/.test(draftSrc) && !/saveDraft\(\{[^}]*apiKey/.test(draftSrc), '出图 Key 只进请求体，不写进草稿');
   const invSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'inventory.js'), 'utf8');

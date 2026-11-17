@@ -18,6 +18,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const SERVER = path.join(ROOT, 'server.js');
 const SETTINGS = path.join(ROOT, 'web', 'src', 'screens', 'settingsPage.js');
+const SETTINGS_I18N = path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'settings.js');
 
 let pass = 0;
 let fail = 0;
@@ -32,6 +33,7 @@ console.log('================================================================');
 
 const server = fs.readFileSync(SERVER, 'utf8');
 const settings = fs.readFileSync(SETTINGS, 'utf8');
+const settingsI18n = fs.readFileSync(SETTINGS_I18N, 'utf8');
 
 // ---- 1. 后端：非 ASCII 前置校验（必须在 fetch 之前）----
 const guardIdx = server.indexOf('const nonAscii = ');
@@ -53,12 +55,14 @@ check(/default（旧通用入口/.test(server), '能标出「回落到旧通用�
 check(/request（页面 Base URL）/.test(server), '能标出「用的是页面填的地址」');
 
 // ---- 3. 前端：显示/隐藏按钮不依赖 emoji 与缺失的 Tailwind 类 ----
-check(/显示/.test(settings) && /隐藏/.test(settings), '按钮文案含「显示 / 隐藏」文字');
+check(/settings\.keys\.(show|hide)/.test(settings) && /显示/.test(settingsI18n) && /隐藏/.test(settingsI18n),
+  '按钮文案含「显示 / 隐藏」文字（i18n 词条）');
 check(!/👁|🙈/.test(settings), '不再依赖 👁/🙈 emoji（字体缺失时会塌成看不见）');
 check(/position: 'absolute'/.test(settings), '按钮用内联 position:absolute（不依赖缺失的 .right-1/.top-1\/2）');
 check(/translateY\(-50%\)/.test(settings), '按钮用内联 translateY 垂直居中');
 check(/paddingRight/.test(settings), '输入框用内联 paddingRight 给按钮留位（不依赖缺失的 .pr-9）');
-check(/含中文\/符号|非 ASCII/.test(settings), '输入时即时提示「Key 里含中文/符号」');
+check(/settings\.keys\.nonAscii/.test(settings) && /中文\/符号/.test(settingsI18n),
+  '输入时即时提示「Key 里含中文/符号」（i18n 词条）');
 check(/vs_config/.test(settings) || /KEY_STORE/.test(settings), 'Key 仍写 localStorage（不改存储键）');
 
 console.log('\n================================================================');

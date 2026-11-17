@@ -31,6 +31,8 @@ const F_ASSIST = path.join(WEB, 'src', 'components', 'assistant.js');
 const F_PLAN = path.join(WEB, 'src', 'components', 'xiaozhiPlan.js');
 const F_DRAWER = path.join(WEB, 'src', 'components', 'taskDrawer.js');
 const F_SETTINGS = path.join(WEB, 'src', 'screens', 'settingsPage.js');
+const F_MSG_ASSIST = path.join(WEB, 'src', 'i18n', 'messages', 'assistant.js');
+const F_MSG_XZ = path.join(WEB, 'src', 'i18n', 'messages', 'xiaozhi.js');
 
 let pass = 0;
 let fail = 0;
@@ -78,6 +80,7 @@ function slice(src, startRe, endRe, maxLen) {
   const plan = read(F_PLAN);
   const drawer = read(F_DRAWER);
   const settings = read(F_SETTINGS);
+  const zhMsgs = read(F_MSG_ASSIST) + '\n' + read(F_MSG_XZ);
 
   // ------------------------------------------------------------
   section('[1] store.js：readRuntimeConfig 对所有 model 都带 5 个图片字段（契约 §1）');
@@ -127,7 +130,7 @@ function slice(src, startRe, endRe, maxLen) {
   const backendGuard = slice(assist, /if \(imagePerClip && !imageBackendReady\) \{/, /\n    \}/);
   check('服务端无 image 能力（旧进程）时 confirmPlan 拦截（不误跑纯文生视频）',
     /!imageBackendReady/.test(assist) && backendGuard.length > 0 && /return;/.test(backendGuard)
-    && /重启 3001/.test(assist));
+    && /重启 3001/.test(zhMsgs));
   // 2026-11-16 20:30 实测更新：WhaleTV 中转图生视频已确认可用（/video/generations + data URL 出片），
   // 因此「中转 + 出图」的前端拦截与红色提示必须已经删除（否则会挡住合法链路）。
   check('中转通道 + 出图 → 不再被 confirmPlan 拦截（旧 400 结论已被推翻）',
@@ -136,13 +139,16 @@ function slice(src, startRe, endRe, maxLen) {
   check('PlanCard 不再显示「中转不收首帧图」红色提示',
     !/plan\.model === 'openai-video'/.test(plan) && !/不收首帧图/.test(plan));
   const warnBlock = slice(assist, /if \(imagePerClip && !runtime\.imageApiKey\) \{/, /\n    \}/);
-  check('图片 Key 为空 → 对话里警告（不拦截）', /设置里没有填「图片生成」的 Key/.test(warnBlock));
+  check('图片 Key 为空 → 对话里警告（不拦截）',
+    /assistant\.warn\.noImageKey/.test(warnBlock) && /设置里没有填「图片生成」的 Key/.test(zhMsgs));
   check('该警告块内没有 return（确认流程不被拦）', warnBlock.length > 0 && !/return;/.test(warnBlock));
-  check('警告风格与既有「没填 Key」警告一致（⚠ 前缀）', /content: '⚠ 设置里没有填「图片生成」/.test(assist));
+  check('警告风格与既有「没填 Key」警告一致（⚠ 前缀）',
+    /tr\('assistant\.warn\.noImageKey'\)/.test(assist) && /⚠ 设置里没有填「图片生成」/.test(zhMsgs));
   const notReady = slice(assist, /j\.code === 'IMAGE_GEN_NOT_READY'/, /return;/);
   check('处理 IMAGE_GEN_NOT_READY：显示后端 error 原文',
-    /j\.error \|\| '出图未就绪/.test(notReady), notReady.trim().slice(0, 100));
-  check('IMAGE_GEN_NOT_READY 文案说明「没有建任务、没有费用」', /没有建任务，也没有产生费用/.test(assist));
+    /assistant\.warn\.imageNotReady/.test(notReady) && /j\.error/.test(notReady)
+    && /出图未就绪/.test(zhMsgs), notReady.trim().slice(0, 100));
+  check('IMAGE_GEN_NOT_READY 文案说明「没有建任务、没有费用」', /没有建任务，也没有产生费用/.test(zhMsgs));
 
   // ------------------------------------------------------------
   section('[4] 计费提示：单价只来自 /api/assistant/info 的 image.unitCny（禁止硬编码）');
@@ -155,7 +161,8 @@ function slice(src, startRe, endRe, maxLen) {
     /money\(unit\)/.test(plan) && /money\(unit \* n\)/.test(plan));
   check('单价缺失/0 → 显示「单价未知」', /单价未知/.test(plan));
   check('张数来自 plan.clipCount（不是写死）', /Number\(plan && plan\.clipCount\)/.test(plan));
-  check('提示出图后暂停等审图', /出图完成后整批暂停，等你审图后再点继续/.test(plan));
+  check('提示出图后暂停等审图',
+    /xiaozhi\.plan\.pauseNote/.test(plan) && /出图完成后整批暂停，等你审图后再点继续/.test(zhMsgs));
   for (const [name, src] of [['store.js', store], ['assistant.js', assist], ['xiaozhiPlan.js', plan], ['taskDrawer.js', drawer]]) {
     check(name + ' 不含硬编码图片单价 0.20 / ¥0.2', !/0\.20/.test(src) && !/¥0\.2(?![0-9])/.test(src));
   }
@@ -174,16 +181,19 @@ function slice(src, startRe, endRe, maxLen) {
   check('pendingPhotos 缺失时不谎报 0（回落成 generated）',
     /Number\.isFinite\(pendingRaw\) \? Math\.max\(0, Math\.floor\(pendingRaw\)\) : generated/.test(plan));
   check('「图已出好」标题', /图已出好/.test(plan));
-  check('「去审图」按钮 → navigate(/library)', /去审图/.test(plan) && /navigate\('\/library'\)/.test(assist));
-  check('「继续生成」按钮', /继续生成/.test(plan));
+  check('「去审图」按钮 → navigate(/library)',
+    /xiaozhi\.review\.goReview/.test(plan) && /去审图/.test(zhMsgs) && /navigate\('\/library'\)/.test(assist));
+  check('「继续生成」按钮', /xiaozhi\.review\.continue/.test(plan) && /继续生成/.test(zhMsgs));
   check('unpause 调用带 taskId 与 same-origin',
     /'\/api\/tasks\/' \+ encodeURIComponent\(tid\) \+ '\/unpause'/.test(assist)
     && /unpause'[\s\S]{0,200}credentials: 'same-origin'/.test(assist), null);
   const unpauseBlock = slice(assist, /async function continueAfterReview\(\)/, /function dismissGreet/);
   check('unpause 用 POST', /method: 'POST'/.test(unpauseBlock));
-  check('成功后提示「已继续，开始生成视频」', /已继续，开始生成视频/.test(unpauseBlock));
+  check('成功后提示「已继续，开始生成视频」',
+    /assistant\.continue\.started/.test(unpauseBlock) && /已继续，开始生成视频/.test(zhMsgs));
   check('成功后保持轮询（立刻再拉一次 /api/assistant/state）', /\/api\/assistant\/state\?sessionId=/.test(unpauseBlock));
-  check('失败只报原因，不假装成功', /继续失败：/.test(unpauseBlock));
+  check('失败只报原因，不假装成功',
+    /assistant\.continue\.failed/.test(unpauseBlock) && /继续失败：/.test(zhMsgs));
   check('普通 paused 不抢提示：卡片仅由 awaitingImageReview 决定（无独立 paused 分支）',
     !/reviewTask = \(xstate\.task\.status === 'paused'\)/.test(assist));
 
@@ -193,13 +203,16 @@ function slice(src, startRe, endRe, maxLen) {
     /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution \}\)/.test(plan));
   check('计划卡可改分辨率（480P/720P/1080P 按钮 + 回调 onSetResolution）',
     /'480p', '720p', '1080p'/.test(plan) && /onSetResolution/.test(plan)
-    && /onSetResolution=\$\{\(r\) => send\('改成 ' \+ r\)\}/.test(assist));
+    && /assistant\.panel\.changeTo/.test(assist) && /改成 \{res\}/.test(zhMsgs));
   check('计划卡一行「出图：逐段 N 张 → 图生视频」',
-    /'出图', imgOn \? `逐段 \$\{plan\.clipCount\} 张 → 图生视频` : '关（纯文生视频）'/.test(plan));
-  check('关掉时文案「关（纯文生视频）」', /关（纯文生视频）/.test(plan));
-  check('开时说明纯文生视频是旧链路（行为不变）', /纯文生视频（旧链路，不出图/.test(plan));
+    /xiaozhi\.plan\.imageOn/.test(plan) && /逐段 \{n\} 张 → 图生视频/.test(zhMsgs)
+    && /xiaozhi\.plan\.imageOff/.test(plan) && /关（纯文生视频）/.test(zhMsgs));
+  check('关掉时文案「关（纯文生视频）」', /关（纯文生视频）/.test(zhMsgs));
+  check('开时说明纯文生视频是旧链路（行为不变）',
+    /xiaozhi\.plan\.pureText/.test(plan) && /纯文生视频（旧链路，不出图/.test(zhMsgs));
   check('StateStrip 读取 task.awaitingImageReview', /const awaiting = !!\(task && task\.awaitingImageReview === true\);/.test(plan));
-  check('StateStrip 在审图时显示「等待审图」', /awaiting \? '等待审图' : \(state\.label \|\| state\.state\)/.test(plan));
+  check('StateStrip 在审图时显示「等待审图」',
+    /awaiting \? tr\('xiaozhi\.state\.awaiting'\)/.test(plan) && /等待审图/.test(zhMsgs));
   check('StateStrip 审图态用 warn 色（不是运行中的 accent）', /awaiting \? 'text-warn'/.test(plan));
   check('ImageReviewCard 已导出（assistant.js 可 import）', /export function ImageReviewCard\(/.test(plan));
 

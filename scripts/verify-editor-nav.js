@@ -49,13 +49,16 @@ async function waitReady(base, timeoutMs = 25000) {
   console.log('================================================================');
 
   const shell = read(path.join(WEB, 'src', 'screens', 'shell.js'));
+const navMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'nav.js'));
 
   check(!/label: '配乐编辑器'/.test(shell), '不再出现「配乐编辑器」入口');
   check(!/key: 'bgm'/.test(shell), 'NAV 移除 bgm 项');
   check(/route\.startsWith\('\/bgm'\)\) return 'edit'/.test(shell), '/bgm 落到剪辑台');
   check(!/BgmEditorView/.test(shell), '不再加载独立配乐编辑器');
   check(!/bgm: '\/bgm'/.test(shell), 'routeOf 移除 bgm');
-  check(/section: '素材'/.test(shell) && !/section: '记录'/.test(shell), '导航只剩「素材 · 库」一段（历史/产出已下线）');
+  check(/sectionKey: 'nav\.materials'/.test(shell) && !/sectionKey: 'nav\.(records|outputs)'/.test(shell)
+  && /materials: '素材'/.test(navMsgs),
+  '导航只剩「素材 · 库」一段（历史/产出已下线；i18n 键）');
   check(/key: 'library', route: '\/library'/.test(shell), '库入口指向 /library');
   // 旧深链：/clips 与 /photos 仍应落到库页（P2 合并后不再单列导航）
   check(/route\.startsWith\('\/clips'\)\) return 'library'/.test(shell), '/clips 旧深链落到库');

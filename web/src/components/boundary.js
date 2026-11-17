@@ -4,6 +4,7 @@
 // 有了边界，出错时至少能看到「哪一块坏了 + 错误原文」，不至于两眼一抹黑。
 const { React } = window;
 const html = window.htm.bind(React.createElement);
+import { t as tr } from '../i18n/index.js';
 
 export class Boundary extends React.Component {
   constructor(props) {
@@ -25,7 +26,7 @@ export class Boundary extends React.Component {
     if (this.props.fallback) return this.props.fallback(this.state.err);
     return html`
       <div className="p-4 text-[12px] text-danger">
-        这一块渲染失败：${String(this.state.err && this.state.err.message)}
+        ${tr('editor.boundary.renderFailed', { msg: String(this.state.err && this.state.err.message) })}
       </div>
     `;
   }

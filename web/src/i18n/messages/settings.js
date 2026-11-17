@@ -1,0 +1,206 @@
+// ============================================================
+// i18n · 设置页（整页）
+// P0：语言区 + 生成参数 + API Key + 备份恢复 + 成员管理
+// ============================================================
+export default {
+  zh: {
+    settings: {
+      title: '设置',
+      language: {
+        title: '语言',
+        desc: '界面语言立即生效并记住；首次访问按浏览器语言自动选择。切换语言不会丢失当前编辑内容。',
+        display: '界面语言',
+        aiTitle: 'AI 输出语言',
+        aiDesc: '助手回复、生成的提示词与场景卡使用哪种语言；默认跟随界面。',
+        zh: '中文',
+        en: 'English'
+      },
+      general: {
+        title: '生成参数',
+        videoModel: '视频模型',
+        resolution: '分辨率',
+        preset: '档位',
+        balance: '账户余额',
+        balancePlaceholder: '元（留空 = 不拦截）',
+        balanceHint: '生成前用预计花费与余额比对；超出直接拦截，避免误点超支。需手动维护。',
+        transition: '片段转场',
+        colorMatch: '接缝校色',
+        colorMatchHint: '校色依赖转场'
+      },
+      field: {
+        model: '模型',
+        region: '区域',
+        size: '尺寸'
+      },
+      keys: {
+        title: 'API Key',
+        hint: '只存本机浏览器；生成时随请求发送，不落服务端',
+        collapse: '收起',
+        expand: '展开',
+        test: '测试连接',
+        testing: '测试中…',
+        show: '显示',
+        hide: '隐藏',
+        showKey: '显示密钥',
+        hideKey: '隐藏密钥',
+        collapsed: '已折叠（点「展开」填写）',
+        nonAscii: '这个字段里有中文/符号（含非 ASCII 字符）——多半是粘贴了页面上的提示文案。请只填纯英文数字的 Key（一般以 sk- 开头）或纯英文地址。',
+        imageType: '接口类型',
+        imageDashscope: '百炼原生（异步任务轮询）',
+        imageOpenai: 'OpenAI 兼容（WhaleTV / 中转 / OpenAI）',
+        server: '服务端：',
+        ready: '已就绪',
+        noKey: '未配置 Key',
+        noAdapter: '适配器未注册',
+        reading: '读取中…',
+        local: ' · 本机：',
+        filled: '已填写',
+        empty: '未填写',
+        imageNote: '模型 / 尺寸留空即用默认 wan2.7-image / 1696x960（16:9）。填在这里的 Key 会随出图请求发送，不落服务端；也可写 app/.env 的 IMAGE_GEN_API_KEY 作为服务端全局配置。',
+        imageBase: '第三方 / 中转 Key 必须填它给的 Base URL；官方百炼 Key 填',
+        connected: '连接正常',
+        failed: '测试失败',
+        oldServer: '（服务端仍是旧进程，请重启 node server.js）'
+      },
+      group: {
+        seedance: 'Seedance 2.5（字节）',
+        kling: '可灵 Kling 3.0',
+        dashscope: '万相 3.0（DashScope）',
+        whaletv: 'OpenAI 兼容视频（WhaleTV / 中转）',
+        imagegen: '图片生成 · wan2.7-image',
+        llm: 'LLM · 提示词助手',
+        multimodal: '多模态 · 视觉质检'
+      },
+      backup: {
+        title: '备份 / 恢复',
+        export: '导出配置',
+        import: '导入配置',
+        warn: '备份文件含 API Key，注意保管',
+        noConfig: '文件里没有 config',
+        restored: '已恢复备份',
+        failed: '恢复失败：'
+      },
+      members: {
+        title: '成员管理',
+        count: '{n} 名',
+        count_one: '{n} 名',
+        count_other: '{n} 名',
+        authOff: ' · 登录墙未启用',
+        username: '用户名',
+        password: '密码（≥8 位）',
+        add: '新建成员',
+        empty: '没有成员（或登录墙未启用）。',
+        self: '当前登录',
+        reset: '重置密码',
+        delete: '删除',
+        created: '成员已创建',
+        createFailed: '创建成员失败：',
+        resetPrompt: '给 {name} 设置新密码（至少 8 位）：',
+        resetDone: '密码已重置',
+        resetFailed: '重置失败：',
+        deleteConfirm: '删除成员 {name}？',
+        deleteFailed: '删除失败：'
+      }
+    }
+  },
+  en: {
+    settings: {
+      title: 'Settings',
+      language: {
+        title: 'Language',
+        desc: 'The interface language applies immediately and is remembered. On first visit it follows your browser language. Switching does not discard your current work.',
+        display: 'Interface language',
+        aiTitle: 'AI output language',
+        aiDesc: 'Language used for assistant replies, generated prompts and scene cards. Defaults to the interface language.',
+        zh: 'Chinese',
+        en: 'English'
+      },
+      general: {
+        title: 'Generation',
+        videoModel: 'Video model',
+        resolution: 'Resolution',
+        preset: 'Preset',
+        balance: 'Balance',
+        balancePlaceholder: 'CNY (blank = no limit)',
+        balanceHint: 'Estimated cost is checked against your balance before generation; over-budget runs are blocked. Maintained manually.',
+        transition: 'Clip transitions',
+        colorMatch: 'Seam color match',
+        colorMatchHint: 'Color match requires transitions'
+      },
+      field: {
+        model: 'Model',
+        region: 'Region',
+        size: 'Size'
+      },
+      keys: {
+        title: 'API Keys',
+        hint: 'Stored only in this browser; sent with generation requests, never persisted on the server.',
+        collapse: 'Collapse',
+        expand: 'Expand',
+        test: 'Test connection',
+        testing: 'Testing…',
+        show: 'Show',
+        hide: 'Hide',
+        showKey: 'Show key',
+        hideKey: 'Hide key',
+        collapsed: 'Collapsed (click Expand to edit)',
+        nonAscii: 'This field contains non-ASCII characters — you probably pasted UI text. Enter only an ASCII key (usually starting with sk-) or an ASCII URL.',
+        imageType: 'Endpoint type',
+        imageDashscope: 'Model Studio native (async task polling)',
+        imageOpenai: 'OpenAI-compatible (WhaleTV / proxy / OpenAI)',
+        server: 'Server: ',
+        ready: 'ready',
+        noKey: 'no API key configured',
+        noAdapter: 'adapter not registered',
+        reading: 'loading…',
+        local: ' · This browser: ',
+        filled: 'filled',
+        empty: 'not set',
+        imageNote: 'Leave model / size blank to use the defaults wan2.7-image / 1696x960 (16:9). Keys entered here are sent with image requests and never stored server-side; you can also set IMAGE_GEN_API_KEY in app/.env as a server-side default.',
+        imageBase: 'For third-party / proxy keys, fill in the Base URL they provide. For official Model Studio keys use',
+        connected: 'Connected',
+        failed: 'Test failed',
+        oldServer: ' (the server is still running old code; restart with node server.js)'
+      },
+      group: {
+        seedance: 'Seedance 2.5 (ByteDance)',
+        kling: 'Kling 3.0',
+        dashscope: 'Wan 3.0 (DashScope)',
+        whaletv: 'OpenAI-compatible video (WhaleTV / proxy)',
+        imagegen: 'Image generation · wan2.7-image',
+        llm: 'LLM · prompt assistant',
+        multimodal: 'Multimodal · visual QC'
+      },
+      backup: {
+        title: 'Backup / Restore',
+        export: 'Export config',
+        import: 'Import config',
+        warn: 'The backup contains API keys — keep it safe',
+        noConfig: 'No config found in the file',
+        restored: 'Backup restored',
+        failed: 'Restore failed: '
+      },
+      members: {
+        title: 'Members',
+        count: '{n} member(s)',
+        count_one: '{n} member',
+        count_other: '{n} members',
+        authOff: ' · sign-in wall disabled',
+        username: 'Username',
+        password: 'Password (min 8 chars)',
+        add: 'Add member',
+        empty: 'No members (or the sign-in wall is disabled).',
+        self: 'signed in',
+        reset: 'Reset password',
+        delete: 'Delete',
+        created: 'Member created',
+        createFailed: 'Failed to create member: ',
+        resetPrompt: 'Set a new password for {name} (at least 8 characters):',
+        resetDone: 'Password reset',
+        resetFailed: 'Reset failed: ',
+        deleteConfirm: 'Delete member {name}?',
+        deleteFailed: 'Delete failed: '
+      }
+    }
+  }
+};

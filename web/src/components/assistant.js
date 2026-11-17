@@ -14,6 +14,7 @@ import { promptBus, readLLMConfig, readRuntimeConfig } from '../store.js';
 import { navigate, currentRoute } from '../router.js';
 import { createOrb } from './assistantOrb.js';
 import { PlanCard, StateStrip, GreetingBubble, VoiceButton, ImageReviewCard } from './xiaozhiPlan.js';
+import { t as tr } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -104,7 +105,12 @@ export function Assistant({ page = false } = {}) {
   const pageScrollRef = useRef(null);
   // 建议 chips：用户只说时长，场景由场景卡库自动抽取（2026-11-16 用户指正：
   // 长片不围绕某个主题，60–180 段是不同场景，不能演示成主题式长片示例）。
-  const PAGE_CHIPS = ['30 秒（快速试）', '10 分钟的长视频', '上一次的视频', '现在进度怎样'];
+  const PAGE_CHIPS = [
+    tr('assistant.chips.quick'),
+    tr('assistant.chips.long'),
+    tr('assistant.chips.last'),
+    tr('assistant.chips.progress')
+  ];
   // 批量模式（2026-11-12 用户口径）：不填条数，按「目标时长 ÷ 每段秒数」自动算。
   // 默认 10 分钟 / 10 秒 = 60 条；可切 30 分钟 = 180 条。
   const [batchMinutes, setBatchMinutes] = useState(10);
@@ -347,15 +353,18 @@ export function Assistant({ page = false } = {}) {
   // 抽成函数是因为流式 / 整段返回两条路径都要用同一套格式。
   function failureText(j) {
     const hint = j.error === 'NO_LLM_KEY'
-      ? '还没配置 LLM Key，请先去设置页填好'
-      : (j.message || ('助手没有响应（' + j.error + '）'));
+      ? tr('assistant.failure.noLlmKey')
+      : (j.message || tr('assistant.failure.noResponse', { error: j.error }));
     // 失败原因一并带进气泡：只说「检查网络或 API Key」会把用户带偏
     // （2026-11-10：真因是地址读错 / 模型名不在中转可用列表，照着这句话白查两轮）
     const lines = ['⚠ ' + hint];
     if (j.hint) lines.push('· ' + j.hint);
-    if (j.url) lines.push('· 实际请求 ' + j.url + (j.model ? '（模型 ' + j.model + '）' : ''));
-    if (j.status) lines.push('· HTTP ' + j.status + (j.detail ? '：' + j.detail : ''));
-    else if (j.detail) lines.push('· ' + j.detail);
+    if (j.url) lines.push(tr('assistant.failure.request', { url: j.url }) + (j.model ? tr('assistant.failure.model', { model: j.model }) : ''));
+    if (j.status) {
+      lines.push(j.detail
+        ? tr('assistant.failure.httpDetail', { status: j.status, detail: j.detail })
+        : tr('assistant.failure.http', { status: j.status }));
+    } else if (j.detail) lines.push(tr('assistant.failure.detail', { detail: j.detail }));
     return lines.join('\n');
   }
 
@@ -421,7 +430,7 @@ export function Assistant({ page = false } = {}) {
         }
         setStreamText('');
         if (!finalEvt) {
-          setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 流式回复中断了，请重试' }]);
+          setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.streamInterrupted') }]);
         } else if (finalEvt.ok === false) {
           setMsgs((m) => [...m, { role: 'assistant', content: failureText(finalEvt) }]);
         } else {
@@ -432,7 +441,7 @@ export function Assistant({ page = false } = {}) {
         // ---- 回退：整段返回（旧后端 / 网关不转发流） ----
         const j = await r.json().catch(() => null);
         if (!j) {
-          setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 返回不是 JSON，请重试' }]);
+          setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.notJson') }]);
         } else if (j.ok === false) {
           setMsgs((m) => [...m, { role: 'assistant', content: failureText(j) }]);
         } else {
@@ -441,7 +450,7 @@ export function Assistant({ page = false } = {}) {
         }
       }
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.network', { msg: e.message }) }]);
     } finally {
       clearInterval(tick);
       setThinking(false);
@@ -463,10 +472,10 @@ export function Assistant({ page = false } = {}) {
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
-        setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 小智没响应：' + ((j && (j.error || j.code)) || ('HTTP ' + r.status)) }]);
+        setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.xiaozhiNoResponse', { error: (j && (j.error || j.code)) || ('HTTP ' + r.status) }) }]);
         return;
       }
-      setMsgs((m) => [...m, { role: 'assistant', content: j.reply || '（没有回复）' }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: j.reply || tr('assistant.noReply') }]);
       // 卡片两时点（2026-11-17 V1 §9.1-5 / Q14=A）：
       //   ① intent=create 且 planId 是新的 → 首次计划成型，弹卡；
       //   ② intent=confirm（用户问「确认生成吗」）→ 最终确认，弹卡；
@@ -480,7 +489,7 @@ export function Assistant({ page = false } = {}) {
       }
       setPlanCardVisible(showCard);
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.network', { msg: e.message }) }]);
     } finally {
       setThinking(false);
       setStreamText('');
@@ -502,9 +511,7 @@ export function Assistant({ page = false } = {}) {
       // 不拦（服务端 .env 也可能配了 Key），但绝不能让「降级 Mock」再无声发生。
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: '⚠ 设置里没有填「' + (plan.modelLabel || plan.model) + '」的 Key。'
-          + '服务端 .env 若也没有，这条计划会降级成 Mock 合成画面（不扣费，但不是真实模型）。'
-          + '要真实生成，请先到「设置」填 Key 再点确认。'
+        content: tr('assistant.warn.noModelKey', { model: plan.modelLabel || plan.model })
       }]);
     }
     // 逐段出图（契约 §1）：开了开关但图片 Key 为空 → 先警告，不拦截。
@@ -512,9 +519,7 @@ export function Assistant({ page = false } = {}) {
     if (imagePerClip && !runtime.imageApiKey) {
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: '⚠ 设置里没有填「图片生成」的 Key（设置 → 图片生成）。'
-          + '开了「逐段出图」却没有 Key，服务端会直接返回「出图未就绪」：不会出图，也不会扣费。'
-          + '要出图请先填 Key；不想出图就把计划卡上的「逐段出图」关掉（改走纯文生视频）。'
+        content: tr('assistant.warn.noImageKey')
       }]);
     }
     // 服务端还是旧进程（/api/assistant/info 没有 image 段）：出图开关不会生效。
@@ -523,11 +528,7 @@ export function Assistant({ page = false } = {}) {
     if (imagePerClip && !imageBackendReady) {
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: '⛔ 服务端还是旧进程：`/api/assistant/info` 里没有出图能力（image 段），'
-          + '「逐段出图」现在不会生效——不会出图、也不会在出图后暂停，确认后会按**纯文生视频**一路跑完。'
-          + '为避免按错误预期扣费，这次没有提交。请二选一：'
-          + '\n① 重启 3001（node server.js）让出图能力上线后再点确认；'
-          + '\n② 确实只要纯文生视频：先把计划卡上的「逐段出图」关掉，再点确认。'
+        content: tr('assistant.warn.oldServerImage')
       }]);
       return;
     }
@@ -552,20 +553,21 @@ export function Assistant({ page = false } = {}) {
         if (j && j.code === 'IMAGE_GEN_NOT_READY') {
           setMsgs((m) => [...m, {
             role: 'assistant',
-            content: '⚠ ' + (j.error || '出图未就绪：请到「设置 → 图片生成」填 Key / 地址 / 模型。')
-              + '\n（这次没有建任务，也没有产生费用；不想出图就把「逐段出图」关掉。）'
+            content: tr('assistant.warn.imageNotReady', {
+              error: j.error || tr('assistant.warn.imageNotReadyFallback')
+            })
           }]);
           return;
         }
-        setMsgs((m) => [...m, { role: 'assistant', content: '⚠ ' + ((j && (j.error || j.code)) || ('HTTP ' + r.status)) }]);
+        setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.generic', { error: (j && (j.error || j.code)) || ('HTTP ' + r.status) }) }]);
         return;
       }
-      setMsgs((m) => [...m, { role: 'assistant', content: j.reply || '已开始。' }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: j.reply || tr('assistant.started') }]);
       setXstate({ ok: true, state: j.state, task: j.taskId ? { taskId: j.taskId, totalClips: 0 } : null });
       // 确认这一刻用过了：收起卡片，避免重复点「确认执行」再建一条任务（防重复计费）。
       setPlanCardVisible(false);
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.network', { msg: e.message }) }]);
     } finally {
       setXbusy(false);
     }
@@ -599,15 +601,15 @@ export function Assistant({ page = false } = {}) {
       if (!r.ok || (j && j.success === false)) {
         setMsgs((m) => [...m, {
           role: 'assistant',
-          content: '⚠ 继续失败：' + ((j && j.error) || ('HTTP ' + r.status))
+          content: tr('assistant.continue.failed', { error: (j && j.error) || ('HTTP ' + r.status) })
         }]);
         return;
       }
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: '已继续，开始生成视频'
-          + (j && j.approvedPhotos ? `（${j.approvedPhotos} 张未单独审核的图按通过处理）` : '')
-          + '。'
+        content: tr('assistant.continue.started')
+          + (j && j.approvedPhotos ? tr('assistant.continue.approvedPhotos', { n: j.approvedPhotos }) : '')
+          + '.'
       }]);
       // 保持轮询：paused → running 仍在非终态集合里，原来的 2s 定时器自己会接着跑；
       // 这里再立刻拉一次，免得状态条最多 2 秒后才更新。
@@ -617,7 +619,7 @@ export function Assistant({ page = false } = {}) {
         .then((sj) => { if (sj && sj.ok) setXstate(sj); })
         .catch(() => {});
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 继续失败：' + (e && e.message ? e.message : e) }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.continue.failed', { error: e && e.message ? e.message : e }) }]);
     } finally {
       setReviewBusy(false);
     }
@@ -658,20 +660,20 @@ export function Assistant({ page = false } = {}) {
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
-        const why = (j && (j.message || j.error)) || '返回不是 JSON';
-        setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 批量生成失败：' + why }]);
+        const why = (j && (j.message || j.error)) || tr('assistant.batch.noJson');
+        setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.batch.failed', { why }) }]);
         return;
       }
       const got = (j.items || []).length;
       setBatchItems(j.items || []);
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: `已生成 ${got}/${batchCount} 条不同地貌的提示词（${batchSeconds} 秒/条）`
-          + (got < batchCount ? '，有缺条（已标警告），可以再点一次补' : '')
-          + '。点下面的「填入创作页」。'
+        content: tr('assistant.batch.result', { got, total: batchCount, sec: batchSeconds })
+          + (got < batchCount ? tr('assistant.batch.missing') : '')
+          + tr('assistant.batch.fill')
       }]);
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 网络异常：' + e.message }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.failure.network', { msg: e.message }) }]);
     } finally {
       setBatchBusy(false);
     }
@@ -692,11 +694,11 @@ export function Assistant({ page = false } = {}) {
     let all = {};
     try { all = JSON.parse(localStorage.getItem('vs_config') || '{}'); } catch { all = {}; }
     if (!all.imageKey) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 还没填图片生成 Key（设置 → 图片生成）。' }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.noImageKey') }]);
       return;
     }
     if (!all.dashScopeKey) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 还没填 DashScope Key（图生视频要用它）。' }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.noDashscopeKey') }]);
       return;
     }
     const dsBase = (all.dashScopeWorkspaceId && all.dashScopeRegion)
@@ -705,7 +707,7 @@ export function Assistant({ page = false } = {}) {
     const n = list.length;
 
     // 免费自检：先确认百炼临时上传可用，避免出完图才发现 Key/BaseURL/model 不对。
-    setMsgs((m) => [...m, { role: 'assistant', content: '正在检查百炼临时上传（免费，不上传文件）…' }]);
+    setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.uploadCheck') }]);
     try {
       const pr = await fetch('/api/dashscope/upload-check', {
         method: 'POST',
@@ -717,20 +719,19 @@ export function Assistant({ page = false } = {}) {
       if (!pr.ok || !pj || pj.ok !== true) {
         setMsgs((m) => [...m, {
           role: 'assistant',
-          content: '⚠ 百炼临时上传自检失败：' + ((pj && pj.error) || ('HTTP ' + pr.status))
-            + '\n（没有生成任何图片，不产生费用）'
+          content: tr('assistant.imageFirst.uploadFailed', { error: (pj && pj.error) || ('HTTP ' + pr.status) })
         }]);
         return;
       }
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 百炼临时上传自检网络异常：' + (e.message || e) }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.uploadNetwork', { msg: e.message || e }) }]);
       return;
     }
-    if (!window.confirm(`将生成 ${n} 张图（逐图调色）+ ${n} 段视频。这会真实计费，继续？`)) return;
+    if (!window.confirm(tr('assistant.imageFirst.confirm', { n }))) return;
 
     setImageFirstBusy(true);
     try {
-      setMsgs((m) => [...m, { role: 'assistant', content: `正在批量出图 ${n} 张（逐图调色）…` }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.generating', { n }) }]);
       const ir = await fetch('/api/images/generate-batch', {
         method: 'POST',
         credentials: 'same-origin',
@@ -748,12 +749,16 @@ export function Assistant({ page = false } = {}) {
       });
       const ij = await ir.json().catch(() => null);
       if (!ij || ij.ok !== true || !Array.isArray(ij.items) || ij.items.length !== n) {
-        const why = (ij && (ij.error || (ij.errors && ij.errors[0] && ij.errors[0].error))) || '返回不完整';
-        const storageWhy = (ij && ij.storage && ij.storage.reason) ? `（${ij.storage.reason}）` : '';
-        throw new Error('批量出图失败：' + why + storageWhy + (ij && ij.failed ? `（失败 ${ij.failed} 张）` : ''));
+        const why = (ij && (ij.error || (ij.errors && ij.errors[0] && ij.errors[0].error))) || tr('assistant.imageFirst.incomplete');
+        const storageWhy = (ij && ij.storage && ij.storage.reason) ? tr('assistant.imageFirst.storage', { reason: ij.storage.reason }) : '';
+        throw new Error(tr('assistant.imageFirst.batchFailed', {
+          why,
+          storage: storageWhy,
+          failed: ij && ij.failed ? tr('assistant.imageFirst.failedCount', { n: ij.failed }) : ''
+        }));
       }
       const photoIds = ij.items.map((x) => x.photoId);
-      setMsgs((m) => [...m, { role: 'assistant', content: `出图完成 ${n} 张，正在提交视频任务…` }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.imagesDone', { n }) }]);
 
       const tr = await fetch('/api/tasks', {
         method: 'POST',
@@ -783,14 +788,14 @@ export function Assistant({ page = false } = {}) {
         })
       });
       const tj = await tr.json().catch(() => null);
-      if (!tr.ok || !tj || !tj.taskId) throw new Error((tj && tj.error) || '任务提交失败');
+      if (!tr.ok || !tj || !tj.taskId) throw new Error((tj && tj.error) || tr('assistant.imageFirst.taskFailed'));
       setMsgs((m) => [...m, {
         role: 'assistant',
-        content: `任务已提交：${tj.taskId}（${n} 段，逐片段图生视频）。可在「库 · 成片」查看进度。`
+        content: tr('assistant.imageFirst.submitted', { id: tj.taskId, n })
       }]);
       setBatchItems(null);
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', content: '⚠ 图片优先失败：' + (e.message || e) }]);
+      setMsgs((m) => [...m, { role: 'assistant', content: tr('assistant.imageFirst.failed', { msg: e.message || e }) }]);
     } finally {
       setImageFirstBusy(false);
     }
@@ -826,15 +831,15 @@ export function Assistant({ page = false } = {}) {
                 <${Orb} state=${thinking ? 'thinking' : 'idle'} />
               </div>
               <div className="xz-title-block">
-                <p className="xz-kicker">${chatting ? '管家 · 你说我做' : 'XIAOZHI · VIDEO STUDIO'}</p>
-                <h1 className="xz-title">小智</h1>
+                <p className="xz-kicker">${chatting ? tr('assistant.page.kickerChatting') : tr('assistant.page.kickerIdle')}</p>
+                <h1 className="xz-title">${tr('assistant.page.title')}</h1>
               </div>
             </div>
 
             ${!chatting && html`
-              <section className="xz-intro" aria-label="小智介绍">
-                <p className="xz-intro-kicker">你的视频管家</p>
-                <h2 className="xz-intro-title">我是小智，告诉我你想要多长的视频吧</h2>
+              <section className="xz-intro" aria-label=${tr('assistant.page.introAria')}>
+                <p className="xz-intro-kicker">${tr('assistant.page.introKicker')}</p>
+                <h2 className="xz-intro-title">${tr('assistant.page.introTitle')}</h2>
                 <div className="xz-chips">
                   ${PAGE_CHIPS.map((c) => html`
                     <button key=${c} type="button" className="xz-chip" onClick=${() => pickGreeting(c)}>${c}</button>
@@ -845,8 +850,7 @@ export function Assistant({ page = false } = {}) {
 
             ${backend.checked && !backend.ok && html`
               <div className="xz-warning">
-                服务端还是旧进程：计划卡 / 语音暂不可用。确认代码：<code>node scripts/check-server-version.js</code>；
-                重启：<code>node app/server.js</code>（单实例 3001）。
+                ${tr('assistant.page.oldServerPrefix')}<code>node scripts/check-server-version.js</code>${tr('assistant.page.oldServerMid')}<code>node app/server.js</code>${tr('assistant.page.oldServerSuffix')}
               </div>
             `}
 
@@ -862,7 +866,7 @@ export function Assistant({ page = false } = {}) {
                 `)}
                 ${thinking && html`
                   <div className="xz-msg-row is-bot">
-                    <div className="xz-bubble is-bot">${streamText || ('正在想…' + (waitMs >= 800 ? '（已 ' + (waitMs / 1000).toFixed(1) + 's）' : ''))}</div>
+                    <div className="xz-bubble is-bot">${streamText || (tr('assistant.thinking') + (waitMs >= 800 ? tr('assistant.elapsed', { sec: (waitMs / 1000).toFixed(1) }) : ''))}</div>
                   </div>
                 `}
               </div>
@@ -893,7 +897,7 @@ export function Assistant({ page = false } = {}) {
                   unitCny=${imageUnitCny}
                   hasImageKey=${imageKeyPresent}
                   imageBackendReady=${imageBackendReady}
-                  onSetResolution=${(r) => send('改成 ' + r)}
+                  onSetResolution=${(r) => send(tr('assistant.panel.changeTo', { res: r }))}
                 />
               </div>
             `}
@@ -909,12 +913,12 @@ export function Assistant({ page = false } = {}) {
 
             ${suggested && html`
               <div className="xz-block rounded-[8px] border border-accent/25 bg-accent/[.06] p-3">
-                <p className="text-[11px] text-ink3">建议提示词</p>
+                <p className="text-[11px] text-ink3">${tr('assistant.page.suggested')}</p>
                 <p className="mt-1 text-[12px] leading-[1.7] text-ink whitespace-pre-wrap break-words">${suggested}</p>
                 <button
                   className="mt-2 h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px]"
                   onClick=${usePrompt}
-                >使用这段提示词</button>
+                >${tr('assistant.page.usePrompt')}</button>
               </div>
             `}
           </div>
@@ -934,21 +938,21 @@ export function Assistant({ page = false } = {}) {
                 value=${draft}
                 onInput=${(e) => { setDraft(e.target.value); growComposer(e); }}
                 onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder=${backend.ok ? '说个总时长，比如「10 分钟」…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
+                placeholder=${backend.ok ? tr('assistant.page.placeholderXiaozhi') : (hasKey ? tr('assistant.page.placeholderChat') : tr('assistant.page.placeholderNoKey'))}
                 disabled=${!canType}
-                aria-label="给小智发消息"
+                aria-label=${tr('assistant.page.inputAria')}
                 className="xz-input"
               ></textarea>
               <button
                 type="button"
                 className="xz-send"
-                aria-label="发送"
-                title="发送"
+                aria-label=${tr('assistant.page.sendAria')}
+                title=${tr('assistant.page.sendAria')}
                 onClick=${() => send()}
                 disabled=${!canType || thinking || !draft.trim()}
               >↑</button>
             </div>
-            <p className="xz-footnote">小智会先给计划卡，确认后才开始执行 · 付费调用需你确认</p>
+            <p className="xz-footnote">${tr('assistant.page.footnote')}</p>
           </div>
         </div>
       </div>
@@ -960,8 +964,8 @@ export function Assistant({ page = false } = {}) {
       ref=${ballRef}
       role="button"
       tabIndex="0"
-      aria-label="打开小智"
-      title="小智"
+      aria-label=${tr('assistant.float.openAria')}
+      title=${tr('assistant.float.title')}
       onPointerDown=${onPointerDown}
       onPointerMove=${onPointerMove}
       onPointerUp=${onPointerUp}
@@ -991,7 +995,7 @@ export function Assistant({ page = false } = {}) {
       <div
         ref=${panelRef}
         role="dialog"
-        aria-label="小智面板"
+        aria-label=${tr('assistant.panel.aria')}
         style=${{
           position: 'fixed',
           zIndex: 61,
@@ -1003,64 +1007,64 @@ export function Assistant({ page = false } = {}) {
         className="flex flex-col rounded-[10px] border border-white/[.08] bg-s3 shadow-[0_18px_48px_rgba(0,0,0,.16)] overflow-hidden"
       >
         <div className="shrink-0 flex items-center gap-2 px-3 h-10 border-b border-white/[.06]">
-          <span className="text-[12px] font-medium text-ink">小智</span>
-          <span className="text-[10px] text-ink3">管家 · 你说我做</span>
+          <span className="text-[12px] font-medium text-ink">${tr('assistant.panel.title')}</span>
+          <span className="text-[10px] text-ink3">${tr('assistant.panel.sub')}</span>
           <span className="flex-1"></span>
           <button
             className="h-6 px-1.5 rounded-[4px] text-[11px] text-ink2 hover:bg-white/[.05]"
             onClick=${() => setOpen(false)}
-          >收起</button>
+          >${tr('assistant.panel.collapse')}</button>
         </div>
 
         ${backend.checked && !backend.ok && html`
           <div className="shrink-0 px-3 py-2 border-b border-warn/25 bg-warn/[.08]">
-            <p className="text-[11px] text-warn">服务端还是旧进程：计划卡 / 语音暂不可用。</p>
+            <p className="text-[11px] text-warn">${tr('assistant.page.oldServerWarning')}</p>
             <p className="mt-0.5 text-[10px] leading-[1.5] text-ink3">
-              确认代码：<code className="font-num">node scripts/check-server-version.js</code>；重启：<code className="font-num">node server.js</code>（单实例 3001）。
+              <code className="font-num">node scripts/check-server-version.js</code>${tr('assistant.page.oldServerMid')}<code className="font-num">node server.js</code>${tr('assistant.page.oldServerSuffix')}
             </p>
           </div>
         `}
 
         <div className="shrink-0 flex items-center gap-1.5 px-3 py-2 border-b border-white/[.06]">
-          <span className="text-[11px] text-ink3">批量</span>
+          <span className="text-[11px] text-ink3">${tr('assistant.panel.batch')}</span>
           <select
             value=${batchMinutes}
             onChange=${(e) => setBatchMinutes(Number(e.target.value) === 30 ? 30 : 10)}
             className="h-6 rounded-[4px] bg-white/[.04] border border-white/[.08] px-1 text-[11px] text-ink outline-none"
           >
-            <option value="10">10 分钟</option>
-            <option value="30">30 分钟</option>
+            <option value="10">${tr('assistant.panel.minutes10')}</option>
+            <option value="30">${tr('assistant.panel.minutes30')}</option>
           </select>
-          <span className="text-[11px] text-ink3">= ${batchCount} 条 × ${batchSeconds}s</span>
+          <span className="text-[11px] text-ink3">${tr('assistant.panel.batchSummary', { n: batchCount, sec: batchSeconds })}</span>
           <span className="flex-1"></span>
           <button
             onClick=${runBatch}
             disabled=${!hasKey || batchBusy}
             className="h-6 px-2 rounded-[4px] bg-accent text-onaccent text-[11px] disabled:opacity-40"
-          >${batchBusy ? '生成中…' : '生成'}</button>
+          >${batchBusy ? tr('assistant.panel.generating') : tr('assistant.panel.generate')}</button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 flex flex-col gap-2">
           ${!hasKey && !backend.ok && html`
             <div className="rounded-[8px] border border-white/[.08] bg-s2 p-2.5">
-              <p className="text-[12px] text-ink">还没配置 LLM Key</p>
+              <p className="text-[12px] text-ink">${tr('assistant.panel.noKeyTitle')}</p>
               <p className="mt-1 text-[11px] leading-[1.6] text-ink3">
-                先去旧版设置页填好 Key，再回来这里就能对话了。
+                ${tr('assistant.panel.noKeyBody')}
               </p>
-              <a href="/" className="mt-2 inline-block text-[11px] text-accent underline">去旧版设置</a>
+              <a href="/" className="mt-2 inline-block text-[11px] text-accent underline">${tr('assistant.panel.noKeyLink')}</a>
             </div>
           `}
           ${msgs.length === 0 && backend.ok && html`
-            <${Msg} role="assistant" text=${'我是小智。说个总时长就能排计划，比如「10 分钟」；也可以问「上一次的视频」或「现在进度怎样」。'} />
+            <${Msg} role="assistant" text=${tr('assistant.panel.emptyAssistant')} />
           `}
           ${msgs.length === 0 && !backend.ok && hasKey && html`
-            <${Msg} role="assistant" text="说说你想拍什么？比如「极光」「喀斯特晨雾」。单条就一次问一个问题；也可以在上面直接批量生成 N 条不同地貌。" />
+            <${Msg} role="assistant" text=${tr('assistant.panel.emptyNoBackend')} />
           `}
           ${msgs.map((m, i) => html`<${Msg} key=${i} role=${m.role} text=${m.content} />`)}
           ${thinking && html`
             <${Msg}
               role="assistant"
-              text=${streamText || ('正在想…' + (waitMs >= 800 ? '（已 ' + (waitMs / 1000).toFixed(1) + 's）' : ''))}
+              text=${streamText || (tr('assistant.thinking') + (waitMs >= 800 ? tr('assistant.elapsed', { sec: (waitMs / 1000).toFixed(1) }) : ''))}
             />
           `}
 
@@ -1086,7 +1090,7 @@ export function Assistant({ page = false } = {}) {
               unitCny=${imageUnitCny}
               hasImageKey=${imageKeyPresent}
               imageBackendReady=${imageBackendReady}
-              onSetResolution=${(r) => send('改成 ' + r)}
+              onSetResolution=${(r) => send(tr('assistant.panel.changeTo', { res: r }))}
             />
           `}
           ${xstate && xstate.state && html`
@@ -1099,34 +1103,34 @@ export function Assistant({ page = false } = {}) {
 
           ${suggested && html`
             <div className="rounded-[8px] border border-accent/25 bg-accent/[.06] p-2.5">
-              <p className="text-[11px] text-ink3">建议提示词</p>
+              <p className="text-[11px] text-ink3">${tr('assistant.page.suggested')}</p>
               <p className="mt-1 text-[12px] leading-[1.7] text-ink whitespace-pre-wrap break-words">${suggested}</p>
               <button
                 className="mt-2 h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px]"
                 onClick=${usePrompt}
-              >使用这段提示词</button>
+              >${tr('assistant.page.usePrompt')}</button>
             </div>
           `}
 
           ${batchItems && batchItems.length > 0 && html`
             <div className="rounded-[8px] border border-accent/25 bg-accent/[.06] p-2.5">
-              <p className="text-[11px] text-ink3">已生成 ${batchItems.length} 条（${batchSeconds} 秒/条）</p>
+              <p className="text-[11px] text-ink3">${tr('assistant.panel.batchGenerated', { n: batchItems.length, sec: batchSeconds })}</p>
               <button
                 className="mt-2 h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px]"
                 onClick=${fillBatch}
-              >填入创作页</button>
+              >${tr('assistant.panel.fillCreate')}</button>
               <button
                 className="mt-2 ml-2 h-7 px-2.5 rounded-[5px] border border-accent/40 text-accent text-[11px] disabled:opacity-40"
                 onClick=${() => runImageFirst()}
                 disabled=${imageFirstBusy}
-              >${imageFirstBusy ? '执行中…' : '图片优先：出图+调色+图生视频'}</button>
+              >${imageFirstBusy ? tr('assistant.panel.imageFirstBusy') : tr('assistant.panel.imageFirst')}</button>
               <button
                 className="mt-2 ml-2 h-7 px-2.5 rounded-[5px] border border-white/[.10] text-ink2 text-[11px] disabled:opacity-40"
                 onClick=${() => runImageFirst(batchItems.slice(0, 2))}
                 disabled=${imageFirstBusy}
-              >先试 2 条</button>
+              >${tr('assistant.panel.tryTwo')}</button>
               <p className="mt-1.5 text-[10px] leading-[1.6] text-ink3">
-                会真实计费：${batchItems.length} 张图 + ${batchItems.length} 段视频；出图后自动通过、逐图调色。
+                ${tr('assistant.panel.billingNote', { n: batchItems.length })}
               </p>
             </div>
           `}
@@ -1144,7 +1148,7 @@ export function Assistant({ page = false } = {}) {
             value=${draft}
             onInput=${(e) => setDraft(e.target.value)}
             onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder=${backend.ok ? '说个总时长，或问上一次的视频…' : (hasKey ? '说说你想拍什么…' : '先配置 LLM Key')}
+            placeholder=${backend.ok ? tr('assistant.panel.placeholderXiaozhi') : (hasKey ? tr('assistant.page.placeholderChat') : tr('assistant.page.placeholderNoKey'))}
             disabled=${backend.ok ? false : !hasKey}
             className="flex-1 resize-none bg-transparent outline-none text-[12px] leading-[1.6] text-ink placeholder:text-ink3 px-1 py-1 disabled:opacity-50"
           ></textarea>
@@ -1152,7 +1156,7 @@ export function Assistant({ page = false } = {}) {
             onClick=${() => send()}
             disabled=${(backend.ok ? false : !hasKey) || thinking || !draft.trim()}
             className="h-7 px-2.5 rounded-[5px] bg-accent text-onaccent text-[11px] disabled:opacity-40"
-          >发送</button>
+          >${tr('assistant.panel.send')}</button>
         </div>
       </div>
     `}

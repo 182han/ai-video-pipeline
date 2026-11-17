@@ -41,6 +41,7 @@ async function httpGet(url) {
   console.log('================================================================');
 
   const plan = read(path.join(WEB, 'src', 'components', 'xiaozhiPlan.js'));
+  const micMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'xiaozhi.js'));
   const css = read(path.join(WEB, 'styles', 'assistant-home.css'));
   const assistant = read(path.join(WEB, 'src', 'components', 'assistant.js'));
   const serverCode = read(path.join(APP, 'server.js'));
@@ -59,14 +60,16 @@ async function httpGet(url) {
   console.log('\n[2] 拒绝时给 Chrome / Windows 可照做的步骤');
   check('给出 chrome://settings/content/microphone', /chrome:\/\/settings\/content\/microphone/.test(plan));
   check('Chrome 地址栏 → 网站设置 → 麦克风 → 允许',
-    /网站设置[\s\S]{0,80}麦克风[\s\S]{0,40}允许/.test(plan));
+    /xiaozhi\.mic\.err\.denied\.s1/.test(plan) && /网站设置[\s\S]{0,80}麦克风[\s\S]{0,40}允许/.test(micMsgs));
   check('Windows 隐私和安全性 → 麦克风两处开关',
-    /允许应用访问麦克风/.test(plan) && /允许桌面应用访问麦克风/.test(plan));
+    /xiaozhi\.mic\.err\.denied\.s3/.test(plan)
+    && /允许应用访问麦克风/.test(micMsgs) && /允许桌面应用访问麦克风/.test(micMsgs));
   check('「重新请求麦克风」与「复制排查步骤」按钮',
-    /重新请求麦克风/.test(plan) && /复制排查步骤/.test(plan));
+    /xiaozhi\.mic\.retry/.test(plan) && /xiaozhi\.mic\.copy/.test(plan)
+    && /重新请求麦克风/.test(micMsgs) && /复制排查步骤/.test(micMsgs));
   check('权限卡带 data 标记（可自动化验收）',
     /data-mic-modal="1"/.test(plan) && /data-mic-phase=/.test(plan));
-  check('保留「先打字」出口，不阻塞输入框', /先打字/.test(plan));
+  check('保留「先打字」出口，不阻塞输入框', /xiaozhi\.mic\.typeInstead/.test(plan) && /先打字/.test(micMsgs));
 
   console.log('\n[3] 授权晚到不偷偷录音（按住说话的老坑）');
   check('pointerup/leave 会清 pressedRef，授权返回时检查',
@@ -74,15 +77,19 @@ async function httpGet(url) {
   check('授权晚到 → 停流 + 提示「请再按住」而不是开始录音',
     /!pressedRef\.current[\s\S]{0,300}getTracks\(\)/.test(plan)
     && /!pressedRef\.current[\s\S]{0,600}showModal\('granted'/.test(plan));
-  check('授权晚到文案明确要求再按一次', /再按住麦克风说一次/.test(plan));
+  check('授权晚到文案明确要求再按一次', /xiaozhi\.mic\.hint\.allowedAgain/.test(plan) && /再按住麦克风说一次/.test(micMsgs));
 
   console.log('\n[4] 错误分类：权限 / 无设备 / 被占用 / 非安全来源');
-  check('NotFoundError → 没有检测到麦克风', /NotFoundError[\s\S]{0,120}没有检测到麦克风/.test(plan));
-  check('NotReadableError → 被其他程序占用', /NotReadableError[\s\S]{0,120}被其他程序占用/.test(plan));
-  check('非 secure context → 明确提示 localhost/https', /INSECURE_CONTEXT[\s\S]{0,120}不是安全来源/.test(plan));
-  check('缺 getUserMedia → 浏览器不支持', /NO_GETUSERMEDIA[\s\S]{0,120}不支持录音/.test(plan));
+  check('NotFoundError → 没有检测到麦克风',
+    /NotFoundError[\s\S]{0,160}err\.notFound\.title/.test(plan) && /没有检测到麦克风/.test(micMsgs));
+  check('NotReadableError → 被其他程序占用',
+    /NotReadableError[\s\S]{0,160}err\.busy\.title/.test(plan) && /被其他程序占用/.test(micMsgs));
+  check('非 secure context → 明确提示 localhost/https',
+    /INSECURE_CONTEXT[\s\S]{0,160}err\.insecure\.title/.test(plan) && /不是安全来源/.test(micMsgs));
+  check('缺 getUserMedia → 浏览器不支持',
+    /NO_GETUSERMEDIA[\s\S]{0,160}err\.unsupported\.title/.test(plan) && /不支持录音/.test(micMsgs));
   check('站点已允许但仍 NotAllowed → 提示检查 Permissions-Policy',
-    /Permissions-Policy/.test(plan) && /microphone=\(self\)/.test(plan));
+    /err\.policy\.s1/.test(plan) && /Permissions-Policy/.test(micMsgs) && /microphone=\(self\)/.test(micMsgs));
 
   console.log('\n[5] 遮罩挂 body + 样式');
   check('createPortal 到 document.body（否则 fixed 会被输入条的 backdrop-filter 限制）',
@@ -94,19 +101,21 @@ async function httpGet(url) {
 
   console.log('\n[6] 原有语音/ASR 链路未被改坏');
   check('仍 POST /api/assistant/asr', /\/api\/assistant\/asr/.test(plan));
-  check('ASR 失败仍有「改用打字」兜底', /改用打字/.test(plan));
+  check('ASR 失败仍有「改用打字」兜底',
+    /xiaozhi\.mic\.hint\.asrFailed/.test(plan) && /改用打字/.test(micMsgs));
   check('MediaRecorder → base64 上传逻辑保留',
     /chunksRef\.current/.test(plan) && /audioBase64: btoa\(binary\)/.test(plan));
   check('整页与悬浮面板两处都复用 VoiceButton',
     (assistant.match(/<\$\{VoiceButton\}/g) || []).length === 2,
     String((assistant.match(/<\$\{VoiceButton\}/g) || []).length) + ' 处');
   check('录音时显示状态条（正在打开 / 正在录音 / 正在识别）',
-    /xz-mic-status/.test(plan) && /正在打开麦克风/.test(plan)
-    && /正在录音/.test(plan) && /正在识别语音/.test(plan));
+    /xz-mic-status/.test(plan) && /xiaozhi\.mic\.statusStarting/.test(plan)
+    && /xiaozhi\.mic\.statusRecording/.test(plan) && /xiaozhi\.mic\.statusTranscribing/.test(plan)
+    && /正在打开麦克风/.test(micMsgs) && /正在录音/.test(micMsgs) && /正在识别语音/.test(micMsgs));
   check('录音电平监控 + 最短 600ms 兜底',
     /startLevelMonitor/.test(plan) && /durationMs < 600/.test(plan) && /maxLevel < 0\.005/.test(plan));
   check('静音/纯标点 ASR 结果不塞进输入框',
-    /meaningful/.test(plan) && /只识别到标点\/杂音/.test(plan));
+    /meaningful/.test(plan) && /xiaozhi\.mic\.hint\.unclear/.test(plan) && /只识别到标点\/杂音/.test(micMsgs));
   check('CSS：录音状态条固定显示',
     /\.xz-mic-status[\s\S]{0,120}position: fixed/.test(css));
 
@@ -130,7 +139,7 @@ async function httpGet(url) {
     check('GET xiaozhiPlan.js 200', js.status === 200, 'HTTP ' + js.status);
     check('线上已含 MicPermissionModal / queryMicPermission',
       /MicPermissionModal/.test(js.body) && /queryMicPermission/.test(js.body));
-    check('线上已含 Windows 两处开关文案', /允许桌面应用访问麦克风/.test(js.body));
+    check('线上已含 Windows 两处开关文案', /xiaozhi\.mic\.err\.denied\.s3/.test(js.body));
     const c = await httpGet(BASE + '/app/styles/assistant-home.css');
     check('GET assistant-home.css 200', c.status === 200, 'HTTP ' + c.status);
     check('线上 CSS 已含 .xz-mic-overlay', /\.xz-mic-overlay/.test(c.body));

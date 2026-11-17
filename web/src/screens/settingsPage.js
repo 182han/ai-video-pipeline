@@ -11,6 +11,9 @@
 //   PUT  /api/users/:id/password      { password }
 //   DELETE /api/users/:id
 // ============================================================
+import { t, tp } from '../i18n/index.js';
+import { LangSwitch } from '../components/langSwitch.js';
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
@@ -26,31 +29,35 @@ function writeJson(k, patch) {
 }
 
 const GROUPS = [
-  { id: 'seedance', title: 'Seedance 2.5（字节）', collapsible: true, fields: [['seedanceKey', 'API Key', 'password'], ['seedanceBaseUrl', 'Base URL', 'text'], ['seedanceModel', '模型', 'text']] },
-  { id: 'kling', title: '可灵 Kling 3.0', collapsible: true, fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
-  { id: 'dashscope', title: '万相 3.0（DashScope）', fields: [['dashScopeKey', 'API Key', 'password'], ['dashScopeRegion', '区域', 'text'], ['dashScopeWorkspaceId', 'WorkspaceId', 'text']] },
+  { id: 'seedance', titleKey: 'settings.group.seedance', collapsible: true, fields: [['seedanceKey', 'API Key', 'password'], ['seedanceBaseUrl', 'Base URL', 'text'], ['seedanceModel', '@model', 'text']] },
+  { id: 'kling', titleKey: 'settings.group.kling', collapsible: true, fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
+  { id: 'dashscope', titleKey: 'settings.group.dashscope', fields: [['dashScopeKey', 'API Key', 'password'], ['dashScopeRegion', '@region', 'text'], ['dashScopeWorkspaceId', 'WorkspaceId', 'text']] },
   {
     id: 'whaletv',
-    title: 'OpenAI 兼容视频（WhaleTV / 中转）',
+    titleKey: 'settings.group.whaletv',
     fields: [
       ['whaletvKey', 'API Key', 'password'],
       ['whaletvBaseUrl', 'Base URL', 'text'],
-      ['whaletvVideoModel', '模型', 'text']
+      ['whaletvVideoModel', '@model', 'text']
     ]
   },
   {
     id: 'imagegen',
-    title: '图片生成 · wan2.7-image',
+    titleKey: 'settings.group.imagegen',
     fields: [
       ['imageKey', 'API Key', 'password'],
       ['imageBaseUrl', 'Base URL', 'text'],
-      ['imageModel', '模型', 'text'],
-      ['imageSize', '尺寸', 'text']
+      ['imageModel', '@model', 'text'],
+      ['imageSize', '@size', 'text']
     ]
   },
-  { id: 'llm', title: 'LLM · 提示词助手', fields: [['llmKey', 'API Key', 'password'], ['llmUrl', 'Base URL', 'text'], ['llmModel', '模型', 'text']] },
-  { id: 'multimodal', title: '多模态 · 视觉质检', fields: [['multimodalKey', 'API Key', 'password'], ['multimodalUrl', 'Base URL', 'text'], ['multimodalModel', '模型', 'text']] }
+  { id: 'llm', titleKey: 'settings.group.llm', fields: [['llmKey', 'API Key', 'password'], ['llmUrl', 'Base URL', 'text'], ['llmModel', '@model', 'text']] },
+  { id: 'multimodal', titleKey: 'settings.group.multimodal', fields: [['multimodalKey', 'API Key', 'password'], ['multimodalUrl', 'Base URL', 'text'], ['multimodalModel', '@model', 'text']] }
 ];
+
+// 字段标签里的 @xxx 走词条；API Key / Base URL / AccessKey 等专有名词保持原文。
+const FIELD_LABELS = { '@model': 'settings.field.model', '@region': 'settings.field.region', '@size': 'settings.field.size' };
+const fieldLabel = (label) => (FIELD_LABELS[label] ? t(FIELD_LABELS[label]) : label);
 
 const inputCls = 'h-8 w-full rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none';
 
@@ -111,9 +118,9 @@ export function SettingsView() {
       const j = await fetchJson('/api/test-api-key', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
-      let text = j.success ? (j.message || '连接正常') : (j.error || '测试失败');
+      let text = j.success ? (j.message || t('settings.keys.connected')) : (j.error || t('settings.keys.failed'));
       if (!j.success && /未知的测试类型/.test(text)) {
-        text += '（服务端仍是旧进程，请重启 node server.js）';
+        text += t('settings.keys.oldServer');
       }
       setTestRes((r) => ({ ...r, [g.id]: { ok: !!j.success, text } }));
     } catch (e) {
@@ -144,12 +151,12 @@ export function SettingsView() {
       try {
         const raw = JSON.parse(String(reader.result));
         const cfg = raw.config || raw;
-        if (!cfg || typeof cfg !== 'object') throw new Error('文件里没有 config');
+        if (!cfg || typeof cfg !== 'object') throw new Error(t('settings.backup.noConfig'));
         localStorage.setItem(KEY_STORE, JSON.stringify(cfg));
         if (raw.webConfig) localStorage.setItem(WEB_STORE, JSON.stringify(raw.webConfig));
         setKeys(readJson(KEY_STORE)); setWeb(readJson(WEB_STORE));
-        setMsg('已恢复备份');
-      } catch (x) { setErr('恢复失败：' + x.message); }
+        setMsg(t('settings.backup.restored'));
+      } catch (x) { setErr(t('settings.backup.failed') + x.message); }
     };
     reader.readAsText(f);
     e.target.value = '';
@@ -165,12 +172,12 @@ export function SettingsView() {
       setNu(''); setNp('');
       const j = await fetchJson('/api/users');
       setUsers(j.users || []);
-      setMsg('成员已创建');
-    } catch (e) { setErr('创建成员失败：' + e.message); }
+      setMsg(t('settings.members.created'));
+    } catch (e) { setErr(t('settings.members.createFailed') + e.message); }
   }
 
   async function resetPwd(u) {
-    const pwd = window.prompt('给 ' + u.username + ' 设置新密码（至少 8 位）：');
+    const pwd = window.prompt(t('settings.members.resetPrompt', { name: u.username }));
     if (!pwd) return;
     setErr(''); setMsg('');
     try {
@@ -178,56 +185,75 @@ export function SettingsView() {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd })
       });
-      setMsg('密码已重置');
-    } catch (e) { setErr('重置失败：' + e.message); }
+      setMsg(t('settings.members.resetDone'));
+    } catch (e) { setErr(t('settings.members.resetFailed') + e.message); }
   }
 
   async function delUser(u) {
-    if (!window.confirm('删除成员 ' + u.username + '？')) return;
+    if (!window.confirm(t('settings.members.deleteConfirm', { name: u.username }))) return;
     setErr(''); setMsg('');
     try {
       await fetchJson('/api/users/' + encodeURIComponent(u.userId || u.id), { method: 'DELETE' });
       const j = await fetchJson('/api/users');
       setUsers(j.users || []);
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(t('settings.members.deleteFailed') + e.message); }
   }
 
   const sec = 'rounded-[8px] border border-white/[.08] bg-s1 px-4 py-3 mb-3.5';
 
   return html`
     <div className="px-6 py-5 max-w-[1040px]">
-      <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0 mb-3.5">设置</h1>
+      <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0 mb-3.5">${t('settings.title')}</h1>
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
       ${msg && html`<p className="mb-2 text-[12px] text-accent">${msg}</p>`}
 
       <div className=${sec}>
-        <b className="block text-[12.5px] font-medium text-ink mb-2">生成参数</b>
+        <b className="block text-[12.5px] font-medium text-ink mb-2">${t('settings.language.title')}</b>
+        <p className="text-[11px] leading-[1.7] text-ink3 mt-0 mb-2">${t('settings.language.desc')}</p>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[12px] text-ink2 w-[64px]">视频模型</span>
+          <span className="text-[12px] text-ink2 w-[84px]">${t('settings.language.display')}</span>
+          <${LangSwitch} />
+        </div>
+        <div className="mt-2 flex items-center gap-3 flex-wrap">
+          <span className="text-[12px] text-ink2 w-[84px]">${t('settings.language.aiTitle')}</span>
+          <select value=${keys.aiLang || ''} onChange=${(e) => saveKey({ aiLang: e.target.value })}
+            className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+            <option value="">${t('common.followUi')}</option>
+            <option value="zh">${t('settings.language.zh')}</option>
+            <option value="en">${t('settings.language.en')}</option>
+          </select>
+          <span className="text-[11px] text-ink3">${t('settings.language.aiDesc')}</span>
+        </div>
+      </div>
+
+      <div className=${sec}>
+        <b className="block text-[12.5px] font-medium text-ink mb-2">${t('settings.general.title')}</b>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-[12px] text-ink2 w-[64px]">${t('settings.general.videoModel')}</span>
           <select value=${web.videoModel || 'seedance'} onChange=${(e) => saveWeb({ videoModel: e.target.value })}
             className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
             <option value="seedance">Seedance 2.5</option>
-            <option value="kling">可灵 Kling 3.0</option>
-            <option value="dashscope">万相 3.0</option>
+            <option value="kling">${t('settings.group.kling')}</option>
+            <option value="dashscope">${t('settings.group.dashscope')}</option>
           </select>
-          <span className="text-[12px] text-ink2 w-[54px]">分辨率</span>
+          <span className="text-[12px] text-ink2 w-[54px]">${t('settings.general.resolution')}</span>
           <select value=${web.resolution || '1080p'} onChange=${(e) => saveWeb({ resolution: e.target.value })}
             className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
             ${['720p', '1080p', '4K'].map((r) => html`<option key=${r} value=${r}>${r}</option>`)}
           </select>
-          <span className="text-[12px] text-ink2 w-[40px]">档位</span>
+          <span className="text-[12px] text-ink2 w-[40px]">${t('settings.general.preset')}</span>
           <select value=${web.preset || 'final'} onChange=${(e) => saveWeb({ preset: e.target.value })}
             className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
             ${['final', 'daily', 'quick', 'clips_only'].map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
           </select>
         </div>
         <div className="mt-2 flex items-center gap-3 flex-wrap">
-          <span className="text-[12px] text-ink2 w-[64px]">账户余额</span>
+          <span className="text-[12px] text-ink2 w-[64px]">${t('settings.general.balance')}</span>
           <input type="number" step="0.01" min="0" value=${web.balance !== undefined ? web.balance : ''}
             onInput=${(e) => saveWeb({ balance: e.target.value })}
-            placeholder="元（留空 = 不拦截）"
+            placeholder=${t('settings.general.balancePlaceholder')}
             className="h-8 w-[140px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink font-num outline-none" />
-          <span className="text-[11px] text-ink3">生成前用预计花费与余额比对；超出直接拦截，避免误点超支。需手动维护。</span>
+          <span className="text-[11px] text-ink3">${t('settings.general.balanceHint')}</span>
         </div>
         <div className="mt-2 flex items-center gap-4">
           <label className="flex items-center gap-2 text-[12px] text-ink">
@@ -238,7 +264,7 @@ export function SettingsView() {
                 setWeb(readJson(WEB_STORE));
               }}
               className="w-[15px] h-[15px] accent-accent" />
-            片段转场
+            ${t('settings.general.transition')}
           </label>
           <label className="flex items-center gap-2 text-[12px] text-ink">
             <input type="checkbox" checked=${web.colorMatch === true}
@@ -248,36 +274,36 @@ export function SettingsView() {
                 setWeb(readJson(WEB_STORE));
               }}
               className="w-[15px] h-[15px] accent-accent" />
-            接缝校色
+            ${t('settings.general.colorMatch')}
           </label>
-          <span className="text-[11px] text-ink3">校色依赖转场</span>
+          <span className="text-[11px] text-ink3">${t('settings.general.colorMatchHint')}</span>
         </div>
       </div>
 
       <div className=${sec}>
         <div className="flex items-center gap-2 mb-1">
-          <b className="text-[12.5px] font-medium text-ink">API Key</b>
+          <b className="text-[12.5px] font-medium text-ink">${t('settings.keys.title')}</b>
           <span className="flex-1"></span>
-          <span className="text-[10px] text-ink3">只存本机浏览器；生成时随请求发送，不落服务端</span>
+          <span className="text-[10px] text-ink3">${t('settings.keys.hint')}</span>
         </div>
         ${GROUPS.map((g) => {
           const open = !g.collapsible || !!openGroups[g.id];
           return html`
             <div key=${g.id} className="py-2 border-b border-white/[.05] last:border-0">
               <div className="flex items-center gap-2">
-                <b className="text-[12px] text-ink">${g.title}</b>
+                <b className="text-[12px] text-ink">${t(g.titleKey)}</b>
                 <span className="flex-1"></span>
                 ${g.collapsible && html`
                   <button onClick=${() => setOpenGroups((s) => ({ ...s, [g.id]: !open }))}
                     className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">
-                    ${open ? '收起' : '展开'}
+                    ${open ? t('settings.keys.collapse') : t('settings.keys.expand')}
                   </button>
                 `}
                 ${open && !g.noTest && html`
                   <button onClick=${() => test(g)} disabled=${testing === g.id}
                     className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
                                hover:bg-white/[.05] disabled:opacity-40"
-                  >${testing === g.id ? '测试中…' : '测试连接'}</button>
+                  >${testing === g.id ? t('settings.keys.testing') : t('settings.keys.test')}</button>
                 `}
               </div>
               ${open ? html`
@@ -288,7 +314,7 @@ export function SettingsView() {
                 `}
                 ${g.fields.map((f) => html`
                   <div key=${f[0]} className="mt-1.5 flex items-center gap-2">
-                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">${f[1]}</span>
+                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">${fieldLabel(f[1])}</span>
                     <div className="relative flex-1">
                       <input type=${f[2] === 'password' && !showKeys[f[0]] ? 'password' : 'text'}
                         value=${keys[f[0]] || ''}
@@ -308,14 +334,13 @@ export function SettingsView() {
                             color: 'var(--ink3)', background: 'transparent',
                             border: '1px solid rgba(255,255,255,.10)', cursor: 'pointer'
                           }}
-                          title=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
-                          aria-label=${showKeys[f[0]] ? '隐藏密钥' : '显示密钥'}
-                        >${showKeys[f[0]] ? '隐藏' : '显示'}</button>
+                          title=${showKeys[f[0]] ? t('settings.keys.hideKey') : t('settings.keys.showKey')}
+                          aria-label=${showKeys[f[0]] ? t('settings.keys.hideKey') : t('settings.keys.showKey')}
+                        >${showKeys[f[0]] ? t('settings.keys.hide') : t('settings.keys.show')}</button>
                       `}
                       ${f[2] === 'password' && /[^\x20-\x7E]/.test(String(keys[f[0]] || '')) && html`
                         <p style=${{ margin: '6px 0 0', fontSize: '11px', lineHeight: '1.6', color: 'var(--danger, #ff6b6b)' }}>
-                          这个字段里有中文/符号（含非 ASCII 字符）——多半是粘贴了页面上的提示文案。
-                          请只填纯英文数字的 Key（一般以 sk- 开头）或纯英文地址。
+                          ${t('settings.keys.nonAscii')}
                         </p>
                       `}
                     </div>
@@ -323,31 +348,29 @@ export function SettingsView() {
                 `)}
                 ${g.id === 'imagegen' && html`
                   <div className="mt-1.5 flex items-center gap-2">
-                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">接口类型</span>
+                    <span className="w-[84px] shrink-0 text-[11px] text-ink3">${t('settings.keys.imageType')}</span>
                     <select value=${keys.imageProvider || 'dashscope'}
                       onChange=${(e) => saveKey({ imageProvider: e.target.value })}
                       className="h-8 flex-1 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-                      <option value="dashscope">百炼原生（异步任务轮询）</option>
-                      <option value="openai-images">OpenAI 兼容（WhaleTV / 中转 / OpenAI）</option>
+                      <option value="dashscope">${t('settings.keys.imageDashscope')}</option>
+                      <option value="openai-images">${t('settings.keys.imageOpenai')}</option>
                     </select>
                   </div>
                   <p className="mt-1.5 text-[11px] leading-[1.7] text-ink3">
-                    服务端：${imgStatus
-                      ? (imgStatus.usable ? '已就绪' : (imgStatus.providerImplemented ? '未配置 Key' : '适配器未注册'))
-                      : '读取中…'}
-                    · 本机：${String(keys.imageKey || '').trim() ? '已填写' : '未填写'}
+                    ${t('settings.keys.server')}${imgStatus
+                      ? (imgStatus.usable ? t('settings.keys.ready') : (imgStatus.providerImplemented ? t('settings.keys.noKey') : t('settings.keys.noAdapter')))
+                      : t('settings.keys.reading')}${t('settings.keys.local')}${String(keys.imageKey || '').trim() ? t('settings.keys.filled') : t('settings.keys.empty')}
                   </p>
                   <p className="mt-1 text-[11px] leading-[1.7] text-ink3">
-                    模型 / 尺寸留空即用默认 wan2.7-image / 1696x960（16:9）。填在这里的 Key 会随出图请求发送，不落服务端；
-                    也可写 app/.env 的 IMAGE_GEN_API_KEY 作为服务端全局配置。
+                    ${t('settings.keys.imageNote')}
                   </p>
                   <p className="mt-1 text-[11px] leading-[1.7] text-warn">
-                    第三方 / 中转 Key 必须填它给的 Base URL；官方百炼 Key 填
+                    ${t('settings.keys.imageBase')}
                     <code className="font-num"> https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1</code>。
                   </p>
                 `}
               ` : html`
-                <p className="mt-1 text-[11px] text-ink3">已折叠（点「展开」填写）</p>
+                <p className="mt-1 text-[11px] text-ink3">${t('settings.keys.collapsed')}</p>
               `}
             </div>
           `;
@@ -355,45 +378,45 @@ export function SettingsView() {
       </div>
 
       <div className=${sec}>
-        <b className="block text-[12.5px] font-medium text-ink mb-2">备份 / 恢复</b>
+        <b className="block text-[12.5px] font-medium text-ink mb-2">${t('settings.backup.title')}</b>
         <div className="flex items-center gap-2">
           <button onClick=${exportCfg}
-            className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]">导出配置</button>
+            className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]">${t('settings.backup.export')}</button>
           <label className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2
                             hover:bg-white/[.05] inline-flex items-center cursor-pointer">
-            导入配置
+            ${t('settings.backup.import')}
             <input type="file" accept=".json,application/json" className="hidden" onChange=${importCfg} />
           </label>
-          <span className="text-[10px] text-danger">备份文件含 API Key，注意保管</span>
+          <span className="text-[10px] text-danger">${t('settings.backup.warn')}</span>
         </div>
       </div>
 
       <div className=${sec}>
         <div className="flex items-center gap-2 mb-2">
-          <b className="text-[12.5px] font-medium text-ink">成员管理</b>
+          <b className="text-[12.5px] font-medium text-ink">${t('settings.members.title')}</b>
           <span className="text-[10px] text-ink3 font-num">
-            ${users.length} 名${authEnabled ? '' : ' · 登录墙未启用'}
+            ${tp('settings.members.count', users.length)}${authEnabled ? '' : t('settings.members.authOff')}
           </span>
         </div>
         <div className="flex items-center gap-2 mb-2">
-          <input value=${nu} onInput=${(e) => setNu(e.target.value)} placeholder="用户名"
+          <input value=${nu} onInput=${(e) => setNu(e.target.value)} placeholder=${t('settings.members.username')}
             className="h-8 w-[150px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
-          <input value=${np} onInput=${(e) => setNp(e.target.value)} type="password" placeholder="密码（≥8 位）"
+          <input value=${np} onInput=${(e) => setNp(e.target.value)} type="password" placeholder=${t('settings.members.password')}
             className="h-8 w-[170px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
           <button onClick=${addUser}
-            className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">新建成员</button>
+            className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">${t('settings.members.add')}</button>
         </div>
-        ${users.length === 0 && html`<p className="text-[11px] text-ink3">没有成员（或登录墙未启用）。</p>`}
+        ${users.length === 0 && html`<p className="text-[11px] text-ink3">${t('settings.members.empty')}</p>`}
         ${users.map((u) => html`
           <div key=${u.userId || u.id || u.username} className="flex items-center gap-3 py-1.5 border-t border-white/[.05]">
             <span className="text-[12px] text-ink w-[150px] truncate">${u.username}</span>
             <span className="text-[10px] text-ink3 font-num flex-1">
-              ${(u.userId || u.id || '') === selfId ? '当前登录' : ''}
+              ${(u.userId || u.id || '') === selfId ? t('settings.members.self') : ''}
             </span>
             <button onClick=${() => resetPwd(u)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">重置密码</button>
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${t('settings.members.reset')}</button>
             <button onClick=${() => delUser(u)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${t('settings.members.delete')}</button>
           </div>
         `)}
       </div>

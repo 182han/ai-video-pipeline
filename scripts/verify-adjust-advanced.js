@@ -109,8 +109,8 @@ function identityLut() {
     && /data-adv-panel="wheel"/.test(adv), '三块面板有可静态核验的挂载标记');
 
   const hslBlock = (adv.match(/const HSL_BANDS = \[([\s\S]*?)\n\];/) || [])[1] || '';
-  const bandCount = (hslBlock.match(/label:/g) || []).length;
-  check(bandCount === 8, 'HSL 固定 8 个色带', bandCount + ' 个');
+  const bandCount = (hslBlock.match(/labelKey:/g) || []).length;
+  check(bandCount === 8, 'HSL 固定 8 个色带（i18n labelKey）', bandCount + ' 个');
   check(/const WHEEL_ZONES = \[/.test(adv) && /lift/.test(adv) && /gamma/.test(adv) && /gain/.test(adv),
     '色轮含 lift / gamma / gain 三区');
   check(/const CURVE_CHANNELS = \[/.test(adv), '曲线含 R/G/B 通道与合成线');

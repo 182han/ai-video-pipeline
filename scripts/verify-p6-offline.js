@@ -61,7 +61,9 @@ function httpGet(url, ms = 4000) {
 
   const shell = read(path.join(WEB, 'src', 'screens', 'shell.js'));
   const gen = read(path.join(WEB, 'src', 'screens', 'gen.js'));
+const genMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'gen.js'));
   const inv = read(path.join(WEB, 'src', 'screens', 'inventory.js'));
+const invMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'inventory.js'));
   const hist = read(path.join(WEB, 'src', 'screens', 'history.js'));
   const out = read(path.join(WEB, 'src', 'screens', 'output.js'));
   const assistant = read(path.join(WEB, 'src', 'components', 'assistant.js'));
@@ -86,7 +88,7 @@ function httpGet(url, ms = 4000) {
   console.log('\n[2] 生成页 / 小智：不再把用户指向历史页');
   check(!/navigate\('\/history'\)/.test(gen), 'gen.js 不再跳 /history');
   check(/navigate\('\/library'\)/.test(gen), 'gen.js 改跳 /library');
-  check(/去库看成片/.test(gen), '按钮文案「去库看成片」');
+  check(/gen\.openLibrary/.test(gen) && /去库看成片/.test(genMsgs), '按钮文案走词条「去库看成片」');
   check(!/历史\/任务列表/.test(assistant) && !/历史记录/.test(assistant),
     'assistant.js 提交成功文案不再提历史');
 
@@ -99,9 +101,9 @@ function httpGet(url, ms = 4000) {
   check(/t\.model !== 'mock'/.test(inv), '排除 mock（合成任务不入正式库口径）');
   check(/!t\.fragmentOnly/.test(inv), '排除 clips_only（本来就不产成片）');
   check(/finalTaskIds/.test(inv), '已产出成片的任务不重复计入未完成');
-  check(/未完成 \$\{rows\.length\} 条/.test(inv), '卡片显示「未完成 N 条」');
-  check(/详情 \/ 补跑/.test(inv), '卡片有「详情 / 补跑」入口');
-  check(/it\.status === 'failed'[\s\S]{0,80}生成失败/.test(inv), '片段卡显示「生成失败」徽章');
+  check(/library\.unfinished\.heading/.test(inv) && /未完成 \{n\} 条/.test(invMsgs), '卡片显示「未完成 N 条」（i18n 词条）');
+  check(/library\.unfinished\.detail/.test(inv) && /详情 \/ 补跑/.test(invMsgs), '卡片有「详情 / 补跑」入口（i18n 词条）');
+  check(/library\.clips\.failed/.test(inv) && /生成失败/.test(invMsgs), '片段卡显示「生成失败」徽章（i18n 词条）');
   check(/export function LibraryView\(\{ initialTab = 'finals', tasks = \[\] \}\)/.test(inv),
     'LibraryView 接收 tasks（默认空数组，单独渲染不崩）');
   check(/\$\{FinalsPanel\} items=\$\{finals\} tasks=\$\{tasks\}/.test(inv),
@@ -145,8 +147,8 @@ function httpGet(url, ms = 4000) {
     check(liveInv.status === 200 && /UnfinishedPanel/.test(liveInv.body),
       '线上 inventory.js 已含未完成卡片');
     const liveGen = await httpGet(BASE + '/app/src/screens/gen.js');
-    check(liveGen.status === 200 && !/navigate\('\/history'\)/.test(liveGen.body) && /去库看成片/.test(liveGen.body),
-      '线上 gen.js 已改为「去库看成片」');
+    check(liveGen.status === 200 && !/navigate\('\/history'\)/.test(liveGen.body) && /gen\.openLibrary/.test(liveGen.body),
+      '线上 gen.js 已改为「去库看成片」（i18n key）');
   }
 
   console.log('\n================================================================');

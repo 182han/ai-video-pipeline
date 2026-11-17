@@ -14,6 +14,8 @@
 //   · 只存界面状态与图片地址，不存任何 API Key（Key 仍只在 localStorage.vs_config）。
 // ============================================================
 
+import { t as tr } from './i18n/index.js';
+
 const KEY = 'vs_create_draft_v1';
 // 从「照片」页带一张已生成的图进创作流程：点按钮时写这个 key，回到 / 时由向导取走并删除
 const SEED_KEY = 'vs_create_seed_photo';
@@ -45,7 +47,7 @@ export function takeSeedPhoto() {
 
 // 把图片库条目变成向导里的「当前图」并写进草稿（第③步可确认，第⑥步可用于图生视频）
 export function adoptPhoto(photo) {
-  if (!photo || !photo.url) throw new Error('缺少图片信息');
+  if (!photo || !photo.url) throw new Error(tr('create.errors.missingPhoto'));
   const result = {
     url: photo.url,
     width: photo.width || null,
@@ -174,7 +176,7 @@ export async function startImage({ prompt, size, cfg }) {
     saveDraft({ image: result });
   } catch (e) {
     // 关键：失败时不清空 result —— 已付费的上一张图必须留在界面上
-    if (epoch === myEpoch) setImageState({ busy: false, error: (e && e.message) || '出图失败' });
+    if (epoch === myEpoch) setImageState({ busy: false, error: (e && e.message) || tr('create.errors.imageFailed') });
   }
   return getImageState();
 }

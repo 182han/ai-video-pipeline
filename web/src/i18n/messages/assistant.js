@@ -1,0 +1,235 @@
+// ============================================================
+// i18n · 小智（AI 助手）前端话术
+// 注意：计划卡 / 状态条 / 麦克风排查在 components/xiaozhiPlan.js（下一批迁移）。
+// 后端 system prompt 与计划卡解析在 src/assistant/*（P3 处理）。
+// ============================================================
+export default {
+  zh: {
+    assistant: {
+      chips: {
+        quick: '30 秒（快速试）',
+        long: '10 分钟的长视频',
+        last: '上一次的视频',
+        progress: '现在进度怎样'
+      },
+      thinking: '正在想…',
+      elapsed: '（已 {sec}s）',
+      noReply: '（没有回复）',
+      started: '已开始。',
+      failure: {
+        noLlmKey: '还没配置 LLM Key，请先去设置页填好',
+        noResponse: '助手没有响应（{error}）',
+        request: '· 实际请求 {url}',
+        model: '（模型 {model}）',
+        http: '· HTTP {status}',
+        httpDetail: '· HTTP {status}：{detail}',
+        detail: '· {detail}',
+        streamInterrupted: '⚠ 流式回复中断了，请重试',
+        notJson: '⚠ 返回不是 JSON，请重试',
+        network: '⚠ 网络异常：{msg}',
+        xiaozhiNoResponse: '⚠ 小智没响应：{error}',
+        generic: '⚠ {error}'
+      },
+      warn: {
+        noModelKey: '⚠ 设置里没有填「{model}」的 Key。服务端 .env 若也没有，这条计划会降级成 Mock 合成画面（不扣费，但不是真实模型）。要真实生成，请先到「设置」填 Key 再点确认。',
+        noImageKey: '⚠ 设置里没有填「图片生成」的 Key（设置 → 图片生成）。开了「逐段出图」却没有 Key，服务端会直接返回「出图未就绪」：不会出图，也不会扣费。要出图请先填 Key；不想出图就把计划卡上的「逐段出图」关掉（改走纯文生视频）。',
+        oldServerImage: '⛔ 服务端还是旧进程：`/api/assistant/info` 里没有出图能力（image 段），「逐段出图」现在不会生效——不会出图、也不会在出图后暂停，确认后会按**纯文生视频**一路跑完。为避免按错误预期扣费，这次没有提交。请二选一：\n① 重启 3001（node server.js）让出图能力上线后再点确认；\n② 确实只要纯文生视频：先把计划卡上的「逐段出图」关掉，再点确认。',
+        imageNotReadyFallback: '出图未就绪：请到「设置 → 图片生成」填 Key / 地址 / 模型。',
+        imageNotReady: '⚠ {error}\n（这次没有建任务，也没有产生费用；不想出图就把「逐段出图」关掉。）'
+      },
+      continue: {
+        failed: '⚠ 继续失败：{error}',
+        started: '已继续，开始生成视频',
+        approvedPhotos: '（{n} 张未单独审核的图按通过处理）'
+      },
+      batch: {
+        failed: '⚠ 批量生成失败：{why}',
+        noJson: '返回不是 JSON',
+        result: '已生成 {got}/{total} 条不同地貌的提示词（{sec} 秒/条）',
+        missing: '，有缺条（已标警告），可以再点一次补',
+        fill: '。点下面的「填入创作页」。'
+      },
+      imageFirst: {
+        noImageKey: '⚠ 还没填图片生成 Key（设置 → 图片生成）。',
+        noDashscopeKey: '⚠ 还没填 DashScope Key（图生视频要用它）。',
+        uploadCheck: '正在检查百炼临时上传（免费，不上传文件）…',
+        uploadFailed: '⚠ 百炼临时上传自检失败：{error}\n（没有生成任何图片，不产生费用）',
+        uploadNetwork: '⚠ 百炼临时上传自检网络异常：{msg}',
+        confirm: '将生成 {n} 张图（逐图调色）+ {n} 段视频。这会真实计费，继续？',
+        generating: '正在批量出图 {n} 张（逐图调色）…',
+        incomplete: '返回不完整',
+        batchFailed: '批量出图失败：{why}{storage}{failed}',
+        storage: '（{reason}）',
+        failedCount: '（失败 {n} 张）',
+        imagesDone: '出图完成 {n} 张，正在提交视频任务…',
+        taskFailed: '任务提交失败',
+        submitted: '任务已提交：{id}（{n} 段，逐片段图生视频）。可在「库 · 成片」查看进度。',
+        failed: '⚠ 图片优先失败：{msg}'
+      },
+      page: {
+        kickerChatting: '管家 · 你说我做',
+        kickerIdle: 'XIAOZHI · VIDEO STUDIO',
+        title: '小智',
+        introAria: '小智介绍',
+        introKicker: '你的视频管家',
+        introTitle: '我是小智，告诉我你想要多长的视频吧',
+        oldServerPrefix: '服务端还是旧进程：计划卡 / 语音暂不可用。确认代码：',
+        oldServerWarning: '服务端还是旧进程：计划卡 / 语音暂不可用。',
+        oldServerMid: '；重启：',
+        oldServerSuffix: '（单实例 3001）。',
+        suggested: '建议提示词',
+        usePrompt: '使用这段提示词',
+        placeholderXiaozhi: '说个总时长，比如「10 分钟」…',
+        placeholderChat: '说说你想拍什么…',
+        placeholderNoKey: '先配置 LLM Key',
+        inputAria: '给小智发消息',
+        sendAria: '发送',
+        footnote: '小智会先给计划卡，确认后才开始执行 · 付费调用需你确认'
+      },
+      float: {
+        openAria: '打开小智',
+        title: '小智'
+      },
+      panel: {
+        aria: '小智面板',
+        title: '小智',
+        sub: '管家 · 你说我做',
+        collapse: '收起',
+        batch: '批量',
+        minutes10: '10 分钟',
+        minutes30: '30 分钟',
+        batchSummary: '= {n} 条 × {sec}s',
+        generating: '生成中…',
+        generate: '生成',
+        noKeyTitle: '还没配置 LLM Key',
+        noKeyBody: '先去旧版设置页填好 Key，再回来这里就能对话了。',
+        noKeyLink: '去旧版设置',
+        emptyAssistant: '我是小智。说个总时长就能排计划，比如「10 分钟」；也可以问「上一次的视频」或「现在进度怎样」。',
+        emptyNoBackend: '说说你想拍什么？比如「极光」「喀斯特晨雾」。单条就一次问一个问题；也可以在上面直接批量生成 N 条不同地貌。',
+        batchGenerated: '已生成 {n} 条（{sec} 秒/条）',
+        fillCreate: '填入创作页',
+        imageFirst: '图片优先：出图+调色+图生视频',
+        imageFirstBusy: '执行中…',
+        tryTwo: '先试 2 条',
+        billingNote: '会真实计费：{n} 张图 + {n} 段视频；出图后自动通过、逐图调色。',
+        send: '发送',
+        changeTo: '改成 {res}',
+        placeholderXiaozhi: '说个总时长，或问上一次的视频…'
+      }
+    }
+  },
+  en: {
+    assistant: {
+      chips: {
+        quick: '30 seconds (quick test)',
+        long: '10-minute long video',
+        last: 'Last video',
+        progress: 'How is it going?'
+      },
+      thinking: 'Thinking…',
+      elapsed: ' ({sec}s elapsed)',
+      noReply: '(no reply)',
+      started: 'Started.',
+      failure: {
+        noLlmKey: 'LLM key is not configured yet. Fill it in on the Settings page first.',
+        noResponse: 'The assistant did not respond ({error})',
+        request: '· Actual request {url}',
+        model: ' (model {model})',
+        http: '· HTTP {status}',
+        httpDetail: '· HTTP {status}: {detail}',
+        detail: '· {detail}',
+        streamInterrupted: '⚠ The streaming reply was interrupted. Please retry.',
+        notJson: '⚠ The response was not JSON. Please retry.',
+        network: '⚠ Network error: {msg}',
+        xiaozhiNoResponse: '⚠ XiaoZhi did not respond: {error}',
+        generic: '⚠ {error}'
+      },
+      warn: {
+        noModelKey: '⚠ No key is configured for "{model}". If the server .env also lacks one, this plan will silently fall back to Mock footage (no charge, but not the real model). To generate for real, add the key in Settings, then confirm.',
+        noImageKey: '⚠ No key is configured for image generation (Settings → Image generation). With "image per clip" on but no key, the server returns "image generation not ready": no images and no charge. Add the key first, or turn "image per clip" off on the plan card to use text-to-video only.',
+        oldServerImage: '⛔ The server is still an old process: `/api/assistant/info` has no image capability, so "image per clip" will not take effect. No images, no pause for review — confirmation would run the whole task as **text-to-video**. To avoid unexpected charges, nothing was submitted. Choose one:\n① Restart 3001 (node server.js) so image support is loaded, then confirm;\n② If you really want text-to-video, turn "image per clip" off on the plan card, then confirm.',
+        imageNotReadyFallback: 'Image generation is not ready: fill in the key / base URL / model in Settings → Image generation.',
+        imageNotReady: '⚠ {error}\n(No task was created and no charge was made. To skip images, turn "image per clip" off.)'
+      },
+      continue: {
+        failed: '⚠ Continue failed: {error}',
+        started: 'Continued; video generation started',
+        approvedPhotos: ' ({n} images without individual review were treated as approved)'
+      },
+      batch: {
+        failed: '⚠ Batch generation failed: {why}',
+        noJson: 'the response was not JSON',
+        result: 'Generated {got}/{total} prompts for different landscapes ({sec}s each)',
+        missing: ', some are missing (warned); click again to fill them',
+        fill: '. Click "Fill into Create" below.'
+      },
+      imageFirst: {
+        noImageKey: '⚠ Image generation key is not configured (Settings → Image generation).',
+        noDashscopeKey: '⚠ DashScope key is not configured (needed for image-to-video).',
+        uploadCheck: 'Checking Bailian temporary upload (free; no files are uploaded)…',
+        uploadFailed: '⚠ Bailian temporary upload check failed: {error}\n(No images were generated; no charge.)',
+        uploadNetwork: '⚠ Bailian temporary upload check hit a network error: {msg}',
+        confirm: 'This will generate {n} images (with per-image color adjustment) + {n} video clips. This is billed for real. Continue?',
+        generating: 'Generating {n} images in a batch (per-image color adjustment)…',
+        incomplete: 'the response was incomplete',
+        batchFailed: 'Batch image generation failed: {why}{storage}{failed}',
+        storage: ' ({reason})',
+        failedCount: ' ({n} failed)',
+        imagesDone: 'Generated {n} images; submitting the video task…',
+        taskFailed: 'Task submission failed',
+        submitted: 'Task submitted: {id} ({n} clips, image-to-video per clip). Track progress in Library → Finals.',
+        failed: '⚠ Image-first flow failed: {msg}'
+      },
+      page: {
+        kickerChatting: 'BUTLER · YOU SAY, I DO',
+        kickerIdle: 'XIAOZHI · VIDEO STUDIO',
+        title: 'XiaoZhi',
+        introAria: 'About XiaoZhi',
+        introKicker: 'Your video butler',
+        introTitle: 'I am XiaoZhi. Tell me how long the video should be.',
+        oldServerPrefix: 'The server is still an old process: plan cards and voice are unavailable. Verify with: ',
+        oldServerWarning: 'The server is still an old process: plan cards and voice are unavailable.',
+        oldServerMid: '; restart: ',
+        oldServerSuffix: ' (single instance, port 3001).',
+        suggested: 'Suggested prompt',
+        usePrompt: 'Use this prompt',
+        placeholderXiaozhi: 'Say a total duration, e.g. "10 minutes"…',
+        placeholderChat: 'Tell me what you want to shoot…',
+        placeholderNoKey: 'Configure the LLM key first',
+        inputAria: 'Message XiaoZhi',
+        sendAria: 'Send',
+        footnote: 'XiaoZhi shows a plan card first and only starts after you confirm · paid calls need your approval'
+      },
+      float: {
+        openAria: 'Open XiaoZhi',
+        title: 'XiaoZhi'
+      },
+      panel: {
+        aria: 'XiaoZhi panel',
+        title: 'XiaoZhi',
+        sub: 'BUTLER · YOU SAY, I DO',
+        collapse: 'Collapse',
+        batch: 'Batch',
+        minutes10: '10 minutes',
+        minutes30: '30 minutes',
+        batchSummary: '= {n} × {sec}s',
+        generating: 'Generating…',
+        generate: 'Generate',
+        noKeyTitle: 'LLM key is not configured',
+        noKeyBody: 'Fill in the key on the legacy settings page, then come back here to chat.',
+        noKeyLink: 'Open legacy settings',
+        emptyAssistant: 'I am XiaoZhi. Give me a total duration and I will lay out a plan, e.g. "10 minutes"; you can also ask "last video" or "how is it going?".',
+        emptyNoBackend: 'Tell me what you want to shoot, e.g. "aurora" or "karst morning mist". One question at a time, or generate a batch of different landscapes above.',
+        batchGenerated: 'Generated {n} prompts ({sec}s each)',
+        fillCreate: 'Fill into Create',
+        imageFirst: 'Image-first: images + color + image-to-video',
+        imageFirstBusy: 'Running…',
+        tryTwo: 'Try 2 first',
+        billingNote: 'Billed for real: {n} images + {n} video clips; images are auto-approved and color-adjusted one by one.',
+        send: 'Send',
+        changeTo: 'Change to {res}',
+        placeholderXiaozhi: 'Say a duration, or ask about the last video…'
+      }
+    }
+  }
+};

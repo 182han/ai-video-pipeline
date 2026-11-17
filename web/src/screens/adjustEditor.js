@@ -13,6 +13,7 @@
 // 零构建：React 18 UMD + htm，无 JSX、无 npm。样式见 styles/adjust-editor.css。
 // ============================================================
 import { navigate } from '../router.js';
+import { t as tr } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -20,23 +21,23 @@ const { useEffect, useRef, useState } = React;
 
 const SLIDER_GROUPS = [
   {
-    title: '色彩',
+    titleKey: 'editor.adjust.groups.color',
     items: [
-      { key: 'temperature', label: '色温', psnr: 41.95 },
-      { key: 'tone', label: '色调', psnr: 41.19 },
-      { key: 'saturation', label: '饱和度', psnr: 40.50 }
+      { key: 'temperature', labelKey: 'editor.adjust.sliders.temperature', psnr: 41.95 },
+      { key: 'tone', labelKey: 'editor.adjust.sliders.tone', psnr: 41.19 },
+      { key: 'saturation', labelKey: 'editor.adjust.sliders.saturation', psnr: 40.50 }
     ]
   },
   {
-    title: '明度',
+    titleKey: 'editor.adjust.groups.light',
     items: [
-      { key: 'brightness', label: '亮度', psnr: 41.67 },
-      { key: 'contrast', label: '对比度', psnr: 40.32, note: '三帧均值 39.46；t=4 运动帧 37.80' },
-      { key: 'highlight', label: '高光', psnr: 40.88 },
-      { key: 'shadow', label: '阴影', psnr: 42.27 },
-      { key: 'white', label: '白色', psnr: 41.24 },
-      { key: 'black', label: '黑色', psnr: 45.04 },
-      { key: 'lightSensation', label: '光感', psnr: 40.49, note: '三帧均值 39.97；t=4 运动帧 39.36' }
+      { key: 'brightness', labelKey: 'editor.adjust.sliders.brightness', psnr: 41.67 },
+      { key: 'contrast', labelKey: 'editor.adjust.sliders.contrast', psnr: 40.32, noteKey: 'editor.adjust.contrastNote' },
+      { key: 'highlight', labelKey: 'editor.adjust.sliders.highlight', psnr: 40.88 },
+      { key: 'shadow', labelKey: 'editor.adjust.sliders.shadow', psnr: 42.27 },
+      { key: 'white', labelKey: 'editor.adjust.sliders.white', psnr: 41.24 },
+      { key: 'black', labelKey: 'editor.adjust.sliders.black', psnr: 45.04 },
+      { key: 'lightSensation', labelKey: 'editor.adjust.sliders.lightSensation', psnr: 40.49, noteKey: 'editor.adjust.lightNote' }
     ]
   }
 ];
@@ -133,10 +134,13 @@ function SliderRow({ item, value, onChange, onReset }) {
   const track = 'linear-gradient(to right, rgba(244,247,245,.14) 0%, rgba(244,247,245,.14) ' + from +
     '%, var(--accent) ' + from + '%, var(--accent) ' + to + '%, rgba(244,247,245,.14) ' + to +
     '%, rgba(244,247,245,.14) 100%)';
-  const title = item.psnr ? '对照 PSNR ' + item.psnr + ' dB（t=2.5 单帧）' + (item.note ? '；' + item.note : '') : '';
+  const title = item.psnr
+    ? tr('editor.adjust.psnrTitle', { psnr: item.psnr })
+      + (item.noteKey ? tr('editor.adjust.psnrNote', { note: tr(item.noteKey) }) : '')
+    : '';
   return html`
     <div className="adj-row" title=${title}>
-      <span className="adj-label" onDoubleClick=${onReset} title="双击归零">${item.label}</span>
+      <span className="adj-label" onDoubleClick=${onReset} title=${tr('editor.adjust.dblReset')}>${tr(item.labelKey)}</span>
       <input
         className="adj-range"
         type="range"
@@ -148,7 +152,7 @@ function SliderRow({ item, value, onChange, onReset }) {
         onInput=${(e) => onChange(Number(e.target.value))}
       />
       <span className=${'adj-val' + (clampVal(value) === 0 ? ' zero' : '')}>${fmtVal(value)}</span>
-      <button className="adj-reset" onClick=${onReset} title="归零" aria-label=${item.label + '归零'}>↺</button>
+      <button className="adj-reset" onClick=${onReset} title=${tr('editor.adjust.reset')} aria-label=${tr('editor.adjust.resetAria', { label: tr(item.labelKey) })}>↺</button>
     </div>
   `;
 }
@@ -173,7 +177,7 @@ export function AdjustEditorView() {
       const j = await fetchJson('/api/tasks/completed');
       setTasks(Array.isArray(j.tasks) ? j.tasks : []);
     } catch (e) {
-      setErr('加载成片列表失败：' + e.message);
+      setErr(tr('editor.adjust.loadListFailed') + e.message);
     } finally {
       setLoading(false);
     }
@@ -196,7 +200,7 @@ export function AdjustEditorView() {
         try { history.pushState({}, '', want); } catch (e) { /* ignore */ }
       }
     } catch (e) {
-      setErr('加载任务失败：' + e.message);
+      setErr(tr('editor.adjust.loadTaskFailed') + e.message);
     }
   }
 
@@ -247,7 +251,7 @@ export function AdjustEditorView() {
     if (busy) return;
     setBusy(true);
     setErr('');
-    setStatus({ text: '正在提交重新导出…', kind: 'busy' });
+    setStatus({ text: tr('editor.adjust.submitExport'), kind: 'busy' });
     const wanted = paramsFromTask({ adjust: toAdjustObject(params) });
     try {
       const r = await fetch('/api/tasks/' + encodeURIComponent(selectedId) + '/adjust', {
@@ -264,23 +268,23 @@ export function AdjustEditorView() {
         await sleep(1500);
         t = await fetchJson('/api/tasks/' + encodeURIComponent(selectedId));
         if (['completed', 'partial', 'failed'].includes(t.status)) break;
-        setStatus({ text: '重新导出中：' + (t.currentStep || t.status || '…'), kind: 'busy' });
+        setStatus({ text: tr('editor.adjust.reexporting', { step: t.currentStep || t.status || '…' }), kind: 'busy' });
       }
       if (!t || !['completed', 'partial', 'failed'].includes(t.status)) {
-        throw new Error('导出超时：15 分钟内未完成，请到任务详情查看');
+        throw new Error(tr('editor.adjust.timeout'));
       }
       setTask(t);
       if (t.status === 'failed') {
         const stepErr = t.steps && Object.values(t.steps).map((s) => s && s.error).filter(Boolean)[0];
-        throw new Error(t.error || stepErr || '导出失败（后端未给出原因）');
+        throw new Error(t.error || stepErr || tr('editor.adjust.failedNoReason'));
       }
       setSaved(wanted);
       setParams(wanted);
       setBust(Date.now());
-      setStatus({ text: '已重新导出' + (j.backup ? '；旧成片已备份' : ''), kind: 'ok' });
+      setStatus({ text: tr('editor.adjust.reexported') + (j.backup ? tr('editor.adjust.backupSuffix') : ''), kind: 'ok' });
     } catch (e) {
-      setStatus({ text: '导出失败', kind: 'err' });
-      setErr(e.message || '导出失败');
+      setStatus({ text: tr('editor.adjust.exportFailedStatus'), kind: 'err' });
+      setErr(e.message || tr('editor.adjust.exportFailed'));
     } finally {
       setBusy(false);
     }
@@ -291,21 +295,21 @@ export function AdjustEditorView() {
 
   const head = html`
     <div className="adj-head">
-      <h1 className="adj-title">剪辑 · 调节</h1>
-      <span className="adj-sub">${tasks.length} 条已完成成片</span>
+      <h1 className="adj-title">${tr('editor.adjust.pageTitle')}</h1>
+      <span className="adj-sub">${tr('editor.adjust.completed', { n: tasks.length })}</span>
       <span className="adj-spacer"></span>
       ${selectedId && html`
         <select className="adj-select" value=${selectedId}
           onChange=${(e) => { if (e.target.value) selectTask(e.target.value); }}>
           ${tasks.map((t) => html`
             <option key=${t.taskId} value=${t.taskId}>
-              ${(t.prompt || '(无提示词)').slice(0, 36)}${t.adjust ? ' · 已调节' : ''}
+              ${(t.prompt || tr('editor.adjust.noPrompt')).slice(0, 36)}${t.adjust ? tr('editor.adjust.adjustedSuffix') : ''}
             </option>
           `)}
         </select>
       `}
-      ${selectedId && html`<button className="adj-btn" onClick=${backToList}>返回列表</button>`}
-      <button className="adj-btn" onClick=${loadList} disabled=${busy}>刷新</button>
+      ${selectedId && html`<button className="adj-btn" onClick=${backToList}>${tr('editor.adjust.backToList')}</button>`}
+      <button className="adj-btn" onClick=${loadList} disabled=${busy}>${tr('editor.adjust.refresh')}</button>
     </div>
   `;
 
@@ -315,20 +319,20 @@ export function AdjustEditorView() {
         ${head}
         ${err && html`<p className="adj-status err" style=${{ margin: '0 0 10px' }}>${err}</p>`}
         ${loading
-          ? html`<p className="adj-empty">加载中…</p>`
+          ? html`<p className="adj-empty">${tr('editor.adjust.loading')}</p>`
           : tasks.length === 0
-            ? html`<p className="adj-empty">还没有已完成成片。先在「创作」页生成一条，完成后回到这里调节。</p>`
+            ? html`<p className="adj-empty">${tr('editor.adjust.empty')}</p>`
             : html`
               <div className="adj-list">
                 ${tasks.map((t) => html`
                   <button key=${t.taskId} className="adj-card" onClick=${() => selectTask(t.taskId)}>
-                    <span className="adj-card-title">${(t.prompt || '(无提示词)').slice(0, 80)}</span>
+                    <span className="adj-card-title">${(t.prompt || tr('editor.adjust.noPrompt')).slice(0, 80)}</span>
                     <span className="adj-card-meta">
                       <span>${t.resolution || '-'}</span>
                       <span>${t.totalDuration ? t.totalDuration + 's' : '-'}</span>
-                      <span>${t.totalClips || 0} 段</span>
-                      <span>${t.hasBgm ? '有配乐' : '无配乐'}</span>
-                      <span className=${t.adjust ? 'adj-tag' : ''}>${t.adjust ? '已调节' : '未调节'}</span>
+                      <span>${tr('editor.adjust.clips', { n: t.totalClips || 0 })}</span>
+                      <span>${t.hasBgm ? tr('editor.adjust.hasBgm') : tr('editor.adjust.noBgm')}</span>
+                      <span className=${t.adjust ? 'adj-tag' : ''}>${t.adjust ? tr('editor.adjust.adjusted') : tr('editor.adjust.unadjusted')}</span>
                     </span>
                   </button>
                 `)}
@@ -353,7 +357,7 @@ export function AdjustEditorView() {
                   preload="metadata"
                   playsInline
                 ></video>`
-              : html`<div className="adj-video-empty">${activeTask ? '没有可播放的成片文件' : '加载中…'}</div>`}
+              : html`<div className="adj-video-empty">${activeTask ? tr('editor.adjust.noPlayable') : tr('editor.adjust.loading')}</div>`}
           </div>
           <div className="adj-preview-meta">
             <span>${activeTask ? (activeTask.resolution || '-') : '-'}</span>
@@ -361,26 +365,26 @@ export function AdjustEditorView() {
             <span>${activeTask && activeTask.totalDuration ? activeTask.totalDuration + 's' : '-'}</span>
             <span>·</span>
             <span>${selectedId || ''}</span>
-            ${activeTask && activeTask.adjust ? html`<span className="adj-tag">已调节</span>` : null}
+            ${activeTask && activeTask.adjust ? html`<span className="adj-tag">${tr('editor.adjust.adjusted')}</span>` : null}
             <span className="adj-spacer"></span>
             ${status.text && html`<span className=${'adj-status ' + status.kind}>${status.text}</span>`}
           </div>
           <p className="adj-preview-note">
-            预览为 CSS 滤镜近似，仅供示意；颜色、强弱以「应用并重新导出」后的成片为准。
+            ${tr('editor.adjust.previewNote')}
           </p>
         </div>
 
         <div className="adj-panel">
           <div className="adj-panel-head">
-            <span className="adj-panel-title">调节</span>
+            <span className="adj-panel-title">${tr('editor.adjust.panelTitle')}</span>
             <span className="adj-sub" style=${{ marginLeft: 'auto' }}>
-              ${dirty ? '有未应用的修改' : '参数已保存'}
+              ${dirty ? tr('editor.adjust.dirty') : tr('editor.adjust.saved')}
             </span>
           </div>
           <div className="adj-panel-body">
             ${SLIDER_GROUPS.map((g) => html`
-              <div className="adj-group" key=${g.title}>
-                <h4 className="adj-group-title">${g.title}</h4>
+              <div className="adj-group" key=${g.titleKey}>
+                <h4 className="adj-group-title">${tr(g.titleKey)}</h4>
                 ${g.items.map((item) => html`
                   <${SliderRow}
                     key=${item.key}
@@ -393,15 +397,14 @@ export function AdjustEditorView() {
               </div>
             `)}
             <p className="adj-foot-note" style=${{ marginTop: '10px' }}>
-              10 项均已用剪映真实导出对照验证（t=2.5 单帧 PSNR ≥ 40 dB）；对比度/光感的三帧均值见
-              docs/spec/re-jianying/jy-adjust.md §16（运动帧会低 1~2 dB）。
+              ${tr('editor.adjust.footNote')}
             </p>
           </div>
           <div className="adj-panel-foot">
-            <button className="adj-btn" onClick=${resetAll} disabled=${busy}>全部归零</button>
+            <button className="adj-btn" onClick=${resetAll} disabled=${busy}>${tr('editor.adjust.resetAll')}</button>
             <span className="adj-spacer"></span>
             <button className="adj-btn primary" onClick=${apply} disabled=${busy || !dirty}>
-              ${busy ? '导出中…' : '应用并重新导出'}
+              ${busy ? tr('editor.adjust.exporting') : tr('editor.adjust.apply')}
             </button>
           </div>
         </div>

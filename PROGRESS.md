@@ -989,3 +989,212 @@ docs/spec/re-jianying/adjust-api-contract.md。
 5. 旧版 `index.html` 移 `legacy/`、改 5 个测试与 `_selftest.html`、删除 `public/index.html`。
 6. 启动服务，验证 `/` 302、`/app` 200、`check-server-version.js` exit 0。
 7. 需要 WhaleTV 的 Base URL 后再做真实出图。
+
+---
+
+## 2026-11-17 · i18n（中/英）P0 交接
+
+规格：`../docs/spec/i18n-spec.md`（根 `docs/`，不在 git；含调研结论、契约、分阶段验收）。
+
+已落地（P0 底座）：
+- `web/src/i18n/index.js`（检测/切换/t/tp/Intl/订阅/cookie 持久化）+ `web/src/i18n/messages/*`
+- `web/src/components/langSwitch.js`；左栏、小智首页、设置页、登录页四处可切换
+- 改：`web/src/app.js`、`web/src/screens/{shell,assistantPage,settingsPage}.js`、`public/login.html`
+- 新验收：`scripts/verify-i18n.js`（词条对等/占位符/使用中 key/硬编码扫描）、
+  `scripts/verify-i18n-runtime.js`（DOM 桩：29 项），已注册进 `verify-all.js`
+- 实测：i18n 11/0、runtime 29/0、key-guard 18/0、create-config 28/0；**浏览器视觉未验证**
+  （本机无 Electron；系统 Chrome/Edge 被沙箱 Mojo 限制拦住）
+
+并行注意（2026-11-17 17:5x 观察到，**不是本任务改的，禁止覆盖/提交**）：
+`src/assistant/memory.js`、`src/assistant/supervisor.js`、`src/sceneCards.js`、
+`web/src/components/assistant.js` 有另一会话的未提交改动；`scripts/verify-scene-cards.js` 也被改过。
+3001 已有外部实例在跑（PID 60036，登录墙开启）；本次**没有**重启或杀掉它。
+
+下一步：
+1. P1-A：`create.js` / `createSmart.js` / `gen.js` + 对应 `messages/<ns>.js`（每屏一个文件，改完在 `messages/index.js` 注册）。
+2. P1-B：`inventory.js` / `editor.js` / `bgmEditor.js` / `adjustEditor.js` / `taskDrawer.js` / `audioPanel.js` 等。
+3. 每批跑 `node scripts/verify-i18n.js`；`--strict` 等硬编码清零后再启用。
+4. 避开上面 4 个并行文件，直到对方落盘。
+5. P2/P3 需要重启 3001 才能生效，重启前必须先与用户/另一会话确认（单实例红线）。
+
+### 2026-11-17 · P1 进度（Round 2）
+
+已迁移：`gen.js`、`templates.js`、`pauseControl.js`、`jobBar.js`、`taskDrawer.js`、`history.js`、`output.js`。
+新增/填充词条：`messages/{tasks,templates,gen,inventory}.js`。
+
+- 硬编码中文：**8906 → 8030**（17 个文件；剩余大头：inventory 1725 / create 1514 / bgmEditor 1174 /
+  assistant 1009 / createSmart 871 / editor 769 / adjustEditor 301 / xiaozhiPlan 293）。
+- 验收：`verify-i18n` 11/0；`verify-i18n-runtime` 29/0；`verify-image-first-ui` 90/0（5 项需登录未验证）；
+  `verify-p6-offline` 41/0。
+- 修了 2 个**过时静态断言**（不是功能回归）：`verify-key-guard.js`（2 项）、`verify-p6-offline.js`（2 项）
+  原先写死中文文案，现改为「组件引用 i18n key + 词条里存在对应中英文」。
+- 3 个并行队友均在认领任务前失败、无产物；本轮改由 Lead 自己推进。
+- 坑：`taskDrawer.js` / `templates.js` 里已有局部变量 `t`/模板参数 `t`，会遮蔽翻译函数；
+  统一改为 `import { t as tr }`，已写进 `web/src/i18n/README.md`。
+
+下一步：`inventory.js`（最大，1725）→ `create/createSmart` → `editor/bgmEditor` → 等并发会话落盘后做
+`assistant/xiaozhiPlan`；然后 `--strict` 收口。
+
+### 2026-11-17 · P1 进度（Round 3）
+
+`inventory.js` 第一轮：**公共工具 + ClipsPanel + UnfinishedPanel + TaskTrashDrawer + FinalsPanel +
+RecycleDrawer + LibraryView** 全部双语化；该文件硬编码中文 **1725 → 877**。
+新增词条组：`library.{common,origin,qc,clips,unfinished,taskTrash,finals,recycle,shell}`。
+
+- 全站硬编码：**8030 → 7182**（17 个文件）。
+- 验收：`verify-i18n` 11/0；`verify-i18n-runtime` 29/0；`verify-p6-offline` 41/0；
+  `verify-image-first-ui` 90/0（5 项需登录）；`verify-photo-library` 42/0；`verify-photo-adjust-ui` 73/0。
+- 又修 4 个过时静态断言（不是功能回归）：`verify-p6-offline.js` 3 项、`verify-photo-adjust-ui.js` 1 项
+  （后者原先断言「恰好 4 个 import」，现允许 i18n 模块、第三方依赖仍为 0）。
+- 剩余 inventory：`PhotosPanel`（约 80 行中文）+ `MusicView`（约 34 行）。
+- 注意：`inventory.js` 里局部变量 `t`（`RECYCLE_TABS.map((t) =>`、`tasks.map((t) =>`）也会遮蔽翻译函数，
+  本文件统一 `import { t as tr }`。
+
+### 2026-11-17 · P1 进度（Round 4）
+
+`inventory.js` 收尾：**PhotosPanel（审核 / 手动调色 / 版本链 / 提示词 / 元信息）+ MusicView
+（上传 / 元信息 / 试听 / 默认 / 删除）** 全部双语化。
+该文件硬编码中文 **1725 → 28**（剩余仅为后端数据标签与正则匹配，例如 `p.label === '调色前'`、
+`调色失败|回退原图失败`，不是界面文案）。
+
+- 新增词条组：`library.photos.*`、`library.music.*`。
+- 全站硬编码：**7182 → 6333**（17 个文件）。
+- 验收：`verify-i18n` 11/0；`verify-i18n-runtime` 29/0；`verify-p6-offline` 41/0；
+  `verify-image-first-ui` 90/0（5 项需登录）；`verify-photo-library` 42/0；
+  `verify-photo-adjust-ui` 73/0；`_smoke-app-route` 全通过。
+- 又修 1 个过时断言：`verify-photo-adjust-ui.js` 原先靠中文「手动调色」切片定位源码，
+  现改为按 `tr('library.photos.manualAdjust')` 定位，并允许 ADJUST_KEYS 存 labelKey。
+
+下一步：`create.js`（1514，最大）→ `createSmart.js`（871）→ `createDraft.js`（10）+
+`preview/engine.js`（40）两个小尾巴；`assistant/xiaozhiPlan` 等并发会话落盘后再做。
+
+### 2026-11-17 · P1 进度（Round 5）
+
+`create.js`（975 行）全部双语化：**六步向导（提示词 / 图片生成 / 图片审核 / 运镜 /
+时长与配乐 / 确认）+ 自定义环节 + 13 项质检 + 图生视频 + 费用确认 + 草稿恢复**。
+该文件硬编码中文 **1514 → 43**（剩余仅为天气/昼夜冲突词表、后端数据标签与注释）。
+
+同时收掉两个小尾巴：
+- `createDraft.js`：缺图/出图失败两条错误 → `create.errors.*`（10 → 0）；
+- `preview/engine.js`：shader 编译 / WebGL2 / 链接 / 素材加载 / 渲染失败 → `editor.preview.*`（40 → 0）。
+
+**i18n 运行时修正（重要）**：语言探测只把 `window.navigator` 当作浏览器语言来源；
+Node 24 自带的全局 `navigator`（en-US）不再影响无头验收渲染。这样测试桩里没有
+`window.navigator` 时稳定回落中文，真实浏览器行为不变。
+
+- 新增词条：`create.*`（约 150 条，含 steps/stage/qc/conflict/errors/p0–p5/draft/nav）、
+  `editor.preview.*`（5 条）。
+- 全站硬编码：**6333 → 4812**，文件数 **17 → 15**。
+- 为迁移同步修了 6 个静态断言脚本（全部从「断言中文源码」改为「断言 i18n key + 词条文案」）：
+  `verify-create-config`、`verify-create-draft`、`verify-image-review`、`verify-cost-guard`、
+  `verify-budget-guard`、`verify-image-gen`。
+- 验收（逐套件跑；`verify-all` 在本沙箱仍 `spawn EPERM`）：create-config 通过、create-draft 通过、
+  image-gen 通过、image-review 通过、budget-guard 47/0、cost-guard 通过、multi-prompt 通过、
+  custom-stages 通过、i2v 通过、i18n 11/0、i18n-runtime 29/0、p6 41/0、image-first-ui 90/0、
+  photo-adjust-ui 73/0、smoke 全通过。
+- 未纳入结论：`verify-frontend-static` 因引用已删除模块而 `MODULE_NOT_FOUND`（旧脚本遗留，
+  与本次改动无关）；`verify-recovery-fixes` 缺样例片段 `clips/mock_mvgy1dd6_4tbe09.mp4`（环境产物缺失）。
+
+下一步：`bgmEditor.js`（1174）→ `assistant.js`（1009，外部会话已提交、可安全改）→
+`createSmart.js`（871）→ `editor.js`（769）→ `adjustEditor.js`（301）→ `xiaozhiPlan/audioPanel/
+advancedAdjust/boundary` 小尾巴。
+
+### 2026-11-17 · P1 进度（Round 6）
+
+`assistant.js`（1160 行，小智前端）全部用户可见话术双语化：
+悬浮球 / 面板 / 整页三种形态、思考与等待秒数、失败诊断气泡、计划确认前警告
+（模型 Key / 图片 Key / 旧服务端）、审图继续、批量提示词、图片优先（出图+调色+图生视频）、
+空态与 chips、旧服务端提示、输入框/发送/收起等。该文件硬编码中文 **1009 → 0**
+（剩余仅为注释）。
+
+- 新增 namespace `assistant.*`（约 100 条）并注册到 `messages/index.js`。
+- 分辨率按钮从 `send('改成 1080p')` 改为本地化命令（中文仍是「改成 1080p」，
+  英文「Change to 1080p」）；后端 `findResolution` 只认分辨率词，英文命令同样可解析。
+- 全站硬编码：**4812 → 3798**，文件数 **15 → 14**。
+- 同轮修了 3 个过时断言：
+  - `verify-assistant.js`：外部会话刚把「场景卡库自动抽取」改成「随机抽取」，断言改为兼容两种；
+  - `verify-assistant.js`：面板标题检查改为 i18n key + 词条，并只拦截用户可见的「>提示词助手<」；
+  - `verify-assistant-diagnostics.js`：思考/等待秒数断言改为 `assistant.thinking` / `assistant.elapsed`。
+- 验收：`verify-i18n` 11/0、`verify-i18n-runtime` 29/0、`verify-assistant-diagnostics` 101/0、
+  `verify-xiaozhi-home` 通过、`_smoke-app-route` 通过；`verify-assistant.js` 已跑过全部 i18n 相关断言，
+  随后在 `ctxOf.keys.length` 处抛 `TypeError`（后端 `contextOf` 返回结构与脚本预期不符，
+  属外部会话 V1 的后端改动，不是本任务前端改动），该套件未全绿，如实记录。
+
+剩余与小智相关：`xiaozhiPlan.js`（293：计划卡 / 状态条 / 首页气泡 / 麦克风排查）；
+后端 system prompt 与计划卡话术属于 P3，需要后端重启窗口。
+
+下一步：`xiaozhiPlan.js`（293）→ `bgmEditor.js`（1174）→ `createSmart.js`（866）→
+`editor.js`（769）→ `adjustEditor.js`（301）→ `audioPanel/advancedAdjust/boundary` 小尾巴。
+
+### 2026-11-17 · P1 进度（Round 8）
+
+**小智 UI 收尾**：`xiaozhiPlan.js`（831 行）全部双语化 —— 计划卡（时长/模型/分辨率/场景/
+出图/费用/补位/确认）、状态条（重试/补位/片段/等待审图）、「图已出好」审图卡、首页引导气泡、
+麦克风权限卡（Chrome/Windows 排查步骤、错误分类）、录音状态条与全部提示。该文件 **293 → 0**
+（仅剩注释）。
+
+- 新增并注册 namespace `xiaozhi.*`（约 110 条）。
+- 同一轮还完成了三个较小编辑器组件（Round 7 末尾）：
+  `audioPanel.js` 164→0、`advancedAdjust.js` 133→0、`boundary.js` 7→0
+  （新增 `editor.audio.* / editor.adv.* / editor.boundary.*`）。
+- 全站硬编码：**3798 → 3201**，文件数 **14 → 10**。
+- 修了 2 个过时断言：
+  - `verify-adjust-advanced.js`：HSL 色带计数从 `label:` 改为 `labelKey:`；
+  - `verify-mic-permission.js`：约 10 条中文文案断言改为「i18n key + 词条文案」，语义不变。
+- 验收（逐套件）：`verify-mic-permission` 0、`verify-xiaozhi-home` 0、
+  `verify-assistant-diagnostics` 0、`verify-scene-cards` 0、`verify-adjust-advanced` 0、
+  `verify-editor-audio` 0、`verify-i18n` 11/0、`verify-i18n-runtime` 29/0、smoke 0。
+  `verify-assistant.js` 仍受后端 `contextOf` 形状问题影响（见 Round 6），本轮未复跑全量。
+
+下一步：`bgmEditor.js`（1174）→ `createSmart.js`（866）→ `editor.js`（769）→
+`adjustEditor.js`（301）；之后收口 `create/inventory/settingsPage/output` 的后端匹配与注释，
+再进 `--strict`、P2 后端与 P3 提示词。
+
+### 2026-11-17 · P1 进度（Round 9）
+
+`adjustEditor.js`（411 行）全部双语化：成片列表 / 10 项滑杆（色彩、明度）/ PSNR 提示 /
+预览说明 / 调节面板 / 未应用提示 / 全部归零 / 应用并重新导出 / 提交与轮询状态 /
+超时与失败原因 / 空态。该文件 **301 → 0**（新增 `editor.adjust.*`）。
+
+- 全站硬编码：**3201 → 2900**，文件数 **10 → 9**。
+- 验收：`verify-editor-adjust` 0、`verify-editor-shell` 0、`verify-adjust-advanced` 0、
+  `verify-i18n` 11/0、`verify-i18n-runtime` 29/0、smoke 0。
+- 剩余文件：`bgmEditor.js` 1174、`createSmart.js` 866、`editor.js` 769；
+  小尾巴 `create.js` 43（冲突词表）、`inventory.js` 28（后端标签）、`settingsPage.js` 7（后端错误匹配）、
+  `output.js` 6（HTML 注释）、`langSwitch.js` 5 + `i18n/index.js` 2（语言自称，应进 allowlist）。
+
+下一步：`bgmEditor.js`（1174）→ `createSmart.js`（866）→ `editor.js`（769）→ `--strict` 收口。
+
+### 2026-11-17 · P1 进度（Round 10）
+
+`createSmart.js`（448 行，小智流程版五步创作向导，当前默认创作入口）全部双语化：
+步骤条、时长/每段/预计段数、场景卡读取、逐段提示词、出图+审核（可选）、图片库选图、
+生成设置（通道/分辨率/转场/配乐/费用）、确认页、图片选择器、草稿恢复与重新开始、全部错误与确认框。
+该文件 **866 → 0**（仅剩注释），新增 namespace `createSmart.*`（约 110 条）。
+
+- 全站硬编码：**2900 → 2034**，文件数 **9 → 8**。
+- 修了 1 个过时断言：`verify-assistant.js` 的「场景从卡库随机抽」改为同时接受 i18n 词条
+  （该套件仍受后端 `contextOf` 形状问题影响，未全量复跑）。
+- 验收：`verify-xiaozhi-home` 0、`verify-scene-cards` 0、`verify-assistant-diagnostics` 0、
+  `verify-editor-adjust` 0、`verify-i18n` 11/0、runtime 29/0、smoke 0。
+- 剩余文件：`bgmEditor.js` 1174、`editor.js` 769；小尾巴 `create.js` 43、`inventory.js` 28、
+  `settingsPage.js` 7、`output.js` 6、`langSwitch/i18n` 7（语言自称，进 allowlist）。
+
+下一步：`bgmEditor.js`（1174）→ `editor.js`（769）→ `--strict` 收口 → P2 后端 → P3 提示词。
+
+### 2026-11-17 · P1 进度（Round 11）
+
+`bgmEditor.js`（1365 行，配乐编辑器）全部双语化：
+任务列表 / 曲库（分类、搜索、加载态、空态）/ 时间轴（缩放、拖动裁剪读数、三条轨道空态、
+播放头/时长/覆盖统计）/ 片段参数（音轨、时间轴与源内起止、音量、变速、淡入淡出、
+填充模式、关键帧提示）/ 保存/自动配乐/预览/导出（含覆盖确认）/ 全部状态与错误提示。
+该文件 **1174 → 4**（仅剩注释与后端错误匹配），新增 namespace `bgm.*`（约 130 条）。
+
+- 全站硬编码：**2034 → 864**，文件数 **8**（其中 bgmEditor 仅剩 4 行非界面文案）。
+- 修了 1 个过时断言：`verify-editor-nav.js` 的导航段断言改为 `sectionKey` + `nav.materials` 词条。
+- 验收：`verify-bgm-upload` 0、`verify-bgm-tracks` 0、`verify-bgm-plan` 0、
+  `verify-editor-audio` 0、`verify-editor-nav` 0、`verify-i18n` 11/0、runtime 29/0、smoke 0。
+- 剩余大文件：`editor.js` 769；小尾巴 `create.js` 43、`inventory.js` 28、`settingsPage.js` 7、
+  `output.js` 6、`langSwitch/i18n` 7（语言自称，进 allowlist）、`bgmEditor.js` 4（后端匹配）。
+
+下一步：`editor.js`（769）→ `--strict` 收口 → P2 后端 → P3 提示词。

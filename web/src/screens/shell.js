@@ -18,6 +18,8 @@
 //   /settings    设置
 // ============================================================
 import { navigate } from '../router.js';
+import { t } from '../i18n/index.js';
+import { LangSwitch } from '../components/langSwitch.js';
 import { JobBar, useTasksPoll } from '../components/jobBar.js';
 // 2026-11-16 用户口径（P4）：全局悬浮小助手下线 —— 小智只保留两处：
 // ① 首页 `/` 的整页小智（AssistantPage）② 左栏「小智 · 对话首页」入口。
@@ -41,12 +43,10 @@ const { useEffect } = React;
 // 历史记录与产出已于 P6 下线（不再有视图/路由项）；失败任务改由「库 · 成片」的未完成卡片承接。
 // 配乐入口并入剪辑台。
 const NAV = [
-  // 2026-11-16 用户验收后切换：默认创作入口 = 智能向导 /create-smart；
-  // 旧六步向导保留在 /create（新向导页内有「用旧版六步向导」入口可回退）。
-  { key: 'create', route: '/create-smart', label: '创作', icon: '◆' },
-  { key: 'edit', route: '/edit', label: '剪辑', icon: '✂' },
-  { section: '素材' },
-  { key: 'library', route: '/library', label: '库', icon: '▤' }
+  { key: 'create', route: '/create-smart', icon: '◆', labelKey: 'nav.create' },
+  { key: 'edit', route: '/edit', icon: '✂', labelKey: 'nav.edit' },
+  { sectionKey: 'nav.materials' },
+  { key: 'library', route: '/library', icon: '▤', labelKey: 'nav.library' }
 ];
 
 function viewOf(route) {
@@ -94,7 +94,7 @@ function Rail({ view }) {
   };
   // 2026-11-16 用户问「进入板块后怎么退出」：左栏顶部固定「小智 · 对话首页」入口，点击回 /。
   return html`
-    <aside className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
+    <aside aria-label=${t('nav.mainAria')} className="bg-s1 border-r border-white/[.08] flex flex-col py-4 min-h-0 overflow-auto">
       <div className="font-display text-[14px] uppercase tracking-[.13em] px-4 pb-3.5 text-ink select-none">
         Video Studio
       </div>
@@ -102,25 +102,28 @@ function Rail({ view }) {
       <button
         type="button"
         onClick=${() => navigate('/')}
-        title="回到小智首页"
-        aria-label="回到小智首页"
+        title=${t('nav.homeAria')}
+        aria-label=${t('nav.homeAria')}
         className="rail-home"
       >
         <span className="rail-home-orb" aria-hidden="true"></span>
         <span className="min-w-0">
-          <span className="rail-home-title">小智</span>
-          <span className="rail-home-sub">对话首页 · 点这里回来</span>
+          <span className="rail-home-title">${t('nav.home')}</span>
+          <span className="rail-home-sub">${t('nav.homeSub')}</span>
         </span>
       </button>
 
       ${NAV.map((n, i) =>
-        n.section
-          ? html`<div key=${'s' + i} className="px-4 pt-3.5 pb-1.5 text-[10px] tracking-[.14em] uppercase text-ink3 font-num">${n.section}</div>`
-          : html`<${RailItem} key=${n.key} item=${n} active=${routeOf[view] === n.route} />`
+        n.sectionKey
+          ? html`<div key=${'s' + i} className="px-4 pt-3.5 pb-1.5 text-[10px] tracking-[.14em] uppercase text-ink3 font-num">${t(n.sectionKey)}</div>`
+          : html`<${RailItem} key=${n.key} item=${{ route: n.route, icon: n.icon, label: t(n.labelKey) }} active=${routeOf[view] === n.route} />`
       )}
 
       <span className="flex-1"></span>
-      <${RailItem} item=${{ route: '/settings', label: '设置', icon: '⚙' }} active=${view === 'settings'} />
+      <div className="px-2.5 pb-2">
+        <${LangSwitch} />
+      </div>
+      <${RailItem} item=${{ route: '/settings', label: t('nav.settings'), icon: '⚙' }} active=${view === 'settings'} />
     </aside>
   `;
 }

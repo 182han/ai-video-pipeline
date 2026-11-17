@@ -9,15 +9,16 @@
 //   测不到 / 无结果             → 未执行
 // ============================================================
 import { statusMeta, PauseButton } from './pauseControl.js';
+import { t as tr, has, fmtDateTime } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
 
 const ADJ_LABELS = {
-  temperature: '色温', tone: '色调', saturation: '饱和度',
-  brightness: '亮度', contrast: '对比度', highlight: '高光',
-  shadow: '阴影', white: '白色', black: '黑色', lightSensation: '光感'
+  temperature: 'tasks.adjust.temperature', tone: 'tasks.adjust.tone', saturation: 'tasks.adjust.saturation',
+  brightness: 'tasks.adjust.brightness', contrast: 'tasks.adjust.contrast', highlight: 'tasks.adjust.highlight',
+  shadow: 'tasks.adjust.shadow', white: 'tasks.adjust.white', black: 'tasks.adjust.black', lightSensation: 'tasks.adjust.lightSensation'
 };
 
 // 打开剪辑台（/app/edit?task=<id>）：pushState + popstate 让 shell 重新解析路由。
@@ -37,12 +38,23 @@ const STEP_ORDER = [
   'final_qc'
 ];
 
+const STEP_LABEL_KEY = {
+  prompt_optimize: 'tasks.step.prompt_optimize',
+  storyboard: 'tasks.step.storyboard',
+  clip_generation: 'tasks.step.clip_generation',
+  concatenation: 'tasks.step.concatenation',
+  loop_processing: 'tasks.step.loop_processing',
+  audio_mix: 'tasks.step.audio_mix',
+  transcoding: 'tasks.step.transcoding',
+  final_qc: 'tasks.step.final_qc'
+};
+
 function qcBadge(qc) {
-  if (!qc) return { text: '未执行', cls: 'text-ink3' };
-  if (qc.passed === true) return { text: '通过', cls: 'text-accent' };
-  if (qc.legitimateSkip === true) return { text: '按计划跳过', cls: 'text-ink3' };
-  if (qc.skipped === true) return { text: '跳过·不可判', cls: 'text-danger' };
-  return { text: '不通过', cls: 'text-danger' };
+  if (!qc) return { text: tr('tasks.qc.notRun'), cls: 'text-ink3' };
+  if (qc.passed === true) return { text: tr('tasks.qc.passed'), cls: 'text-accent' };
+  if (qc.legitimateSkip === true) return { text: tr('tasks.qc.plannedSkip'), cls: 'text-ink3' };
+  if (qc.skipped === true) return { text: tr('tasks.qc.skippedUnknown'), cls: 'text-danger' };
+  return { text: tr('tasks.qc.failed'), cls: 'text-danger' };
 }
 
 // 校色四态（2026-10-27 契约，字段直接读，不从 reason 猜）
@@ -50,27 +62,27 @@ function qcBadge(qc) {
 //   拼接结果：  task.steps.concatenation.qcDetails.colorMatch { state, reason, applied, total, luts }
 //   终检汇总：  task.finalQC.details.colorContinuity.colorMatchState / colorMatchReason
 function colorMatchBadge(cm) {
-  if (!cm || !cm.state) return { text: '未执行', cls: 'text-warn', title: '没有拿到校色结果字段' };
+  if (!cm || !cm.state) return { text: tr('tasks.qc.notRun'), cls: 'text-warn', title: tr('tasks.colorMatch.noResult') };
   switch (cm.state) {
     case 'applied':
       return {
-        text: '已校色',
+        text: tr('tasks.colorMatch.applied'),
         cls: 'text-accent',
         title: [
           cm.reason || '',
-          cm.applied != null && cm.total != null ? `已校色 ${cm.applied}/${cm.total} 段` : '',
-          Array.isArray(cm.luts) ? `${cm.luts.length} 组 LUT` : ''
+          cm.applied != null && cm.total != null ? tr('tasks.colorMatch.appliedCount', { applied: cm.applied, total: cm.total }) : '',
+          Array.isArray(cm.luts) ? tr('tasks.colorMatch.lutCount', { n: cm.luts.length }) : ''
         ].filter(Boolean).join(' · ')
       };
     case 'disabled':
-      return { text: '未校色', cls: 'text-ink3', title: cm.reason || '默认关闭，本次未开启' };
+      return { text: tr('tasks.colorMatch.disabled'), cls: 'text-ink3', title: cm.reason || tr('tasks.colorMatch.disabledTitle') };
     case 'skipped':
-      return { text: '校色未执行', cls: 'text-warn', title: cm.reason || cm.colorMatchReason || '按设计跳过' };
+      return { text: tr('tasks.colorMatch.skipped'), cls: 'text-warn', title: cm.reason || cm.colorMatchReason || tr('tasks.colorMatch.skippedTitle') };
     case 'failed':
       return {
-        text: '校色失败',
+        text: tr('tasks.colorMatch.failed'),
         cls: 'text-danger',
-        title: (cm.reason || '') + '（成片仍按原片产出，不是出片失败）'
+        title: (cm.reason || '') + tr('tasks.colorMatch.failedTitle')
       };
     default:
       return { text: cm.state, cls: 'text-ink3', title: cm.reason || '' };
@@ -188,7 +200,7 @@ export function TaskDrawer({ taskId, onClose }) {
       if (!r.ok || j.success === false) throw new Error(j.error || ('HTTP ' + r.status));
       setTick((v) => v + 1);
     } catch (e) {
-      setActErr(e.message || '操作失败');
+      setActErr(e.message || tr('tasks.drawer.actionFailed'));
     } finally {
       setBusyAct('');
     }
@@ -211,7 +223,7 @@ export function TaskDrawer({ taskId, onClose }) {
       if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
       setTick((v) => v + 1);
     } catch (e) {
-      setActErr(e.message || '重生成失败');
+      setActErr(e.message || tr('tasks.drawer.regenerateFailed'));
     } finally {
       setBusyAct('');
     }
@@ -252,7 +264,7 @@ export function TaskDrawer({ taskId, onClose }) {
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label="任务详情"
+        aria-label=${tr('tasks.drawer.title')}
         className="absolute right-0 top-0 bottom-0 w-[min(760px,94vw)] bg-s3 border-l border-white/[.08]
                    shadow-[-16px_0_48px_rgba(0,0,0,.12)] flex flex-col drawer-in"
         onClick=${(e) => e.stopPropagation()}
@@ -273,22 +285,22 @@ export function TaskDrawer({ taskId, onClose }) {
           <button
             onClick=${onClose}
             className="h-7 w-7 grid place-items-center rounded-[5px] text-ink2 hover:bg-white/[.05]"
-            aria-label="关闭"
+            aria-label=${tr('tasks.drawer.close')}
           >✕</button>
         </header>
 
         <div className="flex-1 min-h-0 overflow-auto px-4 py-4">
-          ${state.loading && html`<p className="text-[12px] text-ink3">加载中…</p>`}
-          ${state.error && html`<p className="text-[12px] text-danger">读取失败：${state.error}</p>`}
+          ${state.loading && html`<p className="text-[12px] text-ink3">${tr('tasks.drawer.loading')}</p>`}
+          ${state.error && html`<p className="text-[12px] text-danger">${tr('tasks.drawer.loadFailed')}${state.error}</p>`}
 
           ${t && html`
             <div>
               <p className="text-[13px] leading-[1.75] text-ink">
-                ${(t.optimizedPrompt || t.prompt || '(无提示词)')}
+                ${(t.optimizedPrompt || t.prompt || tr('tasks.drawer.noPrompt'))}
               </p>
               ${t.isMultiPrompt && t.prompts && t.prompts.length > 1 && html`
                 <details className="mt-2">
-                  <summary className="text-[11px] text-ink3 cursor-pointer">展开 ${t.prompts.length} 条分镜提示词</summary>
+                  <summary className="text-[11px] text-ink3 cursor-pointer">${tr('tasks.drawer.expandPrompts', { n: t.prompts.length })}</summary>
                   <ol className="mt-1 pl-4 list-decimal text-[11px] text-ink2 leading-[1.7]">
                     ${t.prompts.map((p, i) =>
                       html`<li key=${i}>${typeof p === 'string' ? p : (p && p.text) || JSON.stringify(p)}</li>`
@@ -309,21 +321,21 @@ export function TaskDrawer({ taskId, onClose }) {
             `}
 
             <div className="mt-4">
-              <${Row} label="档位">${t.preset || '-'}</${Row}>
-              <${Row} label="模型">${t.model || '-'}</${Row}>
-              <${Row} label="分辨率">${t.resolution || '-'}</${Row}>
-              <${Row} label="片段">${(t.totalClips || 0) + ' × ' + (t.clipDuration || 0) + 's'}</${Row}>
-              <${Row} label="成片时长">${t.totalDuration ? t.totalDuration + 's' : '-'}</${Row}>
-              <${Row} label="创建">
-                ${t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-'}
+              <${Row} label=${tr('tasks.drawer.preset')}>${t.preset || '-'}</${Row}>
+              <${Row} label=${tr('tasks.drawer.model')}>${t.model || '-'}</${Row}>
+              <${Row} label=${tr('tasks.drawer.resolution')}>${t.resolution || '-'}</${Row}>
+              <${Row} label=${tr('tasks.drawer.clips')}>${(t.totalClips || 0) + ' × ' + (t.clipDuration || 0) + 's'}</${Row}>
+              <${Row} label=${tr('tasks.drawer.finalDuration')}>${t.totalDuration ? t.totalDuration + 's' : '-'}</${Row}>
+              <${Row} label=${tr('tasks.drawer.created')}>
+                ${t.createdAt ? fmtDateTime(t.createdAt) : '-'}
               </${Row}>
-              ${t.error && html`<${Row} label="错误"><span className="text-danger">${t.error}</span></${Row}>`}
-              ${t.failureCode && html`<${Row} label="中止">
+              ${t.error && html`<${Row} label=${tr('tasks.drawer.error')}><span className="text-danger">${t.error}</span></${Row}>`}
+              ${t.failureCode && html`<${Row} label=${tr('tasks.drawer.aborted')}>
                 <span className="text-warn">${st.note || t.failureCode}</span>
-                ${t.recoverable ? html`<span className="text-[11px] text-ink3"> · 可补跑</span>` : null}
+                ${t.recoverable ? html`<span className="text-[11px] text-ink3"> · ${tr('tasks.drawer.resumable')}</span>` : null}
                 ${t.pauseTimedOutAt && html`
                   <span className="text-[10px] text-ink3">
-                    （${new Date(t.pauseTimedOutAt).toLocaleString('zh-CN')}）
+                    （${fmtDateTime(t.pauseTimedOutAt)}）
                   </span>
                 `}
               </${Row}>`}
@@ -333,23 +345,23 @@ export function TaskDrawer({ taskId, onClose }) {
               ${(t.status === 'failed' || t.status === 'partial') && html`
                 <button onClick=${() => postAction('retry')} disabled=${!!busyAct}
                   className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
-                             hover:bg-white/[.06] disabled:opacity-40">重试</button>
+                             hover:bg-white/[.06] disabled:opacity-40">${tr('tasks.drawer.retry')}</button>
                 <button onClick=${() => postAction('resume')} disabled=${!!busyAct}
                   className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
-                             hover:bg-white/[.06] disabled:opacity-40">用已成功片段继续</button>
+                             hover:bg-white/[.06] disabled:opacity-40">${tr('tasks.drawer.continueWithClips')}</button>
                 <button onClick=${() => postAction('continue')} disabled=${!!busyAct}
                   className="h-7 px-2.5 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
-                             hover:bg-white/[.06] disabled:opacity-40">补跑</button>
+                             hover:bg-white/[.06] disabled:opacity-40">${tr('tasks.drawer.continueTask')}</button>
               `}
               ${videoUrl && html`
                 <a href=${videoUrl} download
                   className="h-7 px-2.5 inline-flex items-center rounded-[5px] border border-white/[.10]
-                             text-[11px] text-ink2 hover:bg-white/[.06]">下载成片</a>
+                             text-[11px] text-ink2 hover:bg-white/[.06]">${tr('tasks.drawer.downloadFinal')}</a>
               `}
               ${videoUrl && html`
                 <button onClick=${() => openEdit(t.taskId)}
                   className="h-7 px-2.5 rounded-[5px] border border-accent/40 text-[11px] text-accent
-                             hover:bg-accent/[.08]">在剪辑台打开</button>
+                             hover:bg-accent/[.08]">${tr('tasks.drawer.openInEditor')}</button>
               `}
               ${actErr && html`<span className="text-[11px] text-danger">${actErr}</span>`}
             </div>
@@ -359,23 +371,23 @@ export function TaskDrawer({ taskId, onClose }) {
               if (!failed.length) return null;
               return html`
                 <div className="mt-4">
-                  <h4 className="mb-1 text-[12px] font-medium text-ink">失败片段（${failed.length}）</h4>
+                  <h4 className="mb-1 text-[12px] font-medium text-ink">${tr('tasks.drawer.failedClips', { n: failed.length })}</h4>
                   <p className="mb-2 text-[10px] leading-[1.6] text-ink3">
-                    只重生成你点的那一条；不会自动重跑其它片段。
+                    ${tr('tasks.drawer.failedClipsHint')}
                   </p>
                   <ul className="divide-y divide-white/[.05] rounded-[8px] border border-white/[.07] bg-s3 px-2.5">
                     ${failed.map((c) => html`
                       <li key=${c.index} className="flex items-center gap-2 py-2">
                         <span className="shrink-0 text-[11px] font-num text-ink2">#${c.index + 1}</span>
                         <span className="min-w-0 flex-1 text-[11px] leading-[1.6] text-ink3 break-words">
-                          ${c.error || (c.qcResult && c.qcResult.reason) || '生成/质检未通过'}
+                          ${c.error || (c.qcResult && c.qcResult.reason) || tr('tasks.drawer.failedBadge')}
                         </span>
                         <button
                           onClick=${() => regenerateOne(c.index)}
                           disabled=${!!busyAct}
                           className="h-6 px-2 rounded-[4px] border border-white/[.10] text-[11px] text-ink2
                                      hover:bg-white/[.06] disabled:opacity-40"
-                        >${busyAct === 'clip-' + c.index ? '重生成中…' : '重新生成'}</button>
+                        >${busyAct === 'clip-' + c.index ? tr('tasks.drawer.regenerating') : tr('tasks.drawer.regenerate')}</button>
                       </li>
                     `)}
                   </ul>
@@ -387,15 +399,15 @@ export function TaskDrawer({ taskId, onClose }) {
               const cm = pickColorMatch(t);
               const b = colorMatchBadge(cm.result);
               return html`
-                <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">校色</h4>
+                <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">${tr('tasks.drawer.colorMatch')}</h4>
                 <div className="flex items-center gap-2 py-[5px] border-b border-white/[.04]">
-                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">用户要求</span>
+                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">${tr('tasks.drawer.userRequest')}</span>
                   <span className=${'text-[12px] ' + (cm.intent ? 'text-ink' : 'text-ink3')}>
-                    ${cm.intent ? '开启' : '未要求（默认关）'}${cm.maxGain != null ? ' · 增益上限 ' + cm.maxGain : ''}
+                    ${cm.intent ? tr('tasks.drawer.enabled') : tr('tasks.drawer.notRequested')}${cm.maxGain != null ? tr('tasks.drawer.maxGain', { value: cm.maxGain }) : ''}
                   </span>
                 </div>
                 <div className="flex items-start gap-2 py-[5px]">
-                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">实际结果</span>
+                  <span className="w-[68px] shrink-0 text-[12px] text-ink3">${tr('tasks.drawer.actualResult')}</span>
                   <span className="flex-1 min-w-0">
                     <span className=${'text-[12px] ' + b.cls} title=${b.title}>${b.text}</span>
                     ${b.title && html`
@@ -406,42 +418,43 @@ export function TaskDrawer({ taskId, onClose }) {
               `;
             })()}
 
-            <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">调节</h4>
+            <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">${tr('tasks.drawer.adjustments')}</h4>
             ${(() => {
               const adj = t.adjust && typeof t.adjust === 'object' ? t.adjust : null;
               const items = adj
                 ? Object.keys(ADJ_LABELS).filter((k) => adj[k] !== undefined && adj[k] !== 0)
                 : [];
               if (!items.length) {
-                return html`<p className="text-[12px] text-ink3 py-[5px]">未调节</p>`;
+                return html`<p className="text-[12px] text-ink3 py-[5px]">${tr('tasks.drawer.noAdjustments')}</p>`;
               }
               return html`
                 <div className="flex flex-wrap gap-x-4 gap-y-1 py-[5px] text-[12px] text-ink2">
                   ${items.map((k) => html`
                     <span key=${k}>
-                      ${ADJ_LABELS[k]}
+                      ${tr(ADJ_LABELS[k])}
                       <b className="font-num text-ink font-normal">${adj[k] > 0 ? '+' + adj[k] : adj[k]}</b>
                     </span>
                   `)}
                 </div>
                 <p className="text-[10px] leading-[1.6] text-ink3">
                   ${t.adjustApplied && t.adjustApplied.filter
-                    ? '导出时已应用：' + t.adjustApplied.filter
-                    : '参数已保存，尚未应用到成片'}
+                    ? tr('tasks.drawer.appliedOnExport', { list: t.adjustApplied.filter })
+                    : tr('tasks.drawer.adjustmentsSaved')}
                 </p>
               `;
             })()}
 
-            <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">流水线</h4>
+            <h4 className="mt-5 mb-1 text-[12px] font-medium text-ink">${tr('tasks.drawer.pipeline')}</h4>
             <ul className="divide-y divide-white/[.04]">
               ${steps.map((k) => {
                 const s = t.steps[k];
                 const b = qcBadge(s.qcDetails);
                 const reason = s.qcDetails && (s.qcDetails.reason || s.error);
+                const stepLabel = has(STEP_LABEL_KEY[k] || '') ? tr(STEP_LABEL_KEY[k]) : (s.name || k);
                 return html`
                   <li key=${k} className="py-[7px]">
                     <div className="flex items-center gap-2">
-                      <span className="text-[12px] text-ink">${s.name || k}</span>
+                      <span className="text-[12px] text-ink">${stepLabel}</span>
                       <span className="flex-1"></span>
                       <span className=${'text-[11px] ' + b.cls}>${b.text}</span>
                       ${s.duration > 0 && html`<span className="text-[10px] text-ink3 font-num">${s.duration}ms</span>`}

@@ -10,36 +10,37 @@
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
+import { t as tr } from '../i18n/index.js';
 
 export const HSL_BANDS = [
-  { key: 'red', label: '红', color: '#E4574F' },
-  { key: 'orange', label: '橙', color: '#E6913F' },
-  { key: 'yellow', label: '黄', color: '#D8C84A' },
-  { key: 'green', label: '绿', color: '#5DBE72' },
-  { key: 'cyan', label: '青', color: '#4BBFC4' },
-  { key: 'blue', label: '蓝', color: '#5A8FE0' },
-  { key: 'purple', label: '紫', color: '#9A6FD0' },
-  { key: 'magenta', label: '品红', color: '#D667B0' }
+  { key: 'red', labelKey: 'editor.adv.bands.red', color: '#E4574F' },
+  { key: 'orange', labelKey: 'editor.adv.bands.orange', color: '#E6913F' },
+  { key: 'yellow', labelKey: 'editor.adv.bands.yellow', color: '#D8C84A' },
+  { key: 'green', labelKey: 'editor.adv.bands.green', color: '#5DBE72' },
+  { key: 'cyan', labelKey: 'editor.adv.bands.cyan', color: '#4BBFC4' },
+  { key: 'blue', labelKey: 'editor.adv.bands.blue', color: '#5A8FE0' },
+  { key: 'purple', labelKey: 'editor.adv.bands.purple', color: '#9A6FD0' },
+  { key: 'magenta', labelKey: 'editor.adv.bands.magenta', color: '#D667B0' }
 ];
 
 export const CURVE_CHANNELS = [
-  { key: 'rgb', label: '合成', color: '#D6B36A' },
+  { key: 'rgb', labelKey: 'editor.adv.channels.rgb', color: '#D6B36A' },
   { key: 'r', label: 'R', color: '#E4574F' },
   { key: 'g', label: 'G', color: '#5DBE72' },
   { key: 'b', label: 'B', color: '#5A8FE0' }
 ];
 
 export const WHEEL_ZONES = [
-  { key: 'lift', label: '提升 Lift' },
-  { key: 'gamma', label: '伽马 Gamma' },
-  { key: 'gain', label: '增益 Gain' }
+  { key: 'lift', labelKey: 'editor.adv.zones.lift' },
+  { key: 'gamma', labelKey: 'editor.adv.zones.gamma' },
+  { key: 'gain', labelKey: 'editor.adv.zones.gain' }
 ];
 
 const WHEEL_CHANNELS = ['r', 'g', 'b', 'y'];
 const HSL_CHANNELS = [
-  { key: 'h', label: '色相' },
-  { key: 's', label: '饱和度' },
-  { key: 'l', label: '明度' }
+  { key: 'h', labelKey: 'editor.adv.hsl.h' },
+  { key: 's', labelKey: 'editor.adv.hsl.s' },
+  { key: 'l', labelKey: 'editor.adv.hsl.l' }
 ];
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
@@ -136,8 +137,8 @@ export function HslPanel({ adjust, onChange, onHistory }) {
   return html`<div className="ed-adv" data-adv-panel="hsl">
     <div className="ed-adv-head">
       <b>HSL</b>
-      <span className="ed-sub">8 个色带 · 每带 色相 / 饱和度 / 明度</span>
-      <button className="ed-btn ed-adv-reset" onClick=${resetAll}>重置</button>
+      <span className="ed-sub">${tr('editor.adv.hslHint')}</span>
+      <button className="ed-btn ed-adv-reset" onClick=${resetAll}>${tr('editor.adv.reset')}</button>
     </div>
     <div className="ed-adv-bands">
       ${HSL_BANDS.map((b, i) => html`
@@ -145,17 +146,17 @@ export function HslPanel({ adjust, onChange, onHistory }) {
           key=${b.key}
           className=${'ed-adv-band' + (i === band ? ' on' : '') + (hsl[i].some((v) => v !== 0) ? ' mod' : '')}
           onClick=${() => setBand(i)}
-          title=${b.label + '色带'}
+          title=${tr('editor.adv.bandTitle', { band: tr(b.labelKey) })}
         >
           <span className="ed-adv-dot" style=${{ background: b.color }}></span>
-          <span>${b.label}</span>
+          <span>${tr(b.labelKey)}</span>
         </button>
       `)}
     </div>
     <div className="ed-group">
       ${HSL_CHANNELS.map((c, ci) => html`
         <div className="ed-slider-row" key=${c.key}>
-          <span className="ed-slider-label">${c.label}</span>
+          <span className="ed-slider-label">${tr(c.labelKey)}</span>
           <input
             className="ed-slider-input"
             type="range"
@@ -171,10 +172,10 @@ export function HslPanel({ adjust, onChange, onHistory }) {
       `)}
     </div>
     <div className="ed-adv-foot">
-      <button className="ed-btn" onClick=${resetBand}>重置本带</button>
-      <span className="ed-sub">${HSL_BANDS[band].label}色带</span>
+      <button className="ed-btn" onClick=${resetBand}>${tr('editor.adv.resetBand')}</button>
+      <span className="ed-sub">${tr('editor.adv.bandSuffix', { band: tr(HSL_BANDS[band].labelKey) })}</span>
     </div>
-    <p className="ed-hint">只作用选中片段；参数存进工程，预览与导出共用同一套 LUT。</p>
+    <p className="ed-hint">${tr('editor.adv.hslNote')}</p>
   </div>`;
 }
 
@@ -321,9 +322,9 @@ export function CurvePanel({ adjust, onChange, onHistory }) {
 
   return html`<div className="ed-adv" data-adv-panel="curve">
     <div className="ed-adv-head">
-      <b>曲线</b>
-      <span className="ed-sub">拖动控制点 · 合成会同时写入 R/G/B</span>
-      <button className="ed-btn ed-adv-reset" onClick=${resetChannel}>重置</button>
+      <b>${tr('editor.adv.curve')}</b>
+      <span className="ed-sub">${tr('editor.adv.curveSub')}</span>
+      <button className="ed-btn ed-adv-reset" onClick=${resetChannel}>${tr('editor.adv.reset')}</button>
     </div>
     <div className="ed-adv-chan">
       ${CURVE_CHANNELS.map((c) => html`
@@ -332,7 +333,7 @@ export function CurvePanel({ adjust, onChange, onHistory }) {
           className=${'ed-adv-chan-btn' + (chan === c.key ? ' on' : '')}
           style=${{ '--chan-color': c.color }}
           onClick=${() => setChan(c.key)}
-        >${c.label}</button>
+        >${c.labelKey ? tr(c.labelKey) : c.label}</button>
       `)}
     </div>
     <canvas
@@ -341,9 +342,9 @@ export function CurvePanel({ adjust, onChange, onHistory }) {
       width="260"
       height="180"
       onPointerDown=${onDown}
-      title="拖动曲线控制点"
+      title=${tr('editor.adv.curveTitle')}
     ></canvas>
-    <p className="ed-hint">默认 5 个控制点（0/0、0.25/0.25、0.5/0.5、0.75/0.75、1/1）；端点只能上下移动。</p>
+    <p className="ed-hint">${tr('editor.adv.curveHint')}</p>
   </div>`;
 }
 
@@ -375,15 +376,15 @@ export function WheelPanel({ adjust, onChange, onHistory }) {
 
   return html`<div className="ed-adv" data-adv-panel="wheel">
     <div className="ed-adv-head">
-      <b>色轮</b>
-      <span className="ed-sub">lift / gamma / gain · r/g/b/y · -1..1</span>
-      <button className="ed-btn ed-adv-reset" onClick=${resetAll}>重置</button>
+      <b>${tr('editor.adv.wheel')}</b>
+      <span className="ed-sub">${tr('editor.adv.wheelSub')}</span>
+      <button className="ed-btn ed-adv-reset" onClick=${resetAll}>${tr('editor.adv.reset')}</button>
     </div>
     ${WHEEL_ZONES.map((z) => html`
       <div className="ed-adv-wheel" key=${z.key}>
         <div className="ed-adv-wheel-head">
-          <b>${z.label}</b>
-          <button className="ed-btn ed-adv-reset" onClick=${() => resetZone(z.key)}>归零</button>
+          <b>${tr(z.labelKey)}</b>
+          <button className="ed-btn ed-adv-reset" onClick=${() => resetZone(z.key)}>${tr('editor.adv.zero')}</button>
         </div>
         <div className="ed-adv-wheel-grid">
           ${WHEEL_CHANNELS.map((ch) => html`
@@ -405,6 +406,6 @@ export function WheelPanel({ adjust, onChange, onHistory }) {
         </div>
       </div>
     `)}
-    <p className="ed-hint">0 = 不变。y 是亮度通道；参数逐段保存，预览与导出同一套 LUT。</p>
+    <p className="ed-hint">${tr('editor.adv.wheelHint')}</p>
   </div>`;
 }

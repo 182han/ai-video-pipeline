@@ -267,6 +267,7 @@ const stubs = [];
     const draftSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'createDraft.js'), 'utf8');
     const invSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'inventory.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'settingsPage.js'), 'utf8');
+const settingsMsgs = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'i18n', 'messages', 'settings.js'), 'utf8');
 
     ok('server.js 注册了出图适配器', serverSrc.includes("require('./src/generators/imageProviders')"));
     ok('存在 GET /api/image-gen/status', serverSrc.includes("app.get('/api/image-gen/status'"));
@@ -280,15 +281,15 @@ const stubs = [];
     ok('settingsPage 有图片模型入口', settingsSrc.includes("id: 'imagegen'"));
     ok('settingsPage 保存图片 Key 字段', settingsSrc.includes("['imageKey'"));
     ok('settingsPage 图片组可测试连接', settingsSrc.includes("if (g.id === 'imagegen')"));
-    ok('settingsPage 所有密码字段有显示切换', settingsSrc.includes('showKeys') && settingsSrc.includes('显示密钥'));
+    ok('settingsPage 所有密码字段有显示切换', settingsSrc.includes('showKeys') && settingsMsgs.includes("showKey: '显示密钥'"));
     ok('server.js 支持 imagegen 连接测试', serverSrc.includes("type === 'imagegen'"));
     ok('/api/status 暴露图片生成版本探针', serverSrc.includes('imageGen: {'));
     ok('server.js 带 serverInfo 版本探针', serverSrc.includes('SERVER_STARTED_AT'));
     ok('根路径已重定向到 /app', serverSrc.includes("res.redirect(302, '/app')"));
     ok('存在运行版本检查脚本', fs.existsSync(path.join(APP_DIR, 'scripts', 'check-server-version.js')));
-    ok('设置页对旧服务端给出重启提示', settingsSrc.includes('服务端仍是旧进程'));
-    ok('Seedance 接口默认折叠', settingsSrc.includes("{ id: 'seedance', title: 'Seedance 2.5（字节）', collapsible: true"));
-    ok('可灵接口默认折叠', settingsSrc.includes("{ id: 'kling', title: '可灵 Kling 3.0', collapsible: true"));
+    ok('设置页对旧服务端给出重启提示', settingsSrc.includes('settings.keys.oldServer') && settingsMsgs.includes('服务端仍是旧进程'));
+    ok('Seedance 接口默认折叠', settingsSrc.includes("titleKey: 'settings.group.seedance', collapsible: true"));
+    ok('可灵接口默认折叠', settingsSrc.includes("titleKey: 'settings.group.kling', collapsible: true"));
     ok('inventory.js 不再声称厂商未接入', !invSrc.includes('目前出图厂商未接入'));
     ok('适配器已注册 dashscope', imageGen.listImageProviders().includes('dashscope'),
       imageGen.listImageProviders().join(','));

@@ -18,6 +18,7 @@ import { navigate } from '../router.js';
 import { setSeedPhoto } from '../createDraft.js';
 import { TaskDrawer } from '../components/taskDrawer.js';
 import { statusMeta } from '../components/pauseControl.js';
+import { t as tr, tp, fmtDateTime } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -56,15 +57,15 @@ function Empty({ children }) {
 function costText(cost) {
   if (!cost) return '';
   // 未知模型不能显示成 ¥0.00（会误导成免费）；如实标“未配置”。
-  if (cost.computed === false) return '未配置';
+  if (cost.computed === false) return tr('library.common.unconfigured');
   const n = Number(cost.amount);
   return Number.isFinite(n) ? '¥' + n.toFixed(2) : '';
 }
 
 function qcText(qc) {
-  if (!qc) return '未质检';
-  if (qc.passed) return 'QC 通过';
-  return 'QC ' + (qc.level || '未通过');
+  if (!qc) return tr('library.qc.notChecked');
+  if (qc.passed) return tr('library.qc.passed');
+  return tr('library.qc.failedPrefix') + (qc.level || tr('library.qc.failed'));
 }
 
 // ---------------- 库：公共小工具 ----------------
@@ -81,21 +82,22 @@ function fmtDurSec(sec) {
   return String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
 }
 
-const ORIGIN_TEXT = { task: '任务', library: '片段库', editor: '剪辑导出', orphan: '孤儿' };
+const ORIGIN_KEYS = { task: 'library.origin.task', library: 'library.origin.library', editor: 'library.origin.editor', orphan: 'library.origin.orphan' };
+const originText = (o) => (o && ORIGIN_KEYS[o]) ? tr(ORIGIN_KEYS[o]) : (o || tr('library.common.unknown'));
 
 // 费用：没有快照就显示“未知”，绝不写 ¥0.00（2026-11-15 口径）。
 function costLabel(cost) {
-  if (!cost) return '未知';
-  if (cost.computed === false) return '未知';
+  if (!cost) return tr('library.common.unknown');
+  if (cost.computed === false) return tr('library.common.unknown');
   const n = Number(cost.amount);
-  return Number.isFinite(n) ? '¥' + n.toFixed(2) : '未知';
+  return Number.isFinite(n) ? '¥' + n.toFixed(2) : tr('library.common.unknown');
 }
 
 function qcBadge(qc) {
-  if (!qc) return html`<span className="text-[10px] text-ink3">未质检</span>`;
-  if (qc.passed) return html`<span className="text-[10px] text-accent">QC 通过</span>`;
-  if (qc.unverified) return html`<span className="text-[10px] text-warn">QC 未验证</span>`;
-  return html`<span className="text-[10px] text-danger">QC 不通过</span>`;
+  if (!qc) return html`<span className="text-[10px] text-ink3">${tr('library.qc.notChecked')}</span>`;
+  if (qc.passed) return html`<span className="text-[10px] text-accent">${tr('library.qc.passed')}</span>`;
+  if (qc.unverified) return html`<span className="text-[10px] text-warn">${tr('library.qc.unverified')}</span>`;
+  return html`<span className="text-[10px] text-danger">${tr('library.qc.failed')}</span>`;
 }
 
 // 缩略图：走 /api/library/:id/thumb（服务端抽帧缓存）；失败就显示占位，不装样子。
@@ -104,7 +106,7 @@ function Thumb({ id }) {
   const box = { width: '86px', height: '48px', flex: '0 0 auto' };
   if (bad || !id) {
     return html`<span className="grid place-items-center bg-black rounded-[4px] text-[9px] text-ink3"
-      style=${box}>无图</span>`;
+      style=${box}>${tr('library.common.noThumb')}</span>`;
   }
   return html`<img src=${'/api/library/' + encodeURIComponent(id) + '/thumb'} alt=""
     loading="lazy" onError=${() => setBad(true)}
@@ -116,7 +118,7 @@ function DownloadLink({ url, fileName, label }) {
   if (!url) return null;
   return html`<a href=${url} download=${fileName || ''}
     className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06] inline-flex items-center"
-  >${label || '下载'}</a>`;
+  >${label || tr('library.common.download')}</a>`;
 }
 
 export function ClipsPanel({ onChanged }) {
@@ -164,11 +166,11 @@ export function ClipsPanel({ onChanged }) {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       reload();
-    } catch (e) { setErr('收藏失败：' + e.message); }
+    } catch (e) { setErr(tr('library.clips.favFailed') + e.message); }
   }
 
   async function remove(id) {
-    if (!window.confirm('删除这条片段？会先移入回收站，可在回收站恢复。')) return;
+    if (!window.confirm(tr('library.clips.deleteConfirm'))) return;
     setErr('');
     try {
       const r = await fetch('/api/library/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
@@ -176,11 +178,11 @@ export function ClipsPanel({ onChanged }) {
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       reload();
       if (onChanged) onChanged();
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(tr('library.clips.deleteFailed') + e.message); }
   }
 
   async function regen(it) {
-    if (!window.confirm('按原提示词重新生成一条？旧的会保留。')) return;
+    if (!window.confirm(tr('library.clips.regenConfirm'))) return;
     setErr('');
     try {
       const r = await fetch('/api/library/' + encodeURIComponent(it.id) + '/regenerate', {
@@ -190,8 +192,8 @@ export function ClipsPanel({ onChanged }) {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      window.alert('已提交重新生成（在后台跑，完成后会进片段库）。');
-    } catch (e) { setErr('重新生成失败：' + e.message); }
+      window.alert(tr('library.clips.regenSubmitted'));
+    } catch (e) { setErr(tr('library.clips.regenFailed') + e.message); }
   }
 
   return html`
@@ -200,28 +202,28 @@ export function ClipsPanel({ onChanged }) {
         <button onClick=${() => setFav((v) => !v)}
           className=${'h-8 px-3 rounded-[6px] text-[12px] border ' +
             (fav ? 'border-accent/50 text-accent' : 'border-white/[.10] text-ink2 hover:bg-white/[.05]')}
-        >只看收藏</button>
+        >${tr('library.clips.onlyFav')}</button>
         <select value=${res} onChange=${(e) => setRes(e.target.value)}
           className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-          <option value="">全部分辨率</option>
+          <option value="">${tr('library.clips.allResolutions')}</option>
           ${(facets.resolutions || []).map((x) => html`<option key=${x} value=${x}>${x}</option>`)}
         </select>
-        <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="搜索提示词…"
+        <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder=${tr('library.clips.searchPlaceholder')}
           className="h-8 w-[190px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
         <span className="flex-1"></span>
-        <span className="text-[11px] text-ink3">${clipCount} 条 · ${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
+        <span className="text-[11px] text-ink3">${tp('library.clips.count', clipCount)}${s.loading ? ' · ' + tr('library.common.loading') : (s.error ? ' · ' + tr('library.common.loadFailed') : '')}</span>
       </div>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
       ${s.error && html`<p className="mb-2 text-[12px] text-danger">${s.error}</p>`}
 
-      ${clipGroups.length === 0 && !s.loading && html`<${Empty}>没有匹配的片段</${Empty}>`}
+      ${clipGroups.length === 0 && !s.loading && html`<${Empty}>${tr('library.clips.empty')}</${Empty}>`}
 
       ${clipGroups.map((g) => html`
         <div key=${g.label} className="mb-4">
           <div className="flex items-baseline gap-2 border-b border-white/[.08] pb-1 mb-2">
             <span className="text-[12px] font-medium text-ink">${g.label}</span>
-            <span className="text-[10px] text-ink3 font-num">${g.count} 条</span>
+            <span className="text-[10px] text-ink3 font-num">${tp('library.clips.count', g.count)}</span>
           </div>
           <div className="grid grid-cols-4 gap-3">
             ${(g.items || []).map((it) => html`
@@ -236,9 +238,9 @@ export function ClipsPanel({ onChanged }) {
                     <span>${fmtDurSec(it.durationSec)}</span>
                     <span className="opacity-40">·</span>
                     ${qcBadge(it.qc)}
-                    ${it.status === 'failed' ? html`<span className="text-[10px] text-danger">生成失败</span>` : null}
+                    ${it.status === 'failed' ? html`<span className="text-[10px] text-danger">${tr('library.clips.failed')}</span>` : null}
                     <span className="opacity-40">·</span>
-                    <span>费用 ${costLabel(it.cost)}</span>
+                    <span>${tr('library.clips.cost', { cost: costLabel(it.cost) })}</span>
                   </p>
                   <div className="mt-1 flex items-center gap-2">
                     <button onClick=${() => toggleFav(it.id, it.favorite)}
@@ -248,12 +250,12 @@ export function ClipsPanel({ onChanged }) {
                     <span className="text-[10px] text-ink3 font-num">${it.model || ''}</span>
                     <span className="flex-1"></span>
                     <button onClick=${() => setDetail(it)}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">详情</button>
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">${tr('library.clips.detail')}</button>
                     <button onClick=${() => regen(it)}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">重新生成</button>
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">${tr('library.clips.regenerate')}</button>
                     <${DownloadLink} url=${it.url} fileName=${it.fileName} />
                     <button onClick=${() => remove(it.id)}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">${tr('library.clips.delete')}</button>
                   </div>
                 </div>
               </div>
@@ -268,16 +270,16 @@ export function ClipsPanel({ onChanged }) {
         >
           <div style=${{ width: 'min(760px, 92vw)', maxHeight: '86vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
-              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>片段详情</b>
-              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.clips.detailTitle')}</b>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
             </div>
             <video src=${detail.url} controls playsInline style=${{ width: '100%', maxHeight: '340px', background: '#000', borderRadius: '6px' }}></video>
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
-              <span style=${{ color: 'var(--ink3)' }}>提示词</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.prompt')}</span>
               <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${detail.prompt || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>型号</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.model')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>规格</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.spec')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${[
                 detail.resolution,
                 detail.width && detail.height ? detail.width + '×' + detail.height : '',
@@ -285,38 +287,38 @@ export function ClipsPanel({ onChanged }) {
                 detail.durationSec ? Number(detail.durationSec).toFixed(2) + 's' : '',
                 detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ')}</span>
-              <span style=${{ color: 'var(--ink3)' }}>成本</span>
-              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}${detail.cost && detail.cost.attempts ? ' · ' + detail.cost.attempts + ' 次' : ''}</span>
-              <span style=${{ color: 'var(--ink3)' }}>质检</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.costLabel')}</span>
+              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}${detail.cost && detail.cost.attempts ? tr('library.common.attempts', { n: detail.cost.attempts }) : ''}</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.qcLabel')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${qcText(detail.qc)}${detail.qc && detail.qc.reason ? ' · ' + detail.qc.reason : ''}${detail.qc && detail.qc.qcVersion ? ' · v' + detail.qc.qcVersion : ''}</span>
-              <span style=${{ color: 'var(--ink3)' }}>来源任务</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.sourceTask')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.taskId || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>源图</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.sourcePhoto')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.sourcePhotoId || '-'}</span>
               ${sourceVersions.length > 1 && html`
                 <div style=${{ gridColumn: '1 / -1', marginTop: '4px' }}>
-                  <div style=${{ fontSize: '11px', color: 'var(--ink3)', marginBottom: '6px' }}>源图版本链（相邻版本并排）</div>
+                  <div style=${{ fontSize: '11px', color: 'var(--ink3)', marginBottom: '6px' }}>${tr('library.clips.versionChain')}</div>
                   ${sourceVersions.slice(1).map((v, i) => {
                     const prev = sourceVersions[i];
                     return html`
                       <div key=${v.id} style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
                         <div><img src=${prev.url} style=${{ width: '100%', maxHeight: '150px', objectFit: 'contain', background: '#000', borderRadius: '4px' }} /><div style=${{ fontSize: '10px', color: 'var(--ink3)', textAlign: 'center' }}>V${prev.version}</div></div>
-                        <div><img src=${v.url} style=${{ width: '100%', maxHeight: '150px', objectFit: 'contain', background: '#000', borderRadius: '4px' }} /><div style=${{ fontSize: '10px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? ' · 最终' : ''}</div></div>
+                        <div><img src=${v.url} style=${{ width: '100%', maxHeight: '150px', objectFit: 'contain', background: '#000', borderRadius: '4px' }} /><div style=${{ fontSize: '10px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? ' · ' + tr('library.common.finalVersion') : ''}</div></div>
                       </div>`;
                   })}
                 </div>`}
-              <span style=${{ color: 'var(--ink3)' }}>文件</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.common.file')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.fileName || '-'}</span>
             </div>
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
               <button
                 onClick=${() => { toggleFav(detail.id, detail.favorite); setDetail(null); }}
                 style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}
-              >${detail.favorite ? '取消收藏' : '收藏'}</button>
+              >${detail.favorite ? tr('library.clips.unfavorite') : tr('library.clips.favorite')}</button>
               <button
                 onClick=${() => { regen(detail); setDetail(null); }}
                 style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}
-              >按原提示词重新生成</button>
+              >${tr('library.clips.regenSamePrompt')}</button>
             </div>
           </div>
         </div>
@@ -328,7 +330,7 @@ export function ClipsPanel({ onChanged }) {
 // ---------------- 照片 ----------------
 // 2026-11-11：图片库落地。生成时自动入库（含提示词），这里做列表 / 人工审核 / 删除。
 // 审核通过 = 这张图可以用作下一步「图生视频」的输入（厂商通道按确认后接入）。
-const PHOTO_STATUS_TEXT = { pending: '待审', approved: '已通过', rejected: '已打回' };
+const PHOTO_STATUS_KEYS = { pending: 'library.photos.status.pending', approved: 'library.photos.status.approved', rejected: 'library.photos.status.rejected' };
 
 // ---------------- 照片手动调色（2026-11-16 契约 §3.5） ----------------
 // 接口：POST /api/photos/:id/adjust
@@ -337,10 +339,10 @@ const PHOTO_STATUS_TEXT = { pending: '待审', approved: '已通过', rejected: 
 // 响应：{ ok, adjusted, reverted, filter, url, photo }；photo.adjust = { params, versions, current, ... }
 // 调色是本地派生、不计费；调色前后是同一 photo 条目的版本链，不拆成新条目。
 const ADJUST_KEYS = [
-  { key: 'brightness', label: '亮度' },
-  { key: 'contrast', label: '对比度' },
-  { key: 'saturation', label: '饱和度' },
-  { key: 'temperature', label: '色温' }
+  { key: 'brightness', labelKey: 'tasks.adjust.brightness' },
+  { key: 'contrast', labelKey: 'tasks.adjust.contrast' },
+  { key: 'saturation', labelKey: 'tasks.adjust.saturation' },
+  { key: 'temperature', labelKey: 'tasks.adjust.temperature' }
 ];
 const ADJUST_ZERO = { brightness: 0, contrast: 0, saturation: 0, temperature: 0 };
 
@@ -367,10 +369,10 @@ function adjustVersion(photo) {
 // 参数摘要：亮度+20 · 对比度-5 · 饱和度 0 · 色温+10
 function adjustSummary(params) {
   const p = params || ADJUST_ZERO;
-  return ADJUST_KEYS.map(({ key, label }) => {
+  return ADJUST_KEYS.map(({ key, labelKey }) => {
     const n = Number(p[key]);
     const v = Number.isFinite(n) ? Math.round(n) : 0;
-    return label + (v > 0 ? '+' : '') + v;
+    return tr(labelKey) + (v > 0 ? '+' : '') + v;
   }).join(' · ');
 }
 
@@ -456,7 +458,7 @@ export function PhotosPanel({ onChanged }) {
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       setDetail((d) => (d && d.id === id ? j.photo : d));
       reload();
-    } catch (e) { setErr('审核失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.reviewFailed') + e.message); }
   }
 
   async function makeFinal(id) {
@@ -472,7 +474,7 @@ export function PhotosPanel({ onChanged }) {
       setDetail(j.photo);
       setVersions(Array.isArray(j.versions) ? j.versions : []);
       reload();
-    } catch (e) { setErr('设为最终版失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.makeFinalFailed') + e.message); }
   }
 
   async function reviewScience(id, next) {
@@ -488,11 +490,11 @@ export function PhotosPanel({ onChanged }) {
       setDetail(j.photo);
       setVersions(Array.isArray(j.versions) ? j.versions : []);
       reload();
-    } catch (e) { setErr('科学审查失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.scienceFailed') + e.message); }
   }
 
   async function remove(id) {
-    if (!window.confirm('删除这张图片？会先移入回收站，可在回收站恢复。')) return;
+    if (!window.confirm(tr('library.photos.removeConfirm'))) return;
     setErr('');
     try {
       const r = await fetch('/api/photos/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
@@ -501,7 +503,7 @@ export function PhotosPanel({ onChanged }) {
       setDetail(null);
       reload();
       if (onChanged) onChanged();
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.deleteFailed') + e.message); }
   }
 
   // 画面提示词 / 视频提示词分开保存：互不覆盖
@@ -519,7 +521,7 @@ export function PhotosPanel({ onChanged }) {
       setEditPrompt(j.photo.imagePrompt || '');
       setEditVideoPrompt(j.photo.videoPrompt || '');
       reload();
-    } catch (e) { setErr('保存提示词失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.savePromptFailed') + e.message); }
   }
 
   // ---- 手动调色：POST /api/photos/:id/adjust ----
@@ -560,7 +562,7 @@ export function PhotosPanel({ onChanged }) {
       const msg = String((e && e.message) || '');
       setAdjErr(/^(调色失败|回退原图失败|恢复原图失败)[:：]/.test(msg)
         ? msg
-        : ((kind === 'revert' ? '恢复原图失败：' : '调色失败：') + msg));
+        : ((kind === 'revert' ? tr('library.photos.revertFailed') : tr('library.photos.adjustFailed')) + msg));
       return null;
     } finally {
       setAdjBusy('');
@@ -573,7 +575,7 @@ export function PhotosPanel({ onChanged }) {
     const j = await postAdjust(body, 'apply');
     if (j) {
       const v = adjustVersion(j.photo);
-      setAdjNote('已应用调色' + (v ? '（v' + v + '）' : '') + '，改用服务端渲染结果');
+      setAdjNote(tr('library.photos.appliedNote', { version: v ? tr('library.photos.appliedVersion', { n: v }) : '' }));
     }
   }
 
@@ -581,7 +583,7 @@ export function PhotosPanel({ onChanged }) {
     const j = await postAdjust({ reset: true }, 'revert');
     if (j) {
       setAdjParams({ ...ADJUST_ZERO });
-      setAdjNote('已恢复原图，滑杆归 0');
+      setAdjNote(tr('library.photos.revertedNote'));
     }
   }
 
@@ -589,14 +591,14 @@ export function PhotosPanel({ onChanged }) {
   function resetAdjustSliders() {
     setAdjParams({ ...ADJUST_ZERO });
     setAdjErr('');
-    setAdjNote('滑杆已归 0（未提交）。要丢弃调色、回到原图请点「恢复原图」。');
+    setAdjNote(tr('library.photos.resetNote'));
   }
 
   // 「载入上次参数」把滑杆设回 photo.adjust.params（服务端当前版本），只是回填，不提交。
   function loadLastAdjust() {
     setAdjParams(adjustParamsOf(detail));
     setAdjErr('');
-    setAdjNote('已载入上次应用参数（未提交）');
+    setAdjNote(tr('library.photos.loadedNote'));
   }
 
   // 把这张图带回创作流程：未审核的先标记通过，再写 seed 并跳回 /（向导会取走并跳到第③步）
@@ -616,10 +618,10 @@ export function PhotosPanel({ onChanged }) {
       }
       setSeedPhoto(photo);
       navigate('/create');
-    } catch (e) { setErr('带入创作失败：' + e.message); }
+    } catch (e) { setErr(tr('library.photos.useFailed') + e.message); }
   }
 
-  const promptText = (p) => ((p.imagePrompt || p.prompt) || (p.promptAvailable === false ? '（历史文件：提示词未记录）' : '（无提示词）'));
+  const promptText = (p) => ((p.imagePrompt || p.prompt) || (p.promptAvailable === false ? tr('library.photos.promptMissingHistory') : tr('library.photos.promptMissing')));
 
   // 2026-11-14 用户要求：调色前/后是同一张图的两个版本，列表里并列成一张卡，
   // 不再拆成两个独立卡片；同时显示生成费与使用状态。
@@ -648,7 +650,7 @@ export function PhotosPanel({ onChanged }) {
       g.after = null;
     }
   }
-  const usedText = (p) => (Array.isArray(p.usedIn) && p.usedIn.length ? '已用于生成视频' : '尚未用于视频');
+  const usedText = (p) => (Array.isArray(p.usedIn) && p.usedIn.length ? tr('library.photos.used') : tr('library.photos.unused'));
   const cleanPrompt = (p) => promptText(p).replace(/^【(调色前|调色后)】/, '');
   const detailPair = detail
     ? photoGroups.find((g) => g.key === pairKey(detail) && g.before && g.after)
@@ -671,31 +673,31 @@ export function PhotosPanel({ onChanged }) {
   return html`
     <div>
       <p className="mb-3 text-[11px] leading-[1.7] text-ink3">
-        生成的图片会自动入库并保留提示词（不再只留一个 clips 文件）。点「通过」表示这张图可以作为下一步图生视频的输入。调色前/后并列展示；生成费用按价目表估算，调色是本地派生、不重复计费。
+        ${tr('library.photos.intro')}
       </p>
 
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <select value=${status} onChange=${(e) => setStatus(e.target.value)}
           className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
-          <option value="">全部状态</option>
-          <option value="pending">待审</option>
-          <option value="approved">已通过</option>
-          <option value="rejected">已打回</option>
+          <option value="">${tr('library.photos.allStatus')}</option>
+          <option value="pending">${tr('library.photos.status.pending')}</option>
+          <option value="approved">${tr('library.photos.status.approved')}</option>
+          <option value="rejected">${tr('library.photos.status.rejected')}</option>
         </select>
-        <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="搜索提示词…"
+        <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder=${tr('library.photos.searchPlaceholder')}
           className="h-8 w-[190px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
         <span className="flex-1"></span>
         <span className="text-[11px] text-ink3 font-num">
-          ${totals.all || 0} 张 · 待审 ${totals.pending || 0} · 通过 ${totals.approved || 0} · 打回 ${totals.rejected || 0}
+          ${tr('library.photos.totals', { all: totals.all || 0, pending: totals.pending || 0, approved: totals.approved || 0, rejected: totals.rejected || 0 })}
         </span>
-        <span className="text-[11px] text-ink3">${s.loading ? '加载中…' : (s.error ? '读取失败' : '')}</span>
+        <span className="text-[11px] text-ink3">${s.loading ? tr('library.photos.loading') : (s.error ? tr('library.photos.loadFailed') : '')}</span>
       </div>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
       ${s.error && html`<p className="mb-2 text-[12px] text-danger">${s.error}</p>`}
 
       ${photos.length === 0 && !s.loading && html`<${Empty}>
-        ${status || q.trim() ? '没有匹配的照片' : '还没有照片。到「创作」第②步生成一张，就会自动入库。'}
+        ${status || q.trim() ? tr('library.photos.emptyFiltered') : tr('library.photos.empty')}
       </${Empty}>`}
 
       <div className="grid grid-cols-4 gap-3">
@@ -706,35 +708,35 @@ export function PhotosPanel({ onChanged }) {
               <div key=${g.key} style=${{ gridColumn: 'span 2' }} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
                 <div className="grid grid-cols-2 gap-px bg-black">
                   <div style=${{ position: 'relative' }}>
-                    <img src=${withCacheBust(g.before.url, adjBust[g.before.id])} alt="调色前"
+                    <img src=${withCacheBust(g.before.url, adjBust[g.before.id])} alt=${tr('library.photos.before')}
                       onClick=${() => openDetail(g.before)}
                       className="w-full aspect-video bg-black object-cover cursor-pointer" />
-                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色前</span>
+                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>${tr('library.photos.before')}</span>
                   </div>
                   <div style=${{ position: 'relative' }}>
-                    <img src=${withCacheBust(g.after.url, adjBust[g.after.id])} alt="调色后"
+                    <img src=${withCacheBust(g.after.url, adjBust[g.after.id])} alt=${tr('library.photos.after')}
                       onClick=${() => openDetail(g.after)}
                       className="w-full aspect-video bg-black object-cover cursor-pointer" />
-                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>调色后</span>
+                    <span style=${{ position: 'absolute', left: '6px', top: '6px', padding: '2px 6px', borderRadius: '3px', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: '10px' }}>${tr('library.photos.after')}</span>
                   </div>
                 </div>
                 <div className="px-2 py-1.5">
                   <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${cleanPrompt(p)}</p>
                   <p className="text-[10px] text-ink3 font-num">
-                    ${PHOTO_STATUS_TEXT[p.status] || p.status}
+                    ${PHOTO_STATUS_KEYS[p.status] ? tr(PHOTO_STATUS_KEYS[p.status]) : p.status}
                     ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
-                    ${' · 生成 ' + (costText(g.before.cost) || '-')}
-                    ${' · 调色 ' + (costText(g.after.cost) || '-')}
+                    ${' · ' + tr('library.photos.generatedCost', { cost: costText(g.before.cost) || '-' })}
+                    ${' · ' + tr('library.photos.adjustedCost', { cost: costText(g.after.cost) || '-' })}
                   </p>
                   <p className="mt-0.5 text-[10px] text-ink3">${usedText(g.after)}</p>
                   <div className="mt-1 flex items-center gap-2">
                     <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
                     <span className="flex-1"></span>
                     <button onClick=${() => openDetail(g.after)}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">查看对比</button>
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">${tr('library.photos.viewCompare')}</button>
                     <${DownloadLink} url=${g.after.url} fileName=${g.after.fileName} />
                     <button onClick=${() => useInCreation(g.after)}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">${tr('library.photos.useInVideo')}</button>
                   </div>
                 </div>
               </div>`;
@@ -742,13 +744,13 @@ export function PhotosPanel({ onChanged }) {
           const p = g.after || g.before || g.singles[0];
           return html`
             <div key=${p.id} className="rounded-[6px] border border-white/[.08] bg-s1 overflow-hidden">
-              <img src=${withCacheBust(p.url, adjBust[p.id])} alt="生成的图片"
+              <img src=${withCacheBust(p.url, adjBust[p.id])} alt=${tr('library.photos.imageAlt')}
                 onClick=${() => openDetail(p)}
                 className="w-full aspect-video bg-black object-cover cursor-pointer" />
               <div className="px-2 py-1.5">
                 <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">${promptText(p)}</p>
                 <p className="text-[10px] text-ink3 font-num">
-                  ${PHOTO_STATUS_TEXT[p.status] || p.status}
+                  ${PHOTO_STATUS_KEYS[p.status] ? tr(PHOTO_STATUS_KEYS[p.status]) : p.status}
                   ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
                   ${costText(p.cost) ? ' · ' + costText(p.cost) : ''}
                 </p>
@@ -757,16 +759,16 @@ export function PhotosPanel({ onChanged }) {
                   <span className="text-[10px] text-ink3 font-num">${p.model || ''}</span>
                   <span className="flex-1"></span>
                   <button onClick=${() => useInCreation(p)}
-                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">用它生成视频</button>
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">${tr('library.photos.useInVideo')}</button>
                   ${p.status !== 'approved' && html`
                     <button onClick=${() => review(p.id, 'approved')}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">通过</button>`}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-accent hover:bg-white/[.06]">${tr('library.photos.approve')}</button>`}
                   ${p.status !== 'rejected' && html`
                     <button onClick=${() => review(p.id, 'rejected')}
-                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">打回</button>`}
+                      className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">${tr('library.photos.reject')}</button>`}
                   <${DownloadLink} url=${p.url} fileName=${p.fileName} />
                   <button onClick=${() => remove(p.id)}
-                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+                    className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06]">${tr('library.photos.delete')}</button>
                 </div>
               </div>
             </div>`;
@@ -780,31 +782,31 @@ export function PhotosPanel({ onChanged }) {
         >
           <div style=${{ width: 'min(820px, 92vw)', maxHeight: '88vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>图片详情</b>
-              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${PHOTO_STATUS_TEXT[detail.status] || detail.status}</span>
+              <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.detailTitle')}</b>
+              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${PHOTO_STATUS_KEYS[detail.status] ? tr(PHOTO_STATUS_KEYS[detail.status]) : detail.status}</span>
               <span style=${{ flex: 1 }}></span>
-              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.close')}</button>
             </div>
-            <img src=${withCacheBust(detail.url, adjBust[detail.id])} alt="生成的图片" onClick=${() => setZoomImg(detail.url)}
+            <img src=${withCacheBust(detail.url, adjBust[detail.id])} alt=${tr('library.photos.imageAlt')} onClick=${() => setZoomImg(detail.url)}
               style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in', ...(previewFilterText ? { filter: previewFilterText } : {}) }} />
             <div style=${{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '2px' }}>
-                <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>手动调色</b>
+                <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.manualAdjust')}</b>
                 ${adjustVer
                   ? html`
-                    <span style=${{ padding: '1px 6px', borderRadius: '3px', border: '1px solid rgba(214,179,106,.45)', color: 'var(--accent)', fontSize: '10px' }}>已调色 v${adjustVer}</span>
+                    <span style=${{ padding: '1px 6px', borderRadius: '3px', border: '1px solid rgba(214,179,106,.45)', color: 'var(--accent)', fontSize: '10px' }}>${tr('library.photos.adjustedVersion', { n: adjustVer })}</span>
                     <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjustSummary(detail.adjust.params)}</span>
                     <button onClick=${loadLastAdjust}
-                      style=${{ height: '22px', padding: '0 8px', borderRadius: '4px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '10.5px', cursor: 'pointer' }}>载入上次参数</button>`
-                  : html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>未调色（当前是原始版本）</span>`}
+                      style=${{ height: '22px', padding: '0 8px', borderRadius: '4px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '10.5px', cursor: 'pointer' }}>${tr('library.photos.loadLast')}</button>`
+                  : html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${tr('library.photos.notAdjusted')}</span>`}
                 <span style=${{ flex: 1 }}></span>
-                ${previewFilterText ? html`<span style=${{ color: 'var(--accent)', fontSize: '10.5px' }}>即时预览 · 未提交</span>` : ''}
-                ${adjBusy ? html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjBusy === 'revert' ? '恢复中…' : '应用中…'}</span>` : ''}
+                ${previewFilterText ? html`<span style=${{ color: 'var(--accent)', fontSize: '10.5px' }}>${tr('library.photos.previewing')}</span>` : ''}
+                ${adjBusy ? html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjBusy === 'revert' ? tr('library.photos.reverting') : tr('library.photos.applying')}</span>` : ''}
               </div>
-              ${ADJUST_KEYS.map(({ key, label }) => html`
+              ${ADJUST_KEYS.map(({ key, labelKey }) => html`
                 <div key=${'adjust-' + key} style=${{ display: 'grid', gridTemplateColumns: '52px 1fr 44px', alignItems: 'center', gap: '8px', margin: '3px 0' }}>
-                  <span style=${{ color: 'var(--ink2)', fontSize: '11px' }}>${label}</span>
-                  <input type="range" min="-100" max="100" step="1" value=${adjParams[key]} aria-label=${label}
+                  <span style=${{ color: 'var(--ink2)', fontSize: '11px' }}>${tr(labelKey)}</span>
+                  <input type="range" min="-100" max="100" step="1" value=${adjParams[key]} aria-label=${tr(labelKey)}
                     onChange=${(e) => {
                       const n = Number(e.target.value);
                       setAdjParams((p) => Object.assign({}, p, { [key]: Number.isFinite(n) ? n : 0 }));
@@ -816,29 +818,29 @@ export function PhotosPanel({ onChanged }) {
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
                 <button onClick=${applyAdjust}
                   disabled=${adjBusy !== '' || adjustIsZero}
-                  title=${adjustIsZero ? '四项全 0 不是合法调色：要用原图请点「恢复原图」' : '按当前滑杆值从原图重新渲染'}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: adjustIsZero ? 'var(--ink3)' : 'var(--accent)', fontSize: '11px', cursor: adjBusy !== '' || adjustIsZero ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || adjustIsZero ? 0.5 : 1 }}>应用</button>
+                  title=${adjustIsZero ? tr('library.photos.zeroTitle') : tr('library.photos.applyTitle')}
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: adjustIsZero ? 'var(--ink3)' : 'var(--accent)', fontSize: '11px', cursor: adjBusy !== '' || adjustIsZero ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || adjustIsZero ? 0.5 : 1 }}>${tr('library.photos.apply')}</button>
                 <button onClick=${resetAdjustSliders}
                   disabled=${adjBusy !== ''}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: adjBusy !== '' ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' ? 0.5 : 1 }}>重置为 0</button>
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: adjBusy !== '' ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' ? 0.5 : 1 }}>${tr('library.photos.resetZero')}</button>
                 <button onClick=${revertAdjust}
                   disabled=${adjBusy !== '' || !adjustVer}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: adjustVer ? 'var(--ink2)' : 'var(--ink3)', fontSize: '11px', cursor: adjBusy !== '' || !adjustVer ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || !adjustVer ? 0.5 : 1 }}>恢复原图</button>
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: adjustVer ? 'var(--ink2)' : 'var(--ink3)', fontSize: '11px', cursor: adjBusy !== '' || !adjustVer ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || !adjustVer ? 0.5 : 1 }}>${tr('library.photos.revert')}</button>
                 <span style=${{ flex: 1 }}></span>
                 ${adjustIsZero && html`
-                  <span style=${{ color: 'var(--ink3)', fontSize: '10px' }}>四项全 0 不能应用：先拖动滑杆；要丢弃调色回原图请点「恢复原图」</span>`}
+                  <span style=${{ color: 'var(--ink3)', fontSize: '10px' }}>${tr('library.photos.zeroHint')}</span>`}
               </div>
               ${adjErr && html`<p style=${{ margin: '6px 0 0', fontSize: '11px', color: 'var(--danger)' }}>${adjErr}</p>`}
               ${adjNote && html`<p style=${{ margin: '6px 0 0', fontSize: '10.5px', color: 'var(--ink3)' }}>${adjNote}</p>`}
               <p style=${{ margin: '6px 0 0', fontSize: '10px', color: 'var(--ink3)', lineHeight: 1.6 }}>
-                调色参数是绝对值（-100..100），每次都从原图重新渲染、不叠加、不计费。拖动滑杆时大图上只是 CSS 近似预览（不发请求）；点「应用」才提交到 POST /api/photos/:id/adjust，「恢复原图」提交 reset:true。
+                ${tr('library.photos.adjustNote')}
               </p>
             </div>
             ${versions.length > 1 && html`
               <div style=${{ marginTop: '14px' }}>
                 <div style=${{ fontSize: '12px', color: 'var(--ink2)', marginBottom: '8px' }}>
-                  版本过程（相邻版本并排，共 ${versions.length} 版）
-                  ${detail.isFinal ? html`<span style=${{ marginLeft: '8px', color: 'var(--accent)', fontSize: '10.5px' }}>当前最终版</span>` : ''}
+                  ${tr('library.photos.versions', { n: versions.length })}
+                  ${detail.isFinal ? html`<span style=${{ marginLeft: '8px', color: 'var(--accent)', fontSize: '10.5px' }}>${tr('library.photos.currentFinal')}</span>` : ''}
                 </div>
                 ${versions.slice(1).map((v, i) => {
                   const prev = versions[i];
@@ -848,12 +850,12 @@ export function PhotosPanel({ onChanged }) {
                         <div>
                           <img src=${prev.url} alt=${'V' + prev.version} onClick=${() => setZoomImg(prev.url)}
                             style=${{ width: '100%', maxHeight: '260px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
-                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${prev.version}${prev.isFinal ? ' · 最终' : ''}${prev.status === 'rejected' ? ' · 已淘汰' : ''}</div>
+                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${prev.version}${prev.isFinal ? tr('library.photos.finalBadge') : ''}${prev.status === 'rejected' ? tr('library.photos.dropped') : ''}</div>
                         </div>
                         <div>
                           <img src=${v.url} alt=${'V' + v.version} onClick=${() => setZoomImg(v.url)}
                             style=${{ width: '100%', maxHeight: '260px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in' }} />
-                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? ' · 最终' : ''}${v.status === 'rejected' ? ' · 已淘汰' : ''}</div>
+                          <div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)', textAlign: 'center' }}>V${v.version}${v.isFinal ? tr('library.photos.finalBadge') : ''}${v.status === 'rejected' ? tr('library.photos.dropped') : ''}</div>
                         </div>
                       </div>
                       ${v.revisionNote ? html`<div style=${{ marginTop: '3px', fontSize: '10.5px', color: 'var(--ink3)' }}>${v.revisionNote}</div>` : ''}
@@ -862,70 +864,70 @@ export function PhotosPanel({ onChanged }) {
               </div>`}
             ${versions.some((v) => v.failureSummary) && html`
               <div style=${{ marginTop: '10px', padding: '8px 10px', border: '1px solid rgba(217,139,106,.25)', borderRadius: '6px', background: 'rgba(217,139,106,.06)' }}>
-                <div style=${{ fontSize: '11px', color: 'var(--ink2)', marginBottom: '4px' }}>失败 / 淘汰记录（不展示失败图）</div>
+                <div style=${{ fontSize: '11px', color: 'var(--ink2)', marginBottom: '4px' }}>${tr('library.photos.failures')}</div>
                 ${versions.filter((v) => v.failureSummary).map((v) => html`
                   <div key=${'fail-' + v.id} style=${{ fontSize: '10.5px', color: 'var(--ink3)', lineHeight: 1.6 }}>V${v.version}：${v.failureSummary}</div>`)}
               </div>`}
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
-              <span style=${{ color: 'var(--ink3)' }}>画面提示词</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.imagePrompt')}</span>
               <div>
                 <textarea value=${editPrompt} onInput=${(e) => setEditPrompt(e.target.value)}
-                  rows="3" placeholder="画面内容（历史图可以手动补录）"
+                  rows="3" placeholder=${tr('library.photos.imagePromptPh')}
                   style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
-                  出图时原值：${detail.generationPrompt || '未记录'}
+                  ${tr('library.photos.generationPrompt', { value: detail.generationPrompt || tr('library.photos.notRecorded') })}
                 </span>
               </div>
-              <span style=${{ color: 'var(--ink3)' }}>视频提示词</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.videoPrompt')}</span>
               <div>
                 <textarea value=${editVideoPrompt} onInput=${(e) => setEditVideoPrompt(e.target.value)}
-                  rows="2" placeholder="最近一次用它生成视频的运动描述（可空）"
+                  rows="2" placeholder=${tr('library.photos.videoPromptPh')}
                   style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                   <button onClick=${() => savePrompt(detail.id)}
-                    style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>保存提示词</button>
+                    style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.savePrompt')}</button>
                   <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
-                    ${detail.videoPromptUpdatedAt ? '最近视频提示词更新于 ' + String(detail.videoPromptUpdatedAt).slice(0, 19).replace('T', ' ') : '还没有用它生成过视频'}
+                    ${detail.videoPromptUpdatedAt ? tr('library.photos.videoPromptUpdated', { time: String(detail.videoPromptUpdatedAt).slice(0, 19).replace('T', ' ') }) : tr('library.photos.videoNeverUsed')}
                   </span>
                 </div>
               </div>
-              <span style=${{ color: 'var(--ink3)' }}>模型</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.model')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}${detail.provider ? ' · ' + detail.provider : ''}</span>
-              <span style=${{ color: 'var(--ink3)' }}>规格</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.spec')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${[
                 detail.width && detail.height ? detail.width + '×' + detail.height : '',
                 detail.size || '',
                 detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ') || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>生成费用</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.genCost')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}</span>
               ${detail.failureSummary && html`
-                <span style=${{ color: 'var(--ink3)' }}>失败记录</span>
+                <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.failure')}</span>
                 <span style=${{ color: 'var(--ink2)' }}>${detail.failureSummary}</span>`}
-              <span style=${{ color: 'var(--ink3)' }}>生成时间</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.createdAt')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace' }}>${detail.createdAt || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>文件</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.common.file')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>${detail.fileName || '-'}</span>
-              <span style=${{ color: 'var(--ink3)' }}>用于视频</span>
+              <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.usedIn')}</span>
               <span style=${{ color: 'var(--ink2)', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
-                ${Array.isArray(detail.usedIn) && detail.usedIn.length ? detail.usedIn.map((u) => u.taskId).join(', ') : '（还没用过）'}
+                ${Array.isArray(detail.usedIn) && detail.usedIn.length ? detail.usedIn.map((u) => u.taskId).join(', ') : tr('library.photos.neverUsed')}
               </span>
             </div>
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
               ${!detail.isFinal && html`
                 <button onClick=${() => makeFinal(detail.id)}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>设为最终版</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.setFinal')}</button>`}
               <button onClick=${() => useInCreation(detail)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>用它生成视频</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.useInVideo')}</button>
               ${detail.status !== 'approved' && html`
                 <button onClick=${() => review(detail.id, 'approved')}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>通过</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.approve')}</button>`}
               ${detail.status !== 'rejected' && html`
                 <button onClick=${() => review(detail.id, 'rejected')}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>打回</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.reject')}</button>`}
               <${DownloadLink} url=${detail.url} fileName=${detail.fileName} />
               <button onClick=${() => remove(detail.id)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>删除</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.delete')}</button>
             </div>
           </div>
         </div>
@@ -933,7 +935,7 @@ export function PhotosPanel({ onChanged }) {
       ${zoomImg && html`
         <div onClick=${() => setZoomImg('')}
           style=${{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,.92)', display: 'grid', placeItems: 'center', cursor: 'zoom-out', padding: '18px' }}>
-          <img src=${zoomImg} alt="放大查看"
+          <img src=${zoomImg} alt=${tr('library.photos.zoomAlt')}
             style=${{ maxWidth: '96vw', maxHeight: '94vh', objectFit: 'contain', borderRadius: '4px' }} />
         </div>`}
     </div>
@@ -999,21 +1001,17 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
         files = (Array.isArray(task.clips) ? task.clips : []).filter((c) => c && c.videoPath).length;
       } catch (e) { files = null; }
     }
-    const label = String(t.prompt || '(无提示词)').slice(0, 42);
+    const label = String(t.prompt || tr('library.common.noPrompt')).slice(0, 42);
     const first = (files === null)
-      ? `读不到这条任务的片段详情，无法确认它是否还有片段文件。\n\n`
-        + `删除只会移走任务记录（片段文件不会被删），但请你自己确认。\n\n`
-        + `确定删除任务记录「${label}」？`
+      ? tr('library.unfinished.confirmUnknown', { label })
       : (files > 0
-        ? `这条任务还有 ${files} 个片段文件（clips/，不会被删除）。\n\n`
-          + `删除只会把任务记录移入「任务回收站」，片段文件仍留在磁盘上。\n`
-          + `要彻底清掉片段，请到「片段」tab 单独处理。\n\n`
-          + `确定删除任务记录「${label}」？`
-        : `删除任务记录「${label}」？\n会移到「任务回收站」（库页右上角），可恢复。`);
+        ? tr('library.unfinished.confirmHasFiles', { n: files, label })
+        : tr('library.unfinished.confirmNoFiles', { label }));
     if (!window.confirm(first)) return;
     if (files !== 0 && !window.confirm(
-      (files > 0 ? `再次确认：这条任务有 ${files} 个片段文件，` : '再次确认：片段数未知，')
-      + '删除后记录进任务回收站、文件仍在磁盘。继续？')) return;
+      files > 0
+        ? tr('library.unfinished.confirmAgainFiles', { n: files })
+        : tr('library.unfinished.confirmAgainUnknown'))) return;
     setErr(''); setBusy(t.taskId);
     try {
       const r = await fetch('/api/tasks/' + encodeURIComponent(t.taskId), { method: 'DELETE', credentials: 'same-origin' });
@@ -1021,7 +1019,7 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
       // 该路由总是 HTTP 200，错误在 body.error 里（taskManager.moveToTrash 的返回）
       if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
       if (onChanged) onChanged();
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(tr('library.unfinished.deleteFailed') + e.message); }
     finally { setBusy(''); }
   }
   if (!rows.length) return null;
@@ -1029,10 +1027,10 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
   return html`
     <div className="mb-4 rounded-[8px] border border-warn/30 bg-warn/[.05] px-3 py-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[12px] text-warn">未完成 ${rows.length} 条</span>
-        <span className="text-[10px] text-ink3">失败任务仍可补跑；成片齐全后会自动从这里消失。</span>
+        <span className="text-[12px] text-warn">${tr('library.unfinished.heading', { n: rows.length })}</span>
+        <span className="text-[10px] text-ink3">${tr('library.unfinished.hint')}</span>
         <span className="flex-1"></span>
-        <span className="text-[10px] text-ink3">删除只移任务记录，不动片段文件</span>
+        <span className="text-[10px] text-ink3">${tr('library.unfinished.deleteHint')}</span>
       </div>
       ${err && html`<p className="mt-1 text-[11px] text-danger">${err}</p>`}
       <div className="mt-1">
@@ -1042,21 +1040,21 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
             <div key=${t.taskId} className="flex items-center gap-2.5 py-1.5 border-t border-white/[.05]">
               <span className=${'w-[6px] h-[6px] rounded-full shrink-0 ' + st.dot}></span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[12px] text-ink truncate">${(t.prompt || '(无提示词)').slice(0, 80)}</span>
+                <span className="block text-[12px] text-ink truncate">${(t.prompt || tr('library.common.noPrompt')).slice(0, 80)}</span>
                 <span className="block text-[10px] text-ink3 font-num">
-                  ${t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN') : '-'}
+                  ${t.createdAt ? fmtDateTime(t.createdAt) : '-'}
                   ${' · ' + st.text}
-                  ${t.failedClips ? ' · 失败片段 ' + t.failedClips : ''}
-                  ${t.recoverable ? ' · 可补跑' : ''}
+                  ${t.failedClips ? ' · ' + tr('library.unfinished.failedClips', { n: t.failedClips }) : ''}
+                  ${t.recoverable ? ' · ' + tr('library.unfinished.resumable') : ''}
                 </span>
               </span>
               <button onClick=${() => setOpenId(t.taskId)}
                 className="h-6 px-2 rounded-[4px] text-[10px] text-ink2 hover:bg-white/[.06] shrink-0"
-              >详情 / 补跑</button>
+              >${tr('library.unfinished.detail')}</button>
               <button onClick=${() => removeTask(t)} disabled=${busy === t.taskId}
                 className="h-6 px-2 rounded-[4px] text-[10px] text-ink3 hover:text-danger hover:bg-white/[.06] shrink-0"
                 style=${{ opacity: busy === t.taskId ? .5 : 1 }}
-              >${fileCounts[t.taskId] > 0 ? `删除（${fileCounts[t.taskId]} 个片段）` : '删除'}</button>
+              >${fileCounts[t.taskId] > 0 ? tr('library.unfinished.deleteWithClips', { n: fileCounts[t.taskId] }) : tr('library.unfinished.delete')}</button>
             </div>
           `;
         })}
@@ -1090,22 +1088,22 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
         { method: 'POST', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setMsg('已恢复任务 ' + it.taskId + '（回到「库 · 成片」未完成列表 / 任务详情）');
+      setMsg(tr('library.taskTrash.restored', { id: it.taskId }));
       if (onChanged) onChanged();
-    } catch (e) { setMsg('恢复失败：' + e.message); }
+    } catch (e) { setMsg(tr('library.taskTrash.restoreFailed') + e.message); }
     finally { setBusy(''); }
   }
 
   async function purge(it) {
-    if (!window.confirm('彻底删除任务记录 ' + it.taskId + '？\n任务 JSON 会被删除，无法恢复；片段文件不受影响。')) return;
+    if (!window.confirm(tr('library.taskTrash.purgeConfirm', { id: it.taskId }))) return;
     setMsg(''); setBusy(it.taskId);
     try {
       const r = await fetch('/api/trash/' + encodeURIComponent(it.taskId), { method: 'DELETE', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setMsg('已彻底删除任务记录');
+      setMsg(tr('library.taskTrash.purged'));
       if (onChanged) onChanged();
-    } catch (e) { setMsg('彻底删除失败：' + e.message); }
+    } catch (e) { setMsg(tr('library.taskTrash.purgeFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -1115,29 +1113,29 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(520px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
-          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>任务回收站</b>
-          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${list.length} 条 · 删除的任务记录在这里</span>
+          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.taskTrash.title')}</b>
+          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.taskTrash.count', { n: list.length })}</span>
           <span style=${{ flex: 1 }}></span>
           <button onClick=${onClose}
-            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.taskTrash.close')}</button>
         </div>
         <p style=${{ margin: '0 14px 8px', fontSize: '10.5px', color: 'var(--ink3)', lineHeight: 1.6 }}>
-          删除任务只移走任务记录，<b style=${{ color: 'var(--ink2)' }}>片段文件仍留在 clips/</b>；恢复会把任务记录放回。
+          ${tr('library.taskTrash.note')}
         </p>
         ${msg && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--ink2)' }}>${msg}</p>`}
         ${error && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--danger)' }}>${error}</p>`}
         <div style=${{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 14px 14px' }}>
-          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>加载中…</p>`}
-          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>任务回收站是空的</p>`}
+          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.taskTrash.loading')}</p>`}
+          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${tr('library.taskTrash.empty')}</p>`}
           ${list.map((it) => html`
             <div key=${it.taskId} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
-              <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${it.prompt || '(无提示词)'}</div>
+              <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${it.prompt || tr('library.common.noPrompt')}</div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
-                ${it.taskId} · ${it.model || '-'} · ${it.totalClips || 0} 段 · 删除于 ${String(it.deletedAt || '').slice(0, 19).replace('T', ' ')}
+                ${it.taskId} · ${it.model || '-'}${tr('library.taskTrash.clipsUnit', { n: it.totalClips || 0 })}${tr('library.taskTrash.deletedAt', { time: String(it.deletedAt || '').slice(0, 19).replace('T', ' ') })}
               </div>
               <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
-                <button onClick=${() => restore(it)} disabled=${busy === it.taskId} style=${btn(true)}>恢复</button>
-                <button onClick=${() => purge(it)} disabled=${busy === it.taskId} style=${btn(false)}>彻底删除记录</button>
+                <button onClick=${() => restore(it)} disabled=${busy === it.taskId} style=${btn(true)}>${tr('library.taskTrash.restore')}</button>
+                <button onClick=${() => purge(it)} disabled=${busy === it.taskId} style=${btn(false)}>${tr('library.taskTrash.purge')}</button>
               </div>
             </div>
           `)}
@@ -1157,7 +1155,7 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
   const [busy, setBusy] = useState('');
 
   async function remove(it) {
-    if (!window.confirm('删除这条成片？会先移入回收站，可在回收站恢复。')) return;
+    if (!window.confirm(tr('library.finals.deleteConfirm'))) return;
     setErr('');
     setBusy(it.id);
     try {
@@ -1165,7 +1163,7 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       if (onChanged) onChanged();
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(tr('library.finals.deleteFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -1174,7 +1172,7 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
       ${error && html`<p className="mb-2 text-[12px] text-danger">${error}</p>`}
       <${UnfinishedPanel} tasks=${tasks} finals=${items} onChanged=${onChanged} />
-      ${(items || []).length === 0 && !loading && html`<${Empty}>还没有成片。创作完成或剪辑台导出后会出现在这里。</${Empty}>`}
+      ${(items || []).length === 0 && !loading && html`<${Empty}>${tr('library.finals.empty')}</${Empty}>`}
       <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
         ${(items || []).map((it) => html`
           <div key=${it.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-white/[.05] last:border-0">
@@ -1182,25 +1180,25 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[12.5px] text-ink truncate">${it.prompt || it.fileName || it.id}</span>
-                ${it.suspectedDamage ? html`<span className="text-[10px] text-warn">疑似损坏</span>` : null}
+                ${it.suspectedDamage ? html`<span className="text-[10px] text-warn">${tr('library.finals.suspect')}</span>` : null}
               </div>
               <p className="text-[10px] text-ink3 font-num flex items-center gap-1.5 flex-wrap mt-0.5">
                 <span>${fmtDurSec(it.durationSec)}</span>
                 <span className="opacity-40">·</span>
                 <span>${it.resolution || '-'}</span>
                 <span className="opacity-40">·</span>
-                <span>来源 ${ORIGIN_TEXT[it.origin] || it.origin || '未知'}</span>
+                <span>${tr('library.finals.origin', { origin: originText(it.origin) })}</span>
                 <span className="opacity-40">·</span>
-                <span>费用 ${costLabel(it.cost)}</span>
+                <span>${tr('library.finals.cost', { cost: costLabel(it.cost) })}</span>
                 <span className="opacity-40">·</span>
                 ${qcBadge(it.qc)}
               </p>
             </div>
             <button onClick=${() => setPlay(it)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-accent hover:bg-white/[.06]">播放</button>
-            <${DownloadLink} url=${it.url} fileName=${it.fileName} label="下载" />
+              className="h-7 px-2 rounded-[5px] text-[11px] text-accent hover:bg-white/[.06]">${tr('library.finals.play')}</button>
+            <${DownloadLink} url=${it.url} fileName=${it.fileName} label=${tr('library.common.download')} />
             <button onClick=${() => remove(it)} disabled=${busy === it.id}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${tr('library.finals.delete')}</button>
           </div>
         `)}
       </div>
@@ -1211,14 +1209,14 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
           <div style=${{ width: 'min(880px, 94vw)', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '12px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
               <b style=${{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>${play.fileName || play.id}</b>
-              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${fmtDurSec(play.durationSec)} · ${play.resolution || '-'} · 来源 ${ORIGIN_TEXT[play.origin] || play.origin || '未知'}</span>
+              <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${fmtDurSec(play.durationSec)} · ${play.resolution || '-'} · ${tr('library.finals.origin', { origin: originText(play.origin) })}</span>
               <span style=${{ flex: 1 }}></span>
               <button onClick=${() => setPlay(null)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
             </div>
             <video src=${play.url} controls autoPlay playsInline
               style=${{ width: '100%', maxHeight: '68vh', background: '#000', borderRadius: '6px' }}></video>
-            <p style=${{ marginTop: '8px', fontSize: '11px', lineHeight: 1.7, color: 'var(--ink3)', whiteSpace: 'pre-wrap' }}>${play.prompt || '（无提示词）'}</p>
+            <p style=${{ marginTop: '8px', fontSize: '11px', lineHeight: 1.7, color: 'var(--ink3)', whiteSpace: 'pre-wrap' }}>${play.prompt || tr('library.finals.noPrompt')}</p>
           </div>
         </div>`}
     </div>
@@ -1227,13 +1225,13 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
 
 // ---------------- 回收站抽屉 ----------------
 // 删除只进这里；彻底删除必须在这里再确认一次（两次确认的口径见交接 §7）。
-const RECYCLE_TYPE_TEXT = { clip: '片段', final: '成片', photo: '图片', bgm: '配乐' };
+const RECYCLE_TYPE_KEYS = { clip: 'library.recycle.types.clip', final: 'library.recycle.types.final', photo: 'library.recycle.types.photo', bgm: 'library.recycle.types.bgm' };
 const RECYCLE_TABS = [
-  { key: 'all', label: '全部' },
-  { key: 'clip', label: '片段' },
-  { key: 'final', label: '成片' },
-  { key: 'photo', label: '图片' },
-  { key: 'bgm', label: '配乐' }
+  { key: 'all', labelKey: 'library.recycle.tabs.all' },
+  { key: 'clip', labelKey: 'library.recycle.tabs.clip' },
+  { key: 'final', labelKey: 'library.recycle.tabs.final' },
+  { key: 'photo', labelKey: 'library.recycle.tabs.photo' },
+  { key: 'bgm', labelKey: 'library.recycle.tabs.bgm' }
 ];
 
 function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
@@ -1256,37 +1254,37 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
         { method: 'POST', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setMsg('已恢复：' + ((it.entry && it.entry.fileName) || it.id)
-        + (j.conflicts && j.conflicts.length ? '（目标位置已有同名文件，恢复为 .restored-*）' : ''));
+      setMsg(tr('library.recycle.restored', { label: (it.entry && it.entry.fileName) || it.id })
+        + (j.conflicts && j.conflicts.length ? tr('library.recycle.restoredConflict') : ''));
       if (onChanged) onChanged();
-    } catch (e) { setMsg('恢复失败：' + e.message); }
+    } catch (e) { setMsg(tr('library.recycle.restoreFailed') + e.message); }
     finally { setBusy(''); }
   }
 
   async function purge(it) {
-    if (!window.confirm('彻底删除「' + ((it.entry && it.entry.fileName) || it.id) + '」？\n删除后无法恢复。')) return;
+    if (!window.confirm(tr('library.recycle.purgeConfirm', { label: (it.entry && it.entry.fileName) || it.id }))) return;
     setMsg(''); setBusy(it.type + '/' + it.id);
     try {
       const r = await fetch('/api/recycle/' + encodeURIComponent(it.type) + '/' + encodeURIComponent(it.id),
         { method: 'DELETE', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
-      setMsg('已彻底删除');
+      setMsg(tr('library.recycle.purged'));
       if (onChanged) onChanged();
-    } catch (e) { setMsg('彻底删除失败：' + e.message); }
+    } catch (e) { setMsg(tr('library.recycle.purgeFailed') + e.message); }
     finally { setBusy(''); }
   }
 
   async function purgeAll() {
-    if (!window.confirm('清空全部回收站条目？\n删除后无法恢复。')) return;
+    if (!window.confirm(tr('library.recycle.purgeAllConfirm'))) return;
     setMsg(''); setBusy('all');
     try {
       const r = await fetch('/api/recycle/all/purge', { method: 'POST', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      setMsg('已清空回收站（' + (j.removed || 0) + ' 项）');
+      setMsg(tr('library.recycle.purgedAll', { n: j.removed || 0 }));
       if (onChanged) onChanged();
-    } catch (e) { setMsg('清空失败：' + e.message); }
+    } catch (e) { setMsg(tr('library.recycle.purgeAllFailed') + e.message); }
     finally { setBusy(''); }
   }
 
@@ -1296,13 +1294,13 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
-          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>回收站</b>
-          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${(items || []).length} 项 · 不自动过期</span>
+          <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.recycle.title')}</b>
+          <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.recycle.count', { n: (items || []).length })}</span>
           <span style=${{ flex: 1 }}></span>
           <button onClick=${purgeAll} disabled=${busy === 'all' || (items || []).length === 0}
-            style=${{ ...btn(false), opacity: (items || []).length ? 1 : .4 }}>清空回收站</button>
+            style=${{ ...btn(false), opacity: (items || []).length ? 1 : .4 }}>${tr('library.recycle.clear')}</button>
           <button onClick=${onClose}
-            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>关闭</button>
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.recycle.close')}</button>
         </div>
         <div style=${{ display: 'flex', gap: '6px', padding: '0 14px 10px', flexWrap: 'wrap' }}>
           ${RECYCLE_TABS.map((t) => html`
@@ -1313,26 +1311,26 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
                 background: openType === t.key ? 'rgba(214,179,106,.13)' : 'transparent',
                 color: openType === t.key ? 'var(--accent)' : 'var(--ink3)'
               }}
-            >${t.label}</button>
+            >${tr(t.labelKey)}</button>
           `)}
         </div>
         ${msg && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--ink2)' }}>${msg}</p>`}
         ${error && html`<p style=${{ margin: '0 14px 8px', fontSize: '11px', color: 'var(--danger)' }}>${error}</p>`}
         <div style=${{ flex: 1, minHeight: 0, overflow: 'auto', padding: '0 14px 14px' }}>
-          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>加载中…</p>`}
-          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${openType === 'all' ? '回收站是空的' : '这个类型下没有条目'}</p>`}
+          ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.recycle.loading')}</p>`}
+          ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${openType === 'all' ? tr('library.recycle.emptyAll') : tr('library.recycle.emptyType')}</p>`}
           ${list.map((it) => html`
             <div key=${it.type + '/' + it.id} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style=${{ fontSize: '10px', color: 'var(--onaccent)', background: 'var(--accent)', borderRadius: '3px', padding: '1px 6px', flex: '0 0 auto' }}>${RECYCLE_TYPE_TEXT[it.type] || it.type}</span>
+                <span style=${{ fontSize: '10px', color: 'var(--onaccent)', background: 'var(--accent)', borderRadius: '3px', padding: '1px 6px', flex: '0 0 auto' }}>${RECYCLE_TYPE_KEYS[it.type] ? tr(RECYCLE_TYPE_KEYS[it.type]) : it.type}</span>
                 <span style=${{ fontSize: '11.5px', color: 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${(it.entry && (it.entry.fileName || it.entry.prompt)) || it.id}</span>
               </div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
-                ${it.id} · ${String(it.trashedAt || '').slice(0, 19).replace('T', ' ')} · ${it.fileCount || 0} 个文件 · ${((it.sizeBytes || 0) / 1048576).toFixed(2)} MB
+                ${it.id} · ${String(it.trashedAt || '').slice(0, 19).replace('T', ' ')} · ${tr('library.recycle.fileCount', { n: it.fileCount || 0 })} · ${((it.sizeBytes || 0) / 1048576).toFixed(2)} MB
               </div>
               <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
-                <button onClick=${() => restore(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(true)}>恢复</button>
-                <button onClick=${() => purge(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(false)}>彻底删除</button>
+                <button onClick=${() => restore(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(true)}>${tr('library.recycle.restore')}</button>
+                <button onClick=${() => purge(it)} disabled=${busy === it.type + '/' + it.id} style=${btn(false)}>${tr('library.recycle.purge')}</button>
               </div>
             </div>
           `)}
@@ -1368,23 +1366,23 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
 
   const refreshAll = () => { reloadLib(); reloadPhotos(); reloadRec(); reloadTrash(); };
   const TABS = [
-    { key: 'finals', label: '成片', count: finals.length },
-    { key: 'clips', label: '片段', count: clipCount },
-    { key: 'photos', label: '图片', count: photos.length }
+    { key: 'finals', labelKey: 'library.shell.tabs.finals', count: finals.length },
+    { key: 'clips', labelKey: 'library.shell.tabs.clips', count: clipCount },
+    { key: 'photos', labelKey: 'library.shell.tabs.photos', count: photos.length }
   ];
 
   return html`
     <div className="px-6 py-5" style=${{ paddingBottom: '84px' }}>
       <div className="flex items-center gap-3 mb-3.5">
-        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">库</h1>
-        <span className="text-[11px] text-ink3 font-num">成片 ${finals.length} · 片段 ${clipCount} · 图片 ${photos.length}</span>
+        <h1 className="font-display text-[21px] font-medium tracking-[.02em] text-ink m-0">${tr('library.shell.title')}</h1>
+        <span className="text-[11px] text-ink3 font-num">${tr('library.shell.summary', { finals: finals.length, clips: clipCount, photos: photos.length })}</span>
         <span className="flex-1"></span>
         <button onClick=${() => setTaskTrashOpen(true)}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
-        >任务回收站${trashItems.length ? ' · ' + trashItems.length : ''}</button>
+        >${tr('library.shell.taskTrash')}${trashItems.length ? ' · ' + trashItems.length : ''}</button>
         <button onClick=${() => setRecycleOpen(true)}
           className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2 hover:bg-white/[.05]"
-        >回收站${recycleItems.length ? ' · ' + recycleItems.length : ''}</button>
+        >${tr('library.shell.recycle')}${recycleItems.length ? ' · ' + recycleItems.length : ''}</button>
       </div>
 
       <div className="flex items-center gap-1 border-b border-white/[.08] mb-3">
@@ -1392,21 +1390,21 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
           <button key=${t.key} onClick=${() => setTab(t.key)}
             className=${'h-8 px-3 text-[12px] ' + (tab === t.key ? 'text-accent' : 'text-ink3 hover:text-ink2')}
             style=${{ borderBottom: tab === t.key ? '2px solid var(--accent)' : '2px solid transparent' }}
-          >${t.label}<span className="ml-1.5 text-[10px] font-num" style=${{ opacity: .7 }}>${t.count}</span></button>
+          >${tr(t.labelKey)}<span className="ml-1.5 text-[10px] font-num" style=${{ opacity: .7 }}>${t.count}</span></button>
         `)}
       </div>
 
       ${tab === 'finals' && html`<${FinalsPanel} items=${finals} tasks=${tasks} loading=${libS.loading}
-        error=${libS.error ? '读取失败：' + libS.error : ''} onChanged=${refreshAll} />`}
+        error=${libS.error ? tr('library.shell.loadFailed') + libS.error : ''} onChanged=${refreshAll} />`}
       ${tab === 'clips' && html`<${ClipsPanel} onChanged=${refreshAll} />`}
       ${tab === 'photos' && html`<${PhotosPanel} onChanged=${refreshAll} />`}
 
       <${RecycleDrawer} open=${recycleOpen} items=${recycleItems} loading=${recS.loading}
-        error=${recS.error ? '读取回收站失败：' + recS.error : ''}
+        error=${recS.error ? tr('library.shell.recycleLoadFailed') + recS.error : ''}
         onClose=${() => setRecycleOpen(false)} onChanged=${refreshAll} />
 
       <${TaskTrashDrawer} open=${taskTrashOpen} items=${trashItems} loading=${trashS.loading}
-        error=${trashS.error ? '读取任务回收站失败：' + trashS.error : ''}
+        error=${trashS.error ? tr('library.shell.taskTrashLoadFailed') + trashS.error : ''}
         onClose=${() => setTaskTrashOpen(false)} onChanged=${refreshAll} />
     </div>
   `;
@@ -1422,15 +1420,15 @@ export function PhotosView() {
 
 // ---------------- 配乐 ----------------
 const MUSIC_FIELDS = [
-  ['title', '曲名', 'text'],
-  ['cat', '分类', 'text'],
-  ['mood', '情绪', 'text'],
-  ['bpm', 'BPM', 'number'],
-  ['inst', '乐器', 'text'],
-  ['author', '作者', 'text'],
-  ['source', '来源', 'text'],
-  ['license', '授权', 'text'],
-  ['url', '来源 URL', 'text']
+  ['title', 'library.music.field.title', 'text'],
+  ['cat', 'library.music.field.cat', 'text'],
+  ['mood', 'library.music.field.mood', 'text'],
+  ['bpm', 'library.music.field.bpm', 'number'],
+  ['inst', 'library.music.field.inst', 'text'],
+  ['author', 'library.music.field.author', 'text'],
+  ['source', 'library.music.field.source', 'text'],
+  ['license', 'library.music.field.license', 'text'],
+  ['url', 'library.music.field.url', 'text']
 ];
 
 export function MusicView() {
@@ -1465,17 +1463,17 @@ export function MusicView() {
       if (!a) { a = new window.Audio(); audioRef.current = a; }
       if (playingId === t.id) { a.pause(); setPlayingId(''); return; }
       a.onended = () => setPlayingId('');
-      a.onerror = () => { setPlayErr('试听失败：' + (t.title || t.id) + '（文件可能不存在）'); setPlayingId(''); };
+      a.onerror = () => { setPlayErr(tr('library.music.listenFailedFile', { name: t.title || t.id })); setPlayingId(''); };
       a.src = bgmUrl(t);
       const p = a.play();
       if (p && p.catch) {
         p.catch((e) => {
-          setPlayErr('试听失败：' + (e && e.message ? e.message : '浏览器拒绝播放'));
+          setPlayErr(tr('library.music.listenFailed') + (e && e.message ? e.message : tr('library.music.browserBlocked')));
           setPlayingId('');
         });
       }
       setPlayingId(t.id);
-    } catch (e) { setPlayErr('试听失败：' + e.message); }
+    } catch (e) { setPlayErr(tr('library.music.listenFailed') + e.message); }
   }
 
   async function setDefault(id) {
@@ -1488,18 +1486,18 @@ export function MusicView() {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       reload();
-    } catch (e) { setErr('设为默认失败：' + e.message); }
+    } catch (e) { setErr(tr('library.music.setDefaultFailed') + e.message); }
   }
 
   async function remove(id) {
-    if (!window.confirm('删除这首配乐？')) return;
+    if (!window.confirm(tr('library.music.removeConfirm'))) return;
     setErr('');
     try {
       const r = await fetch('/api/bgm/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       reload();
-    } catch (e) { setErr('删除失败：' + e.message); }
+    } catch (e) { setErr(tr('library.music.deleteFailed') + e.message); }
   }
 
   // 上传音频：FileReader 读成 dataURL（后端只收 base64，零新依赖），
@@ -1508,7 +1506,7 @@ export function MusicView() {
     setErr('');
     if (!file) return;
     if (file.size > MAX_AUDIO_MB * 1024 * 1024) {
-      setErr(`文件 ${(file.size / 1048576).toFixed(1)}MB，超过 ${MAX_AUDIO_MB}MB 上限`);
+      setErr(tr('library.music.fileTooLarge', { size: (file.size / 1048576).toFixed(1), max: MAX_AUDIO_MB }));
       return;
     }
     setUploading(true);
@@ -1516,7 +1514,7 @@ export function MusicView() {
       const dataUrl = await new Promise((res, rej) => {
         const fr = new FileReader();
         fr.onload = () => res(String(fr.result || ''));
-        fr.onerror = () => rej(new Error('读取文件失败'));
+        fr.onerror = () => rej(new Error(tr('library.music.readFailed')));
         fr.readAsDataURL(file);
       });
       const durationSec = await new Promise((res) => {
@@ -1546,7 +1544,7 @@ export function MusicView() {
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       reload();
     } catch (e) {
-      setErr('上传失败：' + e.message);
+      setErr(tr('library.music.uploadFailed') + e.message);
     } finally {
       setUploading(false);
     }
@@ -1554,7 +1552,7 @@ export function MusicView() {
 
   async function submitAdd() {
     setErr('');
-    if (!(form.title || '').trim()) { setErr('曲名必填'); return; }
+    if (!(form.title || '').trim()) { setErr(tr('library.music.titleRequired')); return; }
     try {
       const r = await fetch('/api/bgm', {
         method: 'POST', credentials: 'same-origin',
@@ -1564,25 +1562,25 @@ export function MusicView() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status));
       setAdding(false); setForm({}); reload();
-    } catch (e) { setErr('新增失败：' + e.message); }
+    } catch (e) { setErr(tr('library.music.addFailed') + e.message); }
   }
 
   return html`
     <div className="px-6 py-5">
-      <${Head} title="配乐" sub=${tracks.length + ' 首'}>
+      <${Head} title=${tr('library.music.title')} sub=${tp('library.music.count', tracks.length)}>
         <label className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px] inline-flex items-center cursor-pointer">
-          ${uploading ? '上传中…' : '＋ 上传音频'}
+          ${uploading ? tr('library.music.uploading') : tr('library.music.upload')}
           <input type="file" accept=".mp3,.wav,.m4a,.ogg,audio/*" className="hidden"
             disabled=${uploading}
             onChange=${(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) uploadFile(f); }} />
         </label>
         <button onClick=${() => navigate('/bgm')}
           className="h-8 px-3 rounded-[6px] border border-accent/40 text-accent text-[12px] hover:bg-accent/[.08]"
-          title="打开配乐编辑器：给已完成成片排时间轴"
-        >配乐编辑器 →</button>
+          title=${tr('library.music.editorTitle')}
+        >${tr('library.music.editor')}</button>
         <button onClick=${() => setAdding((v) => !v)}
           className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]"
-        >${adding ? '收起' : '＋ 新增配乐'}</button>
+        >${adding ? tr('library.music.collapse') : tr('library.music.add')}</button>
       </${Head}>
 
       ${err && html`<p className="mb-2 text-[12px] text-danger">${err}</p>`}
@@ -1591,11 +1589,11 @@ export function MusicView() {
 
       ${adding && html`
         <div className="mb-4 rounded-[8px] border border-white/[.08] bg-s1 px-4 py-3">
-          <p className="text-[12px] text-ink mb-2">新增配乐（元信息）</p>
+          <p className="text-[12px] text-ink mb-2">${tr('library.music.addTitle')}</p>
           <div className="grid grid-cols-3 gap-x-3 gap-y-2">
             ${MUSIC_FIELDS.map((f) => html`
               <label key=${f[0]} className="flex flex-col gap-1">
-                <span className="text-[11px] text-ink3">${f[1]}</span>
+                <span className="text-[11px] text-ink3">${tr(f[1])}</span>
                 <input type=${f[2]} value=${form[f[0]] || ''}
                   onInput=${(e) => setForm((x) => ({ ...x, [f[0]]: e.target.value }))}
                   className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none" />
@@ -1603,24 +1601,23 @@ export function MusicView() {
             `)}
           </div>
           <p className="mt-2 text-[11px] leading-[1.7] text-ink3">
-            可以直接「＋ 上传音频」（mp3/wav/m4a/ogg，单文件 ≤${MAX_AUDIO_MB}MB，会自动登记）；
-            也可以手工放到 <code className="font-num">app/assets/bgm/</code> 后在这里补元信息。
+            ${tr('library.music.uploadNote', { max: MAX_AUDIO_MB })}
           </p>
           <div className="mt-2 flex gap-2">
-            <button onClick=${submitAdd} className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">保存</button>
+            <button onClick=${submitAdd} className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">${tr('library.music.save')}</button>
             <button onClick=${() => setAdding(false)}
-              className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2">取消</button>
+              className="h-8 px-3 rounded-[6px] border border-white/[.10] text-[12px] text-ink2">${tr('library.music.cancel')}</button>
           </div>
         </div>
       `}
 
-      ${tracks.length === 0 && !s.loading && html`<${Empty}>还没有配乐</${Empty}>`}
+      ${tracks.length === 0 && !s.loading && html`<${Empty}>${tr('library.music.empty')}</${Empty}>`}
 
       <div className="rounded-[8px] border border-white/[.08] overflow-hidden bg-s1">
         ${tracks.map((t) => html`
           <div key=${t.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-white/[.05] last:border-0">
             <button onClick=${() => togglePlay(t)}
-              title=${playingId === t.id ? '停止试听' : '试听'}
+              title=${playingId === t.id ? tr('library.music.stop') : tr('library.music.play')}
               className="w-[26px] h-[26px] rounded-full border border-white/[.10] grid place-items-center text-[10px] text-ink2 hover:bg-white/[.08] cursor-pointer"
             >${playingId === t.id ? '⏸' : '▶'}</button>
             <span className="flex-1 min-w-0 cursor-pointer" onClick=${() => togglePlay(t)}>
@@ -1630,11 +1627,11 @@ export function MusicView() {
               </span>
             </span>
             ${defaultId === t.id
-              ? html`<span className="text-[10px] px-1.5 py-[3px] rounded-[3px] bg-accent text-onaccent">默认</span>`
+              ? html`<span className="text-[10px] px-1.5 py-[3px] rounded-[3px] bg-accent text-onaccent">${tr('library.music.defaultBadge')}</span>`
               : html`<button onClick=${() => setDefault(t.id)}
-                  className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">设为默认</button>`}
+                  className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${tr('library.music.setDefault')}</button>`}
             <button onClick=${() => remove(t.id)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">删除</button>
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${tr('library.music.delete')}</button>
           </div>
         `)}
       </div>

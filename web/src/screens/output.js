@@ -17,6 +17,8 @@ const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useMemo, useState } = React;
 
+import { t as tr } from '../i18n/index.js';
+
 function toOutputUrl(p) {
   if (!p) return null;
   const name = String(p).split(/[\\/]/).pop();
@@ -25,21 +27,21 @@ function toOutputUrl(p) {
 
 // 四态判定：顺序很重要，先判 passed，再判合法跳过
 function qcState(r) {
-  if (!r) return { key: 'missing', text: '未执行', cls: 'text-ink3', dot: 'bg-ink3' };
-  if (r.passed === true && r.skipped !== true) return { key: 'pass', text: '通过', cls: 'text-accent', dot: 'bg-accent' };
-  if (r.legitimateSkip === true) return { key: 'skip', text: '按计划跳过', cls: 'text-ink3', dot: 'bg-ink3' };
-  if (r.skipped === true) return { key: 'notrun', text: '跳过·不可判', cls: 'text-danger', dot: 'bg-danger' };
-  if (r.level === 'warn') return { key: 'warn', text: '提示', cls: 'text-warn', dot: 'bg-warn' };
-  return { key: 'fail', text: '不通过', cls: 'text-danger', dot: 'bg-danger' };
+  if (!r) return { key: 'missing', text: tr('output.qcState.missing'), cls: 'text-ink3', dot: 'bg-ink3' };
+  if (r.passed === true && r.skipped !== true) return { key: 'pass', text: tr('output.qcState.pass'), cls: 'text-accent', dot: 'bg-accent' };
+  if (r.legitimateSkip === true) return { key: 'skip', text: tr('output.qcState.skip'), cls: 'text-ink3', dot: 'bg-ink3' };
+  if (r.skipped === true) return { key: 'notrun', text: tr('output.qcState.notrun'), cls: 'text-danger', dot: 'bg-danger' };
+  if (r.level === 'warn') return { key: 'warn', text: tr('output.qcState.warn'), cls: 'text-warn', dot: 'bg-warn' };
+  return { key: 'fail', text: tr('output.qcState.fail'), cls: 'text-danger', dot: 'bg-danger' };
 }
 
 // 校色状态（与「镜头色彩连续性」是两件事：这说「有没有做」，那说「做没做好」）
 function colorMatchTag(state, reason) {
   switch (state) {
-    case 'applied': return { text: '已校色', cls: 'text-accent', title: reason || '已对相邻镜头做过校色对齐' };
-    case 'disabled': return { text: '未校色', cls: 'text-ink3', title: reason || '默认关闭，本次未开启' };
-    case 'skipped': return { text: '校色未执行', cls: 'text-warn', title: reason || '按设计跳过（典型原因：转场关闭）' };
-    case 'failed': return { text: '校色失败', cls: 'text-danger', title: (reason || '') + '（成片仍按原片产出，不是出片失败）' };
+    case 'applied': return { text: tr('output.color.applied'), cls: 'text-accent', title: reason || tr('output.color.appliedTitle') };
+    case 'disabled': return { text: tr('output.color.disabled'), cls: 'text-ink3', title: reason || tr('output.color.disabledTitle') };
+    case 'skipped': return { text: tr('output.color.skipped'), cls: 'text-warn', title: reason || tr('output.color.skippedTitle') };
+    case 'failed': return { text: tr('output.color.failed'), cls: 'text-danger', title: (reason || '') + tr('output.color.failedTitle') };
     default: return null;
   }
 }
@@ -94,7 +96,7 @@ export function OutputScreen() {
       <div className="mx-auto w-full max-w-[1240px] px-7 py-7">
 
         <div className="flex items-baseline gap-3">
-          <h2 className="font-display text-[26px] tracking-[.02em] text-ink">产出</h2>
+          <h2 className="font-display text-[26px] tracking-[.02em] text-ink">${tr('output.title')}</h2>
           ${candidates.length > 0 && html`
             <select
               value=${taskId || ''}
@@ -110,12 +112,12 @@ export function OutputScreen() {
           `}
           <span className="flex-1"></span>
           <span className="text-[11px] text-ink3 font-num">
-            ${qcItems.length} 项质检
+            ${tr('output.qcCount', { n: qcItems.length })}
           </span>
         </div>
 
         ${!taskId && !listRes.loading && html`
-          <p className="mt-6 text-[13px] text-ink3">还没有已完成的成片。</p>
+          <p className="mt-6 text-[13px] text-ink3">${tr('output.noFinal')}</p>
         `}
 
         ${task && html`
@@ -127,12 +129,12 @@ export function OutputScreen() {
                 ${videoUrl
                   ? html`<video src=${videoUrl} controls preload="metadata" playsInline
                           className="w-full aspect-video bg-black"></video>`
-                  : html`<div className="aspect-video grid place-items-center text-[12px] text-white/60">没有可播放的成片文件</div>`}
+                  : html`<div className="aspect-video grid place-items-center text-[12px] text-white/60">${tr('output.noVideo')}</div>`}
               </div>
 
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-ink3 font-num">
-                  ${task.resolution || '-'} · ${task.totalClips || 0} 段 · ${task.totalDuration ? task.totalDuration + 's' : '-'}
+                  ${task.resolution || '-'} · ${tr('output.clips', { n: task.totalClips || 0 })} · ${task.totalDuration ? task.totalDuration + 's' : '-'}
                 </span>
                 <span className="flex-1"></span>
                 ${videoUrl && html`
@@ -140,13 +142,13 @@ export function OutputScreen() {
                     href=${videoUrl}
                     download
                     className="h-9 px-4 rounded-[6px] bg-accent text-onaccent text-[13px] inline-flex items-center hover:bg-[#095737] transition-colors"
-                  >导出</a>
+                  >${tr('output.export')}</a>
                 `}
                 <button
                   disabled
-                  title="重新生成会再次产生付费调用，接入前需要你确认"
+                  title=${tr('output.regenerateTitle')}
                   className="h-9 px-3 rounded-[6px] border border-white/[.10] text-[13px] text-ink2 opacity-40 cursor-not-allowed"
-                >重新生成</button>
+                >${tr('output.regenerate')}</button>
               </div>
 
               <p className="mt-3 text-[12px] leading-[1.75] text-ink2 line-clamp-3">
@@ -157,13 +159,13 @@ export function OutputScreen() {
             <!-- 右：质检 -->
             <div>
               <div className="flex items-center gap-3">
-                <h3 className="text-[13px] font-medium text-ink">质检</h3>
+                <h3 className="text-[13px] font-medium text-ink">${tr('output.qc')}</h3>
                 <span className="flex items-center gap-2 text-[11px] font-num">
-                  <span className="text-accent">通过 ${stats.pass}</span>
-                  <span className="text-danger">不通过 ${stats.fail}</span>
-                  <span className="text-warn">提示 ${stats.warn}</span>
-                  <span className="text-ink3">跳过 ${stats.skip}</span>
-                  <span className="text-ink3">未执行 ${stats.missing}</span>
+                  <span className="text-accent">${tr('output.stats.pass', { n: stats.pass })}</span>
+                  <span className="text-danger">${tr('output.stats.fail', { n: stats.fail })}</span>
+                  <span className="text-warn">${tr('output.stats.warn', { n: stats.warn })}</span>
+                  <span className="text-ink3">${tr('output.stats.skip', { n: stats.skip })}</span>
+                  <span className="text-ink3">${tr('output.stats.missing', { n: stats.missing })}</span>
                 </span>
               </div>
 
@@ -192,14 +194,14 @@ export function OutputScreen() {
                   `;
                 })}
               </ul>
-              ${qcRes.error && html`<p className="mt-2 text-[11px] text-danger">质检清单读取失败：${qcRes.error}</p>`}
+              ${qcRes.error && html`<p className="mt-2 text-[11px] text-danger">${tr('output.qcLoadFailed')}${qcRes.error}</p>`}
             </div>
           </div>
         `}
 
         ${task && task.finalQC && task.finalQC.passed === false && !task.finalQC.skipped && html`
           <p className="mt-5 text-[12px] text-danger">
-            这条成片的终检未通过，导出前请先确认原因。
+            ${tr('output.finalQcFail')}
           </p>
         `}
       </div>

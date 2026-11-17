@@ -8,6 +8,8 @@
 // WebSocket 没有专用 paused 事件，前端读 task.status === 'paused'。
 // failureCode 用来区分「暂停导致的中止」与「普通生成失败」，不占用 HTTP 状态码。
 // ============================================================
+import { t } from '../i18n/index.js';
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useState } = React;
@@ -23,29 +25,29 @@ export function statusMeta(status, task) {
   const fc = task && task.failureCode;
   switch (status) {
     case 'completed':
-      return { text: '已完成', dot: 'bg-accent', cls: 'text-accent' };
+      return { text: t('tasks.status.completed'), dot: 'bg-accent', cls: 'text-accent' };
     case 'generating':
-      return { text: '生成中', dot: 'bg-warn', cls: 'text-warn' };
+      return { text: t('tasks.status.generating'), dot: 'bg-warn', cls: 'text-warn' };
     case 'paused':
-      return { text: '已暂停', dot: 'bg-warn', cls: 'text-warn' };
+      return { text: t('tasks.status.paused'), dot: 'bg-warn', cls: 'text-warn' };
     case 'partial':
-      return { text: '部分完成', dot: 'bg-warn', cls: 'text-warn' };
+      return { text: t('tasks.status.partial'), dot: 'bg-warn', cls: 'text-warn' };
     case 'pending':
-      return { text: '等待中', dot: 'bg-ink3', cls: 'text-ink3' };
+      return { text: t('tasks.status.pending'), dot: 'bg-ink3', cls: 'text-ink3' };
     case 'failed':
       if (fc === 'pause_timeout') {
         return {
-          text: '已中止 · 可补跑', dot: 'bg-warn', cls: 'text-warn',
-          note: '暂停等待超过上限，任务被中止（不是生成失败）'
+          text: t('tasks.status.abortedResumable'), dot: 'bg-warn', cls: 'text-warn',
+          note: t('tasks.note.pauseTimeout')
         };
       }
       if (fc === 'pause_interrupted') {
         return {
-          text: '已中止 · 可补跑', dot: 'bg-warn', cls: 'text-warn',
-          note: '暂停期间服务重启，已降级为失败，可补跑从断点继续'
+          text: t('tasks.status.abortedResumable'), dot: 'bg-warn', cls: 'text-warn',
+          note: t('tasks.note.pauseInterrupted')
         };
       }
-      return { text: '失败', dot: 'bg-danger', cls: 'text-danger' };
+      return { text: t('tasks.status.failed'), dot: 'bg-danger', cls: 'text-danger' };
     default:
       return { text: status || '-', dot: 'bg-ink3', cls: 'text-ink3' };
   }
@@ -68,7 +70,7 @@ export function PauseButton({ taskId, status, onChanged, compact }) {
 
   if (!taskId || RUNNING_STATUSES.indexOf(status) === -1) return null;
   const action = status === 'paused' ? 'unpause' : 'pause';
-  const label = action === 'pause' ? '暂停' : '继续';
+  const label = action === 'pause' ? t('tasks.pause.pause') : t('tasks.pause.resume');
 
   async function onClick(e) {
     if (e && e.stopPropagation) e.stopPropagation();
@@ -78,7 +80,7 @@ export function PauseButton({ taskId, status, onChanged, compact }) {
     try {
       await callPause(taskId, action);
     } catch (e2) {
-      setErr(e2.message || '操作失败');
+      setErr(e2.message || t('tasks.pause.failed'));
     } finally {
       setBusy(false);
       if (onChanged) onChanged();
@@ -90,7 +92,7 @@ export function PauseButton({ taskId, status, onChanged, compact }) {
       <button
         onClick=${onClick}
         disabled=${busy}
-        title=${err || (action === 'pause' ? '当前片段跑完后停止，不再发起新的付费生成' : '从断点继续')}
+        title=${err || (action === 'pause' ? t('tasks.pause.pauseTitle') : t('tasks.pause.resumeTitle'))}
         className=${[
           'rounded-[5px] border transition-colors disabled:opacity-40',
           compact ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-[12px]',

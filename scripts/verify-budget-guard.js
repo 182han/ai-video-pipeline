@@ -129,9 +129,10 @@ group('6. 接线静态断言');
   ok(/budget\.estimateLlm\(1\)/.test(serverSrc), 'LLM 优化计预算');
 
   const createSrc = fs.readFileSync(path.join(ROOT, 'web', 'src', 'screens', 'create.js'), 'utf8');
+const createMsgs = fs.readFileSync(path.join(ROOT, 'web', 'src', 'i18n', 'messages', 'create.js'), 'utf8');
   ok(/est\.usd/.test(createSrc), '创作页展示美元预估');
   ok(/est\.budget/.test(createSrc), '创作页展示服务端余额');
-  ok(/服务端预算不足/.test(createSrc), '创作页有预算不足提示');
+  ok(/create\.p5\.budgetShort/.test(createSrc) && /服务端预算不足/.test(createMsgs), '创作页有预算不足提示（i18n 词条）');
   ok(/DUPLICATE_TASK/.test(createSrc), '创作页对重复提交给二次确认');
 
   const tmSrc = fs.readFileSync(path.join(ROOT, 'src', 'taskManager.js'), 'utf8');

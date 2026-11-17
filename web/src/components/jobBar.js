@@ -9,6 +9,7 @@ const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
 
 import { navigate } from '../router.js';
+import { t as tr } from '../i18n/index.js';
 import { statusMeta, PauseButton, isRunningTask, callPause } from './pauseControl.js';
 
 export function useTasksPoll() {
@@ -51,14 +52,14 @@ export function JobBar({ tasks, onChanged }) {
       <span className=${'w-[6px] h-[6px] rounded-full ' + st.dot}></span>
       <span className=${'text-[12px] shrink-0 ' + st.cls}>${st.text}</span>
       <span className="text-[12px] text-ink truncate max-w-[560px]">
-        ${(t.prompt || '(无提示词)').slice(0, 60)}
+        ${(t.prompt || tr('tasks.job.noPrompt')).slice(0, 60)}
       </span>
       <span className="flex-1"></span>
       <${PauseButton} taskId=${t.taskId} status=${t.status} compact=${true} onChanged=${onChanged} />
       <button
         onClick=${() => navigate('/gen')}
         className="h-7 px-2.5 rounded-[5px] text-[12px] text-ink2 hover:bg-white/[.05] transition-colors"
-      >查看进度</button>
+      >${tr('tasks.job.viewProgress')}</button>
     </div>
   `;
 }
