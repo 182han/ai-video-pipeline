@@ -1198,3 +1198,24 @@ advancedAdjust/boundary` 小尾巴。
   `output.js` 6、`langSwitch/i18n` 7（语言自称，进 allowlist）、`bgmEditor.js` 4（后端匹配）。
 
 下一步：`editor.js`（769）→ `--strict` 收口 → P2 后端 → P3 提示词。
+
+### 2026-11-17 · P1 前端完成（Round 12）
+
+`editor.js`（1360 行，剪辑台）全部双语化：素材栏（片段/成片/图片 + 搜索/空态）、
+预览（空时间线/播放/放大/全屏）、调节（转场、10 项基础、HSL/曲线/色轮入口、重置/提示）、
+时间线（撤销/重做/分割/删除/缩放、视频/音频轨、裁剪手柄、音频轨、播放头）、
+工程弹窗与成片重建、成片预览。该文件 **769 → 0**，新增 namespace `studio.*`（约 110 条）。
+
+- 全站非豁免硬编码中文：**0**。`verify-i18n.js --strict` **12 通过 / 0 失败**；
+  另有 **89 处逐行 `i18n-allow`**（语言自称 / 后端中文错误前缀匹配 / 中文输入同义词），
+  不再按界面文案计。
+- `verify-image-first-ui`：**94 通过 / 0 失败 / 1 跳过**（仅剩未登录 401；跳过≠通过）。
+- `verify-assistant`：**237 通过 / 0 失败**。
+- 编辑器静态套件 `verify-editor-shell/media/preview/timeline/nav/final-source/rebuild` 全 0。
+- `verify-editor-audio/adjust`、`verify-adjust-advanced`、`verify-editor-transition-controls`
+  受本机临时目录 ffmpeg `Permission denied` 影响未能完成真导出（环境问题，非 i18n），
+  结论记为「未验证」，不计通过。
+- 同步修正 `verify-editor-final-source/rebuild` 的过期中文断言（改为 i18n key + zh 词条）。
+
+**P1 前端界面 i18n 完成。** 剩余：P2 后端用户可见文字（API/质检/日志、`task.lang`，需重启）、
+P3 AI 助手英文提示词/模板、浏览器英文端到端人工验收（当前未验证）。
