@@ -1219,3 +1219,37 @@ advancedAdjust/boundary` 小尾巴。
 
 **P1 前端界面 i18n 完成。** 剩余：P2 后端用户可见文字（API/质检/日志、`task.lang`，需重启）、
 P3 AI 助手英文提示词/模板、浏览器英文端到端人工验收（当前未验证）。
+
+### 2026-11-17 · P2 后端 i18n（夜间窗口 i18n-p2p3-dev）
+
+P2 后端用户可见文字完成（**只加不删**，中文默认零回归）。核心契约见 `docs/spec/i18n-spec.md` §3.4。
+
+- 新增 `src/i18n/`：
+  - `index.js`：`langFromRequest()`（cookie `vs_lang` → `Accept-Language` → 默认 zh）、`t()` / `tp()`、
+    `err()`（`{messageKey, params, message}` 加法式）、`mark()`、`keyForText()`（中文原文→key 反查）、
+    `logText()`（中文模式逐字返回 fallback）。
+  - `catalog/{index,server,auth,tasks,assistant,media,qc,pipeline,ws}.js`：扁平 key、中英并排；
+    184 条，`catalogProblems()` 0（key 对等 / 占位符一致 / 非空）。
+  - `log.js`：用户可见日志结构化工具（保留原 text + key/params/lang/localized），供 pipeline/processors 后续接入。
+- `server.js`：早期中间件 `req.lang`（登录墙之前，401 也能英文）；auth / users / tasks / budget /
+  assistant / images / photos / bgm / optimize 共 60+ 处错误补 `code + messageKey + params + message`，
+  **原中文 error 与状态码不变**；`POST /api/tasks` 把 `req.lang` 写入任务；`/api/status` 暴露
+  `lang` + `i18n` 探针（公开、无副作用、不泄 Key）；`/api/qc-items` 返回 `lang`。
+- `taskManager`：`task.lang`（缺省 zh，未知语言归 zh）、步骤 `nameKey/qcNameKey`、
+  失败/步骤/片段/Q C 结果在**不改中文原文**的前提下补 `errorKey` / `currentStepMessageKey`。
+- `qualityChecker`：13 个质检项补 `labelKey/descKey/labelZh/labelEn`；`checkClip/checkFinal` 明细补
+  `itemKey/labelKey/labelZh/labelEn`。**passed/skipped 语义与中文 reason 一字未动**（红线）。
+- `wsManager`：连接级 lang 从握手 cookie 解析；progress/clipUpdate/statusChange/stepUpdate/
+  assistantBroadcast 事件追加 `lang`（加法式）。
+- `videoProcessor` / `processors/audioMixer` / `processors/transitionMixer`：用户可见失败结果
+  追加 `errorKey`（反查不到不加，绝不臆造）；中文 error 与判定不变。
+- 新增验收 `scripts/verify-i18n-backend.js`：**70 通过 / 0 失败 / 1 跳过**（EXIT=0）；
+  跳过项 = live 双语 API 探针（需重启后由 Lead 跑 `--probe`，跳过≠通过）。
+- 回归：`verify-i18n --strict` 12/0、`verify-i18n-runtime` 29/0、`verify-assistant` 见本轮实测。
+
+**未验证**：live 双语 API 探针（要重启 3001，由用户重启后 Lead 验）；浏览器端读取新字段的展示
+（P1 前端尚未消费 `messageKey`，属前端后续接线）。
+
+**前端待接点（不在本窗口作用域）**：前端 API 层优先读 `messageKey` → 本地 catalog，缺失时显示
+`message`/`error`；任务详情/日志用 `errorKey`、`currentStepMessageKey`、步骤 `nameKey`；
+质检角标用 `labelKey`；WS 事件按 `lang` 字段选择文案。

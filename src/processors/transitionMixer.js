@@ -861,8 +861,22 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
   }
 }
 
+// P2（加法式）：用户可见失败结果补 errorKey（中文 error 原文与判定不变）。
+const i18n = require('../i18n');
+function _withErrorKey(result) {
+  if (result && typeof result === 'object' && !result.errorKey
+    && typeof result.error === 'string' && result.error) {
+    const key = i18n.keyForText(result.error, { prefix: true });
+    if (key) result.errorKey = key;
+  }
+  return result;
+}
+async function _wrapConcat(...args) {
+  return _withErrorKey(await concatWithTransitions(...args));
+}
+
 module.exports = {
-  concatWithTransitions,
+  concatWithTransitions: _wrapConcat,
   // 供验收脚本/上层复用
   _probeMedia: probeMedia,
   _pickEncoder: pickEncoder,

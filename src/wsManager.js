@@ -3,12 +3,16 @@
 // ==========================================
 
 const { WebSocketServer } = require('ws');
+// P2：连接级语言从握手 cookie 解析；事件只新增可选 lang / key / params，既有字段不变。
+const i18n = require('./i18n');
 
 class WebSocketManager {
   constructor() {
     this.wss = null;
     this.clients = new Map(); // clientId -> ws
     this.taskSubscriptions = new Map(); // taskId -> Set of clientIds
+    // P2：clientId -> 'zh' | 'en'（按握手 cookie vs_lang / Accept-Language 解析）
+    this.clientLang = new Map();
   }
 
   /**
@@ -40,7 +44,10 @@ class WebSocketManager {
     this.wss.on('connection', (ws, req) => {
       const clientId = this._generateId();
       const who = req && req.auth && req.auth.username ? req.auth.username : '匿名';
+      // P2：连接级语言（握手请求同样带 cookie；解析失败回退 zh，不改变任何既有行为）
+      const lang = i18n.langFromRequest(req);
       this.clients.set(clientId, ws);
+      this.clientLang.set(clientId, lang);
       console.log(`[WS] 客户端连接: ${clientId} (${who})`);
 
       ws.on('message', (data) => {
@@ -103,12 +110,29 @@ class WebSocketManager {
 
   _cleanupClient(clientId) {
     this.clients.delete(clientId);
+    this.clientLang.delete(clientId);
     // 从所有任务订阅中移除
     for (const [taskId, clients] of this.taskSubscriptions) {
       clients.delete(clientId);
       if (clients.size === 0) {
         this.taskSubscriptions.delete(taskId);
       }
+    }
+  }
+
+  // P2：单连接发送。每条事件都追加 `lang`（加法式）——前端可按连接语言本地化日志，
+  // 旧前端忽略未知字段即可。发送失败不影响其它订阅者。
+  _sendTo(clientId, payload) {
+    const ws = this.clients.get(clientId);
+    if (!ws || ws.readyState !== 1) return false;
+    try {
+      ws.send(JSON.stringify({
+        ...payload,
+        lang: this.clientLang.get(clientId) || i18n.DEFAULT_LANG
+      }));
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -121,16 +145,17 @@ class WebSocketManager {
   // ==========================================
   broadcastAssistant(payload) {
     if (!payload || typeof payload !== 'object') return 0;
-    let message;
-    try {
-      message = JSON.stringify({ ...payload, type: payload.type || 'assistantBroadcast' });
-    } catch (e) {
-      return 0;
-    }
     let count = 0;
-    for (const ws of this.clients.values()) {
+    for (const [clientId, ws] of this.clients) {
       if (ws && ws.readyState === 1) { // OPEN
-        try { ws.send(message); count += 1; } catch (e) { /* 单个客户端失败不影响其它人 */ }
+        try {
+          ws.send(JSON.stringify({
+            ...payload,
+            type: payload.type || 'assistantBroadcast',
+            lang: this.clientLang.get(clientId) || i18n.DEFAULT_LANG
+          }));
+          count += 1;
+        } catch (e) { /* 单个客户端失败不影响其它人 */ }
       }
     }
     return count;
@@ -141,19 +166,9 @@ class WebSocketManager {
     const subscribers = this.taskSubscriptions.get(taskId);
     if (!subscribers || subscribers.size === 0) return;
 
-    const message = JSON.stringify({
-      type: 'progress',
-      taskId,
-      data: progress
-    });
-
     let count = 0;
     for (const clientId of subscribers) {
-      const ws = this.clients.get(clientId);
-      if (ws && ws.readyState === 1) { // OPEN
-        ws.send(message);
-        count++;
-      }
+      if (this._sendTo(clientId, { type: 'progress', taskId, data: progress })) count++;
     }
 
     if (count > 0) {
@@ -165,39 +180,18 @@ class WebSocketManager {
   broadcastClipUpdate(taskId, clipIndex, clipData) {
     const subscribers = this.taskSubscriptions.get(taskId);
     if (!subscribers || subscribers.size === 0) return;
-
-    const message = JSON.stringify({
-      type: 'clipUpdate',
-      taskId,
-      index: clipIndex,
-      data: clipData
-    });
-
     for (const clientId of subscribers) {
-      const ws = this.clients.get(clientId);
-      if (ws && ws.readyState === 1) {
-        ws.send(message);
-      }
+      this._sendTo(clientId, { type: 'clipUpdate', taskId, index: clipIndex, data: clipData });
     }
   }
 
   // 推送任务状态变化
+  // extra 里的可选 key/params（P2）随事件一起下发，前端可优先用 key 本地化。
   broadcastStatusChange(taskId, status, extra = {}) {
     const subscribers = this.taskSubscriptions.get(taskId);
     if (!subscribers || subscribers.size === 0) return;
-
-    const message = JSON.stringify({
-      type: 'statusChange',
-      taskId,
-      status,
-      ...extra
-    });
-
     for (const clientId of subscribers) {
-      const ws = this.clients.get(clientId);
-      if (ws && ws.readyState === 1) {
-        ws.send(message);
-      }
+      this._sendTo(clientId, { type: 'statusChange', taskId, status, ...extra });
     }
   }
 
@@ -205,19 +199,8 @@ class WebSocketManager {
   broadcastStepUpdate(taskId, stepKey, stepData) {
     const subscribers = this.taskSubscriptions.get(taskId);
     if (!subscribers || subscribers.size === 0) return;
-
-    const message = JSON.stringify({
-      type: 'stepUpdate',
-      taskId,
-      stepKey,
-      data: stepData
-    });
-
     for (const clientId of subscribers) {
-      const ws = this.clients.get(clientId);
-      if (ws && ws.readyState === 1) {
-        ws.send(message);
-      }
+      this._sendTo(clientId, { type: 'stepUpdate', taskId, stepKey, data: stepData });
     }
   }
 }

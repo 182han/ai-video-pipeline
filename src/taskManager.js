@@ -14,6 +14,8 @@ const budget = require('./budget');
 // 场景卡（P4）：任务创建时取一轮卡，promptComposer 运行时拼提示词（卡只读）
 const sceneCards = require('./sceneCards');
 const promptComposer = require('./promptComposer');
+// P2：i18n 只用于「反查 messageKey」与任务语言归一化，不改变任何中文展示文案。
+const i18n = require('./i18n');
 
 const DATA_DIR = config.STORAGE.dataDir;
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
@@ -27,16 +29,17 @@ if (!fs.existsSync(TRASH_DIR)) {
 }
 
 // 流水线步骤定义（含质检环节）
+// P2：新增 nameKey / qcNameKey（加法式）——前端可按 key 本地化；name / qcName 中文原文不变。
 const PIPELINE_STEPS = [
-  { key: 'prompt_optimize', name: '提示词优化', qcKey: 'prompt', qcName: '提示词质检', category: 'pre' },
-  { key: 'storyboard', name: '分镜头生成', qcKey: 'storyboard', qcName: '分镜头质检', category: 'pre' },
-  { key: 'clip_generation', name: '视频片段生成', qcKey: 'clip_qc', qcName: '片段质检（黑帧/模糊/重复/时长）', category: 'clip' },
-  { key: 'concatenation', name: '视频拼接', qcKey: 'concat', qcName: '拼接质检', category: 'post' },
-  { key: 'loop_processing', name: '无缝循环处理', qcKey: 'loop', qcName: '循环质检', category: 'post' },
+  { key: 'prompt_optimize', name: '提示词优化', nameKey: 'pipeline.step.prompt_optimize.name', qcKey: 'prompt', qcName: '提示词质检', qcNameKey: 'pipeline.step.prompt_optimize.qcName', category: 'pre' },
+  { key: 'storyboard', name: '分镜头生成', nameKey: 'pipeline.step.storyboard.name', qcKey: 'storyboard', qcName: '分镜头质检', qcNameKey: 'pipeline.step.storyboard.qcName', category: 'pre' },
+  { key: 'clip_generation', name: '视频片段生成', nameKey: 'pipeline.step.clip_generation.name', qcKey: 'clip_qc', qcName: '片段质检（黑帧/模糊/重复/时长）', qcNameKey: 'pipeline.step.clip_generation.qcName', category: 'clip' },
+  { key: 'concatenation', name: '视频拼接', nameKey: 'pipeline.step.concatenation.name', qcKey: 'concat', qcName: '拼接质检', qcNameKey: 'pipeline.step.concatenation.qcName', category: 'post' },
+  { key: 'loop_processing', name: '无缝循环处理', nameKey: 'pipeline.step.loop_processing.name', qcKey: 'loop', qcName: '循环质检', qcNameKey: 'pipeline.step.loop_processing.qcName', category: 'post' },
   // 配乐混音：整片一次性混入（替代旧的逐片段混音）
-  { key: 'audio_mix', name: '配乐混音', qcKey: 'audio_mix', qcName: '混音校验', category: 'post' },
-  { key: 'transcoding', name: '转码导出', qcKey: 'transcode', qcName: '转码质检', category: 'post' },
-  { key: 'final_qc', name: '最终综合质检', qcKey: 'final', qcName: '最终质检', category: 'final' }
+  { key: 'audio_mix', name: '配乐混音', nameKey: 'pipeline.step.audio_mix.name', qcKey: 'audio_mix', qcName: '混音校验', qcNameKey: 'pipeline.step.audio_mix.qcName', category: 'post' },
+  { key: 'transcoding', name: '转码导出', nameKey: 'pipeline.step.transcoding.name', qcKey: 'transcode', qcName: '转码质检', qcNameKey: 'pipeline.step.transcoding.qcName', category: 'post' },
+  { key: 'final_qc', name: '最终综合质检', nameKey: 'pipeline.step.final_qc.name', qcKey: 'final', qcName: '最终质检', qcNameKey: 'pipeline.step.final_qc.qcName', category: 'final' }
 ];
 
 class TaskManager {
@@ -272,8 +275,11 @@ class TaskManager {
       steps[step.key] = {
         key: step.key,
         name: step.name,
+        // P2 加法式：前端可优先用 nameKey/qcNameKey 本地化；name/qcName 中文原文保留。
+        nameKey: step.nameKey,
         qcKey: step.qcKey,
         qcName: step.qcName,
+        qcNameKey: step.qcNameKey,
         category: step.category,
         status: 'pending', // pending / in_progress / completed / failed / skipped
         startedAt: null,
@@ -330,6 +336,9 @@ class TaskManager {
     const task = {
       taskId,
       status: 'pending',
+      // P2：任务创建时的界面语言（长任务/日志/历史记录按它呈现）。
+      // 缺字段的旧任务在读取时归一为 zh；不改变任何中文默认输出。
+      lang: i18n.normalizeLang(options.lang) || i18n.DEFAULT_LANG,
       prompt,
       optimizedPrompt: '',
       isMultiPrompt: !!prompts,
@@ -485,6 +494,8 @@ class TaskManager {
       preset: options.preset || 'custom',
       stages,
       source: 'library',
+      // P2：任务语言（缺省 zh；由 /api/assemble 从 req.lang 透传）
+      lang: options.lang,
       // 片段间转场：从 /api/assemble 透传；不传则用全局配置
       transition: (options.transition && typeof options.transition === 'object') ? options.transition : null
     });
@@ -504,7 +515,9 @@ class TaskManager {
       resolution: options.resolution || '1080p',
       preset: 'custom',
       stages: ['transcoding'],
-      source: 'editor'
+      source: 'editor',
+      // P2：任务语言（缺省 zh）
+      lang: options.lang
     });
     task.status = 'completed';
     task.outputPath = options.outputPath || null;
@@ -600,6 +613,12 @@ class TaskManager {
     }
     if (options.error !== undefined) {
       step.error = options.error;
+      // P2 加法式：能精确/前缀反查到 catalog 时补 errorKey（中文 step.error 原文不动）
+      if (typeof options.error === 'string' && options.error) {
+        const k = i18n.keyForText(options.error, { prefix: true });
+        if (k) step.errorKey = k;
+        else delete step.errorKey;
+      }
     }
 
     this._saveTask(taskId);
@@ -734,6 +753,25 @@ class TaskManager {
     }
 
     Object.assign(task, extra);
+
+    // P2（加法式）：为失败原因/当前步骤反查 messageKey。
+    // 原则：中文原文 task.error / task.currentStep 一律不改；只新增 errorKey / currentStepMessageKey。
+    // 精确反查不到就清掉旧 key（避免上一次失败的原因残留导致前端显示错文案）。
+    if (typeof extra.error === 'string' && extra.error) {
+      const errorKey = i18n.keyForText(extra.error, { prefix: true });
+      if (errorKey) task.errorKey = errorKey;
+      else delete task.errorKey;
+    } else if (newStatus === 'failed') {
+      // 失败但没有 error 文本：不臆造 key
+      delete task.errorKey;
+    }
+    if (typeof extra.currentStep === 'string' && extra.currentStep) {
+      // 优先取 pipeline.status.*（中文状态名与步骤名可能同字，如「视频拼接」）
+      const stepKey = i18n.keyForText(extra.currentStep, { prefer: 'pipeline.status.' });
+      if (stepKey) task.currentStepMessageKey = stepKey;
+      else delete task.currentStepMessageKey;
+    }
+
     this._saveTask(taskId);
     console.log(`任务 ${taskId} 状态: ${newStatus}`);
 
@@ -803,6 +841,13 @@ class TaskManager {
     const clip = task.clips[clipIndex];
     Object.assign(clip, updates);
 
+    // P2 加法式：片段失败原因补 errorKey（clip.error 中文原文不动）
+    if (typeof updates.error === 'string' && updates.error) {
+      const k = i18n.keyForText(updates.error, { prefix: true });
+      if (k) clip.errorKey = k;
+      else delete clip.errorKey;
+    }
+
     if (updates.status === 'generating' && !clip.createdAt) {
       clip.createdAt = new Date().toISOString();
     }
@@ -838,6 +883,8 @@ class TaskManager {
     if (!qcResult.passed) {
       task.clips[clipIndex].status = 'qc_failed';
       task.clips[clipIndex].error = qcResult.reason;
+      // P2 加法式：质检失败原因若带 key（新代码提供）就一并存；旧结果没有则不加。
+      if (qcResult.reasonKey) task.clips[clipIndex].errorKey = qcResult.reasonKey;
     }
 
     this._saveTask(taskId);

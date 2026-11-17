@@ -8,6 +8,8 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const path = require('path');
 const config = require('../config');
+// P2：质检项 labelKey/labelEn 从后端 catalog 取（中文 name 仍是原文，不迁到 catalog 覆盖）。
+const i18n = require('./i18n');
 
 const FFMPEG_PATH = config.FFMPEG_PATH || 'ffmpeg';
 
@@ -32,6 +34,19 @@ const QC_ITEMS = [
   { key: 'transcode', name: '转码质检', category: 'post', desc: '校验转码后分辨率、帧率、码率' },
   { key: 'final', name: '最终综合质检', category: 'final', desc: '文件完整性 + 整体质量综合评估' }
 ];
+
+// P2：给每个质检项补加法式本地化字段（不改变 name/desc 中文原文，不改任何判定语义）。
+//   labelKey / descKey —— 前端 catalog key；
+//   labelZh = 现有 name 的逐字副本；labelEn = 后端 catalog 的人工英文。
+QC_ITEMS.forEach((item) => {
+  const labelKey = `qc.item.${item.key}.label`;
+  const descKey = `qc.item.${item.key}.desc`;
+  item.labelKey = labelKey;
+  item.descKey = descKey;
+  item.labelZh = item.name;
+  item.labelEn = i18n.t('en', labelKey);
+  if (item.labelEn === labelKey) item.labelEn = item.name;
+});
 
 // ===== 质检结论版本号 =====
 // 2026-10-18 之前 qualityChecker 有两处缺陷（skipped 当 passed / Math.random 假质检），
@@ -249,6 +264,9 @@ class QualityChecker {
     if (notRunItems.length) reasons.push('未执行 ' + notRunItems.join('; '));
     if (allPassed && warnItems.length) reasons.push('警告 ' + warnItems.join('; '));
 
+    // P2：给每个明细项补 itemKey/labelKey/labelZh/labelEn（加法式；reason 等原文不变）
+    this._decorateItemResults(results);
+
     return {
       passed: allPassed,
       qcVersion: QC_VERSION,
@@ -269,9 +287,28 @@ class QualityChecker {
   }
 
   // 获取质检项名称
-  _getItemName(key) {
+  // P2：可选 lang —— 'en' 且 catalog 有英文时返回英文；默认/未知语言保持中文原文（零回归）。
+  _getItemName(key, lang) {
     const item = this.qcItems.find(i => i.key === key);
-    return item ? item.name : key;
+    if (!item) return key;
+    if (i18n.normalizeLang(lang) === 'en' && item.labelEn) return item.labelEn;
+    return item.name;
+  }
+
+  // P2：给质检结果明细补加法式本地化字段（itemKey / labelKey / labelZh / labelEn）。
+  // 只加字段，不改 passed / skipped / reason / level 等任何既有语义。
+  _decorateItemResults(results) {
+    if (!results || typeof results !== 'object') return results;
+    for (const [key, value] of Object.entries(results)) {
+      if (!value || typeof value !== 'object') continue;
+      if (!value.itemKey) value.itemKey = key;
+      const item = this.qcItems.find(i => i.key === key);
+      if (!item) continue;
+      if (!value.labelKey) value.labelKey = item.labelKey;
+      if (!value.labelZh) value.labelZh = item.labelZh;
+      if (!value.labelEn) value.labelEn = item.labelEn;
+    }
+    return results;
   }
 
   // ========== 黑帧检测 ==========
@@ -1443,6 +1480,9 @@ class QualityChecker {
     } else {
       reason = '最终质检通过';
     }
+
+    // P2：给终检明细补 itemKey/labelKey/labelZh/labelEn（加法式；判定与原文不变）
+    this._decorateItemResults(results);
 
     return {
       passed: totalPassed,

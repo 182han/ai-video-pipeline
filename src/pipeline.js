@@ -1445,12 +1445,12 @@ class Pipeline {
 
   async startTask(taskId, options = {}) {
     if (this.runningTasks.has(taskId)) {
-      return { error: '任务已经在运行中' };
+      return { error: '任务已经在运行中', errorKey: 'pipeline.log.taskRunning' };
     }
 
     const task = taskManager.getTask(taskId);
     if (!task) {
-      return { error: '任务不存在' };
+      return { error: '任务不存在', errorKey: 'pipeline.log.taskNotFound' };
     }
 
     this.runningTasks.add(taskId);

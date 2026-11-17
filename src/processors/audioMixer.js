@@ -810,11 +810,31 @@ function listTracksInOrder(category) {
   });
 }
 
+// P2（加法式）：用户可见失败结果补 errorKey（中文 error 原文与判定不变）。
+const i18n = require('../i18n');
+function _withErrorKey(result) {
+  if (result && typeof result === 'object' && !result.errorKey
+    && typeof result.error === 'string' && result.error) {
+    const key = i18n.keyForText(result.error, { prefix: true });
+    if (key) result.errorKey = key;
+  }
+  return result;
+}
+async function _wrapAsync(fn, ...args) {
+  try {
+    return _withErrorKey(await fn(...args));
+  } catch (e) {
+    throw e;
+  }
+}
+
 module.exports = {
   getManifest, listTracks, listTracksInOrder, toPublicTracks, findTrack, resolveTrack, pickRandomMusicTrack,
   getTrackById, addTrack, updateTrack, removeTrack, restoreTrack,
   probeDuration, probeMeanVolume, validateMixedOutput, validateMixDuration,
-  mixBgm, mixBgmPlan, buildMixArgs, resolvePlanPaths, buildAutoPlan, runFfmpeg,
+  mixBgm: (...args) => _wrapAsync(mixBgm, ...args),
+  mixBgmPlan: (...args) => _wrapAsync(mixBgmPlan, ...args),
+  buildMixArgs, resolvePlanPaths, buildAutoPlan, runFfmpeg,
   getPrefs, savePrefs,
   BGM_DIR, PREFS_PATH
 };

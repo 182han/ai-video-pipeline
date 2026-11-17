@@ -73,6 +73,9 @@ const library = require('./src/library');
 const photoLibrary = require('./src/photoLibrary');
 const recycle = require('./src/recycle');
 const security = require('./src/utils/security');
+// 后端 i18n（P2）：请求语言解析 + 加法式文案契约。不引入依赖、不改变中文默认行为。
+// 契约见 docs/spec/i18n-spec.md §3.4；入口在下方 `req.lang` 中间件。
+const i18n = require('./src/i18n');
 const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 // 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 / 调度。
 // 说明：这些模块不自己起服务、不直连厂商；付费闸门在 supervisor.execute 内（未确认不发请求）。
@@ -104,6 +107,16 @@ app.use((req, res, next) => {
   // 浏览器文档的 Permissions-Policy 优先级高于站点权限：Chrome 站点设成「允许」也压不过它。
   // 小智语音需要同源页面访问麦克风，所以只放行 microphone(self)；camera / geolocation 继续禁用。
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
+  next();
+});
+
+// ===== i18n：请求语言（P2）=====
+// 位置刻意在登录墙之前：401、登录失败这类「还没认证」的响应也要能按英文返回。
+// 语言来源：cookie vs_lang（前端切换语言时同步写）→ Accept-Language → 默认 zh。
+// 只设置 req.lang，不改变任何既有响应字段；后续路由用 `...i18n.err(req.lang, key)` 加法式补字段。
+app.use((req, res, next) => {
+  req.lang = i18n.langFromRequest(req);
+  res.locals.lang = req.lang;
   next();
 });
 
@@ -166,7 +179,13 @@ app.use((req, res, next) => {
   if (p.startsWith('/api/')) {
     if (AUTH_PUBLIC_API.has(p)) return next();
     const session = auth.authorizeRequest(req);
-    if (!session) return res.status(401).json({ error: '未登录', code: 'AUTH_REQUIRED' });
+    if (!session) {
+      return res.status(401).json({
+        error: '未登录',
+        code: 'AUTH_REQUIRED',
+        ...i18n.err(req.lang, 'api.auth.required')
+      });
+    }
     req.auth = session;
     return next();
   }
@@ -215,13 +234,20 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(429).json({
       error: `尝试次数过多，请 ${lock.retryAfter} 秒后再试`,
       code: 'LOCKED',
-      retryAfter: lock.retryAfter
+      retryAfter: lock.retryAfter,
+      ...i18n.err(req.lang, 'api.auth.locked', { retryAfter: lock.retryAfter })
     });
   }
 
   const username = String((req.body || {}).username || '').trim();
   const password = String((req.body || {}).password || '');
-  if (!username || !password) return res.status(400).json({ error: '请输入账号和密码' });
+  if (!username || !password) {
+    return res.status(400).json({
+      error: '请输入账号和密码',
+      code: 'AUTH_MISSING_CREDENTIALS',
+      ...i18n.err(req.lang, 'api.auth.missingCredentials')
+    });
+  }
 
   let user = null;
   try {
@@ -232,23 +258,35 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) {
     // 关键：存储不可用时返回 503，绝不 fail-open
     console.error('[auth] 认证存储不可用:', e.message);
-    return res.status(503).json({ error: '认证服务不可用：' + e.message, code: 'AUTH_STORAGE_DOWN' });
+    return res.status(503).json({
+      error: '认证服务不可用：' + e.message,
+      code: 'AUTH_STORAGE_DOWN',
+      ...i18n.err(req.lang, 'api.auth.storageDown')
+    });
   }
 
   const ok = await auth.verifyPasswordConstant(password, user ? user.passwordHash : null);
   if (!ok) {
     const r = auth.recordFailure(ip);
     if (r.locked) {
-      return res.status(401).json({ error: '尝试次数过多，已锁定', code: 'LOCKED' });
+      return res.status(401).json({
+        error: '尝试次数过多，已锁定',
+        code: 'LOCKED',
+        ...i18n.err(req.lang, 'api.auth.lockedNow')
+      });
     }
-    return res.status(401).json({ error: '账号或密码错误', code: 'BAD_CREDENTIALS' });
+    return res.status(401).json({
+      error: '账号或密码错误',
+      code: 'BAD_CREDENTIALS',
+      ...i18n.err(req.lang, 'api.auth.badCredentials')
+    });
   }
 
   auth.resetFailures(ip);
   auth.markLogin(user.id);
   auth.setSessionCookie(res, auth.createSession(user));
   console.log(`[auth] 登录成功: ${user.username} (${ip})`);
-  res.json({ ok: true, username: user.username });
+  res.json({ ok: true, username: user.username, lang: req.lang });
 });
 
 // 登出：销毁会话 + 立即过期 cookie
@@ -269,9 +307,13 @@ app.get('/api/auth/me', (req, res) => {
 app.get('/api/users', async (req, res) => {
   try {
     const users = await storage.listUsers();
-    res.json({ users, authEnabled: auth.isEnabled(), selfId: req.auth.userId });
+    res.json({ users, authEnabled: auth.isEnabled(), selfId: req.auth.userId, lang: req.lang });
   } catch (e) {
-    res.status(503).json({ error: e.message });
+    res.status(503).json({
+      error: e.message,
+      code: 'USERS_LIST_FAILED',
+      ...i18n.err(req.lang, 'api.users.listFailed')
+    });
   }
 });
 
@@ -281,31 +323,67 @@ app.post('/api/users', async (req, res) => {
     const password = String((req.body || {}).password || '');
     const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
     if (!/^[A-Za-z0-9_.@-]{2,32}$/.test(username)) {
-      return res.status(400).json({ error: '账号需 2–32 位，仅限字母、数字、下划线、点、@、横线' });
+      return res.status(400).json({
+        error: '账号需 2–32 位，仅限字母、数字、下划线、点、@、横线',
+        code: 'USERNAME_INVALID',
+        ...i18n.err(req.lang, 'api.users.badUsername')
+      });
     }
-    if (password.length < minLen) return res.status(400).json({ error: `密码至少 ${minLen} 位` });
+    if (password.length < minLen) {
+      return res.status(400).json({
+        error: `密码至少 ${minLen} 位`,
+        code: 'PASSWORD_TOO_SHORT',
+        ...i18n.err(req.lang, 'api.users.passwordTooShort', { min: minLen })
+      });
+    }
     const passwordHash = await auth.hashPassword(password);
     const user = await storage.createUser({ username, passwordHash });
     console.log(`[auth] 新建账号: ${user.username}`);
     res.status(201).json({ user });
   } catch (e) {
     const msg = String(e.message || '新建失败');
-    res.status(/已存在/.test(msg) ? 409 : 400).json({ error: msg });
+    res.status(/已存在/.test(msg) ? 409 : 400).json({
+      error: msg,
+      code: /已存在/.test(msg) ? 'USER_EXISTS' : 'USER_CREATE_FAILED',
+      ...i18n.err(req.lang, 'api.users.createFailed')
+    });
   }
 });
 
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const users = await storage.listUsers();
-    if (users.length <= 1) return res.status(400).json({ error: '至少要保留一个账号' });
-    if (req.params.id === req.auth.userId) return res.status(400).json({ error: '不能删除当前登录的账号' });
+    if (users.length <= 1) {
+      return res.status(400).json({
+        error: '至少要保留一个账号',
+        code: 'LAST_ACCOUNT',
+        ...i18n.err(req.lang, 'api.users.lastAccount')
+      });
+    }
+    if (req.params.id === req.auth.userId) {
+      return res.status(400).json({
+        error: '不能删除当前登录的账号',
+        code: 'CANNOT_DELETE_SELF',
+        ...i18n.err(req.lang, 'api.users.cannotDeleteSelf')
+      });
+    }
     const r = await storage.deleteUser(req.params.id);
-    if (!r.success) return res.status(404).json({ error: r.error || '账号不存在' });
+    if (!r.success) {
+      return res.status(404).json({
+        error: r.error || '账号不存在',
+        code: 'USER_NOT_FOUND',
+        ...i18n.err(req.lang, 'api.users.notFound')
+      });
+    }
     auth.destroySessionsOfUser(req.params.id);
     console.log(`[auth] 删除账号: ${req.params.id}`);
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({
+      error: e.message,
+      code: 'USER_DELETE_FAILED',
+      ...i18n.err(req.lang, 'api.users.deleteFailed')
+    });
   }
 });
 
@@ -313,15 +391,31 @@ app.put('/api/users/:id/password', async (req, res) => {
   try {
     const password = String((req.body || {}).password || '');
     const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
-    if (password.length < minLen) return res.status(400).json({ error: `密码至少 ${minLen} 位` });
+    if (password.length < minLen) {
+      return res.status(400).json({
+        error: `密码至少 ${minLen} 位`,
+        code: 'PASSWORD_TOO_SHORT',
+        ...i18n.err(req.lang, 'api.users.passwordTooShort', { min: minLen })
+      });
+    }
     const passwordHash = await auth.hashPassword(password);
     const user = await storage.updateUserPassword(req.params.id, passwordHash);
-    if (!user) return res.status(404).json({ error: '账号不存在' });
+    if (!user) {
+      return res.status(404).json({
+        error: '账号不存在',
+        code: 'USER_NOT_FOUND',
+        ...i18n.err(req.lang, 'api.users.notFound')
+      });
+    }
     auth.destroySessionsOfUser(req.params.id);
     console.log(`[auth] 重置密码: ${user.username}`);
     res.json({ ok: true, user });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({
+      error: e.message,
+      code: 'USER_PASSWORD_UPDATE_FAILED',
+      ...i18n.err(req.lang, 'api.users.updateFailed')
+    });
   }
 });
 
@@ -453,7 +547,13 @@ app.get('/api/bgm', (req, res) => {
 app.get('/api/bgm/waveform/:id', async (req, res) => {
   try {
     const found = audioMixer.findTrack(req.params.id);
-    if (!found) return res.status(404).json({ error: '音轨不存在: ' + req.params.id });
+    if (!found) {
+    return res.status(404).json({
+      error: '音轨不存在: ' + req.params.id,
+      code: 'BGM_TRACK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.bgm.trackNotFound', { id: req.params.id })
+    });
+  }
     const waveform = require('./src/processors/waveform');
     const r = await waveform.extractPeaks(found.track.id, found.filePath);
     if (!r.ok) return res.status(500).json({ error: r.error });
@@ -461,7 +561,7 @@ app.get('/api/bgm/waveform/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.json({ ok: true, trackId: found.track.id, buckets: r.buckets, peaks: r.peaks, durationSec: r.durationSec });
   } catch (e) {
-    res.status(500).json({ error: '生成波形失败: ' + e.message });
+    res.status(500).json({ error: '生成波形失败: ' + e.message, code: 'BGM_WAVEFORM_FAILED', ...i18n.err(req.lang, 'api.bgm.waveformFailed') });
   }
 });
 
@@ -471,7 +571,7 @@ app.put('/api/bgm/prefs', (req, res) => {
     const prefs = audioMixer.savePrefs(req.body || {});
     res.json({ success: true, ...prefs });
   } catch (e) {
-    res.status(500).json({ error: '保存配乐偏好失败: ' + e.message });
+    res.status(500).json({ error: '保存配乐偏好失败: ' + e.message, code: 'BGM_PREFS_FAILED', ...i18n.err(req.lang, 'api.bgm.prefsSaveFailed') });
   }
 });
 
@@ -509,10 +609,18 @@ app.post('/api/bgm/mix', async (req, res) => {
   // 解释的字符（引号/百分号等），因为路径最终会拼进 ffmpeg 命令行。
   const inputVideo = security.resolveUnderOutput(__dirname, videoPath);
   if (!inputVideo) {
-    return res.status(400).json({ error: 'videoPath 必须是 output 目录内的合法路径（防路径穿越）' });
+    return res.status(400).json({
+      error: 'videoPath 必须是 output 目录内的合法路径（防路径穿越）',
+      code: 'BGM_INVALID_PATH',
+      ...i18n.err(req.lang, 'api.bgm.invalidPath')
+    });
   }
   if (!fs.existsSync(inputVideo)) {
-    return res.status(400).json({ error: '视频文件不存在: ' + videoPath });
+    return res.status(400).json({
+      error: '视频文件不存在: ' + videoPath,
+      code: 'BGM_VIDEO_MISSING',
+      ...i18n.err(req.lang, 'api.bgm.videoMissing')
+    });
   }
   const outName = 'mix_' + Date.now().toString(36) + '.mp4';
   const outputPath = path.join(config.STORAGE.outputDir, outName);
@@ -525,7 +633,7 @@ app.post('/api/bgm/mix', async (req, res) => {
     if (!result.success) return res.status(500).json({ error: result.error });
     res.json({ ...result, outputUrl: '/output/' + outName });
   } catch (e) {
-    res.status(500).json({ error: '混音失败: ' + e.message });
+    res.status(500).json({ error: '混音失败: ' + e.message, code: 'BGM_MIX_FAILED', ...i18n.err(req.lang, 'api.bgm.mixFailed') });
   }
 });
 
@@ -564,7 +672,11 @@ app.get('/api/tasks/completed', (req, res) => {
 // 读取任务的配乐计划
 app.get('/api/tasks/:id/bgm-plan', (req, res) => {
   const task = taskManager.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (!task) return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   res.json({
     taskId: task.taskId,
     bgm: task.bgm || null,
@@ -579,7 +691,11 @@ app.get('/api/tasks/:id/bgm-plan', (req, res) => {
 // 保存配乐计划（不触发出片，仅落库）
 app.put('/api/tasks/:id/bgm-plan', (req, res) => {
   const task = taskManager.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (!task) return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   const normalized = pipeline._normalizePlan((req.body || {}).plan, task);
   if (!normalized.ok) return res.status(400).json({ error: normalized.error });
   taskManager.updateTaskStatus(task.taskId, task.status, { bgmPlan: normalized.plan });
@@ -589,13 +705,17 @@ app.put('/api/tasks/:id/bgm-plan', (req, res) => {
 // 生成自动配乐草稿（供「添加配乐」页面的初始填充，不落库）
 app.post('/api/tasks/:id/bgm-auto-plan', async (req, res) => {
   const task = taskManager.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (!task) return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   try {
     const prep = await pipeline._ensureBgmPlan(task.taskId, task, { force: true });
     if (!prep.ok) return res.status(400).json({ ok: false, error: prep.error });
     res.json({ ok: true, plan: prep.plan, source: prep.source, warnings: prep.warnings || [] });
   } catch (e) {
-    res.status(500).json({ ok: false, error: '生成自动配乐失败: ' + e.message });
+    res.status(500).json({ ok: false, error: '生成自动配乐失败: ' + e.message, code: 'BGM_AUTO_PLAN_FAILED', ...i18n.err(req.lang, 'api.bgm.autoPlanFailed') });
   }
 });
 
@@ -612,7 +732,7 @@ app.post('/api/tasks/:id/bgm-preview', async (req, res) => {
       notice: '这是预览文件，确认后再导出覆盖原成片'
     });
   } catch (e) {
-    res.status(500).json({ error: '配乐预览失败: ' + e.message });
+    res.status(500).json({ error: '配乐预览失败: ' + e.message, code: 'BGM_PREVIEW_FAILED', ...i18n.err(req.lang, 'api.bgm.previewFailed') });
   }
 });
 
@@ -625,7 +745,7 @@ app.post('/api/tasks/:id/audio', async (req, res) => {
     const outUrl = result.outputPath ? '/output/' + path.basename(result.outputPath) : null;
     res.json({ ...result, outputUrl: outUrl });
   } catch (e) {
-    res.status(500).json({ error: '配乐导出失败: ' + e.message });
+    res.status(500).json({ error: '配乐导出失败: ' + e.message, code: 'BGM_EXPORT_FAILED', ...i18n.err(req.lang, 'api.bgm.exportFailed') });
   }
 });
 
@@ -633,7 +753,9 @@ app.post('/api/tasks/:id/audio', async (req, res) => {
 app.post('/api/tasks/:id/clips/:index/audio', (req, res) => {
   res.status(410).json({
     error: '逐段配乐已下线，请使用「添加配乐」页面（POST /api/tasks/:id/audio）',
-    deprecated: true
+    deprecated: true,
+    code: 'BGM_PER_CLIP_REMOVED',
+    ...i18n.err(req.lang, 'api.bgm.perClipRemoved')
   });
 });
 
@@ -699,9 +821,19 @@ app.get('/api/image-gen/status', (req, res) => {
 app.post('/api/images/generate', async (req, res) => {
   const body = req.body || {};
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-  if (!prompt) return res.status(400).json({ error: 'prompt 不能为空' });
+  if (!prompt) {
+    return res.status(400).json({
+      error: 'prompt 不能为空',
+      code: 'IMAGE_PROMPT_REQUIRED',
+      ...i18n.err(req.lang, 'api.images.promptRequired')
+    });
+  }
   if (prompt.length > 8000) {
-    return res.status(400).json({ error: `prompt 过长（${prompt.length} 字，上限 8000）` });
+    return res.status(400).json({
+      error: `prompt 过长（${prompt.length} 字，上限 8000）`,
+      code: 'IMAGE_PROMPT_TOO_LONG',
+      ...i18n.err(req.lang, 'api.images.promptTooLong', { length: prompt.length })
+    });
   }
 
   // 运行时配置：页面「设置」里填的 Key/地址/模型只用于本次请求，不落盘。
@@ -719,9 +851,11 @@ app.post('/api/images/generate', async (req, res) => {
       error: '图片生成尚未就绪',
       missing: status.missing,
       providerImplemented: status.providerImplemented,
+      code: 'IMAGE_GEN_NOT_READY',
       hint: status.imageGen.hasApiKey
         ? `缺少: ${status.missing.join(', ') || '所选厂商的适配器未注册'}`
-        : '在「设置 → 图片生成」填 API Key（只存本机浏览器），或写 app/.env 的 IMAGE_GEN_API_KEY，然后重启服务。'
+        : '在「设置 → 图片生成」填 API Key（只存本机浏览器），或写 app/.env 的 IMAGE_GEN_API_KEY，然后重启服务。',
+      ...i18n.err(req.lang, 'api.images.notReady')
     });
   }
 
@@ -732,7 +866,12 @@ app.post('/api/images/generate', async (req, res) => {
     return res.status(402).json({
       error: `余额不足：生成 1 张图需 $${imageUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
       code: 'INSUFFICIENT_BUDGET',
-      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd },
+      ...i18n.err(req.lang, 'api.images.insufficientBudget', {
+        count: 1,
+        estimate: imageUsd.toFixed(2),
+        balance: st.balanceUsd.toFixed(2)
+      })
     });
   }
 
@@ -793,7 +932,11 @@ app.post('/api/images/generate', async (req, res) => {
     // 参数类错误返回 400；厂商/网络类错误返回 502（让调用方能区分「重试可能有用」）
     const isValidation = /提示词|尺寸|n=1|taskId|index|为空/i.test(msg);
     console.error('[image-gen] 生成失败:', msg);
-    res.status(isValidation ? 400 : 502).json({ error: '图片生成失败: ' + msg });
+    res.status(isValidation ? 400 : 502).json({
+      error: '图片生成失败: ' + msg,
+      code: isValidation ? 'IMAGE_GEN_INVALID' : 'IMAGE_GEN_FAILED',
+      ...i18n.err(req.lang, 'api.images.generateFailed')
+    });
   }
 });
 
@@ -810,8 +953,20 @@ app.post('/api/images/generate-batch', async (req, res) => {
   const prompts = Array.isArray(body.prompts)
     ? body.prompts.map(p => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
     : [];
-  if (prompts.length === 0) return res.status(400).json({ error: 'prompts 不能为空' });
-  if (prompts.length > 200) return res.status(400).json({ error: '单次最多 200 条（当前 ' + prompts.length + '）' });
+  if (prompts.length === 0) {
+    return res.status(400).json({
+      error: 'prompts 不能为空',
+      code: 'IMAGE_PROMPTS_REQUIRED',
+      ...i18n.err(req.lang, 'api.images.promptsRequired')
+    });
+  }
+  if (prompts.length > 200) {
+    return res.status(400).json({
+      error: '单次最多 200 条（当前 ' + prompts.length + '）',
+      code: 'IMAGE_BATCH_LIMIT',
+      ...i18n.err(req.lang, 'api.images.batchLimit', { count: prompts.length })
+    });
+  }
 
   const runtime = {};
   if (typeof body.apiKey === 'string' && body.apiKey.trim()) runtime.IMAGE_GEN_API_KEY = body.apiKey.trim();
@@ -825,9 +980,11 @@ app.post('/api/images/generate-batch', async (req, res) => {
     return res.status(503).json({
       error: '图片生成尚未就绪',
       missing: status.missing,
+      code: 'IMAGE_GEN_NOT_READY',
       hint: status.imageGen.hasApiKey
         ? `缺少: ${status.missing.join(', ') || '所选厂商的适配器未注册'}`
-        : '在「设置 → 图片生成」填 API Key'
+        : '在「设置 → 图片生成」填 API Key',
+      ...i18n.err(req.lang, 'api.images.notReady')
     });
   }
 
@@ -847,7 +1004,12 @@ app.post('/api/images/generate-batch', async (req, res) => {
     return res.status(402).json({
       error: `余额不足：生成 ${prompts.length} 张图需 $${batchUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
       code: 'INSUFFICIENT_BUDGET',
-      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+      budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd },
+      ...i18n.err(req.lang, 'api.images.insufficientBudget', {
+        count: prompts.length,
+        estimate: batchUsd.toFixed(2),
+        balance: st.balanceUsd.toFixed(2)
+      })
     });
   }
 
@@ -886,7 +1048,11 @@ app.post('/api/images/generate-batch', async (req, res) => {
       errors: batch.errors
     });
   } catch (e) {
-    return res.status(502).json({ error: '批量出图失败: ' + (e && e.message ? e.message : e) });
+    return res.status(502).json({
+      error: '批量出图失败: ' + (e && e.message ? e.message : e),
+      code: 'IMAGE_BATCH_FAILED',
+      ...i18n.err(req.lang, 'api.images.batchFailed')
+    });
   }
 });
 
@@ -897,7 +1063,11 @@ app.get('/api/photos', (req, res) => {
   const status = String(req.query.status || '').trim();
   const finalOnly = String(req.query.final || '') === '1';
   if (status && !photoLibrary.STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
+    return res.status(400).json({
+      error: 'status 只能是 pending / approved / rejected',
+      code: 'PHOTO_BAD_STATUS',
+      ...i18n.err(req.lang, 'api.photos.badStatus')
+    });
   }
   // 2026-11-15 用户口径：**文件缺失的条目不显示**（图片库曾 17/17 文件全缺，界面全是破图）。
   // 默认隐藏、数据一条不删；文件找回后自动重新出现。排查/对账用 ?includeMissing=1 取全量。
@@ -919,7 +1089,13 @@ app.get('/api/photos', (req, res) => {
 
 app.get('/api/photos/:id', (req, res) => {
   const photo = photoLibrary.get(req.params.id);
-  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  if (!photo) {
+    return res.status(404).json({
+      error: '图片不存在',
+      code: 'PHOTO_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.photos.notFound')
+    });
+  }
   res.json({
     ...photo,
     fileMissing: !(photo.filePath && fs.existsSync(photo.filePath)),
@@ -936,17 +1112,35 @@ app.put('/api/photos/:id', (req, res) => {
   const hasFinal = typeof body.isFinal === 'boolean';
   const hasScience = ['unchecked', 'passed', 'failed'].includes(body.scienceStatus) || typeof body.scienceNotes === 'string';
   if (!status && !hasImage && !hasVideo && !hasLegacy && !hasFinal && !hasScience) {
-    return res.status(400).json({ error: '需要提供 status / imagePrompt / videoPrompt / isFinal / scienceStatus' });
+    return res.status(400).json({
+      error: '需要提供 status / imagePrompt / videoPrompt / isFinal / scienceStatus',
+      code: 'PHOTO_NEED_FIELD',
+      ...i18n.err(req.lang, 'api.photos.needField')
+    });
   }
   if (status && !photoLibrary.STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'status 只能是 pending / approved / rejected' });
+    return res.status(400).json({
+      error: 'status 只能是 pending / approved / rejected',
+      code: 'PHOTO_BAD_STATUS',
+      ...i18n.err(req.lang, 'api.photos.badStatus')
+    });
   }
   let photo = null;
   if (hasFinal && body.isFinal) {
     const current = photoLibrary.get(req.params.id);
-    if (!current) return res.status(404).json({ error: '图片不存在' });
+    if (!current) {
+    return res.status(404).json({
+      error: '图片不存在',
+      code: 'PHOTO_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.photos.notFound')
+    });
+  }
     if (current.scienceStatus !== 'passed') {
-      return res.status(400).json({ error: '科学/物理审查未通过，不能设为最终版' });
+      return res.status(400).json({
+      error: '科学/物理审查未通过，不能设为最终版',
+      code: 'PHOTO_SCIENCE_NOT_PASSED',
+      ...i18n.err(req.lang, 'api.photos.scienceNotPassed')
+    });
     }
   }
   if (hasFinal) photo = photoLibrary.setFinal(req.params.id, body.isFinal);
@@ -972,7 +1166,13 @@ app.put('/api/photos/:id', (req, res) => {
     patch.scienceReviewedAt = new Date().toISOString();
   }
   if (Object.keys(patch).length) photo = photoLibrary.update(req.params.id, patch);
-  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  if (!photo) {
+    return res.status(404).json({
+      error: '图片不存在',
+      code: 'PHOTO_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.photos.notFound')
+    });
+  }
   res.json({ ok: true, photo, versions: photoLibrary.versions(photo.versionGroupId) });
 });
 
@@ -987,14 +1187,24 @@ app.put('/api/photos/:id', (req, res) => {
 app.post('/api/photos/:id/adjust', async (req, res) => {
   const body = req.body || {};
   const photo = photoLibrary.get(req.params.id);
-  if (!photo) return res.status(404).json({ error: '图片不存在' });
+  if (!photo) {
+    return res.status(404).json({
+      error: '图片不存在',
+      code: 'PHOTO_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.photos.notFound')
+    });
+  }
   // 延迟 require：模块缺失时只让这个接口报错，不影响整个服务的其它路由。
   const photoAdjust = require('./src/processors/photoAdjust');
   const prev = (photo.adjust && typeof photo.adjust === 'object') ? photo.adjust : null;
   const originalPath = (prev && prev.originalPath) || photo.filePath;
   const originalUrl = (prev && prev.originalUrl) || photo.url;
   if (!originalPath || !fs.existsSync(originalPath)) {
-    return res.status(409).json({ error: '原图文件不存在，无法调色（' + (originalPath || '(空路径)') + '）' });
+    return res.status(409).json({
+      error: '原图文件不存在，无法调色（' + (originalPath || '(空路径)') + '）',
+      code: 'PHOTO_SOURCE_MISSING',
+      ...i18n.err(req.lang, 'api.photos.sourceMissing')
+    });
   }
   const outDir = config.STORAGE.clipsDir;
   try {
@@ -1003,7 +1213,11 @@ app.post('/api/photos/:id/adjust', async (req, res) => {
         photo, originalPath, outDir, ffmpegPath: config.FFMPEG_PATH
       });
       if (!r || r.ok !== true) {
-        return res.status(502).json({ error: '回退原图失败：' + ((r && r.error) || '未知原因') });
+        return res.status(502).json({
+      error: '回退原图失败：' + ((r && r.error) || '未知原因'),
+      code: 'PHOTO_REVERT_FAILED',
+      ...i18n.err(req.lang, 'api.photos.revertFailed')
+    });
       }
       const versions = Array.isArray(prev && prev.versions) ? prev.versions.slice(-20) : [];
       const originalWidth = (prev && prev.originalWidth) || photo.width;
@@ -1044,13 +1258,21 @@ app.post('/api/photos/:id/adjust', async (req, res) => {
     const params = photoAdjust.normalizeParams(body);   // 非法 → throw code=E_BAD_PARAM
     const noop = !params.brightness && !params.contrast && !params.saturation && !params.temperature;
     if (noop) {
-      return res.status(400).json({ error: '四个参数都为 0，没有可应用的调色（要恢复原图请传 reset:true）' });
+      return res.status(400).json({
+      error: '四个参数都为 0，没有可应用的调色（要恢复原图请传 reset:true）',
+      code: 'PHOTO_NOTHING_TO_ADJUST',
+      ...i18n.err(req.lang, 'api.photos.nothingToAdjust')
+    });
     }
     const r = await photoAdjust.applyToPhoto({
       photo, params, outDir, ffmpegPath: config.FFMPEG_PATH, originalPath
     });
     if (!r || r.ok !== true) {
-      return res.status(502).json({ error: '调色失败：' + ((r && r.error) || '未知原因') });
+      return res.status(502).json({
+      error: '调色失败：' + ((r && r.error) || '未知原因'),
+      code: 'PHOTO_ADJUST_FAILED',
+      ...i18n.err(req.lang, 'api.photos.adjustFailed')
+    });
     }
     const url = r.url || ('/clips/' + encodeURIComponent(path.basename(r.filePath)));
     const versions = (Array.isArray(prev && prev.versions) ? prev.versions.slice() : [])
@@ -1081,7 +1303,11 @@ app.post('/api/photos/:id/adjust', async (req, res) => {
     if (code === 'E_BAD_PARAM') return res.status(400).json({ error: e.message });
     if (code === 'E_MISSING_FILE') return res.status(409).json({ error: e.message });
     console.error('[photo-adjust] 调色失败:', e && e.message ? e.message : e);
-    return res.status(502).json({ error: '调色失败：' + (e && e.message ? e.message : String(e)) });
+    return res.status(502).json({
+      error: '调色失败：' + (e && e.message ? e.message : String(e)),
+      code: 'PHOTO_ADJUST_FAILED',
+      ...i18n.err(req.lang, 'api.photos.adjustFailed')
+    });
   }
 });
 
@@ -1507,7 +1733,11 @@ app.get('/api/status', (req, res) => {
       provider: config.IMAGE_GEN_PROVIDER,
       model: config.IMAGE_GEN_MODEL,
       configured: !!config.IMAGE_GEN_API_KEY
-    }
+    },
+    // i18n 探针（P2）：/api/status 是公开接口，用它就能验证「cookie 切换语言」已生效，
+    // 不需要登录、不产生任何副作用，也不会触发登录失败的 IP 计数。
+    lang: req.lang,
+    i18n: { version: 'p2', langs: i18n.SUPPORTED.slice(), keys: i18n.keyCount() }
   });
 });
 
@@ -1688,11 +1918,19 @@ app.put('/api/rules', (req, res) => {
 
 // 优化提示词
 app.post('/api/optimize-prompt', async (req, res) => {
-  const { prompt, theme, llmApiKey, llmBaseUrl, llmModel } = req.body;
+  const { prompt, theme, llmApiKey, llmBaseUrl, llmModel, aiLang } = req.body;
 
   if (!prompt) {
-    return res.status(400).json({ error: '请输入提示词' });
+    return res.status(400).json({
+      error: '请输入提示词',
+      code: 'PROMPT_REQUIRED',
+      ...i18n.err(req.lang, 'api.optimize.promptRequired')
+    });
   }
+
+  // P3：AI 输出语言 = aiLang（请求体）→ 界面语言 → 默认 zh。
+  // 中文路径行为完全不变；en 走 promptOptimizer 的英文基底 prompt + 独立英文模板。
+  const outputLanguage = i18n.outputLang(req, aiLang);
 
   try {
     // 先做质检
@@ -1709,7 +1947,11 @@ app.post('/api/optimize-prompt', async (req, res) => {
       return res.status(402).json({
         error: `余额不足：本次 LLM 优化预计 $${budget.estimateLlm(1).toFixed(3)}，剩余 $${st.balanceUsd.toFixed(2)}`,
         code: 'INSUFFICIENT_BUDGET',
-        budget: { balanceUsd: st.balanceUsd }
+        budget: { balanceUsd: st.balanceUsd },
+        ...i18n.err(req.lang, 'api.optimize.insufficientBudget', {
+          estimate: budget.estimateLlm(1).toFixed(3),
+          balance: st.balanceUsd.toFixed(2)
+        })
       });
     }
     let result;
@@ -1719,9 +1961,10 @@ app.post('/api/optimize-prompt', async (req, res) => {
         apiKey,
         baseUrl: llmBaseUrl,
         model: llmModel,
+        lang: outputLanguage,
       });
     } else {
-      result = promptOptimizer.optimizeWithTemplate(prompt, useTheme);
+      result = promptOptimizer.optimizeWithTemplate(prompt, useTheme, outputLanguage);
     }
 
     if (apiKey) {
@@ -1736,14 +1979,22 @@ app.post('/api/optimize-prompt', async (req, res) => {
       ...result,
       validation,
       themeResolved: useTheme || null,
+      // P3：输出语言回显（加法式；旧前端不读也不受影响）
+      lang: outputLanguage,
       // 无主题又无 Key 时模板不改写任何内容，明确告知原因，避免误以为按钮坏了
       hint: (!useTheme && !apiKey)
-        ? '未识别主题：请在行尾加【山】【沙漠】【星空】等标签，或在设置里配置 LLM Key 走 AI 优化'
+        ? (outputLanguage === 'en'
+          ? 'No theme detected: append a tag such as 【山】【沙漠】【星空】 at the end, or configure an LLM key in Settings for AI optimization.'
+          : '未识别主题：请在行尾加【山】【沙漠】【星空】等标签，或在设置里配置 LLM Key 走 AI 优化')
         : null,
     });
   } catch (e) {
     console.error('[optimize-prompt] 失败:', e.message);
-    res.status(500).json({ error: '优化失败：' + e.message });
+    res.status(500).json({
+      error: '优化失败：' + e.message,
+      code: 'OPTIMIZE_FAILED',
+      ...i18n.err(req.lang, 'api.optimize.failed')
+    });
   }
 });
 
@@ -2199,12 +2450,19 @@ app.post('/api/assistant/message', (req, res) => {
       sessionId: body.sessionId ? String(body.sessionId) : undefined,
       text,
       // 2026-11-17 V2：跨会话偏好按登录用户隔离；无登录墙/验收环境为 'local'。
-      userId: (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local'
+      userId: (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local',
+      // P3：助手话术语言（默认 zh → 逐字保持现有中文回复；en 走 templates.en.js）。
+      lang: req.lang
     });
     res.json(out);
   } catch (e) {
     console.error('[assistant] message 失败:', e && e.message);
-    res.json({ ok: false, code: (e && e.code) || 'ASSISTANT_ERROR', error: '小智处理失败：' + (e && e.message ? e.message : String(e)) });
+    res.json({
+      ok: false,
+      code: (e && e.code) || 'ASSISTANT_ERROR',
+      error: '小智处理失败：' + (e && e.message ? e.message : String(e)),
+      ...i18n.err(req.lang, 'api.assistant.handleFailed')
+    });
   }
 });
 
@@ -2236,7 +2494,8 @@ app.post('/api/assistant/execute', (req, res) => {
         code: 'IMAGE_GEN_NOT_READY',
         error: '出图未就绪：' + why
           + '。请在「设置 → 图片生成」填 Key/地址/模型，或写 app/.env 的 IMAGE_GEN_API_KEY 后重启服务；'
-          + '也可以关掉「逐段出图」改用纯文生视频。'
+          + '也可以关掉「逐段出图」改用纯文生视频。',
+        ...i18n.err(req.lang, 'api.assistant.imageGenNotReady')
       });
     }
   }
@@ -2246,6 +2505,8 @@ app.post('/api/assistant/execute', (req, res) => {
       planId: body.planId ? String(body.planId) : null,
       approved: body.approved === true,
       force: body.force === true,
+      // P3：AI 输出语言（aiLang 可覆盖界面语言）；任务语言仍按 req.lang 记录。
+      lang: i18n.outputLang(req, body.aiLang),
       options: {
         runtimeConfig: {
           apiKey: body.apiKey || '',
@@ -2272,10 +2533,20 @@ app.post('/api/assistant/execute', (req, res) => {
         transition: (body.transition && typeof body.transition === 'object') ? body.transition : undefined
       }
     });
-    res.json(out);
+    res.json(withAssistantCodeKeys(out, {
+      PAYMENT_NOT_APPROVED: 'api.assistant.executeNotApproved',
+      ASSISTANT_BAD_SESSION: 'api.assistant.badSession',
+      ASSISTANT_NO_PLAN: 'api.assistant.noPlan',
+      ASSISTANT_ALREADY_RUNNING: 'api.assistant.alreadyRunning'
+    }));
   } catch (e) {
     console.error('[assistant] execute 失败:', e && e.message);
-    res.json({ ok: false, code: (e && e.code) || 'ASSISTANT_ERROR', error: '小智执行失败：' + (e && e.message ? e.message : String(e)) });
+    res.json({
+      ok: false,
+      code: (e && e.code) || 'ASSISTANT_ERROR',
+      error: '小智执行失败：' + (e && e.message ? e.message : String(e)),
+      ...i18n.err(req.lang, 'api.assistant.executeFailed')
+    });
   }
 });
 
@@ -2283,7 +2554,12 @@ app.post('/api/assistant/execute', (req, res) => {
 app.get('/api/assistant/state', (req, res) => {
   const sessionId = req.query.sessionId ? String(req.query.sessionId) : '';
   if (!sessionId) {
-    return res.json({ ok: false, code: 'ASSISTANT_BAD_SESSION', error: '需要 sessionId' });
+    return res.json({
+      ok: false,
+      code: 'ASSISTANT_BAD_SESSION',
+      error: '需要 sessionId',
+      ...i18n.err(req.lang, 'api.assistant.badSession')
+    });
   }
   try {
     res.json(assistantSupervisor.stateOf(sessionId, req.query.planId ? String(req.query.planId) : null));
@@ -2296,7 +2572,12 @@ app.get('/api/assistant/state', (req, res) => {
 app.get('/api/assistant/memory', (req, res) => {
   const sessionId = req.query.sessionId ? String(req.query.sessionId) : '';
   if (!sessionId) {
-    return res.json({ ok: false, code: 'ASSISTANT_BAD_SESSION', error: '需要 sessionId' });
+    return res.json({
+      ok: false,
+      code: 'ASSISTANT_BAD_SESSION',
+      error: '需要 sessionId',
+      ...i18n.err(req.lang, 'api.assistant.badSession')
+    });
   }
   try {
     const session = assistantMemory.getSession(sessionId);
@@ -2335,6 +2616,15 @@ function assistantRequestUserId(req) {
   return (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local';
 }
 
+// 助手旧契约（ok:false + code + error 中文原文）的加法式补丁：
+// 只给已知 code 补 messageKey，绝不改 error/message 原文，也不改 ok 语义。
+function withAssistantCodeKeys(out, codeKeyMap) {
+  if (!out || typeof out !== 'object' || out.ok !== false) return out;
+  const key = out.code && codeKeyMap ? codeKeyMap[out.code] : null;
+  if (!key) return out;
+  return { ...out, ...i18n.mark(key) };
+}
+
 // 只读环境上下文 A–E（B1/B2/B4/B5 的数据源；前端页面由 ?page= 上报）
 app.get('/api/assistant/context', (req, res) => {
   try {
@@ -2349,7 +2639,7 @@ app.get('/api/assistant/context', (req, res) => {
     );
     res.json({ ok: true, ...ctx });
   } catch (e) {
-    res.json({ ok: false, code: 'ASSISTANT_CONTEXT_ERROR', error: '读取环境失败：' + (e && e.message ? e.message : String(e)) });
+    res.json({ ok: false, code: 'ASSISTANT_CONTEXT_ERROR', error: '读取环境失败：' + (e && e.message ? e.message : String(e)), ...i18n.err(req.lang, 'api.assistant.contextFailed') });
   }
 });
 
@@ -2358,7 +2648,7 @@ app.get('/api/assistant/preferences', (req, res) => {
   try {
     res.json(assistantSupervisor.getPreferences({ userId: assistantRequestUserId(req) }));
   } catch (e) {
-    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e) });
+    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e), ...i18n.err(req.lang, 'api.assistant.prefsFailed') });
   }
 });
 
@@ -2369,7 +2659,8 @@ app.post('/api/assistant/preferences', (req, res) => {
     return res.json({
       ok: false,
       code: 'SETTINGS_NOT_APPROVED',
-      error: '偏好写入是设置变更（L3），需要明确确认（approved=true）；现在没有改任何东西'
+      error: '偏好写入是设置变更（L3），需要明确确认（approved=true）；现在没有改任何东西',
+      ...i18n.err(req.lang, 'api.assistant.prefsNotApproved')
     });
   }
   const userId = assistantRequestUserId(req);
@@ -2409,12 +2700,14 @@ app.post('/api/assistant/preferences', (req, res) => {
 app.post('/api/assistant/preferences/clear', (req, res) => {
   const body = req.body || {};
   try {
-    res.json(assistantSupervisor.clearPreferences({
+    res.json(withAssistantCodeKeys(assistantSupervisor.clearPreferences({
       userId: assistantRequestUserId(req),
       approved: body.approved === true
+    }), {
+      SETTINGS_NOT_APPROVED: 'api.assistant.prefsClearNotApproved'
     }));
   } catch (e) {
-    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e) });
+    res.json({ ok: false, code: 'ASSISTANT_PREFS_ERROR', error: (e && e.message) || String(e), ...i18n.err(req.lang, 'api.assistant.prefsFailed') });
   }
 });
 
@@ -2427,7 +2720,7 @@ app.get('/api/assistant/audit', (req, res) => {
       total: assistantAudit.count()
     });
   } catch (e) {
-    res.json({ ok: false, code: 'ASSISTANT_AUDIT_ERROR', error: (e && e.message) || String(e) });
+    res.json({ ok: false, code: 'ASSISTANT_AUDIT_ERROR', error: (e && e.message) || String(e), ...i18n.err(req.lang, 'api.assistant.auditFailed') });
   }
 });
 
@@ -2435,11 +2728,13 @@ app.get('/api/assistant/audit', (req, res) => {
 app.post('/api/assistant/settings/confirm', (req, res) => {
   const body = req.body || {};
   try {
-    res.json(assistantSupervisor.confirmSettingChange({
+    res.json(withAssistantCodeKeys(assistantSupervisor.confirmSettingChange({
       sessionId: body.sessionId ? String(body.sessionId) : '',
       changeId: body.changeId ? String(body.changeId) : null,
       approved: body.approved === true,
       userId: assistantRequestUserId(req)
+    }), {
+      SETTINGS_NOT_APPROVED: 'api.assistant.settingsNotApproved'
     }));
   } catch (e) {
     res.json({ ok: false, code: 'ASSISTANT_SETTINGS_ERROR', error: (e && e.message) || String(e) });
@@ -2458,10 +2753,18 @@ app.post('/api/assistant/repair', async (req, res) => {
       userId: assistantRequestUserId(req),
       runtimeConfig: (body.runtimeConfig && typeof body.runtimeConfig === 'object') ? body.runtimeConfig : null
     });
-    res.json(out);
+    res.json(withAssistantCodeKeys(out, {
+      PAYMENT_NOT_APPROVED: 'api.assistant.repairNotApproved',
+      REPAIR_FAILED: 'api.assistant.repairFailed'
+    }));
   } catch (e) {
     console.error('[assistant] repair 失败:', e && e.message);
-    res.json({ ok: false, code: 'ASSISTANT_REPAIR_ERROR', error: '修复执行失败：' + (e && e.message ? e.message : String(e)) });
+    res.json({
+      ok: false,
+      code: 'ASSISTANT_REPAIR_ERROR',
+      error: '修复执行失败：' + (e && e.message ? e.message : String(e)),
+      ...i18n.err(req.lang, 'api.assistant.repairFailed')
+    });
   }
 });
 
@@ -2476,7 +2779,7 @@ app.post('/api/assistant/asr', async (req, res) => {
     res.json(out);
   } catch (e) {
     console.error('[assistant] ASR 失败:', e && e.message);
-    res.json({ ok: false, code: 'ASR_ERROR', error: '语音识别异常：' + (e && e.message ? e.message : String(e)) });
+    res.json({ ok: false, code: 'ASR_ERROR', error: '语音识别异常：' + (e && e.message ? e.message : String(e)), ...i18n.err(req.lang, 'api.assistant.asrFailed') });
   }
 });
 
@@ -2496,12 +2799,20 @@ const ASSISTANT_SLOT_SYSTEM_PROMPT = `你是「小智」的听懂模块，只做
 app.post('/api/assistant/understand', async (req, res) => {
   const body = req.body || {};
   const text = String(body.text || '').trim();
-  if (!text) return res.json({ ok: false, code: 'ASSISTANT_EMPTY_TEXT', error: '没有收到要说的话' });
+  if (!text) {
+    return res.json({
+      ok: false,
+      code: 'ASSISTANT_EMPTY_TEXT',
+      error: '没有收到要说的话',
+      ...i18n.err(req.lang, 'api.assistant.emptyText')
+    });
+  }
   if (body.consent !== true) {
     return res.json({
       ok: false,
       code: 'LLM_CONSENT_REQUIRED',
-      error: '让模型解析计划卡会产生少量 LLM 费用；需要用户明确同意（consent=true）后才会发请求'
+      error: '让模型解析计划卡会产生少量 LLM 费用；需要用户明确同意（consent=true）后才会发请求',
+      ...i18n.err(req.lang, 'api.assistant.understandConsent')
     });
   }
   const llmCfg = { apiKey: body.llmApiKey, baseUrl: body.llmBaseUrl, model: body.llmModel };
@@ -2524,7 +2835,13 @@ app.post('/api/assistant/understand', async (req, res) => {
     slots = null;
   }
   if (!slots || typeof slots !== 'object') {
-    return res.json({ ok: false, code: 'BAD_LLM_JSON', message: '模型没有按格式返回计划卡槽位', raw: String(raw).slice(0, 500) });
+    return res.json({
+      ok: false,
+      code: 'BAD_LLM_JSON',
+      message: '模型没有按格式返回计划卡槽位',
+      raw: String(raw).slice(0, 500),
+      ...i18n.mark('api.assistant.badSlotsJson')
+    });
   }
   const built = assistantPlanCard.buildPlan(assistantPlanCard.mergeModelSlots(text, slots));
   if (!built.ok) {
@@ -2578,7 +2895,11 @@ app.post('/api/tasks', (req, res) => {
   }
 
   if ((!prompt || !prompt.trim()) && !multiPrompts) {
-    return res.status(400).json({ error: '请输入提示词' });
+    return res.status(400).json({
+      error: '请输入提示词',
+      code: 'PROMPT_REQUIRED',
+      ...i18n.err(req.lang, 'api.tasks.promptRequired')
+    });
   }
 
   // 校验模型是否存在
@@ -2587,7 +2908,11 @@ app.post('/api/tasks', (req, res) => {
   // Mock 模型永远可用；真实模型即使没配 Key 也允许（前端传了 Key 就行）
   const modelExists = availableModels.some(m => m.id === modelId);
   if (!modelExists) {
-    return res.status(400).json({ error: '不支持的模型: ' + modelId });
+    return res.status(400).json({
+      error: '不支持的模型: ' + modelId,
+      code: 'UNSUPPORTED_MODEL',
+      ...i18n.err(req.lang, 'api.tasks.unsupportedModel', { model: modelId })
+    });
   }
 
   // 图生视频（2026-11-11 用户口径）：sourcePhotoId 必须是图片库里「已通过」的图，
@@ -2596,10 +2921,18 @@ app.post('/api/tasks', (req, res) => {
   if (sourcePhotoId) {
     sourcePhoto = photoLibrary.get(String(sourcePhotoId));
     if (!sourcePhoto) {
-      return res.status(400).json({ error: '图生视频的源图片不存在: ' + sourcePhotoId });
+      return res.status(400).json({
+        error: '图生视频的源图片不存在: ' + sourcePhotoId,
+        code: 'SOURCE_PHOTO_MISSING',
+        ...i18n.err(req.lang, 'api.tasks.sourcePhotoMissing', { id: String(sourcePhotoId) })
+      });
     }
     if (sourcePhoto.status !== 'approved') {
-      return res.status(400).json({ error: '图生视频的源图片还没通过审核（请到「照片」页点通过）' });
+      return res.status(400).json({
+        error: '图生视频的源图片还没通过审核（请到「照片」页点通过）',
+        code: 'SOURCE_PHOTO_NOT_APPROVED',
+        ...i18n.err(req.lang, 'api.tasks.sourcePhotoNotApproved')
+      });
     }
     // 2026-11-16 用户口径（明确指令）：**人工点「通过」即可用于图生视频**，
     // 科学/物理审查与「最终版」不再是硬闸门（原实现要求 scienceStatus=passed + isFinal=true，
@@ -2608,7 +2941,9 @@ app.post('/api/tasks', (req, res) => {
     if (!getI2VInfo(modelId)) {
       return res.status(400).json({
         error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
-          + '请切换视频模型，或取消勾选「用这张图生成视频」。'
+          + '请切换视频模型，或取消勾选「用这张图生成视频」。',
+        code: 'I2V_UNSUPPORTED_MODEL',
+        ...i18n.err(req.lang, 'api.tasks.i2vUnsupported', { model: modelId })
       });
     }
   }
@@ -2617,7 +2952,9 @@ app.post('/api/tasks', (req, res) => {
   const count = multiPrompts ? multiPrompts.length : (clipCount || totalClips || 10);
   if (count < 1 || count > 200) {
     return res.status(400).json({
-      error: '片段数量必须在 1-200 之间' + (multiPrompts ? `（当前输入了 ${multiPrompts.length} 行提示词）` : '')
+      error: '片段数量必须在 1-200 之间' + (multiPrompts ? `（当前输入了 ${multiPrompts.length} 行提示词）` : ''),
+      code: 'CLIP_COUNT_RANGE',
+      ...i18n.err(req.lang, 'api.tasks.clipCountRange')
     });
   }
 
@@ -2627,20 +2964,34 @@ app.post('/api/tasks', (req, res) => {
   if (Array.isArray(photoIds) && photoIds.length > 0) {
     if (!getI2VInfo(modelId)) {
       return res.status(400).json({
-        error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`
+        error: `模型「${modelId}」没有已实现的图生视频通道（已实现：${listI2VModels().join(' / ')}）。`,
+        code: 'I2V_UNSUPPORTED_MODEL',
+        ...i18n.err(req.lang, 'api.tasks.i2vUnsupported', { model: modelId })
       });
     }
     if (photoIds.length !== count) {
       return res.status(400).json({
-        error: `photoIds 数量（${photoIds.length}）必须与片段数（${count}）一致`
+        error: `photoIds 数量（${photoIds.length}）必须与片段数（${count}）一致`,
+        code: 'PHOTO_COUNT_MISMATCH',
+        ...i18n.err(req.lang, 'api.tasks.photoCountMismatch', { got: photoIds.length, expected: count })
       });
     }
     photoIdList = [];
     for (let i = 0; i < photoIds.length; i++) {
       const p = photoLibrary.get(String(photoIds[i]));
-      if (!p) return res.status(400).json({ error: `第 ${i + 1} 个片段的图片不存在: ${photoIds[i]}` });
+      if (!p) {
+        return res.status(400).json({
+          error: `第 ${i + 1} 个片段的图片不存在: ${photoIds[i]}`,
+          code: 'PHOTO_MISSING',
+          ...i18n.err(req.lang, 'api.tasks.photoMissing', { index: i + 1, id: String(photoIds[i]) })
+        });
+      }
       if (p.status !== 'approved') {
-        return res.status(400).json({ error: `第 ${i + 1} 个片段的图片未通过审核（批量链路请用 status=approved 的图）` });
+        return res.status(400).json({
+          error: `第 ${i + 1} 个片段的图片未通过审核（批量链路请用 status=approved 的图）`,
+          code: 'PHOTO_NOT_APPROVED',
+          ...i18n.err(req.lang, 'api.tasks.photoNotApproved', { index: i + 1 })
+        });
       }
       // 2026-11-16 用户口径：批量出图的「已通过」即放行（不再要求科学审查/最终版，原因同上方注释）。
       photoIdList.push(p.id);
@@ -2650,7 +3001,11 @@ app.post('/api/tasks', (req, res) => {
   // 校验单段时长
   const duration = clipDuration || config.GENERATION.defaultClipDuration || 15;
   if (duration < 1 || duration > 60) {
-    return res.status(400).json({ error: '单段时长必须在 1-60 秒之间' });
+    return res.status(400).json({
+      error: '单段时长必须在 1-60 秒之间',
+      code: 'CLIP_DURATION_RANGE',
+      ...i18n.err(req.lang, 'api.tasks.durationRange')
+    });
   }
 
   // ===== 场景卡模式（P4）=====
@@ -2663,19 +3018,22 @@ app.post('/api/tasks', (req, res) => {
     if (multiPrompts) {
       return res.status(400).json({
         error: '场景卡模式不接受逐行提示词（prompts）：场景内容由卡库提供，请只传主题/提示词。',
-        code: 'SCENE_CARDS_WITH_PROMPTS'
+        code: 'SCENE_CARDS_WITH_PROMPTS',
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsWithPrompts')
       });
     }
     if (sourcePhoto) {
       return res.status(400).json({
         error: '场景卡模式暂不支持图生视频（sourcePhotoId）：卡库已是完整画面指令。',
-        code: 'SCENE_CARDS_WITH_I2V'
+        code: 'SCENE_CARDS_WITH_I2V',
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsWithI2v')
       });
     }
     if (Array.isArray(photoIds) && photoIds.length > 0) {
       return res.status(400).json({
         error: '场景卡模式暂不支持逐片段首帧（photoIds）：卡库已是完整画面指令。',
-        code: 'SCENE_CARDS_WITH_I2V'
+        code: 'SCENE_CARDS_WITH_I2V',
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsWithI2v')
       });
     }
     const cap = sceneCardLibrary.checkCapacity(count);
@@ -2685,14 +3043,16 @@ app.post('/api/tasks', (req, res) => {
         error: cap.error,
         code: cap.code,
         available: cap.available,
-        requested: count
+        requested: count,
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsCapacity', { available: cap.available, requested: count })
       });
     }
     if (Number(duration) !== Number(cap.durationSec)) {
       return res.status(400).json({
         error: `场景卡按 ${cap.durationSec} 秒/段设计（30 分钟 = ${cap.available} 张 × ${cap.durationSec}s）；`
           + `本次 clipDuration=${duration}。请改为 ${cap.durationSec} 秒或关闭场景卡。`,
-        code: 'SCENE_CARDS_DURATION'
+        code: 'SCENE_CARDS_DURATION',
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsDuration', { duration: cap.durationSec, got: duration })
       });
     }
   }
@@ -2736,7 +3096,8 @@ app.post('/api/tasks', (req, res) => {
           code: 'DUPLICATE_TASK',
           existingTaskId: dup.taskId,
           retryAfterSec: dup.retryAfterSec,
-          estimateUsd: estimateUsd.usd
+          estimateUsd: estimateUsd.usd,
+          ...i18n.err(req.lang, 'api.tasks.duplicate', { window: Math.ceil(submitGuard.WINDOW_MS / 60000) })
         });
       }
     }
@@ -2748,7 +3109,11 @@ app.post('/api/tasks', (req, res) => {
         code: 'INSUFFICIENT_BUDGET',
         estimateUsd: estimateUsd.usd,
         breakdown: estimateUsd.breakdown,
-        budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd }
+        budget: { balanceUsd: st.balanceUsd, spentUsd: st.spentUsd },
+        ...i18n.err(req.lang, 'api.tasks.insufficientBudget', {
+          estimate: estimateUsd.usd.toFixed(2),
+          balance: st.balanceUsd.toFixed(2)
+        })
       });
     }
   }
@@ -2770,6 +3135,9 @@ app.post('/api/tasks', (req, res) => {
   try {
     task = taskManager.createTask(firstPrompt.trim(), {
     model: modelId,
+    // 语言：长任务/日志按创建时的界面语言记录（缺字段/旧任务由 taskManager 归一为 zh）。
+    // 只做持久化留痕，不改变中文默认输出；P3 里 AI 输出语言另有 aiLang（可与界面语言分离）。
+    lang: req.lang,
     // 自动重试：缺省 true（API/旧前端兼容）；新版创作页传 false → 只试一次，失败交用户决定
     autoRetry: autoRetry !== false,
     theme: theme ?? null,
@@ -2826,7 +3194,8 @@ app.post('/api/tasks', (req, res) => {
       const status = e && e.code === 'SCENE_CARDS_EXHAUSTED' ? 400 : 503;
       return res.status(status).json({
         error: '场景卡取卡失败: ' + (e && e.message ? e.message : String(e)),
-        code: (e && e.code) || 'SCENE_CARDS_ERROR'
+        code: (e && e.code) || 'SCENE_CARDS_ERROR',
+        ...i18n.err(req.lang, 'api.tasks.sceneCardsFailed')
       });
     }
     throw e;
@@ -2867,7 +3236,9 @@ app.post('/api/tasks', (req, res) => {
 
   res.json({
     taskId: task.taskId,
-    status: task.status
+    status: task.status,
+    // 加法式：让前端知道本任务创建时的界面语言（旧任务/缺字段 = zh）
+    lang: task.lang || i18n.DEFAULT_LANG
   });
 });
 
@@ -2943,7 +3314,10 @@ app.get('/api/scene-cards/preview', (req, res) => {
 app.get('/api/qc-items', (req, res) => {
   res.json({
     qcItems: qualityChecker.getQCItems(),
-    pipelineSteps: taskManager.getPipelineSteps()
+    pipelineSteps: taskManager.getPipelineSteps(),
+    // 加法式（P2）：本次请求语言；qcItems 的 labelKey/labelZh/labelEn 是新增字段，
+    // 原有 name/desc/category 与判定语义完全不变。
+    lang: req.lang
   });
 });
 
@@ -2982,7 +3356,10 @@ app.get('/api/tasks', (req, res) => {
       // 取值见 docs/spec/pause-capability-spec.md §4：
       //   pause_timeout / pause_interrupted / null（普通失败或无失败）
       failureCode: t.failureCode || null,
-      recoverable: !!t.recoverable
+      recoverable: !!t.recoverable,
+      // 加法式 i18n 字段（P2）：任务创建时语言 + 失败原因的 messageKey（能精确反查到才给）
+      lang: t.lang || i18n.DEFAULT_LANG,
+      errorKey: t.errorKey || null
     };
   }));
 });
@@ -2991,20 +3368,31 @@ app.get('/api/tasks', (req, res) => {
 app.get('/api/tasks/:id', (req, res) => {
   const task = taskManager.getTask(req.params.id);
   if (!task) {
-    return res.status(404).json({ error: '任务不存在' });
+    return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   }
   // 补质检可信度标注：qcVersion / qcTrusted / qcLabel（verified | legacy_unverified）。
   // taskManager.getTask 直接读内存对象、不会自动标注（storage.getTask 才标），
   // 不在这里补，前端就无法区分「修复后真实执行的质检」与「修复前伪造的 pass」。
   // annotateTaskQC 返回新对象、不改原对象，安全。
-  res.json(storage.annotateTaskQC(task));
+  const out = storage.annotateTaskQC(task);
+  // 加法式 i18n 字段（P2）：旧任务没有 lang 字段 → 视为 zh；errorKey 由 taskManager 在失败时反查得到。
+  if (!out.lang) out.lang = i18n.DEFAULT_LANG;
+  res.json(out);
 });
 
 // 获取任务进度
 app.get('/api/tasks/:id/progress', (req, res) => {
   const progress = taskManager.getProgress(req.params.id);
   if (!progress) {
-    return res.status(404).json({ error: '任务不存在' });
+    return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   }
   res.json(progress);
 });
@@ -3013,7 +3401,11 @@ app.get('/api/tasks/:id/progress', (req, res) => {
 app.get('/api/tasks/:id/clips', (req, res) => {
   const task = taskManager.getTask(req.params.id);
   if (!task) {
-    return res.status(404).json({ error: '任务不存在' });
+    return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   }
 
   const clipsDir = config.STORAGE.clipsDir;
@@ -3099,12 +3491,22 @@ app.get('/api/budget', (req, res) => {
 app.post('/api/budget/set', (req, res) => {
   const usd = Number(req.body && req.body.balanceUsd);
   if (!Number.isFinite(usd) || usd < 0) {
-    return res.status(400).json({ ok: false, error: 'balanceUsd 必须是非负数（美元）' });
+    return res.status(400).json({
+      ok: false,
+      error: 'balanceUsd 必须是非负数（美元）',
+      code: 'BUDGET_INVALID_AMOUNT',
+      ...i18n.err(req.lang, 'api.budget.invalidAmount')
+    });
   }
   try {
     res.json({ ok: true, ...budget.setBalance(usd) });
   } catch (e) {
-    res.status(400).json({ ok: false, error: e.message });
+    res.status(400).json({
+      ok: false,
+      error: e.message,
+      code: 'BUDGET_SET_FAILED',
+      ...i18n.err(req.lang, 'api.budget.setFailed')
+    });
   }
 });
 
@@ -3169,7 +3571,12 @@ app.get('/api/library/:id/thumb', async (req, res) => {
   try {
     const entry = library.get(req.params.id);
     if (!entry || !entry.filePath) {
-      return res.status(404).json({ success: false, error: '素材不存在' });
+      return res.status(404).json({
+      success: false,
+      error: '素材不存在',
+      code: 'MEDIA_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.media.notFound')
+    });
     }
     const file = await thumbnails.ensure(entry);
     res.set('Cache-Control', 'public, max-age=86400');
@@ -3279,6 +3686,8 @@ app.post('/api/library/:id/regenerate', (req, res) => {
       source: 'regenerate',
       hidden: true,
       regeneratedFrom: entry.id,
+      // P2：任务语言（日志/历史按创建时界面语言）
+      lang: req.lang,
       runtimeConfig: {
         apiKey: body.apiKey || '',
         apiBaseUrl: body.apiBaseUrl || '',
@@ -3359,7 +3768,7 @@ app.post('/api/assemble', (req, res) => {
     }
 
     const transition = (body.transition && typeof body.transition === 'object') ? body.transition : null;
-    const task = taskManager.createLibraryTask({ segments, resolution: target, transition });
+    const task = taskManager.createLibraryTask({ segments, resolution: target, transition, lang: req.lang });
     pipeline.startTask(task.taskId);
     res.json({
       success: true,
@@ -3396,7 +3805,11 @@ app.post('/api/tasks/:id/unpause', (req, res) => {
 // 查询暂停状态
 app.get('/api/tasks/:id/pause-state', (req, res) => {
   const task = taskManager.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (!task) return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   res.json({ paused: pipeline.isPaused(req.params.id), status: task.status });
 });
 
@@ -3535,7 +3948,11 @@ app.post('/api/tasks/:id/recheck-clips', async (req, res) => {
 // 预览：补跑到目标档位还需要跑哪些步骤（只读，不改任务状态）
 app.get('/api/tasks/:id/continue-plan', (req, res) => {
   const task = taskManager.getTask(req.params.id);
-  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (!task) return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   const preset = req.query.preset || task.preset || 'final';
   const completed = pipeline._completedSteps(task);
   const plan = resolveResume({ preset, completed });
@@ -3639,7 +4056,11 @@ app.post('/api/recycle/:type/purge', (req, res) => {
 app.get('/api/trash/:id', (req, res) => {
   const trashPath = path.join(__dirname, 'data', 'trash', `${req.params.id}.json`);
   if (!fs.existsSync(trashPath)) {
-    return res.status(404).json({ error: '任务不存在' });
+    return res.status(404).json({
+      error: '任务不存在',
+      code: 'TASK_NOT_FOUND',
+      ...i18n.err(req.lang, 'api.tasks.notFound')
+    });
   }
   try {
     const data = JSON.parse(fs.readFileSync(trashPath, 'utf8'));

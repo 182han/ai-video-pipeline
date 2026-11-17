@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, exec } = require('child_process');
 const config = require('../config');
+// P2：失败结果补可选 errorKey（加法式）；中文 error 原文与判定逻辑不动。
+const i18n = require('./i18n');
 
 const OUTPUT_DIR = config.STORAGE.outputDir;
 
@@ -719,4 +721,21 @@ class VideoProcessor {
   }
 }
 
-module.exports = new VideoProcessor();
+const videoProcessor = new VideoProcessor();
+
+// P2（加法式）：对用户可见的失败结果补 errorKey，前端/日志可按 key 本地化。
+// 只加字段、不改 error 原文与任何判定；未知文案反查不到就不加（绝不臆造 key）。
+for (const method of ['concatenate', 'concatenateSegments', 'transcode', 'makeSeamlessLoop']) {
+  const original = videoProcessor[method];
+  if (typeof original !== 'function') continue;
+  videoProcessor[method] = async function wrapped(...args) {
+    const out = await original.apply(this, args);
+    if (out && typeof out === 'object' && !out.errorKey && typeof out.error === 'string' && out.error) {
+      const key = i18n.keyForText(out.error, { prefix: true });
+      if (key) out.errorKey = key;
+    }
+    return out;
+  };
+}
+
+module.exports = videoProcessor;
