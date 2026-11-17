@@ -67,21 +67,25 @@ function realLibraryCount() {
   console.log('================================================================');
 
   const editor = read(path.join(WEB, 'src', 'screens', 'editor.js'));
+const studioMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'studio.js'));
   const exporter = read(path.join(ROOT, 'src', 'editorExporter.js'));
   const libSrc = read(path.join(ROOT, 'src', 'library.js'));
   const css = read(path.join(WEB, 'styles', 'editor.css'));
 
   // ---------------- 静态接线 ----------------
-  check(/data-media-source/.test(editor) && /片段/.test(editor) && /成片/.test(editor) && /图片/.test(editor),
-    '素材栏三来源（片段 / 成片 / 图片）');
+  check(/data-media-source/.test(editor) && /studio\.sources\.clip/.test(editor)
+    && /studio\.sources\.final/.test(editor) && /studio\.sources\.photo/.test(editor),
+    '素材栏三来源（片段 / 成片 / 图片；i18n 键）');
   check(/it\.kind !== 'final'/.test(editor) && /it\.kind === 'final'/.test(editor),
     '片段/成片按 kind 分开取（不再混在一列）');
-  check(/整段载入/.test(editor) && /outSec: dur > 0 \? round3\(dur\) : null/.test(editor),
-    '成片默认整段载入（outSec=全长）');
+  check(/studio\.toasts\.loadedWhole/.test(editor) && /已整段载入成片/.test(studioMsgs)
+    && /outSec: dur > 0 \? round3\(dur\) : null/.test(editor),
+    '成片默认整段载入（outSec=全长；i18n 键）');
   check(/assetById/.test(editor) && /assetMaxDur/.test(editor),
     '跨来源素材索引（裁剪上限/预览不受当前来源影响）');
-  check(/图片素材首版后置/.test(editor) && /item\.kind === 'photo'/.test(editor),
-    '图片首版后置有显式说明且不可入轨');
+  check(/studio\.panel\.photoDeferredNote/.test(editor) && /图片素材首版后置/.test(studioMsgs)
+    && /item\.kind === 'photo'/.test(editor),
+    '图片首版后置有显式说明且不可入轨（i18n 键）');
   check(/libraryEntryId/.test(exporter) && /ingestFinal/.test(exporter),
     '导出成功后 library.ingestFinal 归库');
   check(/model === 'editor'/.test(libSrc) && /origin/.test(libSrc),

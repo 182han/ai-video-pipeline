@@ -29,7 +29,7 @@ const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useMemo, useRef, useState } = React;
 
-const MIN_SEG = 0.1;            // 片段最短 0.1s，与旧编辑器一致
+const MIN_SEG = 0.1;            // min segment 0.1s, same as the legacy editor
 const RULER_H = 24;
 const VIDEO_LANE_H = 34;
 const AUDIO_LANE_H = 56;
@@ -72,7 +72,7 @@ function trackKind(track) {
 async function api(url, options = {}) {
   const res = await fetch(url, { credentials: 'same-origin', ...options });
   let data = null;
-  try { data = await res.json(); } catch (_) { /* 非 JSON 响应按空处理 */ }
+  try { data = await res.json(); } catch (_) { /* non-JSON response: treat as empty */ }
   if (!res.ok) {
     const msg = data && (data.error || data.message);
     throw new Error(msg || ('HTTP ' + res.status));
@@ -258,7 +258,7 @@ function ClipBlock({ clip, kind, track, pxPerSec, selected, duration, onSelect, 
       sourceOut: clip.sourceOut || 0
     });
     paint();
-    const timer = setTimeout(paint, 80); // 等布局稳定后再补画一次
+    const timer = setTimeout(paint, 80); // repaint once layout settles
     return () => clearTimeout(timer);
   }, [wave, kind, clip.sourceIn, clip.sourceOut, widthPx, track]);
 
@@ -342,7 +342,7 @@ function ClipBlock({ clip, kind, track, pxPerSec, selected, duration, onSelect, 
 
       const onMove = (ev) => {
         const dx = ev.clientX - startX;
-        if (!moved && Math.abs(dx) < 2) return; // 2px 以内当作点击，不改计划
+        if (!moved && Math.abs(dx) < 2) return; // within 2px counts as a click, plan unchanged
         const r = compute(ev.clientX);
         if (!isValid(r)) return;
         moved = true;
@@ -960,7 +960,7 @@ export function BgmEditorView({ route }) {
     const t = clamp(Number(sec) || 0, 0, hi);
     setPlayhead(t);
     if (v) {
-      try { v.currentTime = t; } catch (_) { /* 媒体还没加载好时忽略 */ }
+      try { v.currentTime = t; } catch (_) { /* media not ready yet: ignore */ }
     }
   }
 
@@ -1079,7 +1079,7 @@ export function BgmEditorView({ route }) {
       setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       setStatus({ kind: 'ok', text: tr('bgm.autoDone') });
     } catch (e) {
-      const hint = /至少勾选/.test(e.message) ? tr('bgm.autoAtLeast') : '';
+      const hint = /至少勾选/.test(e.message) ? tr('bgm.autoAtLeast') : ''; // i18n-allow: backend Chinese error match
       setStatus({ kind: 'err', text: tr('bgm.autoFailed', { error: e.message, hint }) });
     } finally {
       setBusy('');

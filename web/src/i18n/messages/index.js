@@ -19,6 +19,7 @@ import assistant from './assistant.js';
 import xiaozhi from './xiaozhi.js';
 import createSmart from './createSmart.js';
 import bgm from './bgm.js';
+import studio from './studio.js';
 
 const NAMESPACES = {
   common,
@@ -34,7 +35,8 @@ const NAMESPACES = {
   assistant,
   xiaozhi,
   createSmart,
-  bgm
+  bgm,
+  studio
 };
 
 export const messages = { zh: {}, en: {} };

@@ -16,7 +16,7 @@ const DEFAULT_LOCALE = 'zh';
 const STORAGE_KEY = 'vs_lang';
 const COOKIE_KEY = 'vs_lang';
 const TAGS = { zh: 'zh-CN', en: 'en-US' };
-const LABELS = { zh: '中文', en: 'English' };
+const LABELS = { zh: '中文', en: 'English' }; // i18n-allow: language self-name
 
 const missingKeys = new Set();
 const listeners = new Set();
@@ -116,7 +116,7 @@ function warnMissing(key) {
   console.warn('[i18n] missing key:', key);
 }
 
-/** 取文案；缺失时回退中文，再缺失返回 key 本身。 */
+/** Get a message; fall back to Chinese, then to the key itself. */
 export function t(key, params) {
   const current = resolve(messages[locale], key);
   const value = current !== undefined ? current : resolve(messages[DEFAULT_LOCALE], key);
@@ -127,13 +127,13 @@ export function t(key, params) {
   return interpolate(value, params);
 }
 
-/** 是否存在该 key（当前语言或兜底语言）。 */
+/** Whether the key exists (current language or fallback language). */
 export function has(key) {
   return resolve(messages[locale], key) !== undefined
     || resolve(messages[DEFAULT_LOCALE], key) !== undefined;
 }
 
-/** 复数：tp('clip.count', n, { n }) → clip.count_one / clip.count_other。 */
+/** Plural: tp('clip.count', n, { n }) → clip.count_one / clip.count_other. */
 export function tp(key, count, params) {
   let category = 'other';
   try { category = new Intl.PluralRules(TAGS[locale]).select(count); } catch (e) { /* ignore */ }
@@ -172,7 +172,7 @@ function applyDocument() {
   } catch (e) { /* ignore */ }
 }
 
-/** 切换语言；非法/相同语言直接返回当前值。 */
+/** Switch language; invalid or identical language returns the current value. */
 export function setLocale(next) {
   const code = normalizeLocale(next);
   if (!code || code === locale) return locale;
@@ -190,7 +190,7 @@ export function setLocale(next) {
   return locale;
 }
 
-/** 订阅语言变化；返回取消订阅函数。 */
+/** Subscribe to language changes; returns an unsubscribe function. */
 export function subscribe(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);

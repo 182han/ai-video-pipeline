@@ -10,7 +10,7 @@ const { React } = window;
 const html = window.htm.bind(React.createElement);
 
 const OPTIONS = [
-  { code: 'zh', label: '中文', title: '中文' },
+  { code: 'zh', label: '中文', title: '中文' }, // i18n-allow: language self-name
   { code: 'en', label: 'EN', title: 'English' }
 ];
 
@@ -36,7 +36,7 @@ export function LangSwitch({ compact = false, collapsed = false, style = null } 
           cursor: 'pointer',
           ...(style || {})
         }}
-      >${current === 'zh' ? '中' : 'EN'}</button>
+      >${current === 'zh' ? '中' : 'EN'}</button> // i18n-allow: language badge glyph
     `;
   }
   return html`

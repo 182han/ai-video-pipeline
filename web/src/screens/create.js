@@ -117,8 +117,8 @@ function findPromptConflict(base, motion) {
   const m = String(motion || '');
   if (!b || !m) return '';
   const pairs = [
-    [['晴天', '晴朗', '阳光'], ['暴雨', '下雨', '雷雨', '暴风雪', '下雪', '大雪', '大雾', '阴天']],
-    [['白天', '正午', '清晨', '日出'], ['夜晚', '深夜', '夜景', '星空', '银河', '月夜']]
+    [['晴天', '晴朗', '阳光'], ['暴雨', '下雨', '雷雨', '暴风雪', '下雪', '大雪', '大雾', '阴天']], // i18n-allow: Chinese weather synonyms for input matching
+    [['白天', '正午', '清晨', '日出'], ['夜晚', '深夜', '夜景', '星空', '银河', '月夜']] // i18n-allow: Chinese time-of-day synonyms
   ];
   const hit = (text, words) => words.filter((w) => text.includes(w));
   for (const [a, bWords] of pairs) {
@@ -192,11 +192,11 @@ export function CreateWizard({ onChanged }) {
   const [imgStatus, setImgStatus] = useState(null);
   // 出图状态放在模块里（见 ../createDraft.js）：生成中切走再回来，结果不丢
   const [imgState, setImgState] = useState(() => getImageState());
-  const [imgErrLocal, setImgErrLocal] = useState(''); // 只是本地校验错误（没调接口）
+  const [imgErrLocal, setImgErrLocal] = useState(''); // local validation error only (no API call)
   const imgResult = imgState.result;
   const imgBusy = imgState.busy;
   const imgErr = imgErrLocal || imgState.error;
-  const [est, setEst] = useState(null); // 费用预估（/api/estimate，与 /api/pricing 同源）
+  const [est, setEst] = useState(null); // cost estimate (/api/estimate, same source as /api/pricing)
   const [customStages, setCustomStages] = useState(() => (restored && Array.isArray(restored.customStages)
     ? restored.customStages : ALL_STAGE_KEYS.slice()));
   const [strictQc, setStrictQc] = useState(() => (restored && Array.isArray(restored.strictQc)

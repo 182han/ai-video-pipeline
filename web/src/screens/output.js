@@ -123,7 +123,7 @@ export function OutputScreen() {
         ${task && html`
           <div className="mt-5 grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-6 items-start">
 
-            <!-- 左：成片 -->
+            <!-- left: final -->
             <div>
               <div className="relative rounded-[8px] overflow-hidden bg-black">
                 ${videoUrl
@@ -156,7 +156,7 @@ export function OutputScreen() {
               </p>
             </div>
 
-            <!-- 右：质检 -->
+            <!-- right: QC -->
             <div>
               <div className="flex items-center gap-3">
                 <h3 className="text-[13px] font-medium text-ink">${tr('output.qc')}</h3>

@@ -50,6 +50,7 @@ async function waitReady(base, timeoutMs = 25000) {
   console.log('================================================================');
 
   const editor = read(path.join(WEB, 'src', 'screens', 'editor.js'));
+  const studioMsgs = read(path.join(WEB, 'src', 'i18n', 'messages', 'studio.js'));
   const server = read(path.join(ROOT, 'server.js'));
   const builder = read(path.join(ROOT, 'src', 'projectFromTask.js'));
 
@@ -58,7 +59,7 @@ async function waitReady(base, timeoutMs = 25000) {
   check(/bgmPlan/.test(builder) && /cleanAudio/.test(builder), '带回配乐计划');
   check(/transition/.test(builder), '带回转场设置');
   check(/films/.test(editor) && /rebuildFromTask/.test(editor), '编辑器「打开」里可重建');
-  check(/已完成成片/.test(editor), '成片列表分组');
+  check(/studio\.projects\.rebuildSub/.test(editor) && /已完成成片/.test(studioMsgs), '成片列表分组（i18n 键）');
 
   const items = lib.listAll().filter((i) => i.filePath && fs.existsSync(i.filePath)).slice(0, 2);
   check(items.length === 2, '片段库有 2 条素材');

@@ -119,7 +119,7 @@ export function SettingsView() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
       let text = j.success ? (j.message || t('settings.keys.connected')) : (j.error || t('settings.keys.failed'));
-      if (!j.success && /未知的测试类型/.test(text)) {
+      if (!j.success && /未知的测试类型/.test(text)) { // i18n-allow: backend Chinese error match
         text += t('settings.keys.oldServer');
       }
       setTestRes((r) => ({ ...r, [g.id]: { ok: !!j.success, text } }));

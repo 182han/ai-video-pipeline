@@ -433,7 +433,7 @@ export function PhotosPanel({ onChanged }) {
         setEditVideoPrompt(j.videoPrompt || '');
         setAdjParams(adjustParamsOf(j));
       }
-    } catch (e) { /* 详情失败不回滚列表 */ }
+    } catch (e) { /* detail failure does not roll back the list */ }
   }
 
   const qs = new URLSearchParams();
@@ -560,7 +560,7 @@ export function PhotosPanel({ onChanged }) {
       // 后端 error 已经带「调色失败：/回退原图失败：」前缀时不要再叠一层
       // （实测会出现「调色失败：调色失败：ffmpeg…」，用户以为是两次错误）。
       const msg = String((e && e.message) || '');
-      setAdjErr(/^(调色失败|回退原图失败|恢复原图失败)[:：]/.test(msg)
+      setAdjErr(/^(调色失败|回退原图失败|恢复原图失败)[:：]/.test(msg) // i18n-allow: backend Chinese error prefixes
         ? msg
         : ((kind === 'revert' ? tr('library.photos.revertFailed') : tr('library.photos.adjustFailed')) + msg));
       return null;
@@ -638,8 +638,8 @@ export function PhotosPanel({ onChanged }) {
       groupMap.set(key, g);
       photoGroups.push(g);
     }
-    if (String(p.id).endsWith('_original') || p.label === '调色前') g.before = p;
-    else if (p.label === '调色后') g.after = p;
+    if (String(p.id).endsWith('_original') || p.label === '调色前') g.before = p; // i18n-allow: backend photo label
+    else if (p.label === '调色后') g.after = p; // i18n-allow: backend photo label
     else g.singles.push(p);
   }
   // 用户要求：列表页不再并排展示调色前/后；只在详情页看版本链。
@@ -651,7 +651,7 @@ export function PhotosPanel({ onChanged }) {
     }
   }
   const usedText = (p) => (Array.isArray(p.usedIn) && p.usedIn.length ? tr('library.photos.used') : tr('library.photos.unused'));
-  const cleanPrompt = (p) => promptText(p).replace(/^【(调色前|调色后)】/, '');
+  const cleanPrompt = (p) => promptText(p).replace(/^【(调色前|调色后)】/, ''); // i18n-allow: backend photo label prefix
   const detailPair = detail
     ? photoGroups.find((g) => g.key === pairKey(detail) && g.before && g.after)
     : null;
@@ -983,7 +983,7 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
           const task = (j && (j.task || j)) || {};
           const clips = Array.isArray(task.clips) ? task.clips : [];
           next[id] = clips.filter((c) => c && c.videoPath).length;
-        } catch (e) { next[id] = null; } // 读不到 → null（按「可能有文件」保守处理）
+        } catch (e) { next[id] = null; } // unreadable → null (conservatively treat as possibly present)
       }
       if (alive) setFileCounts(next);
     })();
@@ -1347,7 +1347,7 @@ export function LibraryView({ initialTab = 'finals', tasks = [] }) {
   const [recycleOpen, setRecycleOpen] = useState(false);
   const [taskTrashOpen, setTaskTrashOpen] = useState(false);
   const [libS, reloadLib] = useJson('/api/library');
-  const [photoS, reloadPhotos] = useJson('/api/photos');  // 2026-11-16 口径放宽：计数与图片 tab 列表同源（全量）
+  const [photoS, reloadPhotos] = useJson('/api/photos');  // 2026-11-16: counts share the full photo list
   const [recS, reloadRec] = useJson('/api/recycle');
   const [trashS, reloadTrash] = useJson('/api/trash');
 

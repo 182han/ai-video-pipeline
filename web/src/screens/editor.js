@@ -14,6 +14,7 @@
 // 后续：F03 素材面板、F04 时间线、F05 每段调节、F08 导出。
 // ============================================================
 import { navigate } from '../router.js';
+import { t as tr } from '../i18n/index.js';
 import { PreviewEngine } from '../preview/engine.js';
 import { AudioPanel } from '../components/audioPanel.js';
 import { HslPanel, CurvePanel, WheelPanel } from '../components/advancedAdjust.js';
@@ -29,32 +30,32 @@ const PPS_MAX = 80;
 
 const ADJUST_GROUPS = [
   {
-    title: '色彩',
+    titleKey: 'studio.adjust.groups.color',
     items: [
-      { key: 'temperature', label: '色温' },
-      { key: 'tone', label: '色调' },
-      { key: 'saturation', label: '饱和度' }
+      { key: 'temperature', labelKey: 'studio.adjust.labels.temperature' },
+      { key: 'tone', labelKey: 'studio.adjust.labels.tone' },
+      { key: 'saturation', labelKey: 'studio.adjust.labels.saturation' }
     ]
   },
   {
-    title: '明度',
+    titleKey: 'studio.adjust.groups.light',
     items: [
-      { key: 'brightness', label: '亮度' },
-      { key: 'contrast', label: '对比度' },
-      { key: 'highlight', label: '高光' },
-      { key: 'shadow', label: '阴影' },
-      { key: 'white', label: '白色' },
-      { key: 'black', label: '黑色' },
-      { key: 'lightSensation', label: '光感' }
+      { key: 'brightness', labelKey: 'studio.adjust.labels.brightness' },
+      { key: 'contrast', labelKey: 'studio.adjust.labels.contrast' },
+      { key: 'highlight', labelKey: 'studio.adjust.labels.highlight' },
+      { key: 'shadow', labelKey: 'studio.adjust.labels.shadow' },
+      { key: 'white', labelKey: 'studio.adjust.labels.white' },
+      { key: 'black', labelKey: 'studio.adjust.labels.black' },
+      { key: 'lightSensation', labelKey: 'studio.adjust.labels.lightSensation' }
     ]
   }
 ];
 
 const ADJUST_TABS = [
-  { key: 'basic', label: '基础', title: '基础调节' },
-  { key: 'hsl', label: 'HSL', title: 'HSL 8 个色带' },
-  { key: 'curve', label: '曲线', title: 'RGB 曲线' },
-  { key: 'wheel', label: '色轮', title: 'lift / gamma / gain 色轮' }
+  { key: 'basic', labelKey: 'studio.adjust.tabs.basic', titleKey: 'studio.adjust.tabs.basicTitle' },
+  { key: 'hsl', labelKey: 'studio.adjust.tabs.hsl', titleKey: 'studio.adjust.tabs.hslTitle' },
+  { key: 'curve', labelKey: 'studio.adjust.tabs.curve', titleKey: 'studio.adjust.tabs.curveTitle' },
+  { key: 'wheel', labelKey: 'studio.adjust.tabs.wheel', titleKey: 'studio.adjust.tabs.wheelTitle' }
 ];
 
 async function api(url, opt) {
@@ -96,10 +97,10 @@ function thumbUrl(assetId) {
 }
 
 function saveStateText(state) {
-  if (state === 'saving') return '保存中…';
-  if (state === 'saved') return '已保存';
-  if (state === 'conflict') return '已被其他窗口修改';
-  if (state === 'error') return '保存失败';
+  if (state === 'saving') return tr('studio.save.saving');
+  if (state === 'saved') return tr('studio.save.saved');
+  if (state === 'conflict') return tr('studio.save.conflict');
+  if (state === 'error') return tr('studio.save.error');
   return '';
 }
 
@@ -194,12 +195,17 @@ export function EditorView() {
   // 当前来源的列表（搜索同时作用于三个来源）
   const libItems = mediaSource === 'final' ? finalItems : (mediaSource === 'clip' ? clipItems : []);
   const MEDIA_SOURCES = [
-    { key: 'clip', label: '片段', count: clipItems.length },
-    { key: 'final', label: '成片', count: finalItems.length },
-    { key: 'photo', label: '图片', count: photoItems.length }
+    { key: 'clip', labelKey: 'studio.sources.clip', count: clipItems.length },
+    { key: 'final', labelKey: 'studio.sources.final', count: finalItems.length },
+    { key: 'photo', labelKey: 'studio.sources.photo', count: photoItems.length }
   ];
-  const ORIGIN_TEXT = { task: '任务', library: '片段库', editor: '剪辑台导出', orphan: '孤儿成片' };
-  const PHOTO_STATUS_TEXT = { pending: '待审', approved: '通过', rejected: '打回' };
+  const ORIGIN_TEXT = {
+    task: 'studio.sources.task', library: 'studio.sources.library',
+    editor: 'studio.sources.editor', orphan: 'studio.sources.orphan'
+  };
+  const PHOTO_STATUS_TEXT = {
+    pending: 'studio.photoStatus.pending', approved: 'studio.photoStatus.approved', rejected: 'studio.photoStatus.rejected'
+  };
 
   function adopt(p) {
     projectRef.current = p;
@@ -223,7 +229,7 @@ export function EditorView() {
     const j = await api('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: '未命名工程' })
+      body: JSON.stringify({ name: tr('studio.defaultProjectName') })
     });
     return j.project;
   }
@@ -247,7 +253,7 @@ export function EditorView() {
       loadLibrary();
       loadBgm();
       loadPhotos();
-    })().catch((e) => setLoadErr(e.message || '工程加载失败'));
+    })().catch((e) => setLoadErr(e.message || tr('studio.errors.loadProject')));
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
@@ -274,7 +280,7 @@ export function EditorView() {
       setPreviewErr('');
       setPreviewReady(true);
     } catch (e) {
-      setPreviewErr(e.message || 'WebGL 初始化失败');
+      setPreviewErr(e.message || tr('studio.errors.webgl'));
       setPreviewReady(false);
     }
   }, [project]);
@@ -351,7 +357,7 @@ export function EditorView() {
       setLib(j);
       setLibErr('');
     } catch (e) {
-      setLibErr(e.message || '素材加载失败');
+      setLibErr(e.message || tr('studio.errors.library'));
     }
   }
 
@@ -369,7 +375,7 @@ export function EditorView() {
       setPhotos(Array.isArray(j.photos) ? j.photos : []);
       setPhotoErr('');
     } catch (e) {
-      setPhotoErr(e.message || '图片加载失败');
+      setPhotoErr(e.message || tr('studio.errors.photos'));
     }
   }
 
@@ -389,7 +395,7 @@ export function EditorView() {
       return j.project;
     }).catch((e) => {
       setSaveState(e.code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
-      setToast(e.message || '保存失败');
+      setToast(e.message || tr('studio.errors.save'));
       throw e;
     });
   }
@@ -432,7 +438,7 @@ export function EditorView() {
         setSaveState('saved');
       }).catch((e) => {
         setSaveState(e.code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
-        setToast(e.message || '保存失败');
+        setToast(e.message || tr('studio.errors.save'));
       });
     }, 400);
   }
@@ -493,7 +499,7 @@ export function EditorView() {
   function addClip(item) {
     if (!item || !item.id) return;
     if (item.kind === 'photo') {
-      setToast('图片素材首版暂不能加入时间线（产品已定后置）');
+      setToast(tr('studio.toasts.photoDeferred'));
       return;
     }
     // 成片默认整段载入：outSec = 成片全长；入/出点随后可在时间线拖动裁剪。
@@ -508,18 +514,18 @@ export function EditorView() {
     };
     commitSegments([...segmentsRef.current, seg]);
     setSelectedId(seg.id);
-    setToast((whole ? '已整段载入成片：' : '已加入时间线：') + (item.prompt || item.id).slice(0, 24));
+    setToast((whole ? tr('studio.toasts.loadedWhole') : tr('studio.toasts.addedTimeline')) + (item.prompt || item.id).slice(0, 24));
   }
 
   function splitSelected() {
-    if (selectedAudio) { setToast('音频轨暂不支持分割（请用左侧入点/出点）'); return; }
+    if (selectedAudio) { setToast(tr('studio.toasts.audioSplit')); return; }
     const segs = segmentsRef.current;
     if (!segs.length) return;
     let idx = selectedId ? segs.findIndex((s) => s.id === selectedId) : -1;
     if (idx < 0) idx = 0;
     const seg = segs[idx];
     const dur = segDuration(seg);
-    if (dur < 0.4) { setToast('片段太短，无法分割'); return; }
+    if (dur < 0.4) { setToast(tr('studio.toasts.tooShort')); return; }
     let acc = 0;
     for (let i = 0; i < idx; i++) acc += segDuration(segs[i]);
     let local = playhead - acc;
@@ -715,7 +721,7 @@ export function EditorView() {
   async function onExport() {
     const cur = projectRef.current;
     if (!cur || !Array.isArray(cur.segments) || cur.segments.length === 0) {
-      setToast('先加素材再导出');
+      setToast(tr('studio.toasts.needAsset'));
       return;
     }
     if (exportJob && (exportJob.status === 'queued' || exportJob.status === 'running')) return;
@@ -726,7 +732,7 @@ export function EditorView() {
       pollExport(j.export.id);
     } catch (e) {
       setExportJob({ status: 'failed', error: e.message });
-      setToast('导出失败：' + e.message);
+      setToast(tr('studio.errors.export') + ': ' + e.message);
     }
   }
 
@@ -738,7 +744,7 @@ export function EditorView() {
         const j = await api('/api/projects/' + encodeURIComponent(pid) + '/export/' + encodeURIComponent(exportId));
         setExportJob(j.export);
         if (j.export.status === 'done') {
-          setToast('导出完成，已归入「库 · 成片」');
+          setToast(tr('studio.toasts.exportDone'));
           try { loadLibrary(); } catch (e) { /* ignore */ }
           try {
             const fresh = await loadProjectById(pid);
@@ -750,12 +756,12 @@ export function EditorView() {
           return;
         }
         if (j.export.status === 'failed' || j.export.status === 'cancelled') {
-          setToast(j.export.error || '导出失败');
+          setToast(j.export.error || tr('studio.errors.export'));
           return;
         }
         setTimeout(tick, 800);
       } catch (e) {
-        setToast('查询导出状态失败：' + e.message);
+        setToast(tr('studio.errors.exportStatus') + e.message);
         setExportJob({ status: 'failed', error: e.message });
       }
     };
@@ -790,7 +796,7 @@ export function EditorView() {
     try {
       if (document.fullscreenElement) document.exitFullscreen();
       else el.requestFullscreen();
-    } catch (e) { setToast('当前浏览器不支持全屏'); }
+    } catch (e) { setToast(tr('studio.errors.fullscreen')); }
   }
 
   function persistName(next) {    const cur = projectRef.current;
@@ -809,7 +815,7 @@ export function EditorView() {
       setSaveState('saved');
     }).catch((e) => {
       setSaveState(e.code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
-      setToast(e.message || '保存失败');
+      setToast(e.message || tr('studio.errors.save'));
     });
   }
 
@@ -830,7 +836,7 @@ export function EditorView() {
       const p = await createProject();
       adopt(p);
       setOpenList(null);
-    } catch (e) { setToast('新建失败：' + e.message); }
+    } catch (e) { setToast(tr('studio.errors.create') + e.message); }
   }
 
   async function onOpen() {
@@ -843,7 +849,7 @@ export function EditorView() {
       } catch (e) {
         setFilms([]);
       }
-    } catch (e) { setToast('读取工程列表失败：' + e.message); }
+    } catch (e) { setToast(tr('studio.errors.list') + e.message); }
   }
 
   async function rebuildFromTask(taskId) {
@@ -857,9 +863,9 @@ export function EditorView() {
       adopt(j.project);
       setOpenList(null);
       setFilms(null);
-      setToast('已从成片重建工程：' + (j.project.name || ''));
+      setToast(tr('studio.toasts.rebuildDone') + (j.project.name || ''));
     } catch (e) {
-      setToast('重建失败：' + e.message);
+      setToast(tr('studio.errors.rebuild') + e.message);
     } finally {
       setRebuilding(null);
     }
@@ -870,23 +876,23 @@ export function EditorView() {
       const p = await loadProjectById(id);
       adopt(p);
       setOpenList(null);
-    } catch (e) { setToast('打开失败：' + e.message); }
+    } catch (e) { setToast(tr('studio.errors.open') + e.message); }
   }
 
   if (loadErr && !project) {
     return html`
       <div className="ed-root ed-fatal">
         <div>
-          <h2>剪辑台加载失败</h2>
+          <h2>${tr('studio.fatal.title')}</h2>
           <p>${loadErr}</p>
-          <button className="ed-btn primary" onClick=${() => location.reload()}>重试</button>
+          <button className="ed-btn primary" onClick=${() => location.reload()}>${tr('studio.fatal.retry')}</button>
         </div>
       </div>
     `;
   }
 
   if (!project) {
-    return html`<div className="ed-root ed-fatal"><span>正在打开剪辑台…</span></div>`;
+    return html`<div className="ed-root ed-fatal"><span>${tr('studio.fatal.opening')}</span></div>`;
   }
 
   const segments = (Array.isArray(project.segments) ? project.segments : []).filter(Boolean);
@@ -930,25 +936,25 @@ export function EditorView() {
   return html`
     <div className="ed-root">
       <header className="ed-top">
-        <button className="ed-back" onClick=${() => navigate('/')} title="返回小智">←</button>
-        <span className="ed-brand">剪辑台</span>
+        <button className="ed-back" onClick=${() => navigate('/')} title=${tr('studio.header.backTitle')}>←</button>
+        <span className="ed-brand">${tr('studio.header.brand')}</span>
         <input
           className="ed-name"
           value=${nameDraft}
           onInput=${onNameInput}
           onBlur=${onNameBlur}
           spellCheck=${false}
-          aria-label="工程名"
+          aria-label=${tr('studio.header.nameAria')}
         />
         <span className=${'ed-status ' + saveState}>${saveStateText(saveState)}</span>
         <span className="ed-spacer"></span>
-        <button className="ed-btn" onClick=${onOpen}>打开</button>
-        <button className="ed-btn" onClick=${onNew}>新建</button>
-        <button className="ed-btn primary" onClick=${onExport} disabled=${exporting || segments.length === 0} title="导出为成片">
-          ${exporting ? '导出中 ' + Math.round(exportJob.progress || 0) + '%' : '导出'}
+        <button className="ed-btn" onClick=${onOpen}>${tr('studio.header.open')}</button>
+        <button className="ed-btn" onClick=${onNew}>${tr('studio.header.create')}</button>
+        <button className="ed-btn primary" onClick=${onExport} disabled=${exporting || segments.length === 0} title=${tr('studio.header.exportTitle')}>
+          ${exporting ? tr('studio.header.exporting', { n: Math.round(exportJob.progress || 0) }) : tr('studio.header.export')}
         </button>
         ${exportJob && exportJob.status === 'done' && exportJob.outputUrl && html`
-          <button className="ed-btn ed-link" onClick=${() => setViewerUrl(exportJob.outputUrl)}>看成片</button>
+          <button className="ed-btn ed-link" onClick=${() => setViewerUrl(exportJob.outputUrl)}>${tr('studio.header.viewFinal')}</button>
         `}
       </header>
 
@@ -956,54 +962,57 @@ export function EditorView() {
         <section className="ed-left">
           <div className="ed-rail">
             <button className=${'ed-rail-btn' + (tab === 'media' ? ' on' : '')} onClick=${() => setTab('media')}>
-              <span className="ed-rail-ico">▤</span><span>素材</span>
+              <span className="ed-rail-ico">▤</span><span>${tr('studio.rail.media')}</span>
             </button>
             <button className=${'ed-rail-btn' + (tab === 'audio' ? ' on' : '')} onClick=${() => setTab('audio')}>
-              <span className="ed-rail-ico">♪</span><span>音频</span>
+              <span className="ed-rail-ico">♪</span><span>${tr('studio.rail.audio')}</span>
             </button>
           </div>
           <div className="ed-panel">
             <div className="ed-panel-head">
-              <b>${tab === 'media' ? '素材' : '音频'}</b>
+              <b>${tab === 'media' ? tr('studio.panel.media') : tr('studio.panel.audio')}</b>
               <span className="ed-sub">${tab === 'media'
                 ? (mediaSource === 'photo'
-                  ? photoItems.length + ' 张'
-                  : libItems.length + ' / ' + (mediaSource === 'final' ? finalItems.length : clipItems.length) + ' 段')
-                : '音乐 / 环境音'}</span>
+                  ? tr('studio.panel.photoCount', { n: photoItems.length })
+                  : tr('studio.panel.clipRatio', {
+                    shown: libItems.length,
+                    total: mediaSource === 'final' ? finalItems.length : clipItems.length
+                  }))
+                : tr('studio.panel.musicAmbient')}</span>
             </div>
             <div className="ed-panel-body">
               ${tab === 'media'
                 ? html`<div className="ed-media">
-                    <div className="ed-sources" role="tablist" aria-label="素材来源">
+                    <div className="ed-sources" role="tablist" aria-label=${tr('studio.panel.sourcesAria')}>
                       ${MEDIA_SOURCES.map((s) => html`
                         <button
                           key=${s.key}
                           data-media-source=${s.key}
                           className=${'ed-source' + (mediaSource === s.key ? ' on' : '')}
                           onClick=${() => setMediaSource(s.key)}
-                        >${s.label}<span className="ed-source-count">${s.count}</span></button>
+                        >${tr(s.labelKey)}<span className="ed-source-count">${s.count}</span></button>
                       `)}
                     </div>
                     <input
                       className="ed-search"
-                      placeholder="搜索提示词 / 模型 / 分辨率"
+                      placeholder=${tr('studio.panel.searchPlaceholder')}
                       value=${libQuery}
                       onInput=${(e) => setLibQuery(e.target.value)}
                     />
                     ${mediaSource !== 'photo' && libErr && html`<p className="ed-sub ed-err">${libErr}</p>`}
                     ${mediaSource === 'photo' && photoErr && html`<p className="ed-sub ed-err">${photoErr}</p>`}
-                    ${mediaSource !== 'photo' && !lib && !libErr && html`<p className="ed-sub">素材加载中…</p>`}
-                    ${mediaSource === 'photo' && !photos && !photoErr && html`<p className="ed-sub">图片加载中…</p>`}
+                    ${mediaSource !== 'photo' && !lib && !libErr && html`<p className="ed-sub">${tr('studio.panel.mediaLoading')}</p>`}
+                    ${mediaSource === 'photo' && !photos && !photoErr && html`<p className="ed-sub">${tr('studio.panel.photosLoading')}</p>`}
 
                     ${mediaSource === 'photo' && html`
-                      <p className="ed-note">图片素材首版后置：暂不能加入时间线（产品已定）。</p>
+                      <p className="ed-note">${tr('studio.panel.photoDeferredNote')}</p>
                       <div className="ed-grid">
                         ${photoItems.slice(0, 120).map((p) => html`
                           <div
                             key=${p.id}
                             data-photo-id=${p.id}
                             className="ed-card ed-card-photo"
-                            title=${(p.prompt || p.id) + ' · 图片（首版后置）'}
+                            title=${(p.prompt || p.id) + tr('studio.panel.photoTitleSuffix')}
                           >
                             <span className="ed-card-thumb">
                               <img
@@ -1013,19 +1022,19 @@ export function EditorView() {
                                 loading="lazy"
                                 onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
                               />
-                              <span className="ed-card-dur">${PHOTO_STATUS_TEXT[p.status] || '待审'}</span>
-                              <span className="ed-card-badge ghost">图片</span>
+                              <span className="ed-card-dur">${PHOTO_STATUS_TEXT[p.status] ? tr(PHOTO_STATUS_TEXT[p.status]) : tr('studio.photoStatus.pending')}</span>
+                              <span className="ed-card-badge ghost">${tr('studio.panel.photoBadge')}</span>
                             </span>
                             <span className="ed-card-prompt">${p.prompt || p.imagePrompt || p.id}</span>
-                            <span className="ed-card-meta">${p.model || '-'} · 图片</span>
+                            <span className="ed-card-meta">${tr('studio.panel.photoMeta', { model: p.model || '-' })}</span>
                           </div>
                         `)}
                       </div>
-                      ${photoItems.length === 0 && !photoErr && html`<p className="ed-sub">图片库为空</p>`}
+                      ${photoItems.length === 0 && !photoErr && html`<p className="ed-sub">${tr('studio.panel.photoEmpty')}</p>`}
                     `}
 
                     ${mediaSource !== 'photo' && html`
-                      ${mediaSource === 'final' && html`<p className="ed-note">成片默认整段载入，可在时间线拖手柄裁入/出点。</p>`}
+                      ${mediaSource === 'final' && html`<p className="ed-note">${tr('studio.panel.finalNote')}</p>`}
                       <div className="ed-grid">
                         ${libItems.slice(0, 120).map((it) => html`
                           <button
@@ -1036,7 +1045,7 @@ export function EditorView() {
                             draggable=${true}
                             onDragStart=${(e) => { try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }}
                             onClick=${() => addClip(it)}
-                            title=${(it.prompt || it.id) + (it.kind === 'final' ? ' · 点击整段载入成片' : ' · 点击加入时间线')}
+                            title=${(it.prompt || it.id) + (it.kind === 'final' ? tr('studio.panel.cardTitleFinal') : tr('studio.panel.cardTitleClip'))}
                           >
                             <span className="ed-card-thumb">
                               <img
@@ -1047,20 +1056,20 @@ export function EditorView() {
                                 onError=${(e) => { e.currentTarget.style.visibility = 'hidden'; }}
                               />
                               <span className="ed-card-dur">${fmtDur(it.durationSec)}</span>
-                              ${it.kind === 'final' && html`<span className="ed-card-badge">成片</span>`}
+                              ${it.kind === 'final' && html`<span className="ed-card-badge">${tr('studio.panel.finalBadge')}</span>`}
                               <span className="ed-card-plus">＋</span>
                             </span>
                             <span className="ed-card-prompt">${it.prompt || it.id}</span>
                             <span className="ed-card-meta">${it.kind === 'final'
-                              ? (ORIGIN_TEXT[it.origin] || '成片') + ' · ' + (it.resolution || '-')
+                              ? tr(ORIGIN_TEXT[it.origin] || 'studio.sources.orphan') + ' · ' + (it.resolution || '-')
                               : (it.resolution || '-') + ' · ' + (it.model || '-')}</span>
                           </button>
                         `)}
                       </div>
                       ${libItems.length === 0 && !libErr && html`<p className="ed-sub">${mediaSource === 'final'
-                        ? '成片库为空（导出一次后出现在这里）'
-                        : '片段库为空'}</p>`}
-                      ${libItems.length > 120 && html`<p className="ed-sub">只显示前 120 条，用搜索缩小范围</p>`}
+                        ? tr('studio.panel.finalEmpty')
+                        : tr('studio.panel.clipEmpty')}</p>`}
+                      ${libItems.length > 120 && html`<p className="ed-sub">${tr('studio.panel.only120')}</p>`}
                     `}
                   </div>`
                 : html`<${AudioPanel} project=${project} bgm=${bgm} duration=${duration} onCommit=${commitAudio} onReloadBgm=${loadBgm} />`}
@@ -1070,12 +1079,12 @@ export function EditorView() {
 
         <section className="ed-center" ref=${centerRef}>
           <div className="ed-stage">
-            <div className="ed-frame" onDoubleClick=${toggleTheater} title="双击放大/还原">
+            <div className="ed-frame" onDoubleClick=${toggleTheater} title=${tr('studio.preview.frameTitle')}>
               <canvas ref=${canvasRef} className="ed-canvas"></canvas>
               ${segments.length === 0 && html`
                 <div className="ed-frame-empty">
-                  <b>时间线为空</b>
-                  <span>左侧选素材 → 加入时间线 → 右侧调节 → 导出</span>
+                  <b>${tr('studio.preview.emptyTitle')}</b>
+                  <span>${tr('studio.preview.emptyHint')}</span>
                 </div>
               `}
               ${previewErr && html`<div className="ed-preview-err">${previewErr}</div>`}
@@ -1083,10 +1092,10 @@ export function EditorView() {
           </div>
           <div className="ed-transport">
             <span className="ed-time">${fmtTime(playhead)} / ${fmtTime(duration)}</span>
-            <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0 || !previewReady} title=${playing ? '暂停' : '播放'}>${playing ? '⏸' : '▶'}</button>
+            <button className="ed-play" onClick=${togglePlay} disabled=${segments.length === 0 || !previewReady} title=${playing ? tr('studio.preview.pause') : tr('studio.preview.play')}>${playing ? '⏸' : '▶'}</button>
             <span className="ed-spacer"></span>
-            <button className="ed-btn" onClick=${toggleTheater} title="隐藏两侧面板，放大预览">${theater ? '还原' : '放大'}</button>
-            <button className="ed-btn" onClick=${toggleFullscreen} title="全屏预览（Esc 退出）">全屏</button>
+            <button className="ed-btn" onClick=${toggleTheater} title=${tr('studio.preview.theaterTitle')}>${theater ? tr('studio.preview.restore') : tr('studio.preview.enlarge')}</button>
+            <button className="ed-btn" onClick=${toggleFullscreen} title=${tr('studio.preview.fullscreenTitle')}>${tr('studio.preview.fullscreen')}</button>
             <span className="ed-pill">${previewRes}</span>
             <span className="ed-pill">${previewRatio}</span>
           </div>
@@ -1098,25 +1107,25 @@ export function EditorView() {
               <span
                 key=${t.key}
                 className=${'ed-tab' + (adjustTab === t.key ? ' on' : '')}
-                title=${t.title}
+                title=${tr(t.titleKey)}
                 onClick=${() => setAdjustTab(t.key)}
-              >${t.label}</span>
+              >${tr(t.labelKey)}</span>
             `)}
           </div>
           <div className="ed-inspector-body">
             ${adjustTab === 'basic' && html`
             <div className="ed-group ed-transition">
-              <h4>转场</h4>
+              <h4>${tr('studio.inspector.transition')}</h4>
               <label className="ed-check">
                 <input
                   type="checkbox"
                   checked=${transition.enabled !== false}
                   onChange=${(e) => commitTransition({ enabled: e.target.checked })}
                 />
-                <span>片段之间淡入淡出</span>
+                <span>${tr('studio.inspector.transitionToggle')}</span>
               </label>
               <div className="ed-slider-row">
-                <span className="ed-slider-label">时长</span>
+                <span className="ed-slider-label">${tr('studio.inspector.duration')}</span>
                 <select
                   className="ed-select"
                   value=${String(transition.duration)}
@@ -1127,44 +1136,44 @@ export function EditorView() {
                 </select>
               </div>
               <div className="ed-slider-row">
-                <span className="ed-slider-label">类型</span>
+                <span className="ed-slider-label">${tr('studio.inspector.type')}</span>
                 <select
                   className="ed-select"
                   value=${transition.type}
                   disabled=${transition.enabled === false}
                   onChange=${(e) => commitTransition({ type: e.target.value })}
                 >
-                  <option value="fade">淡化</option>
-                  <option value="dissolve">溶解</option>
-                  <option value="wipeleft">左擦除</option>
-                  <option value="wiperight">右擦除</option>
-                  <option value="slideleft">左滑动</option>
-                  <option value="slideright">右滑动</option>
-                  <option value="circleopen">圆形展开</option>
-                  <option value="pixelize">像素化</option>
+                  <option value="fade">${tr('studio.inspector.types.fade')}</option>
+                  <option value="dissolve">${tr('studio.inspector.types.dissolve')}</option>
+                  <option value="wipeleft">${tr('studio.inspector.types.wipeleft')}</option>
+                  <option value="wiperight">${tr('studio.inspector.types.wiperight')}</option>
+                  <option value="slideleft">${tr('studio.inspector.types.slideleft')}</option>
+                  <option value="slideright">${tr('studio.inspector.types.slideright')}</option>
+                  <option value="circleopen">${tr('studio.inspector.types.circleopen')}</option>
+                  <option value="pixelize">${tr('studio.inspector.types.pixelize')}</option>
                 </select>
               </div>
-              <p className="ed-hint">关闭后走直拼（不叠化，不缩短时长）；预览与导出同时生效。</p>
+              <p className="ed-hint">${tr('studio.inspector.transitionHint')}</p>
             </div>
             `}
             ${!selectedSeg && html`
               <div className="ed-empty">
-                <p>先在时间线选中一个片段</p>
-                <p className="ed-sub">${adjustTab === 'basic' ? '选中谁，调谁；每段参数独立保存' : '选中片段后调整「' + ADJUST_TABS.find((t) => t.key === adjustTab).label + '」'}</p>
+                <p>${tr('studio.inspector.selectFirst')}</p>
+                <p className="ed-sub">${adjustTab === 'basic' ? tr('studio.inspector.basicEmptyHint') : tr('studio.inspector.tabEmptyHint', { tab: tr(ADJUST_TABS.find((t) => t.key === adjustTab).labelKey) })}</p>
               </div>
             `}
             ${selectedSeg && html`
               <div className="ed-sel-meta">
                 <span>${selectedSeg.assetId}</span>
-                <button className="ed-btn" onClick=${resetAdjust}>重置本段</button>
+                <button className="ed-btn" onClick=${resetAdjust}>${tr('studio.inspector.resetSegment')}</button>
               </div>
               ${adjustTab === 'basic' && html`
                 ${ADJUST_GROUPS.map((g) => html`
-                  <div className="ed-group" key=${g.title}>
-                    <h4>${g.title}</h4>
+                  <div className="ed-group" key=${g.titleKey}>
+                    <h4>${tr(g.titleKey)}</h4>
                     ${g.items.map((it) => html`
                       <div className="ed-slider-row" key=${it.key}>
-                        <span className="ed-slider-label">${it.label}</span>
+                        <span className="ed-slider-label">${tr(it.labelKey)}</span>
                         <input
                           className="ed-slider-input"
                           type="range"
@@ -1180,7 +1189,7 @@ export function EditorView() {
                     `)}
                   </div>
                 `)}
-                <p className="ed-hint">参数保存到工程草稿；导出时按段烘成 LUT（与预览同一套颜色数学）。</p>
+                <p className="ed-hint">${tr('studio.inspector.basicHint')}</p>
               `}
               ${adjustTab === 'hsl' && html`<${HslPanel} adjust=${selectedSeg.adjust || {}} onChange=${setAdvanced} onHistory=${historyPush} />`}
               ${adjustTab === 'curve' && html`<${CurvePanel} adjust=${selectedSeg.adjust || {}} onChange=${setAdvanced} onHistory=${historyPush} />`}
@@ -1192,21 +1201,21 @@ export function EditorView() {
 
       <section className="ed-timeline">
         <div className="ed-tl-tools">
-          <button className="ed-tool ed-act" onClick=${undo} disabled=${pastRef.current.length === 0} title="撤销">撤销</button>
-          <button className="ed-tool ed-act" onClick=${redo} disabled=${futureRef.current.length === 0} title="重做">重做</button>
-          <button className="ed-tool ed-act" onClick=${splitSelected} disabled=${!selectedId && segments.length === 0} title="在播放头分割">分割</button>
-          <button className="ed-tool ed-act" onClick=${deleteSelected} disabled=${!selectedId && !selectedAudio} title="删除选中片段/音轨">删除</button>
+          <button className="ed-tool ed-act" onClick=${undo} disabled=${pastRef.current.length === 0} title=${tr('studio.timeline.undo')}>${tr('studio.timeline.undo')}</button>
+          <button className="ed-tool ed-act" onClick=${redo} disabled=${futureRef.current.length === 0} title=${tr('studio.timeline.redo')}>${tr('studio.timeline.redo')}</button>
+          <button className="ed-tool ed-act" onClick=${splitSelected} disabled=${!selectedId && segments.length === 0} title=${tr('studio.timeline.splitTitle')}>${tr('studio.timeline.split')}</button>
+          <button className="ed-tool ed-act" onClick=${deleteSelected} disabled=${!selectedId && !selectedAudio} title=${tr('studio.timeline.deleteTitle')}>${tr('studio.timeline.delete')}</button>
           <span className="ed-spacer"></span>
           <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.max(PPS_MIN, v - 6))}>−</button>
-          <span className="ed-tool">缩放</span>
+          <span className="ed-tool">${tr('studio.timeline.zoom')}</span>
           <button className="ed-tool ed-zoom" onClick=${() => setPps((v) => Math.min(PPS_MAX, v + 6))}>＋</button>
-          <span className="ed-tl-count">${segments.length} 段 · ${fmtTime(duration)}</span>
+          <span className="ed-tl-count">${tr('studio.timeline.count', { n: segments.length, time: fmtTime(duration) })}</span>
         </div>
         <div className="ed-tl-body">
           <div className="ed-tl-labels">
             <div className="ed-tl-ruler-pad"></div>
-            <div className="ed-tl-label">视频</div>
-            <div className="ed-tl-label">音频</div>
+            <div className="ed-tl-label">${tr('studio.timeline.video')}</div>
+            <div className="ed-tl-label">${tr('studio.timeline.audio')}</div>
           </div>
           <div className="ed-tl-scroll">
             <div className="ed-ruler" ref=${rulerRef} style=${{ width: trackWidth + 'px' }} onPointerDown=${beginScrub}>
@@ -1225,7 +1234,7 @@ export function EditorView() {
               onClick=${onTrackClick}
             >
               ${layout.length === 0
-                ? html`<span className="ed-track-empty">从左侧点选或拖入素材</span>`
+                ? html`<span className="ed-track-empty">${tr('studio.timeline.empty')}</span>`
                 : layout.map(({ seg, i, left, width, dur, start }) => html`
                     <span
                       key=${seg.id || i}
@@ -1250,10 +1259,10 @@ export function EditorView() {
                         className="ed-clip-thumb"
                         style=${{ backgroundImage: 'url(' + thumbUrl(seg.assetId) + ')' }}
                       ></span>
-                      <span className="ed-handle l" title="拖动裁剪入点" onPointerDown=${(e) => beginTrim(e, i, 'left')}></span>
+                      <span className="ed-handle l" title=${tr('studio.timeline.trimIn')} onPointerDown=${(e) => beginTrim(e, i, 'left')}></span>
                       <span className="ed-clip-name">${seg.assetId}</span>
                       <span className="ed-clip-dur">${fmtDur(dur)}</span>
-                      <span className="ed-handle r" title="拖动裁剪出点" onPointerDown=${(e) => beginTrim(e, i, 'right')}></span>
+                      <span className="ed-handle r" title=${tr('studio.timeline.trimOut')} onPointerDown=${(e) => beginTrim(e, i, 'right')}></span>
                     </span>
                   `)}
             </div>
@@ -1267,7 +1276,7 @@ export function EditorView() {
                     setSelectedAudio('music');
                     setSelectedId(null);
                     setTab('audio');
-                    setToast('已选中音乐轨：' + bgmTitle(musicSeg.trackId));
+                    setToast(tr('studio.toasts.selectMusic') + bgmTitle(musicSeg.trackId));
                   }}
                 >
                   ♪ ${bgmTitle(musicSeg.trackId)}
@@ -1282,20 +1291,20 @@ export function EditorView() {
                     setSelectedAudio('ambient');
                     setSelectedId(null);
                     setTab('audio');
-                    setToast('已选中环境音轨：' + bgmTitle(ambientSeg.trackId));
+                    setToast(tr('studio.toasts.selectAmbient') + bgmTitle(ambientSeg.trackId));
                   }}
                 >
                   ♫ ${bgmTitle(ambientSeg.trackId)}
                 </span>
               `}
-              ${!musicSeg && !ambientSeg && html`<span className="ed-track-empty">音乐 / 环境音（左侧音频面板）</span>`}
+              ${!musicSeg && !ambientSeg && html`<span className="ed-track-empty">${tr('studio.timeline.audioEmpty')}</span>`}
             </div>
             <div
               className="ed-playhead"
               ref=${playheadElRef}
               style=${{ left: (playhead * pps) + 'px' }}
               onPointerDown=${beginScrub}
-              title="拖动定位"
+              title=${tr('studio.timeline.playhead')}
             ></div>
           </div>
         </div>
@@ -1305,20 +1314,20 @@ export function EditorView() {
         <div className="ed-modal" onClick=${(e) => { if (e.target === e.currentTarget) setOpenList(null); }}>
           <div className="ed-modal-card">
             <div className="ed-modal-head">
-              <b>打开工程</b>
-              <button className="ed-btn" onClick=${() => setOpenList(null)}>关闭</button>
+              <b>${tr('studio.projects.openTitle')}</b>
+              <button className="ed-btn" onClick=${() => setOpenList(null)}>${tr('studio.projects.close')}</button>
             </div>
             <div className="ed-modal-body">
-              ${openList.length === 0 && html`<p className="ed-sub">还没有工程</p>`}
+              ${openList.length === 0 && html`<p className="ed-sub">${tr('studio.projects.noProjects')}</p>`}
               ${openList.map((p) => html`
                 <button key=${p.id} className=${'ed-project-row' + (p.id === project.id ? ' on' : '')} onClick=${() => pickProject(p.id)}>
                   <span>${p.name}</span>
-                  <span className="ed-sub">${p.segmentCount} 段 · ${fmtTime(0)}</span>
+                  <span className="ed-sub">${tr('studio.projects.segmentCount', { n: p.segmentCount, time: fmtTime(0) })}</span>
                 </button>
               `)}
-              <div className="ed-modal-sub">已完成成片 · 重建为工程</div>
-              ${!films && html`<p className="ed-sub">读取成片…</p>`}
-              ${films && films.length === 0 && html`<p className="ed-sub">还没有已完成成片</p>`}
+              <div className="ed-modal-sub">${tr('studio.projects.rebuildSub')}</div>
+              ${!films && html`<p className="ed-sub">${tr('studio.projects.loadingFilms')}</p>`}
+              ${films && films.length === 0 && html`<p className="ed-sub">${tr('studio.projects.noFilms')}</p>`}
               ${(films || []).slice(0, 20).map((f) => html`
                 <button
                   key=${f.taskId}
@@ -1327,10 +1336,10 @@ export function EditorView() {
                   onClick=${() => rebuildFromTask(f.taskId)}
                 >
                   <span>${(f.prompt || f.taskId).slice(0, 40)}</span>
-                  <span className="ed-sub">${f.totalClips || 0} 段 · ${fmtTime(f.totalDuration || 0)}${f.status === 'partial' ? ' · 部分' : ''}</span>
+                  <span className="ed-sub">${tr('studio.projects.filmMeta', { n: f.totalClips || 0, time: fmtTime(f.totalDuration || 0) })}${f.status === 'partial' ? tr('studio.projects.partial') : ''}</span>
                 </button>
               `)}
-              ${(films || []).length > 20 && html`<p className="ed-sub">只显示最近 20 条</p>`}
+              ${(films || []).length > 20 && html`<p className="ed-sub">${tr('studio.projects.recent20')}</p>`}
             </div>
           </div>
         </div>
@@ -1340,13 +1349,13 @@ export function EditorView() {
         <div className="ed-viewer" onClick=${(e) => { if (e.target === e.currentTarget) setViewerUrl(null); }}>
           <div className="ed-viewer-card">
             <div className="ed-viewer-head">
-              <b>成片预览</b>
-              <button className="ed-btn" onClick=${() => setViewerUrl(null)}>关闭（Esc）</button>
+              <b>${tr('studio.viewer.title')}</b>
+              <button className="ed-btn" onClick=${() => setViewerUrl(null)}>${tr('studio.viewer.close')}</button>
             </div>
             <video className="ed-viewer-video" src=${viewerUrl} controls autoplay playsInline></video>
             <div className="ed-viewer-foot">
-              <span className="ed-sub">成片已保存在 output/ 并归入「库 · 成片」</span>
-              <a className="ed-sub ed-link" href=${viewerUrl} target="_blank" rel="noreferrer">新标签打开</a>
+              <span className="ed-sub">${tr('studio.viewer.savedNote')}</span>
+              <a className="ed-sub ed-link" href=${viewerUrl} target="_blank" rel="noreferrer">${tr('studio.viewer.newTab')}</a>
             </div>
           </div>
         </div>

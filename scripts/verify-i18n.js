@@ -115,6 +115,7 @@ function scanHardcodedCjk() {
   });
   const byFile = [];
   let total = 0;
+  let allowed = 0;
   for (const file of files) {
     const src = stripBlockComments(fs.readFileSync(file, 'utf8'));
     const lines = src.split(/\r?\n/);
@@ -124,6 +125,9 @@ function scanHardcodedCjk() {
       const code = stripLineComment(line);
       const cjk = code.match(/[\u4e00-\u9fff]/g);
       if (cjk) {
+        // 显式标记 i18n-allow：语言自称、后端中文错误前缀匹配、中文输入同义词表等
+        // 功能性中文不属于界面文案，逐行标记而不是整文件豁免。
+        if (/\bi18n-allow\b/.test(line)) { allowed += cjk.length; return; }
         count += cjk.length;
         if (samples.length < 2) samples.push({ line: index + 1, text: code.trim().slice(0, 90) });
       }
@@ -134,7 +138,7 @@ function scanHardcodedCjk() {
     }
   }
   byFile.sort((a, b) => b.count - a.count);
-  return { total, byFile };
+  return { total, allowed, byFile };
 }
 
 function loginDictionaryKeys() {
@@ -240,6 +244,9 @@ function loginDictionaryKeys() {
       console.log('  ' + String(item.count).padStart(5) + '  ' + item.file
         + (item.samples[0] ? '  e.g. L' + item.samples[0].line + ': ' + item.samples[0].text : ''));
     });
+  }
+  if (hardcoded.allowed > 0) {
+    console.log('（另有 ' + hardcoded.allowed + ' 处已逐行标记 i18n-allow：语言自称 / 后端中文匹配 / 中文输入同义词）');
   }
   if (STRICT) {
     ok('硬编码中文为 0（strict）', hardcoded.total === 0, hardcoded.total + ' 处');
