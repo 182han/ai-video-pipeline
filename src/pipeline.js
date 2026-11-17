@@ -855,7 +855,9 @@ class Pipeline {
       const override = task.promptOverrides && task.promptOverrides[String(clip.index)];
       const patch = promptComposer.composeClipPatch(card, {
         theme: clip.theme ?? task.theme,
-        promptOverride: override || null
+        promptOverride: override || null,
+        // P3：作品提示词语言（promptLang = aiLang || 创建时界面语言；旧任务缺字段回退 lang）
+        lang: task.promptLang || task.lang
       });
       const changed = clip.prompt !== patch.prompt
         || clip.promptSource !== patch.promptSource
@@ -886,7 +888,8 @@ class Pipeline {
     const override = task.promptOverrides && task.promptOverrides[String(index)];
     const patch = promptComposer.composeClipPatch(replaced.card, {
       theme: clip.theme ?? task.theme,
-      promptOverride: override || null
+      promptOverride: override || null,
+      lang: task.promptLang || task.lang
     });
     taskManager.updateClip(taskId, index, {
       ...patch,

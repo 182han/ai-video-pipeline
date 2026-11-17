@@ -16,6 +16,7 @@ const MODULES = [
   require('./media'),
   require('./qc'),
   require('./pipeline'),
+  require('./generators'),
   require('./ws')
 ];
 

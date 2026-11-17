@@ -81,6 +81,15 @@ const catalog = require('../src/i18n/catalog');
 const taskManager = require('../src/taskManager');
 const qualityChecker = require('../src/qualityChecker');
 const wsManager = require('../src/wsManager');
+// P3 被测模块
+const assistantTemplates = require('../src/i18n/templates/assistant');
+const promptTemplates = require('../src/i18n/templates/prompt');
+const sceneTemplates = require('../src/i18n/templates/scene');
+const promptOptimizer = require('../src/promptOptimizer');
+const promptComposer = require('../src/promptComposer');
+const sceneCards = require('../src/sceneCards');
+const assistantPlanCard = require('../src/assistant/planCard');
+const assistantSupervisor = require('../src/assistant/supervisor');
 
 // ------------------------------------------------------------
 // [1] 语言解析
@@ -299,6 +308,111 @@ ok('qualityChecker 不改变 QC 判定逻辑（passed/skipped 分支仍在）',
 ok('videoProcessor 只包装失败结果补 errorKey', /errorKey = key/.test(vpSrc) && /keyForText\(out\.error/.test(vpSrc));
 ok('中文质检文案未改动（NSFW / 最终质检通过）',
   /name: 'NSFW合规检测'/.test(qcSrc) && /reason = '最终质检通过'/.test(qcSrc));
+
+// ------------------------------------------------------------
+// [8b] P3：助手/提示词模板（独立英文基底，中文零回归）
+// ------------------------------------------------------------
+console.log('\n—— [8b] P3 助手与提示词 ——');
+const normalizeEol = (s) => String(s).replace(/\r\n/g, '\n');
+
+// 系统提示词：中文模板 = 改造前原文（逐字/EOL 归一后比对）；英文 = 独立英文基底
+ok('中文悬浮球系统提示词仍是原中文（9 条禁令 + 七段组织）',
+  assistantTemplates.CHAT_SYSTEM_ZH.includes('【画面里不能出现这些东西】')
+  && assistantTemplates.CHAT_SYSTEM_ZH.includes('人物 —— 人脸、手、身体、人群、人形剪影、皮肤特写')
+  && assistantTemplates.CHAT_SYSTEM_ZH.includes('中文提示词按七段组织'));
+ok('英文悬浮球系统提示词 = 独立英文基底 + Respond in English',
+  assistantTemplates.CHAT_SYSTEM_EN.includes('Respond in English')
+  && assistantTemplates.CHAT_SYSTEM_EN.includes('[What must never appear]')
+  && !CJK_RE.test(assistantTemplates.CHAT_SYSTEM_EN));
+ok('英文批量系统提示词含 Respond in English 且无中文',
+  assistantTemplates.batchSystemPromptEn(3, 10).includes('Respond in English')
+  && !CJK_RE.test(assistantTemplates.batchSystemPromptEn(3, 10)));
+ok('中文批量系统提示词保留原句（风光长视频分镜师）',
+  assistantTemplates.batchSystemPromptZh(3, 10).includes('你是「风光长视频分镜师」'));
+ok('英文填槽系统提示词用英文但保留中文地貌 canonical 说明',
+  assistantTemplates.SLOT_SYSTEM_EN.includes('Respond in English')
+  && assistantTemplates.SLOT_SYSTEM_EN.includes('Chinese landform names'));
+ok('server.js 不再内联系统提示词（已迁 templates）',
+  !serverSrc.includes('你是「视频提示词助手」')
+  && !serverSrc.includes('你是「小智」的听懂模块')
+  && /assistantTemplates\.CHAT_SYSTEM_EN/.test(serverSrc)
+  && /assistantTemplates\.SLOT_SYSTEM_EN/.test(serverSrc));
+ok('server.js 的 chat/batch/understand 消费 aiLang 输出语言',
+  /outputLanguage = i18n\.outputLang\(req, req\.body && req\.body\.aiLang\)/.test(serverSrc)
+  && /outputLang\(req, body\.aiLang\)/.test(serverSrc));
+ok('POST /api/tasks 写入 promptLang（作品语言）', /promptLang: i18n\.outputLang\(req/.test(serverSrc));
+
+// promptOptimizer：中文规则逐字不变；英文规则独立
+const zhPrompt = promptOptimizer.buildSystemPrompt(null, 'zh');
+const enPrompt = promptOptimizer.buildSystemPrompt(null, 'en');
+ok('promptOptimizer 中文 systemPrompt 仍是现有中文规则',
+  zhPrompt.systemPrompt === promptOptimizer.rules && CJK_RE.test(zhPrompt.systemPrompt));
+ok('promptOptimizer 英文 systemPrompt = 英文规则 + Respond in English',
+  /Respond in English/.test(enPrompt.systemPrompt) && !CJK_RE.test(enPrompt.systemPrompt));
+ok('promptOptimizer 英文主题标签', promptTemplates.themeLabelEn('landscape') === 'Natural landscape'
+  && promptTemplates.themeLabelEn('aurora') === 'Aurora');
+const tplZh = promptOptimizer.optimizeWithTemplate('雪山日落', 'landscape', { seed: 0 });
+const tplEn = promptOptimizer.optimizeWithTemplate('雪山日落', 'landscape', { lang: 'en', seed: 0 });
+ok('模板优化中文路径不带 lang 字段（零回归）', tplZh.lang === undefined
+  && tplZh.theme === promptOptimizer.templates.landscape.name);
+ok('模板优化英文路径：英文主题标签 + lang=en',
+  tplEn.lang === 'en' && tplEn.theme === 'Natural landscape');
+ok('模板优化确定性不受语言分支影响（seed 相同 → 词池选择相同）',
+  tplZh.optimized === tplEn.optimized, `${tplZh.optimized.slice(0, 40)} vs ${tplEn.optimized.slice(0, 40)}`);
+
+// promptComposer：中文路径零回归；英文走独立模板
+const firstCard = sceneCards.allocate(2).used[0];
+const card = sceneCards.getCardById(firstCard.id);
+const composeZhDefault = promptComposer.composeVideoPrompt(card, {});
+const composeZhExplicit = promptComposer.composeVideoPrompt(card, { lang: 'zh' });
+const composeEn = promptComposer.composeVideoPrompt(card, { lang: 'en' });
+ok('promptComposer 中文默认与显式 zh 输出一致（零回归）', composeZhDefault === composeZhExplicit);
+ok('promptComposer 中文输出仍用原句式（画面主体/镜头）',
+  composeZhDefault.includes('画面主体：') && composeZhDefault.includes('镜头：'));
+ok('promptComposer 英文输出用英文模板（Subject/Camera），不混中文标签',
+  composeEn.includes('Subject:') && composeEn.includes('Camera:')
+  && !/画面主体|镜头：|结尾：/.test(composeEn));
+const patchEn = promptComposer.composeClipPatch(card, { lang: 'en' });
+const patchZh = promptComposer.composeClipPatch(card, { lang: 'zh' });
+ok('场景卡 patch：英文标 promptLanguage，中文不写该字段（任务 JSON 零回归）',
+  patchEn.promptLanguage === 'en' && patchZh.promptLanguage === undefined
+  && patchZh.prompt === composeZhDefault);
+ok('英文场景模板明确只改句式（内容字段无 *_en 时保留原值，不机翻）',
+  typeof sceneTemplates.composeVideoPromptEn === 'function' && sceneTemplates.themeEn('aurora') === 'aurora');
+
+// planCard.describe：中文原文不变；英文独立
+const planSample = assistantPlanCard.buildPlan({ text: '10 分钟', model: 'mock' });
+ok('planCard 中文计划说明仍是原中文（总时长/模型/场景）',
+  assistantPlanCard.describe(planSample.plan)[0].startsWith('总时长 '));
+ok('planCard 英文计划说明（Total length/Model/Scenes）',
+  assistantPlanCard.describe(planSample.plan, 'en')[0].startsWith('Total length ')
+  && assistantPlanCard.describe(planSample.plan, 'en').join('\n').includes('Model:')
+  && assistantPlanCard.describe(planSample.plan, 'en').join('\n').includes('Scenes:'));
+
+// supervisor：英文核心链路 + 中文默认逐字不变
+const zhGreet = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-zh-1', text: '你好' });
+ok('助手中文默认仍是原中文问候（零回归）', zhGreet.reply.startsWith('我是小智。'));
+ok('助手返回加法式 lang/replyKey', zhGreet.lang === 'zh' && zhGreet.replyKey === 'assistant.reply.greeting');
+const enGreet = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-1', text: '你好', lang: 'en' });
+ok('助手英文问候', enGreet.lang === 'en' && enGreet.reply.includes('I am Xiaozhi')
+  && enGreet.replyKey === 'assistant.reply.greeting');
+const enPlan = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-1', text: '10 分钟', lang: 'en' });
+ok('助手英文计划（I\'ve laid out + 计划卡结构）', enPlan.plan && enPlan.reply.includes("I've laid out a")
+  && enPlan.reply.includes('Total length') && enPlan.replyKey === 'assistant.reply.plan');
+ok('助手计划回复带结构化 action=confirm（labelKey）',
+  Array.isArray(enPlan.actions) && enPlan.actions[0].type === 'confirm'
+  && enPlan.actions[0].labelKey === 'assistant.action.confirmExecute');
+const enConfirm = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-1', text: '确认生成吗', lang: 'en' });
+ok('助手英文确认话术（Confirm and run）', enConfirm.replyKey === 'assistant.reply.confirm'
+  && enConfirm.reply.includes('Confirm and run'));
+const enUnknown = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-2', text: '???', lang: 'en' });
+ok('助手英文听不懂/追问不回中文长句', enUnknown.lang === 'en'
+  && (enUnknown.reply.includes('How long should the video be')
+    || enUnknown.reply.includes('I can do three things')
+    || enUnknown.reply.includes("I've laid out a")));
+ok('catalog 有生成器错误 key（供 task/clip 反查 errorKey）',
+  i18n.hasKey('en', 'gen.error.unsupportedModel') && i18n.hasKey('en', 'gen.error.dashscopeKeyMissing')
+  && i18n.keyForText('DashScope API Key 未配置，请在设置中填写', { prefix: true }) === 'gen.error.dashscopeKeyMissing');
 
 // ------------------------------------------------------------
 // [9] 可选：真实 HTTP 探针（需用户重启后运行；默认跳过）

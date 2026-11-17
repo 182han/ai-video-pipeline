@@ -166,6 +166,10 @@ class TaskManager {
         completedAt: null
       });
     }
+    // P3：提示词/作品语言 = promptLang（AI 输出语言 aiLang）→ 界面语言；缺省 zh。
+    // 与 task.lang（界面/日志语言）分开：用户可能用中文界面但要英文提示词。
+    const promptLang = i18n.resolveLang(options.promptLang, options.lang);
+
     // ===== 场景卡模式（P4）=====
     // 只读卡库：按 chapter+sequence 取一轮（不放回），缓冲区不参与初始分配；
     // 提示词由 promptComposer 运行时拼出（不写回卡），任务里记录 scene_key 便于审计。
@@ -225,7 +229,9 @@ class TaskManager {
         // 并打 promptSource='scene-card-user-edit'（卡仍保留审计字段）。
         Object.assign(clips[i], promptComposer.composeClipPatch(card, {
           theme: clips[i].theme,
-          promptOverride: promptOverrides ? promptOverrides[String(i)] : null
+          promptOverride: promptOverrides ? promptOverrides[String(i)] : null,
+          // P3：场景卡提示词语言（promptLang = aiLang || 界面语言；缺省 zh）
+          lang: promptLang
         }));
       }
       const firstKey = sceneCardPlan.used[0] ? sceneCardPlan.used[0].scene_key : '';
@@ -339,6 +345,8 @@ class TaskManager {
       // P2：任务创建时的界面语言（长任务/日志/历史记录按它呈现）。
       // 缺字段的旧任务在读取时归一为 zh；不改变任何中文默认输出。
       lang: i18n.normalizeLang(options.lang) || i18n.DEFAULT_LANG,
+      // P3：作品提示词语言（与界面语言分离；缺省跟随界面语言）
+      promptLang,
       prompt,
       optimizedPrompt: '',
       isMultiPrompt: !!prompts,

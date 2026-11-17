@@ -2004,47 +2004,12 @@ app.post('/api/optimize-prompt', async (req, res) => {
 // 一律 HTTP 200，用 ok 字段区分成败，前端按 error 码展示。
 // Key 只走请求体、绝不落日志。
 // ==========================================
-const ASSISTANT_SYSTEM_PROMPT = `你是「视频提示词助手」，为用户产出 AI 视频生成提示词。
-用户常常不知道自己要拍什么，你的任务是用尽量少的对话，帮他把画面想清楚。
-
-【背景】
-这些画面最后会当屏保长时间循环播放，要看起来像真实拍摄出来的影像。
-
-【画面里不能出现这些东西】
-以下任何一项出现，这段提示词就作废，必须避开：
-1. 人物 —— 人脸、手、身体、人群、人形剪影、皮肤特写
-2. 动物 —— 任何动物（本阶段一律不做）
-3. 室内 —— 房间、店铺、茶馆、咖啡馆、教室、办公室等室内空间
-4. 生活物件 —— 杯子、茶具、书、餐具、家具、日用品
-5. 文字 —— 招牌、字幕、logo、水印、任何可读文字
-6. 城市 —— 城市夜景、建筑群、街道、车流、天际线
-7. 抽象与图形 —— 抽象几何、色块、线条图案、纯色背景、渐变背景、万花筒
-8. 科幻与数字特效 —— 科幻场景、赛博朋克、全息、粒子光效、能量场、CG 渲染、数字艺术
-9. 微距 —— 水滴特写、露珠、叶脉、细胞、微观世界
-
-除这 9 条之外不设别的限制。
-
-【跑题怎么办】
-用户想要的东西落在上面 9 条里时，不要照做。用一句话说明这些东西不能出现，
-然后换 2-3 个能避开它们的替代方向，继续往下聊。
-
-【对话规则】
-1. 每轮只问 1 个最关键的问题，不要连环追问。
-2. 要给选项时给 2-4 个，降低回答成本。
-3. 需要收集：主体、时段/光线、运镜、情绪氛围。集齐就停止提问。
-4. 用户已经说清楚时，不要为了走流程继续问，直接给结果。
-5. 用户说"随便""不知道"时，给 2-3 个具体方向让他选。
-6. 产出时先用一句中文说明为什么这么写，再给中文提示词。
-7. 中文提示词按七段组织：主体（地貌专名）+ 运动 + 运镜 + 光线 + 氛围 + 质感 + 结尾留白。
-
-【写完自检】
-给出 prompt 之前检查一遍，里面有上面 9 条里的东西就重写，不要把违规内容交出去。
-
-【输出格式】必须只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释文字：
-{"ready": false, "message": "你这一轮要说的中文话", "prompt": null}
-- ready=false：还在提问阶段，prompt 必须为 null
-- ready=true：已经给出可用提示词，prompt 填中文提示词字符串
-`;
+// P3（i18n-spec §3.5）：系统提示词已移入 src/i18n/templates/assistant.js。
+//   · 中文模板 = 改造前原文的逐字副本（零回归，verify 里逐字比对）；
+//   · 英文模板 = 独立撰写的英文基底 + Respond in English（不是机翻）；
+//   · 选哪套由输出语言决定：aiLang（AI 输出语言）→ 界面语言 → zh。
+const assistantTemplates = require('./src/i18n/templates/assistant');
+const ASSISTANT_SYSTEM_PROMPT = assistantTemplates.CHAT_SYSTEM_ZH;
 
 // 画面禁用项：与服务端 system prompt 对齐，作为 LLM 不听话时的硬兜底。
 // 命中即不返回可用提示词——宁可让用户再聊一轮，也不让跑题的提示词进流水线烧钱。
@@ -2117,7 +2082,9 @@ function findForbidden(promptText) {
 
 // 模型原文 → 最终响应体（JSON 解析 + ready 判定 + 禁用词硬校验）。
 // 整段返回与流式返回共用同一份判定，保证两条路径结果完全一致。
-function buildAssistantReply(raw) {
+// P3：lang 只影响「命中禁用项时的提示话术」；中文默认输出与改造前逐字一致。
+function buildAssistantReply(raw, lang) {
+  const replyLang = i18n.normalizeLang(lang) || i18n.DEFAULT_LANG;
   // ---- 解析 JSON（容错 markdown 代码块 / 前后废话） ----
   let parsed = null;
   try {
@@ -2151,8 +2118,11 @@ function buildAssistantReply(raw) {
         ready: false,
         rejected: hits,
         // 只说明命中了哪条禁令，不列举"应该做什么"——避免变相白名单。
-        message: `这个方向里有「${hits.join('、')}」，这些不能出现，换个方向吧。`,
-        prompt: null
+        message: replyLang === 'en'
+          ? `That direction includes ${hits.map((h) => assistantTemplates.REJECT_LABELS_EN[h] || h).join(', ')}, which cannot appear. Try another direction.`
+          : `这个方向里有「${hits.join('、')}」，这些不能出现，换个方向吧。`,
+        prompt: null,
+        lang: replyLang
       };
     }
   }
@@ -2162,13 +2132,16 @@ function buildAssistantReply(raw) {
     // ready 只在真的拿到提示词时才算数，防止模型说 ready 却没给正文
     ready: !!(ready && prompt),
     message: parsed.message,
-    prompt
+    prompt,
+    lang: replyLang
   };
 }
 
 // 失败响应体：整段返回与流式共用，保证前端只需要认一套字段。
-function llmFailurePayload(failure) {
+// P3：加法式 messageKey；中文 message 逐字不变，英文请求时 message 走英文。
+function llmFailurePayload(failure, lang) {
   const info = llmService.describeFailure(failure);
+  const replyLang = i18n.normalizeLang(lang) || i18n.DEFAULT_LANG;
   console.error('[assistant] LLM_FAILED ' + JSON.stringify({
     kind: failure && failure.kind,
     status: failure && failure.status,
@@ -2179,7 +2152,11 @@ function llmFailurePayload(failure) {
     ok: false,
     error: 'LLM_FAILED',
     // 首行保持原句不变（后端契约与旧前端都可能依赖它），原因放结构化字段
-    message: '助手没有响应，请检查网络或 API Key 后重试',
+    message: replyLang === 'en'
+      ? 'The assistant did not respond. Check your network or API key and try again.'
+      : '助手没有响应，请检查网络或 API Key 后重试',
+    ...i18n.mark('api.assistant.llmFailed'),
+    lang: replyLang,
     reason: failure && failure.kind ? failure.kind : 'UNKNOWN',
     status: failure && failure.status ? failure.status : null,
     url: failure && failure.url ? failure.url : null,
@@ -2196,7 +2173,8 @@ function llmFailurePayload(failure) {
 //   {type:'final', ...buildAssistantReply}      最终结果，结构与非流式一致
 //   {type:'error', ...llmFailurePayload}        失败，字段与非流式一致
 // 前端断线时 write 会抛，吞掉并停止写；LLM 请求本身仍会跑完（避免留下半截连接）。
-async function streamAssistant(res, assistantSystem, history, llmCfg) {
+async function streamAssistant(res, assistantSystem, history, llmCfg, lang) {
+  const replyLang = i18n.normalizeLang(lang) || i18n.DEFAULT_LANG;
   res.status(200);
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -2226,16 +2204,16 @@ async function streamAssistant(res, assistantSystem, history, llmCfg) {
     });
   } catch (e) {
     console.error('[assistant] 流式异常:', e && e.message);
-    write({ ...llmFailurePayload({ kind: 'UNKNOWN', detail: e && e.message }), type: 'error' });
+    write({ ...llmFailurePayload({ kind: 'UNKNOWN', detail: e && e.message }, replyLang), type: 'error' });
     return res.end();
   }
 
   if (!result || !result.text) {
-    write({ ...llmFailurePayload(result && result.failure), type: 'error' });
+    write({ ...llmFailurePayload(result && result.failure, replyLang), type: 'error' });
     return res.end();
   }
   write({
-    ...buildAssistantReply(result.text),
+    ...buildAssistantReply(result.text, replyLang),
     type: 'final',
     elapsedMs: result.elapsedMs,
     firstTokenMs: result.firstTokenMs
@@ -2245,10 +2223,18 @@ async function streamAssistant(res, assistantSystem, history, llmCfg) {
 
 app.post('/api/assistant/chat', async (req, res) => {
   const { messages, llmApiKey, llmBaseUrl, llmModel } = req.body || {};
+  // P3：AI 输出语言 = aiLang（请求体）→ 界面语言 → zh。中文路径完全不变。
+  const outputLanguage = i18n.outputLang(req, req.body && req.body.aiLang);
 
   // ---- 参数校验 ----
   if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(200).json({ ok: false, error: 'BAD_REQUEST', message: 'messages 必须是非空数组' });
+    return res.status(200).json({
+      ok: false,
+      error: 'BAD_REQUEST',
+      message: 'messages 必须是非空数组',
+      ...i18n.mark('api.assistant.emptyMessages'),
+      lang: outputLanguage
+    });
   }
 
   // 只允许 user / assistant，过滤其它角色
@@ -2257,7 +2243,13 @@ app.post('/api/assistant/chat', async (req, res) => {
     .map(m => ({ role: m.role, content: m.content }));
 
   if (history.length === 0) {
-    return res.status(200).json({ ok: false, error: 'BAD_REQUEST', message: '没有有效的对话内容' });
+    return res.status(200).json({
+      ok: false,
+      error: 'BAD_REQUEST',
+      message: '没有有效的对话内容',
+      ...i18n.mark('api.assistant.noHistory'),
+      lang: outputLanguage
+    });
   }
 
   // 最多保留最近 20 条
@@ -2274,30 +2266,38 @@ app.post('/api/assistant/chat', async (req, res) => {
   // ---- 前置检查：没有 Key 直接返回，不发请求 ----
   const llmCfg = { apiKey: llmApiKey, baseUrl: llmBaseUrl, model: llmModel };
   if (!llmApiKey && !config.OPENAI_API_KEY) {
-    return res.status(200).json({ ok: false, error: 'NO_LLM_KEY' });
+    return res.status(200).json({
+      ok: false,
+      error: 'NO_LLM_KEY',
+      ...i18n.mark('api.assistant.noLlmKey'),
+      lang: outputLanguage
+    });
   }
 
   // ---- 调用 LLM ----
-  // 2026-10-20：叠加 fengguang skill 规则（摄影级风光）
-  // 助手的产出物全是自然风光（9 条禁用项里已排除城市/人物/动物），所以整段追加，不按主题过滤。
-  // SKILL_PROMPT_ENABLED=false 可整体关闭，回退到原助手行为。
-  const assistantSystem = promptSkill.isEnabled()
-    ? `${ASSISTANT_SYSTEM_PROMPT}\n\n${promptSkill.getSkillRules()}\n`
+  // P3：中文模式保留原中文指令 + fengguang skill（零回归）；
+  //     英文模式用独立英文基底（templates/assistant.js）+ Respond in English。
+  //     英文模式不叠加中文 fengguang 规则（会把中文语料混进英文指令）。
+  const baseSystem = outputLanguage === 'en'
+    ? assistantTemplates.CHAT_SYSTEM_EN
     : ASSISTANT_SYSTEM_PROMPT;
+  const assistantSystem = (promptSkill.isEnabled() && outputLanguage !== 'en')
+    ? `${baseSystem}\n\n${promptSkill.getSkillRules()}\n`
+    : baseSystem;
   // 流式模式：前端带 stream:true 时边走边吐，解决「正在想…」那 4–18 秒空白。
   // 老前端（不带该字段）仍走下面的整段返回，契约不变。
   if (req.body && req.body.stream === true) {
-    return streamAssistant(res, assistantSystem, history, llmCfg);
+    return streamAssistant(res, assistantSystem, history, llmCfg, outputLanguage);
   }
 
   const { text: raw, failure } = await llmService.chatMulti(assistantSystem, history, llmCfg);
   if (!raw) {
     // 失败原因必须能到达用户眼前：原先所有失败都回同一句话，用户只能照着
     // 「检查网络或 API Key」乱试（2026-11-10 两起事故：地址读错 / 模型名不在中转列表）。
-    return res.status(200).json(llmFailurePayload(failure));
+    return res.status(200).json(llmFailurePayload(failure, outputLanguage));
   }
 
-  return res.status(200).json(buildAssistantReply(raw));
+  return res.status(200).json(buildAssistantReply(raw, outputLanguage));
 });
 
 // ==========================================
@@ -2324,15 +2324,17 @@ function parseBatchJson(raw) {
   }
 }
 
-function batchSystemPrompt(n, seconds) {
-  return `你是「风光长视频分镜师」。用户要 ${n} 条互不重复的镜头提示词，每条 ${seconds} 秒。
-必须遵守：
-1. 输出恰好 ${n} 条，不要多也不要少；不要问问题、不要解释、不要 markdown 代码块。
-2. 地貌按顺序轮转：${BATCH_LANDFORMS.join('、')}；每条一个独立镜头，相邻不重复。
-3. 同一批固定一个色板（极冷极淡 / 暖浓 / 暗底暖星云，按地貌选最贴的一套）和一个焦段族；同一批内不许换。
-4. 画面里绝不能出现：人物、动物、室内、生活物件、文字/招牌/水印、城市/街道/建筑、抽象图形、科幻特效、微距特写。
-5. 每条按七段写：主体（地貌专名）+ 运动 + 运镜 + 光线 + 氛围 + 质感 + 结尾留白；只允许一条运动主轴；结尾锁死画面（不引入新元素）。
-6. 只输出 JSON 数组，元素格式：{"index":1,"landform":"雪山冰川","palette":"极冷极淡","prompt":"完整中文提示词"}。数组以外不要输出任何字符。`;
+// P3：系统提示词移入 templates（中文 = 原逐字副本；英文 = 独立撰写）。
+function batchSystemPrompt(n, seconds, lang) {
+  return i18n.normalizeLang(lang) === 'en'
+    ? assistantTemplates.batchSystemPromptEn(n, seconds)
+    : assistantTemplates.batchSystemPromptZh(n, seconds);
+}
+
+function batchUserPrompt(theme, start, need, seconds, lang) {
+  return i18n.normalizeLang(lang) === 'en'
+    ? assistantTemplates.batchUserPromptEn(theme, start, need, seconds)
+    : assistantTemplates.batchUserPromptZh(theme, start, need, seconds);
 }
 
 app.post('/api/assistant/batch', async (req, res) => {
@@ -2341,9 +2343,16 @@ app.post('/api/assistant/batch', async (req, res) => {
   const seconds = Math.max(3, Math.min(30, parseInt(body.seconds, 10) || 10));
   const theme = String(body.theme || '自然风光').slice(0, 200);
   const llmCfg = { apiKey: body.llmApiKey, baseUrl: body.llmBaseUrl, model: body.llmModel };
+  // P3：批量出图提示词语言 = aiLang → 界面语言 → zh
+  const outputLanguage = i18n.outputLang(req, body.aiLang);
 
   if (!llmCfg.apiKey && !config.OPENAI_API_KEY) {
-    return res.status(200).json({ ok: false, error: 'NO_LLM_KEY' });
+    return res.status(200).json({
+      ok: false,
+      error: 'NO_LLM_KEY',
+      ...i18n.mark('api.assistant.noLlmKey'),
+      lang: outputLanguage
+    });
   }
 
   // 每批最多 20 条：一条提示词约 60–100 字，20 条约 2k 字，避免输出被截断。
@@ -2352,17 +2361,23 @@ app.post('/api/assistant/batch', async (req, res) => {
   const warnings = [];
   for (let start = 0; start < count; start += BATCH) {
     const need = Math.min(BATCH, count - start);
-    const sys = batchSystemPrompt(need, seconds);
-    const user = `主题：${theme}。本批第 ${start + 1}–${start + need} 条，共 ${need} 条；每条 ${seconds} 秒。地貌从「${BATCH_LANDFORMS[start % BATCH_LANDFORMS.length]}」开始轮转。`;
+    const sys = batchSystemPrompt(need, seconds, outputLanguage);
+    const user = batchUserPrompt(theme, start, need, seconds, outputLanguage);
     let arr = null;
     for (let attempt = 0; attempt < 2 && !arr; attempt++) {
       const { text, failure } = await llmService.chatMulti(sys, [{ role: 'user', content: user }], llmCfg);
-      if (!text) return res.status(200).json(llmFailurePayload(failure));
+      if (!text) return res.status(200).json(llmFailurePayload(failure, outputLanguage));
       arr = parseBatchJson(text);
       if (!arr) warnings.push(`第 ${start + 1} 批返回不是 JSON，已重试`);
     }
     if (!arr) {
-      return res.status(200).json({ ok: false, error: 'BAD_LLM_JSON', message: warnings.join('；') || '模型没有返回 JSON 数组' });
+      return res.status(200).json({
+        ok: false,
+        error: 'BAD_LLM_JSON',
+        message: warnings.join('；') || '模型没有返回 JSON 数组',
+        ...i18n.mark('api.assistant.badLlmJson'),
+        lang: outputLanguage
+      });
     }
     const clean = arr
       .filter(x => x && typeof x.prompt === 'string' && x.prompt.trim())
@@ -2383,7 +2398,9 @@ app.post('/api/assistant/batch', async (req, res) => {
     ok: true,
     items,
     text: items.map(x => x.prompt).join('\n'),
-    meta: { count, seconds, theme, landforms: BATCH_LANDFORMS, warnings }
+    // 加法式：输出语言，前端可据此显示「本条为英文提示词」
+    lang: outputLanguage,
+    meta: { count, seconds, theme, landforms: BATCH_LANDFORMS, warnings, promptLanguage: outputLanguage }
   });
 });
 
@@ -2411,6 +2428,14 @@ app.get('/api/assistant/info', (req, res) => {
       limits: assistantPlanCard.LIMITS,
       models: assistantPlanCard.MODELS,
       themes: assistantPlanCard.THEMES.map(t => ({ id: t.id, label: t.label }))
+    },
+    // P3 加法式：助手话术能力探针（前端据此决定是否用 replyKey/actions/aiLang）
+    lang: req.lang,
+    i18n: {
+      supported: i18n.SUPPORTED.slice(),
+      outputLanguageField: 'aiLang',
+      replyKeys: true,
+      actions: true
     },
     asr: assistantAsr.status(),
     memory: { maxMessages: assistantMemory.MAX_MESSAGES },
@@ -2451,8 +2476,9 @@ app.post('/api/assistant/message', (req, res) => {
       text,
       // 2026-11-17 V2：跨会话偏好按登录用户隔离；无登录墙/验收环境为 'local'。
       userId: (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local',
-      // P3：助手话术语言（默认 zh → 逐字保持现有中文回复；en 走 templates.en.js）。
-      lang: req.lang
+      // P3：助手话术语言 = aiLang（AI 输出语言）→ 界面语言 → zh；
+      // 中文默认逐字保持现有回复（零回归），en 走 src/i18n/templates/assistant.js。
+      lang: i18n.outputLang(req, body.aiLang)
     });
     res.json(out);
   } catch (e) {
@@ -2505,8 +2531,9 @@ app.post('/api/assistant/execute', (req, res) => {
       planId: body.planId ? String(body.planId) : null,
       approved: body.approved === true,
       force: body.force === true,
-      // P3：AI 输出语言（aiLang 可覆盖界面语言）；任务语言仍按 req.lang 记录。
-      lang: i18n.outputLang(req, body.aiLang),
+      // P3：界面语言（写进任务/历史）+ AI 输出语言（aiLang 优先，可与界面语言分离）。
+      lang: req.lang,
+      outputLang: i18n.outputLang(req, body.aiLang),
       options: {
         runtimeConfig: {
           apiKey: body.apiKey || '',
@@ -2785,26 +2812,26 @@ app.post('/api/assistant/asr', async (req, res) => {
 
 // 可选的「模型填槽」：只填计划卡，不执行任何生成。
 // 这是唯一会产生 LLM 费用的入口，因此必须显式传 consent=true；没有 Key 不发请求。
-const ASSISTANT_SLOT_SYSTEM_PROMPT = `你是「小智」的听懂模块，只做一件事：把用户的话填进计划卡槽位。
-只输出一个 JSON 对象，不要 markdown、不要解释：
-{"totalMinutes": number|null, "clipDurationSec": number|null, "clipCount": number|null,
- "resolution": "480p"|"720p"|"1080p"|"4k"|null, "model": "dashscope"|"kling"|"seedance"|null,
- "theme": string|null, "sceneCards": boolean|null}
-规则：
-- 用户没说的字段填 null，绝不猜总时长；「半小时」= 30，「两分钟」= 2。
-- 主题只用中文地貌名（极光/雪山/沙漠/星空/海岸/森林/湖泊/瀑布/云雾山谷等），没提就 null。
-- sceneCards 默认 null（由系统按产品口径开启）；用户说「不用场景卡」才填 false。
-- 只填槽位，不执行、不生成视频、不报价。`;
+// P3：填槽系统提示词移入 templates（中文 = 原逐字副本；英文 = 独立撰写 + Respond in English）。
+const ASSISTANT_SLOT_SYSTEM_PROMPT = assistantTemplates.SLOT_SYSTEM_ZH;
+function assistantSlotSystem(lang) {
+  return i18n.normalizeLang(lang) === 'en'
+    ? assistantTemplates.SLOT_SYSTEM_EN
+    : ASSISTANT_SLOT_SYSTEM_PROMPT;
+}
 
 app.post('/api/assistant/understand', async (req, res) => {
   const body = req.body || {};
   const text = String(body.text || '').trim();
+  // P3：听懂模块的输出语言（影响 system prompt / 错误话术，不影响 JSON 槽位协议）
+  const outputLanguage = i18n.outputLang(req, body.aiLang);
   if (!text) {
     return res.json({
       ok: false,
       code: 'ASSISTANT_EMPTY_TEXT',
       error: '没有收到要说的话',
-      ...i18n.err(req.lang, 'api.assistant.emptyText')
+      ...i18n.err(req.lang, 'api.assistant.emptyText'),
+      lang: outputLanguage
     });
   }
   if (body.consent !== true) {
@@ -2812,19 +2839,25 @@ app.post('/api/assistant/understand', async (req, res) => {
       ok: false,
       code: 'LLM_CONSENT_REQUIRED',
       error: '让模型解析计划卡会产生少量 LLM 费用；需要用户明确同意（consent=true）后才会发请求',
-      ...i18n.err(req.lang, 'api.assistant.understandConsent')
+      ...i18n.err(req.lang, 'api.assistant.understandConsent'),
+      lang: outputLanguage
     });
   }
   const llmCfg = { apiKey: body.llmApiKey, baseUrl: body.llmBaseUrl, model: body.llmModel };
   if (!llmCfg.apiKey && !config.OPENAI_API_KEY) {
-    return res.json({ ok: false, code: 'NO_LLM_KEY' });
+    return res.json({
+      ok: false,
+      code: 'NO_LLM_KEY',
+      ...i18n.mark('api.assistant.noLlmKey'),
+      lang: outputLanguage
+    });
   }
   const { text: raw, failure } = await llmService.chatMulti(
-    ASSISTANT_SLOT_SYSTEM_PROMPT,
+    assistantSlotSystem(outputLanguage),
     [{ role: 'user', content: text }],
     llmCfg
   );
-  if (!raw) return res.json(llmFailurePayload(failure));
+  if (!raw) return res.json(llmFailurePayload(failure, outputLanguage));
   let slots = null;
   try {
     const s = String(raw).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -2840,7 +2873,8 @@ app.post('/api/assistant/understand', async (req, res) => {
       code: 'BAD_LLM_JSON',
       message: '模型没有按格式返回计划卡槽位',
       raw: String(raw).slice(0, 500),
-      ...i18n.mark('api.assistant.badSlotsJson')
+      ...i18n.mark('api.assistant.badSlotsJson'),
+      lang: outputLanguage
     });
   }
   const built = assistantPlanCard.buildPlan(assistantPlanCard.mergeModelSlots(text, slots));
@@ -2851,10 +2885,11 @@ app.post('/api/assistant/understand', async (req, res) => {
       error: built.error,
       missing: built.missing || null,
       question: built.question || null,
-      slots
+      slots,
+      lang: outputLanguage
     });
   }
-  res.json({ ok: true, plan: assistantSupervisor.briefPlan(built.plan), slots, source: 'llm' });
+  res.json({ ok: true, plan: assistantSupervisor.briefPlan(built.plan), slots, source: 'llm', lang: outputLanguage });
 });
 
 
@@ -3138,6 +3173,8 @@ app.post('/api/tasks', (req, res) => {
     // 语言：长任务/日志按创建时的界面语言记录（缺字段/旧任务由 taskManager 归一为 zh）。
     // 只做持久化留痕，不改变中文默认输出；P3 里 AI 输出语言另有 aiLang（可与界面语言分离）。
     lang: req.lang,
+    // P3：作品提示词语言 = aiLang → 界面语言（场景卡提示词按它渲染）
+    promptLang: i18n.outputLang(req, req.body && req.body.aiLang),
     // 自动重试：缺省 true（API/旧前端兼容）；新版创作页传 false → 只试一次，失败交用户决定
     autoRetry: autoRetry !== false,
     theme: theme ?? null,
@@ -3238,7 +3275,9 @@ app.post('/api/tasks', (req, res) => {
     taskId: task.taskId,
     status: task.status,
     // 加法式：让前端知道本任务创建时的界面语言（旧任务/缺字段 = zh）
-    lang: task.lang || i18n.DEFAULT_LANG
+    lang: task.lang || i18n.DEFAULT_LANG,
+    // P3：作品提示词语言（aiLang || 界面语言）
+    promptLang: task.promptLang || task.lang || i18n.DEFAULT_LANG
   });
 });
 
@@ -3359,6 +3398,8 @@ app.get('/api/tasks', (req, res) => {
       recoverable: !!t.recoverable,
       // 加法式 i18n 字段（P2）：任务创建时语言 + 失败原因的 messageKey（能精确反查到才给）
       lang: t.lang || i18n.DEFAULT_LANG,
+      // P3：作品提示词语言（aiLang || 创建时界面语言）
+      promptLang: t.promptLang || t.lang || i18n.DEFAULT_LANG,
       errorKey: t.errorKey || null
     };
   }));

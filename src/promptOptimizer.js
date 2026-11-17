@@ -7,6 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const promptSkill = require('./promptSkill');
+// P3：AI/模板输出语言 = aiLang || uiLang（默认 zh，中文路径逐字不变）。
+const i18n = require('./i18n');
+const promptTemplates = require('./i18n/templates/prompt');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
@@ -741,15 +744,23 @@ class PromptOptimizer {
   // 公式：用户原句 + 运镜 + 光影 + 氛围 + 质感(全量) + 结尾留白
   // seed 用于确定性选择（传 clip.index），保证同主题多片段差异化
   // theme 为空 = 无主题：不套任何模板词池，直接返回原词（只走通用规则）
-  optimizeWithTemplate(userPrompt, theme = null, options = {}) {
+  // P3：第三个参数支持 'en' 或 { lang, seed }。英文模式只改「语言/主题标签」，
+  //     词池本来就是英文视频提示词词汇（不机翻中文模板）。
+  optimizeWithTemplate(userPrompt, theme = null, langOrOptions = {}) {
+    const lang = i18n.resolveLang(
+      typeof langOrOptions === 'string' ? langOrOptions : (langOrOptions && langOrOptions.lang)
+    );
+    const options = (langOrOptions && typeof langOrOptions === 'object') ? langOrOptions : {};
+    const isEn = lang === 'en';
     if (!theme) {
       return {
         method: 'template',
-        theme: '无主题',
+        theme: isEn ? 'No theme' : '无主题',
         original: userPrompt,
         optimized: userPrompt,
         negative: '',
-        seed: Number.isFinite(options.seed) ? options.seed : 0
+        seed: Number.isFinite(options.seed) ? options.seed : 0,
+        lang
       };
     }
 
@@ -757,7 +768,14 @@ class PromptOptimizer {
     const s = template.structure;
 
     // 降级：无 structure（UI 自建模板）→ 旧逻辑
-    if (!s) return this._legacyTemplateOptimize(userPrompt, template);
+    if (!s) {
+      const legacy = this._legacyTemplateOptimize(userPrompt, template);
+      if (isEn) {
+        legacy.theme = promptTemplates.templateThemeLabelEn(theme, template.name);
+        legacy.lang = lang;
+      }
+      return legacy;
+    }
 
     const seed = Number.isFinite(options.seed) ? options.seed : 0;
     const pick = (pool, offset) => (pool && pool.length)
@@ -778,17 +796,41 @@ class PromptOptimizer {
 
     return {
       method: 'template',
-      theme: template.name,
+      theme: isEn ? promptTemplates.templateThemeLabelEn(theme, template.name) : template.name,
       original: userPrompt,
       optimized,
       negative: template.negative,
-      seed
+      seed,
+      ...(isEn ? { lang } : {})
     };
   }
 
   // 组装 system prompt（拆出为独立方法，便于无网络单测）
   // 2026-10-20 起：风光类主题在此叠加 fengguang skill 的摄影级规则层
-  buildSystemPrompt(theme = null) {
+  // P3：lang='en' 时用独立英文基底（promptTemplates.EN_RULES）+ 英文主题标签；
+  //     中文路径（默认）逐字保持改造前逻辑。
+  buildSystemPrompt(theme = null, lang = 'zh') {
+    const isEn = i18n.resolveLang(lang) === 'en';
+    if (isEn) {
+      const template = theme ? (this.templates[theme] || this.templates.landscape) : null;
+      let refLines = null;
+      if (template && template.structure) {
+        const s = template.structure;
+        refLines = [
+          `Subject pool: ${(s.subjectPool || []).slice(0, 3).join(' | ')}`,
+          `Camera pool: ${(s.cameraPool || []).join(' | ')}`,
+          `Lighting pool: ${(s.lightingPool || []).join(' | ')}`,
+          `Atmosphere pool: ${(s.atmospherePool || []).join(' | ')}`,
+          `Texture: ${(s.quality || []).join(', ')}`,
+          'Organize as: user scene + camera + lighting + atmosphere + texture, and close with a still line (no new elements enter frame).'
+        ];
+      }
+      return {
+        systemPrompt: promptTemplates.buildEnglishSystemPrompt(theme, template, refLines),
+        themeLabel: theme ? promptTemplates.themeLabelEn(theme, template ? template.name : theme) : 'No theme',
+        negative: template ? template.negative : ''
+      };
+    }
     let systemPrompt;
     let themeLabel = '无主题';
     let negative = '';
@@ -833,16 +875,18 @@ ${structureRef}
     const apiKey = options.apiKey || config.OPENAI_API_KEY;
     const baseUrl = options.baseUrl || config.OPENAI_BASE_URL;
     const model = options.model || config.OPENAI_MODEL;
+    // P3：输出语言 = aiLang || uiLang；缺省 zh（中文路径零回归）。
+    const lang = i18n.resolveLang(options.lang);
 
     // 如果没有 API Key，降级到模板优化
     if (!apiKey) {
       console.log('未配置 LLM API Key，使用模板优化');
-      return this.optimizeWithTemplate(userPrompt, theme);
+      return this.optimizeWithTemplate(userPrompt, theme, { lang });
     }
 
     try {
-      // system prompt 由 buildSystemPrompt 组装（含 fengguang skill 叠加层）
-      const { systemPrompt, themeLabel, negative } = this.buildSystemPrompt(theme);
+      // system prompt 由 buildSystemPrompt 组装（含 fengguang skill 叠加层；英文模式不叠加中文规则）
+      const { systemPrompt, themeLabel, negative } = this.buildSystemPrompt(theme, lang);
 
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -869,12 +913,13 @@ ${structureRef}
         theme: themeLabel,
         original: userPrompt,
         optimized,
-        negative
+        negative,
+        lang
       };
 
     } catch (error) {
       console.error('AI 优化失败，降级到模板优化:', error.message);
-      return this.optimizeWithTemplate(userPrompt, theme);
+      return this.optimizeWithTemplate(userPrompt, theme, { lang });
     }
   }
   // 解析行尾主题标签（§10B）

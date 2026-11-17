@@ -1253,3 +1253,32 @@ P2 后端用户可见文字完成（**只加不删**，中文默认零回归）�
 **前端待接点（不在本窗口作用域）**：前端 API 层优先读 `messageKey` → 本地 catalog，缺失时显示
 `message`/`error`；任务详情/日志用 `errorKey`、`currentStepMessageKey`、步骤 `nameKey`；
 质检角标用 `labelKey`；WS 事件按 `lang` 字段选择文案。
+
+### 2026-11-17 · P3 助手与提示词英文（夜间窗口 i18n-p2p3-dev）
+
+P3 完成（**中文默认逐字不变**，英文为独立撰写的模板，不是机翻）。规格见 `docs/spec/i18n-spec.md` §3.5 / §12。
+
+- 新增 `src/i18n/templates/assistant.js`：
+  - 悬浮球系统提示词（中文=原逐字副本；英文=独立英文基底 + `Respond in English`，含 9 条禁令与 JSON 输出约束）；
+  - 批量分镜系统/用户提示词（zh/en）；填槽（听懂）系统提示词（zh/en，英文版保留中文地貌 canonical 说明，
+    因为 planCard 的主题词表是中文协议）；
+  - 计划摘要英文（`describePlanEn`）、时长英文格式化、禁用项标签英文（只用于提示话术）。
+- `server.js`：`/api/assistant/chat`（含 stream）、`/batch`、`/understand` 消费
+  `aiLang → req.lang → zh`；英文模式用英文基底、不再叠加中文 fengguang skill；
+  `llmFailurePayload` / 禁用项拦截话术按语言；`/api/assistant/info` 增加 i18n 能力探针；
+  `/api/optimize-prompt` 已接 `aiLang` → promptOptimizer 英文路径。
+- `promptOptimizer`：`buildSystemPrompt(theme, lang)` 英文分支用 `templates/prompt.js` 的 `EN_RULES`
+  + 英文主题标签；`optimizeWithTemplate` 支持 `'en'`/`{lang}`；中文路径逐字不变（词池本来就是英文视频词汇）。
+- `promptComposer`：新增 `templates/scene.js` 英文句式模板；`ctx.lang='en'` 时输出英文脚手架
+  （Subject/Camera/Ending），中文路径一字未改；patch 增加 `promptLanguage:'en'`（中文不写该字段）。
+- `planCard.describe(plan, lang)`：中文原文保留，英文独立说明（Total length/Model/Scenes）。
+- `assistant/supervisor`：`handleMessage({lang})` 英文问候/未知/计划/确认；`execute({lang,outputLang})`
+  英文完成/开始话术；返回增加 `lang`、`replyKey`、`actions[{type,labelKey}]`（加法式）；
+  计划卡/确认错误补 `messageKey`。中文回复逐字不变。
+- `taskManager`：`task.promptLang`（作品提示词语言 = aiLang || 界面语言）；场景卡提示词按它渲染。
+- `generators`：新增 `gen.error.*` catalog（厂商无关前缀），失败边界（taskManager）自动补 `errorKey`。
+- 新增/扩展验收：`scripts/verify-i18n-backend.js` **99 通过 / 0 失败 / 1 跳过**（P2+P3 合计）。
+
+**未验证**：live 双语 API 探针（需重启 3001）；英文端到端浏览器交互（前端未接线，人工验收留给 P4）。
+**前端待接点**：`aiLang` 字段（设置页开关属 v2-ui-dev 作用域，后端只接收/透传）；
+`/api/assistant/*` 的 `replyKey/actions`；提示词请求体带 `aiLang` 即可得到英文提示词。

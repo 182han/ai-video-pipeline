@@ -49,6 +49,9 @@ const diagnose = require('./diagnose');
 const preferences = require('./preferences');
 const audit = require('./audit');
 const assistantBroadcast = require('./broadcast');
+// P3：AI 输出语言 = aiLang/界面语言；英文话术与模板独立撰写（中文默认逐字不变）。
+const i18n = require('../i18n');
+const assistantTemplates = require('../i18n/templates/assistant');
 
 const SUPERVISOR_VERSION = 'assistant-supervisor.v1';
 const ACTIVE_STATUS = new Set([
@@ -248,32 +251,60 @@ function bgmLabel(plan) {
   return '自动（随机轻音乐）';
 }
 
-function describeReply(plan) {
-  const lines = planCard.describe(plan);
+function describeReply(plan, lang) {
+  const lines = planCard.describe(plan, lang);
   // P7-A：计划摘要必须显示当前配乐（§3.3.5）
-  lines.push(`配乐：${bgmLabel(plan)}`);
+  lines.push(i18n.normalizeLang(lang) === 'en'
+    ? `BGM: ${bgmLabelEn(plan)}`
+    : `配乐：${bgmLabel(plan)}`);
   return lines.join('\n');
 }
 
-function replyForPlan(plan) {
+// P3：配乐说明的英文版（选择来自计划对象；曲名/标题原样保留，属内容不翻译）
+function bgmLabelEn(plan) {
+  const b = plan && plan.bgm;
+  if (!b || b.enabled === false || b.mode === 'off') return 'off';
+  if (b.mode === 'auto') return 'auto (random light music)';
+  const hit = bgmFindTrack(b.trackId);
+  return hit ? `manual: ${hit.track.title || hit.track.id}` : `manual: ${b.trackId}`;
+}
+
+function replyForPlan(plan, lang) {
+  if (i18n.normalizeLang(lang) === 'en') {
+    return `I've laid out a ${assistantTemplates.durationLabelEn(plan.totalSec)} plan:\n`
+      + `${describeReply(plan, 'en')}\n`
+      + (plan.requiresPaymentApproval
+        ? 'This is a paid task: I start only after you approve, and I never charge automatically. Tell me if anything should change.'
+        : 'This is a zero-cost task (Mock): I start right after you approve. Tell me if anything should change.');
+  }
   // 2026-11-16 用户口径：长片按「总时长」排，场景从场景卡库自动抽取，不再说「我按某个主题排好了」。
   const mins = Number(plan.totalSec || 0) / 60;
   // 不到 1 分钟按秒说（支持「30 秒」这类短视频/快速验证）。
   const durLabel = mins >= 10 ? `${mins.toFixed(1)} 分钟`
     : (mins >= 1 ? `${mins.toFixed(2)} 分钟` : `${Math.round(Number(plan.totalSec) || 0)} 秒`);
-  return `我按 ${durLabel}排好了：\n${describeReply(plan)}\n`
+  return `我按 ${durLabel}排好了：\n${describeReply(plan, 'zh')}\n`
     + (plan.requiresPaymentApproval
       ? '这是付费任务：你确认后我才开始，不会自动扣费。要改哪里直接说。'
       : '这是零计费任务（Mock）：你确认后我就开始。要改哪里直接说。');
 }
 
-function replyForGreeting() {
+function replyForGreeting(lang) {
+  if (i18n.normalizeLang(lang) === 'en') {
+    return 'I am Xiaozhi. Tell me the total length and I will lay out a plan — for example "10 minutes" or "30 minutes". '
+      + 'Scenes are drawn from the scene-card library and played in chapter order (10 seconds per clip by default; '
+      + '10 minutes = 60 distinct scenes; you can also say "15 seconds per clip"), so no theme is needed. '
+      + 'You can also ask "last video" or "what is the progress". The microphone button is on the left of the input box.';
+  }
   return '我是小智。说个总时长就能排计划，例如「10 分钟」或「30 分钟」——'
     + '场景由场景卡库随机抽取后按章节顺序播映（默认 10 秒/段，10 分钟 = 60 个不同场景；也可以说「每段 15 秒」），不需要指定主题；'
     + '也可以问「上一次的视频」或「现在进度怎样」。语音按钮在输入框左侧。';
 }
 
-function replyUnknown() {
+function replyUnknown(lang) {
+  if (i18n.normalizeLang(lang) === 'en') {
+    return 'I can do three things: ① lay out a plan from the total length (scenes are drawn from the scene-card library; no theme needed); '
+      + '② find your "last video"; ③ report current task progress. For example: 10 minutes / last video / progress.';
+  }
   return '我可以做三件事：① 按总时长排计划（场景从场景卡库自动抽取，不需要说主题）；'
     + '② 帮你找「上一次的视频」；③ 报当前任务进度。比如：10 分钟 / 上一次的视频 / 进度。';
 }
@@ -462,19 +493,34 @@ function replyForNoImage(sessionId) {
 // （web/src/components/assistant.js 的 confirmPlan）。
 // 共同契约 §0.2：L3（付费/建任务）必须用户点确认；未确认 → PAYMENT_NOT_APPROVED。
 // ==========================================
-function replyForConfirm(sessionId) {
+function replyForConfirm(sessionId, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
-    return '现在还没有计划卡，没有可确认的东西。先说总时长（比如「30 秒」「10 分钟」），'
-      + '我排好计划再让你确认。';
+    return isEn
+      ? 'There is no plan card to confirm yet. Tell me the total length (for example "30 seconds" or "10 minutes"), '
+        + 'and I will lay out a plan first.'
+      : '现在还没有计划卡，没有可确认的东西。先说总时长（比如「30 秒」「10 分钟」），'
+        + '我排好计划再让你确认。';
   }
+  const costEn = plan.requiresPaymentApproval && plan.estimate
+    ? `estimated ¥${Number(plan.estimate.totalCny || 0).toFixed(2)}`
+    : 'zero cost (Mock)';
   const cost = plan.requiresPaymentApproval && plan.estimate
     ? `预估 ¥${Number(plan.estimate.totalCny || 0).toFixed(2)}`
     : '零计费（Mock）';
   const state = memory.getState(sessionId, plan.planId);
   if (state && state.state && !['planned'].includes(state.state)) {
-    return `这条计划已经在走了（${stateMachine.LABELS[state.state] || state.state}），不用再确认；`
-      + '要看进度就说「现在进度怎样」。';
+    return isEn
+      ? `This plan is already moving (${stateMachine.LABELS[state.state] || state.state}), so there is no need to confirm again. `
+        + 'Ask "what is the progress" to see it.'
+      : `这条计划已经在走了（${stateMachine.LABELS[state.state] || state.state}），不用再确认；`
+        + '要看进度就说「现在进度怎样」。';
+  }
+  if (isEn) {
+    return `Start now? ${plan.clipCount} clips × ${plan.clipDurationSec} s (${plan.modelLabel} · ${plan.resolution}, ${costEn}).\n`
+      + 'I start only when you press "Confirm and run" on the card below: nothing is created and nothing is charged before that. '
+      + 'If you want changes, say them now; planId stays the same.';
   }
   return `要现在开始吗？${plan.clipCount} 段 × ${plan.clipDurationSec} 秒（${plan.modelLabel} · ${plan.resolution}，${cost}）。\n`
     + '点下面卡片上的「确认执行」我才开始：没点之前不会建任务，也不会花一分钱。'
@@ -1380,7 +1426,9 @@ function isPlanPromptEditForm(text) {
  */
 function handleMessage(opts = {}) {
   const text = String(opts.text || '').trim();
-  if (!text) return { ok: false, code: 'ASSISTANT_EMPTY_TEXT', error: '说点什么吧' };
+  // P3：助手话术语言（默认 zh → 现有中文回复逐字不变；en → 核心链路走英文模板）
+  const lang = i18n.resolveLang(opts.lang);
+  if (!text) return { ok: false, code: 'ASSISTANT_EMPTY_TEXT', error: '说点什么吧', lang };
   const session = memory.getOrCreate(opts.sessionId);
   const sessionId = session.id;
   memory.appendMessage(sessionId, { role: 'user', text });
@@ -1402,43 +1450,57 @@ function handleMessage(opts = {}) {
   let pendingChange = null;
   let diagnosis = null;
   let preferencesView = null;
+  // P3：结构化话术 key（加法式）——前端可据此本地化/追踪；中文 reply 原文不依赖它。
+  let replyKey = null;
+  let actions = null;
 
   if (intent.intent === 'greeting') {
-    reply = replyForGreeting();
+    reply = replyForGreeting(lang);
+    replyKey = 'assistant.reply.greeting';
   } else if (intent.intent === 'status') {
     reply = replyForStatus(sessionId);
+    replyKey = 'assistant.reply.status';
   } else if (intent.intent === 'plan_scenes') {
     // 2026-11-16 用户问题 a：问「选了哪几个场景」→ 只读预览，不重排计划、不占卡。
     reply = replyForPlanScenes(sessionId);
+    replyKey = 'assistant.reply.planScenes';
   } else if (intent.intent === 'no_image') {
     // 2026-11-16 用户问题 b：要纯文生视频 → 告诉用户卡上的开关位置，不新建计划。
     reply = replyForNoImage(sessionId);
+    replyKey = 'assistant.reply.noImage';
   } else if (intent.intent === 'confirm') {
     // 2026-11-17 V1（§9.1-6 / A7）：最终确认时点 —— 只回确认语 + 回传计划（前端给卡片）。
     // 这里**不建任务**：建任务只能走 execute()，而 execute 只由卡片「确认执行」触发。
-    reply = replyForConfirm(sessionId);
+    reply = replyForConfirm(sessionId, lang);
+    replyKey = 'assistant.reply.confirm';
     plan = memory.lastPlan(sessionId);
+    actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
   } else if (intent.intent === 'repair') {
     // 2026-11-17 V2（B2/B3）：失败诊断 + 修复建议。只读，不自动重跑。
     const r = replyForRepair(sessionId);
     reply = r.reply;
+    replyKey = 'assistant.reply.repair';
     diagnosis = r.diagnosis;
   } else if (intent.intent === 'settings') {
     // 2026-11-17 V2（B6）：设置变更（L3）→ 只返回 pendingChange，确认前什么都不改。
     const r = replyForSettings(sessionId, text);
     reply = r.reply;
+    replyKey = 'assistant.reply.settings';
     pendingChange = r.pending;
   } else if (intent.intent === 'prefs') {
     // 2026-11-17 V2（B7）：读跨会话偏好（服务端用户级，换会话仍在）。
     const r = replyForPrefs(sessionId, { userId });
     reply = r.reply;
+    replyKey = 'assistant.reply.prefs';
     preferencesView = r.preferences;
   } else if (intent.intent === 'assets') {
     // 2026-11-17 V2（B5）：素材库存（与 /api/photos 同口径）。
     reply = replyForAssets(sessionId);
+    replyKey = 'assistant.reply.assets';
   } else if (intent.intent === 'context') {
     // 2026-11-17 V1（§9.1-7）/ V2（B4）：只读环境问答；不改计划、不回传计划。
     reply = replyForContext(sessionId, { userId });
+    replyKey = 'assistant.reply.context';
   } else if (planEditBranch) {
     // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
     // 2026-11-17 V1（A4）：先看是不是「把第 N 段的提示词给我看」这种**纯只读**请求；
@@ -1446,8 +1508,10 @@ function handleMessage(opts = {}) {
     const viewed = tryReplyPromptView(sessionId, text);
     if (viewed) {
       reply = viewed;
+      replyKey = 'assistant.reply.promptView';
     } else {
       reply = replyForPlanEdit(sessionId, text);
+      replyKey = 'assistant.reply.planEdit';
       // 2026-11-16 Lead 复核：把更新后的计划一并回传（planId 不变）。
       // 前端 sendXiaozhi 里的 `if (j.plan) setPlan(j.plan)` 依赖它刷新手上的计划卡；
       // 只回 null 时卡片仍是旧对象，用户会觉得「换了但没反应」。
@@ -1456,12 +1520,14 @@ function handleMessage(opts = {}) {
   } else if (intent.intent === 'bgm') {
     // 2026-11-16 P7-A：配乐 —— 列库 / 选曲 / 关掉 / 设默认。
     reply = replyForBgm(sessionId, text);
+    replyKey = 'assistant.reply.bgm';
     // 同上：选曲/关掉配乐后回传更新后的计划（planId 不变；无计划时仍是 null）。
     plan = memory.lastPlan(sessionId);
   } else if (intent.intent === 'last') {
     const res = retrieveRefs(text, 3);
     refs = res.refs;
     reply = replyForLast(text);
+    replyKey = 'assistant.reply.last';
   } else {
     // create / unknown 都尝试排计划；听不懂时 buildPlan 会返回明确的追问。
     const last = memory.lastPlan(sessionId);
@@ -1483,20 +1549,30 @@ function handleMessage(opts = {}) {
       input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
     }
     const built = planCard.buildPlan(input);
+    const isEn = lang === 'en';
     if (!built.ok) {
       if (built.missing || built.code === 'PLAN_NEED_DURATION') {
         missing = built.missing || ['totalMinutes'];
-        reply = built.question || built.error;
+        // P3：英文模式给英文追问；中文模式沿用 planCard 原文（零回归）。
+        reply = (isEn && built.code === 'PLAN_NEED_DURATION')
+          ? 'How long should the video be? For example "30 seconds", "10 minutes", or "half an hour".'
+          : (built.question || built.error);
+        replyKey = 'assistant.question.duration';
+        actions = [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }];
       } else if (intent.intent === 'unknown') {
-        reply = replyUnknown() + '\n（' + built.error + '）';
+        reply = replyUnknown(lang) + (isEn ? '' : '\n（' + built.error + '）');
+        replyKey = 'assistant.reply.unknown';
       } else {
         reply = built.error;
+        replyKey = 'assistant.reply.planError';
       }
     } else {
       plan = built.plan;
       planCache.set(plan.planId, plan);
       memory.addPlan(sessionId, plan);
-      reply = replyForPlan(plan);
+      reply = replyForPlan(plan, lang);
+      replyKey = 'assistant.reply.plan';
+      actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
     }
   }
 
@@ -1507,6 +1583,10 @@ function handleMessage(opts = {}) {
     sessionId,
     intent: reportedIntent,
     reply,
+    // P3 加法式：话术语言 + 结构化 key/actions（中文 reply 原文不依赖这些字段）
+    lang,
+    replyKey,
+    actions,
     plan: plan ? briefPlan(plan) : null,
     missing,
     refs,
@@ -1538,18 +1618,31 @@ function makeFingerprint(plan) {
  * @param {object} opts { sessionId, planId?, approved?, force?, options? }
  */
 function execute(opts = {}) {
+  // P3：话术/任务语言。outputLang 优先（AI 输出语言 aiLang），否则用界面语言。
+  const lang = i18n.resolveLang(opts.outputLang || opts.lang);
+  const isEn = lang === 'en';
+  const taskLang = i18n.resolveLang(opts.lang || opts.outputLang);
   const sessionId = opts.sessionId;
   if (!sessionId || !memory.getSession(sessionId)) {
-    return { ok: false, code: 'ASSISTANT_BAD_SESSION', error: '没有这个会话，请先聊一句' };
+    return { ok: false, code: 'ASSISTANT_BAD_SESSION', error: '没有这个会话，请先聊一句', ...i18n.mark('api.assistant.badSession'), lang };
   }
   const plan = (opts.planId && memory.getPlan(sessionId, opts.planId))
     || planCache.get(opts.planId)
     || memory.lastPlan(sessionId);
-  if (!plan) return { ok: false, code: 'ASSISTANT_NO_PLAN', error: '还没有计划卡，先说时长和主题' };
+  if (!plan) {
+    return { ok: false, code: 'ASSISTANT_NO_PLAN', error: '还没有计划卡，先说时长和主题', ...i18n.mark('api.assistant.noPlan'), lang };
+  }
 
   let state = memory.getState(sessionId, plan.planId) || stateMachine.create(plan, { sessionId });
   if (state.state === stateMachine.STATES.DONE) {
-    return { ok: true, alreadyDone: true, state: stateMachine.summary(state), reply: '这条计划已经完成了。' };
+    return {
+      ok: true,
+      alreadyDone: true,
+      state: stateMachine.summary(state),
+      reply: isEn ? 'This plan is already done.' : '这条计划已经完成了。',
+      replyKey: 'assistant.reply.alreadyDone',
+      lang
+    };
   }
   // 正在执行/已提交/补位中的计划不允许再点一次「确认执行」，否则会重复建任务（防重复计费）。
   if (['confirmed', 'submitted', 'running', 'retrying', 'filling'].includes(state.state)) {
@@ -1557,7 +1650,9 @@ function execute(opts = {}) {
       ok: false,
       code: 'ASSISTANT_ALREADY_RUNNING',
       error: `这条计划已经在执行中（${stateMachine.LABELS[state.state] || state.state}），不会重复创建任务`,
-      state: stateMachine.summary(state)
+      ...i18n.mark('api.assistant.alreadyRunning'),
+      state: stateMachine.summary(state),
+      lang
     };
   }
 
@@ -1567,7 +1662,9 @@ function execute(opts = {}) {
       ok: false,
       code: 'PAYMENT_NOT_APPROVED',
       error: `这是付费任务（预估 ¥${plan.estimate.totalCny.toFixed(2)}），需要你明确确认后才会开始`,
-      state: stateMachine.summary(state)
+      ...i18n.mark('api.assistant.executeNotApproved'),
+      state: stateMachine.summary(state),
+      lang
     };
   }
 
@@ -1581,7 +1678,9 @@ function execute(opts = {}) {
         ok: false,
         code: 'INSUFFICIENT_BUDGET',
         error: `余额不足：本次预计 $${estimateUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
-        state: stateMachine.summary(state)
+        ...i18n.mark('api.tasks.insufficientBudget'),
+        state: stateMachine.summary(state),
+        lang
       };
     }
     const fp = makeFingerprint(plan);
@@ -1591,7 +1690,9 @@ function execute(opts = {}) {
         return {
           ok: false, code: 'DUPLICATE_TASK',
           error: `重复提交已拦截：${Math.ceil(submitGuard.WINDOW_MS / 60000)} 分钟内已创建过相同任务（${dup.taskId || '未知'}）`,
-          state: stateMachine.summary(state)
+          ...i18n.mark('api.tasks.duplicate'),
+          state: stateMachine.summary(state),
+          lang
         };
       }
     }
@@ -1610,6 +1711,9 @@ function execute(opts = {}) {
       resolution: plan.resolution,
       theme: plan.theme || undefined,
       preset: 'final',
+      // P3：任务语言（日志/历史按界面语言；AI 输出语言可单独由 aiLang 指定）
+      lang: taskLang,
+      promptLang: lang,
       // 关键：小智自己按预算重试，不让流水线先产出「缺段成片」。
       autoRetry: false,
       // P7-A：场景卡按计划里固定的 id 传给 createTask（用户换过的卡必须原样生效；
@@ -1673,8 +1777,13 @@ function execute(opts = {}) {
     sessionId,
     taskId: task.taskId,
     state: stateMachine.summary(state),
-    reply: `开始做了：${task.totalClips} 段 × ${task.clipDuration} 秒（${plan.modelLabel}）。`
-      + '我会盯着质检；失败最多自动重试 2 次，再从片段库补位，仍不行才叫你。'
+    replyKey: 'assistant.reply.started',
+    lang,
+    reply: isEn
+      ? `Started: ${task.totalClips} clips × ${task.clipDuration} s (${plan.modelLabel}). `
+        + 'I will watch the QC: up to 2 automatic retries on failure, then fill-ins from the clip library, and I call you only if that still fails.'
+      : `开始做了：${task.totalClips} 段 × ${task.clipDuration} 秒（${plan.modelLabel}）。`
+        + '我会盯着质检；失败最多自动重试 2 次，再从片段库补位，仍不行才叫你。'
   };
 }
 

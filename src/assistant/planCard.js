@@ -558,8 +558,39 @@ function mergeModelSlots(text, slots) {
 }
 
 // 计划卡 → 给人看的几行说明（UI 计划卡、日志共用）。
-function describe(plan) {
+// P3：可选 lang —— 英文模式返回独立英文说明；默认/zh 逐字返回改造前的中文（零回归）。
+function describe(plan, lang) {
   if (!plan || typeof plan !== 'object') return [];
+  if (String(lang || '').toLowerCase().startsWith('en')) {
+    // 独立英文模板（不逐句翻译中文）：数字/品牌/主题名保持原值，不翻译用户内容。
+    const linesEn = [];
+    const secTotalEn = Math.round(Number(plan.totalSec) || 0);
+    const minsEn = secTotalEn / 60;
+    const durLabelEn = minsEn >= 10 ? `${minsEn.toFixed(1)} minutes`
+      : (minsEn >= 1 ? `${minsEn.toFixed(2)} minutes` : `${secTotalEn} seconds`);
+    linesEn.push(`Total length ${durLabelEn} (${plan.clipCount} clips × ${plan.clipDurationSec} s)`);
+    if (plan.themeLabel) linesEn.push(`Theme: ${plan.themeLabel}`);
+    linesEn.push(`Model: ${plan.modelLabel} · ${plan.resolution}`);
+    linesEn.push(plan.sceneCards
+      ? `Scenes: ${plan.clipCount} distinct cards drawn from the scene-card library, played in chapter order without repeats`
+      : 'Scenes: free-form prompts (scene cards off)');
+    if (plan.estimate) {
+      if (plan.estimate.totalCny > 0) {
+        linesEn.push(`Estimated cost: ¥${plan.estimate.totalCny.toFixed(2)} `
+          + `(retry cap ¥${plan.estimate.retryCapCny.toFixed(2)}, up to ${plan.estimate.autoQcRetries} automatic retries)`);
+      } else {
+        linesEn.push('Estimated cost: ¥0 (Mock mode, no charge)');
+      }
+      if (plan.estimate.budget && plan.estimate.budget.usd > 0) {
+        linesEn.push(`Budget gate: $${plan.estimate.budget.usd.toFixed(2)} USD (submission is refused if the balance is too low)`);
+      }
+    }
+    if (plan.fillMaxClips !== undefined) {
+      linesEn.push(`Failure fill-in: up to ${plan.fillMaxClips} clips (≤5% and ≤10 clips)`);
+    }
+    (plan.warnings || []).forEach((w) => linesEn.push('Note: ' + w));
+    return linesEn;
+  }
   const lines = [];
   const mins = plan.totalSec / 60;
   // 不到 1 分钟时按秒显示（「30 秒」比「0.50 分钟」更好读；2026-11-16 支持秒级时长）。

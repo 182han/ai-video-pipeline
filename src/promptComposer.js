@@ -12,6 +12,14 @@
 
 'use strict';
 
+// P3：英文场景提示词走独立英文模板（src/i18n/templates/scene.js）；
+// 中文路径不经过该模块，逐字保持改造前输出。
+const sceneTemplates = require('./i18n/templates/scene');
+
+function _isEn(v) {
+  return String(v || '').trim().toLowerCase().startsWith('en');
+}
+
 const SCENE_PROMPT_VERSION = 'scene-prompt.v1';
 
 // 主题 id → 中文标签（create 页现有主题 id；未知主题原样使用）
@@ -167,6 +175,8 @@ function _assertCard(card) {
 // 视频提示词：卡 + 主题/氛围；语义顺序与 fengguang 的「主体→运镜→光影→色调→收尾」一致。
 function composeVideoPrompt(card, ctx = {}) {
   _assertCard(card);
+  // P3：英文模式 → 独立英文模板（中文路径 continue 到下面原逻辑，一字不改）
+  if (_isEn(ctx.lang)) return sceneTemplates.composeVideoPromptEn(card, ctx);
   const sentences = [];
   const lead = _lead(card, ctx);
   if (lead) sentences.push(lead);
@@ -190,6 +200,7 @@ function composeVideoPrompt(card, ctx = {}) {
 // 图片提示词（首帧/静帧）：不含运动描述，补安全区与横屏要求。
 function composeImagePrompt(card, ctx = {}) {
   _assertCard(card);
+  if (_isEn(ctx.lang)) return sceneTemplates.composeImagePromptEn(card, ctx);
   const sentences = ['单帧静态画面，16:9 横屏。'];
   const lead = _lead(card, ctx);
   if (lead) sentences.push(lead);
@@ -288,6 +299,8 @@ function composeClipPatch(card, ctx = {}) {
     patch.promptSource = 'scene-card-user-edit';
     patch.userPromptOverride = true;
   }
+  // P3 加法式：记录本段提示词语言（中文模式不写该字段，保持任务 JSON 与改造前一致）
+  if (_isEn(ctx.lang)) patch.promptLanguage = 'en';
   return patch;
 }
 
@@ -302,7 +315,8 @@ function compose(card, ctx = {}) {
     imagePrompt: patch.imagePrompt,
     negativePrompt: patch.negativePrompt,
     adjust: patch.adjust,
-    composerVersion: SCENE_PROMPT_VERSION
+    composerVersion: SCENE_PROMPT_VERSION,
+    ...(patch.promptLanguage ? { promptLanguage: patch.promptLanguage } : {})
   };
 }
 
