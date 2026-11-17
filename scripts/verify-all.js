@@ -45,6 +45,12 @@ const SUITES = [
     desc: 'i18n 运行时（检测/切换/cookie/复数/Intl/订阅；DOM 桩，不替代浏览器视觉验收）'
   },
   {
+    name: 'i18n-backend',
+    script: 'verify-i18n-backend.js',
+    group: 'fast',
+    desc: 'P2/P3 后端 i18n（lang 解析/catalog 中英对等/err 加法式字段/task.lang/质检 labelKey/WS lang/原中文串仍在；live 双语需 --probe + 重启后手跑）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
