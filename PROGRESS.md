@@ -1326,3 +1326,22 @@ P3 完成（**中文默认逐字不变**，英文为独立撰写的模板，不�
 - 真实 `data/budget.json` 的历史两笔对账（194.27 vs 196.28）由 Lead 按交接文档 §4 做，本窗口未动真实数据；
 - 小智英文话术只覆盖核心链路与本次修复点；更长的英文回复（状态/上次视频/配乐等）仍中文，后续可按 replyKey 补；
 - 浏览器端到端人工验收未做（前端已由 task-4 独立提交，不在本窗口作用域）。
+
+### 2026-11-18 · Lead 接管验收（task-3/task-4 已提交，等待用户重启）
+
+**独立复跑（稳定 HEAD，逐个串行，EXIT=0）**：`verify-assistant` 237/0、`verify-assistant-followup` 42/0、
+`verify-budget-uncertain` 41/0、`verify-assistant-frontend` 101/0、`verify-i18n --strict` 12/0、
+`verify-i18n-runtime` 29/0、`verify-image-first-ui` 90/0/5 跳过、`verify-scene-cards` 58/0、
+`verify-whaletv-video` 37/0、`verify-budget-guard` 48/0、`verify-photo-adjust-ui` 73/0/1 跳过、
+`verify-p6-offline` 41/0、`verify-i18n-backend` 99/0/1 跳过、`verify-assistant-http` 33/0。
+
+**diff 审查**：`75610a9` 全在 `web/**` + 前端脚本；`b90991c` 全在 `src/assistant/**` + `src/{budget,taskManager}.js` + 脚本；
+均未碰 `server.js`/`pipeline.js`/`qualityChecker.js`/对方领地；无整文件覆盖；新增行无 Key。
+
+**测试卫生（本窗口 2 提交）**：`2e97c21` 修 `verify-assistant-diagnostics` 2 条 i18n P3 后过期断言
+（101/2→103/0）+ 注册 `assistant-followup`/`budget-uncertain`/`budget-guard` 到 `verify-all.js`；
+`3a75d29` 修 `verify-assistant-http` 2 条过期断言（V2 端点 13 个/默认模型 openai-video，31/2→33/0）。
+
+**未验证/待办**：live 双语 API 与 `/api/budget`=2.07 需**用户重启 3001**后验；浏览器中英 E2E 与 5 个问题人工验；
+`verify-loop` 27/2 既有；`doctor` 2 ERROR 环境限制。后续路线图见
+`docs/交接/2026-11-18-后续升级迭代路线图.md`（下一轮建议：预算不确定人工对账入口）。
