@@ -21,7 +21,7 @@
 
 const llmService = require('../services/llmService');
 
-const BRAIN_VERSION = '1.2.0';
+const BRAIN_VERSION = '1.3.0';
 
 // 工具白名单 = 现有 classify() 能产出的意图集合。
 // **不在这里新增能力**：模型只能在这些里面选，选不出来就必须说 clarify。
@@ -105,6 +105,7 @@ function buildSystemPrompt(lang, ctx) {
       '· Nonsense or chit-chat that maps to nothing -> clarify. Do NOT use greeting unless the user is actually greeting.',
       '· "scene card, take a look" while a plan exists -> plan_scenes (cards the CURRENT plan uses). assets only when the user asks about COUNTS (how many left / stock).',
       '· A bare noun with no verb, e.g. "the prompt?" / "prompt again" -> plan_edit (read-only display), NOT clarify.',
+      '· A bare slot change like "make it 1080p" / "switch to 720p" / "15s per clip" -> plan_edit (change the CURRENT plan), NOT settings. settings only when the user says default / global / always.',
       '· If the sentence names a concrete object (prompt / scene card / BGM / budget) plus a verb, prefer that action over clarify. Only use clarify when you truly cannot tell.',
       '',
       'Current state:',
@@ -141,6 +142,8 @@ function buildSystemPrompt(lang, ctx) {
     '· 「场景卡看一下 / 场景卡看看 / 场景卡列一下」→ plan_scenes（看**当前计划**用了哪些卡）；',
     '   assets 只在出现「还剩 / 库存 / 有多少张 / 剩几张」这类**数量**词时才用；',
     '· 「提示词呢 / 那提示词呢」（只给名词、没有动词）→ plan_edit（只读展示已有提示词），**不要** clarify；',
+    '· 只改分辨率/每段秒数这类**槽位**（「改成 1080p」「换成 720p」「每段 15 秒」）→ plan_edit（改当前计划），',
+    '  **不要**选 settings；settings 只在出现「默认 / 全局 / 以后都用」这类词时才用；',
     '· 只要句子里有**具体对象（提示词/场景卡/配乐/预算/进度）+ 动作**，就选对应动作，不要轻易 clarify；',
     '  只有真的分辨不出意图时才用 clarify。',
     '',
