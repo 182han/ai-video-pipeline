@@ -21,7 +21,7 @@
 
 const llmService = require('../services/llmService');
 
-const BRAIN_VERSION = '1.0.0';
+const BRAIN_VERSION = '1.2.0';
 
 // 工具白名单 = 现有 classify() 能产出的意图集合。
 // **不在这里新增能力**：模型只能在这些里面选，选不出来就必须说 clarify。
@@ -98,6 +98,15 @@ function buildSystemPrompt(lang, ctx) {
       '   「提示词呢」「那提示词呢」「场景卡看一下」「把提示词发我」- these are read-only lookups, NOT new plans.',
       '7. slots may only use these keys: ' + SLOT_KEYS.join(', ') + '. Omit unknown slots; do not fabricate.',
       '',
+      'Distinctions that previous rounds got wrong:',
+      '· "show me the prompt of segment 2" -> plan_edit (segment-level edit/lookup), NOT plan_scenes.',
+      '· "scene cards" while a plan exists -> plan_scenes (which cards the plan uses); assets is only about INVENTORY (how many cards/photos/clips are left).',
+      '· "swap a scene card, I am not happy" -> plan_edit (there is a change verb), NOT clarify.',
+      '· Nonsense or chit-chat that maps to nothing -> clarify. Do NOT use greeting unless the user is actually greeting.',
+      '· "scene card, take a look" while a plan exists -> plan_scenes (cards the CURRENT plan uses). assets only when the user asks about COUNTS (how many left / stock).',
+      '· A bare noun with no verb, e.g. "the prompt?" / "prompt again" -> plan_edit (read-only display), NOT clarify.',
+      '· If the sentence names a concrete object (prompt / scene card / BGM / budget) plus a verb, prefer that action over clarify. Only use clarify when you truly cannot tell.',
+      '',
       'Current state:',
       stateBlock(ctx)
     ].join('\n');
@@ -121,6 +130,19 @@ function buildSystemPrompt(lang, ctx) {
     '   「不要场景卡」「不要出图」是开关类指令，不是排计划。',
     '7. slots 只允许这些键：' + SLOT_KEYS.join(', ') + '；不确定就省略，不许瞎填。',
     '8. intent 必须是上面动作里的**原名**（英文小写下划线），不许自创。',
+    '',
+    '上一轮实测判错的四类，优先看这几条：',
+    '· 「把第 2 段的提示词给我看一下」→ plan_edit（带段号、针对某一段），**不是** plan_scenes；',
+    '· 已经有一版计划时问「场景卡…」→ plan_scenes（这版计划用了哪些卡）；',
+    '   assets 只用于**库存**（还剩多少张图/多少张卡/多少段），不是"看当前计划用了什么"；',
+    '· 「换一个场景卡，我不太满意」→ plan_edit（句子里有"换/不满意"这种改动动词），**不是** clarify；',
+    '· 「???」「随便说点什么」这类无意义或纯寒暄 → clarify；',
+    '   greeting **只**用于用户真的在打招呼（你好/hi/在吗），不要拿它兜底。',
+    '· 「场景卡看一下 / 场景卡看看 / 场景卡列一下」→ plan_scenes（看**当前计划**用了哪些卡）；',
+    '   assets 只在出现「还剩 / 库存 / 有多少张 / 剩几张」这类**数量**词时才用；',
+    '· 「提示词呢 / 那提示词呢」（只给名词、没有动词）→ plan_edit（只读展示已有提示词），**不要** clarify；',
+    '· 只要句子里有**具体对象（提示词/场景卡/配乐/预算/进度）+ 动作**，就选对应动作，不要轻易 clarify；',
+    '  只有真的分辨不出意图时才用 clarify。',
     '',
     '当前状态：',
     stateBlock(ctx)

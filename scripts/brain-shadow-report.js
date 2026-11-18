@@ -53,7 +53,11 @@ function loadKey() {
   const kf = value('--key-file');
   if (kf) {
     try {
-      const j = JSON.parse(fs.readFileSync(kf, 'utf8'));
+      // Windows PowerShell 的 Out-File -Encoding UTF8 会写 BOM（EF BB BF），
+      // JSON.parse 会直接报 "Unexpected token"。这里先剥掉，避免用户被这种坑绊住。
+      let raw = fs.readFileSync(kf, 'utf8');
+      if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+      const j = JSON.parse(raw);
       if (j && j.apiKey) return { apiKey: String(j.apiKey), baseUrl: j.baseUrl || '', model: j.model || '', source: 'key-file' };
     } catch (e) {
       console.log('! --key-file 读取失败: ' + e.message);
