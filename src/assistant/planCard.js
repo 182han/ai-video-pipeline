@@ -30,13 +30,15 @@ const PLAN_VERSION = 'assistant-plan.v1';
 const MODELS = Object.freeze({
   // 百炼官方（备用通道）：用户明确说「百炼 / 万相官方 / dashscope」时走。
   // 图生视频走官方临时 OSS（getPolicy → oss://，48h 私有），不需要用户公网存储。
-  dashscope: { id: 'dashscope', label: '百炼万相 3.0（官方）', minSec: 2, maxSec: 30 },
+  // labelEn：2026-11-18 S0 —— 英文计划卡此前直接复用中文 label，导致
+  // `Model: WhaleTV 万相 3.0（中转）` 在英文界面必现。英文渲染一律走 labelEn。
+  dashscope: { id: 'dashscope', label: '百炼万相 3.0（官方）', labelEn: 'Bailian Wanxiang 3.0 (official)', minSec: 2, maxSec: 30 },
   // **默认通道**（2026-11-16 20:4x 用户口径：生视频必须用 WhaleTV key）。
   // 图生视频已实测可用：NewAPI `POST /video/generations + image`，公网 URL / data URL 都出片。
-  'openai-video': { id: 'openai-video', label: 'WhaleTV 万相 3.0（中转）', minSec: 2, maxSec: 30 },
-  kling: { id: 'kling', label: '可灵（Kling）', minSec: 3, maxSec: 15 },
-  seedance: { id: 'seedance', label: '即梦（Seedance）', minSec: 2, maxSec: 15 },
-  mock: { id: 'mock', label: 'Mock（零计费验收）', minSec: 1, maxSec: 60 }
+  'openai-video': { id: 'openai-video', label: 'WhaleTV 万相 3.0（中转）', labelEn: 'WhaleTV Wanxiang 3.0 (relay)', minSec: 2, maxSec: 30 },
+  kling: { id: 'kling', label: '可灵（Kling）', labelEn: 'Kling', minSec: 3, maxSec: 15 },
+  seedance: { id: 'seedance', label: '即梦（Seedance）', labelEn: 'Seedance (Jimeng)', minSec: 2, maxSec: 15 },
+  mock: { id: 'mock', label: 'Mock（零计费验收）', labelEn: 'Mock (no charge)', minSec: 1, maxSec: 60 }
 });
 
 const LIMITS = Object.freeze({
@@ -56,6 +58,15 @@ const LIMITS = Object.freeze({
   fillMaxClips: 10,
   maxPlanTextChars: 4000
 });
+
+// 2026-11-18 S0：分钟数不再把浮点原样甩给用户。
+// 旧文案会出现「目标 0.4166666666666667 分钟」（中英都中招）；整数就整数，否则 2 位小数。
+function fmtMinutes(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  const r = Math.round(v * 100) / 100;
+  return Number.isInteger(r) ? String(r) : r.toFixed(2);
+}
 
 // 主题词表：把口语映射到 promptComposer 认的主题 id（未知主题原样作为 label）。
 const THEMES = Object.freeze([
@@ -535,6 +546,8 @@ function buildPlan(input = {}) {
     resolution,
     model: modelId,
     modelLabel: model.label,
+    // 2026-11-18 S0：英文渲染用 labelEn（缺省回退中文，保证老计划卡不炸）。
+    modelLabelEn: model.labelEn || model.label,
     modelId: input.modelId ? String(input.modelId) : null,
     sceneCards: sceneCardEnabled,
     sceneCardsRequired: true, // 小智计划默认走卡库（§7）
@@ -559,22 +572,38 @@ function buildPlan(input = {}) {
       fillMaxClips: LIMITS.fillMaxClips
     },
     fillMaxClips: Math.min(LIMITS.fillMaxClips, Math.floor(clipCount * LIMITS.fillRatio)),
-    warnings: []
+    warnings: [],
+    // 2026-11-18 S0（加法式，不动 warnings 的既有形状）：
+    // 每条 warnings 配一个结构化 key/params，英文渲染走它，不再依赖中文串拼句。
+    // 与 warnings 等长、按下标对齐；null 表示「这条没有结构化版本」（回退原文）。
+    warningKeys: []
   };
 
   if (base.requestedTotalMinutes !== null && base.totalSec > requestedTotalSec + 1e-6) {
+    // 2026-11-18 S0：浮点格式化（旧文案 0.4166666666666667）+ 结构化 key。
     base.warnings.push(
-      `目标 ${base.requestedTotalMinutes} 分钟，按 ${clipDurationSec} 秒/段向上取整 → ${clipCount} 段 = `
+      `目标 ${fmtMinutes(base.requestedTotalMinutes)} 分钟，按 ${clipDurationSec} 秒/段向上取整 → ${clipCount} 段 = `
       + `${(actualTotalSec / 60).toFixed(2)} 分钟。`);
+    base.warningKeys.push({
+      key: 'plan.roundUp',
+      params: {
+        requestedMinutes: fmtMinutes(base.requestedTotalMinutes),
+        clipSec: clipDurationSec,
+        clipCount,
+        totalMinutes: (actualTotalSec / 60).toFixed(2)
+      }
+    });
   }
   // 用户随口提主题词时只提示「不按主题选卡」，不静默忽略、也不写成计划主题。
   if (mentionedThemeLabel && sceneCardEnabled && !input.theme) {
     base.warnings.push(
       `你提到了「${mentionedThemeLabel}」：长片按场景卡库自动抽取不同场景，不按单一主题选卡；`
       + '这个主题词不会影响出片，只作提示。');
+    base.warningKeys.push({ key: 'plan.themeIgnored', params: { theme: mentionedThemeLabel } });
   }
   // P7-A：提示词被截断等必须告知用户，不静默。
-  overrideWarnings.forEach((w) => base.warnings.push(w));
+  // （这些是用户内容相关提示，没有结构化版本 → 推 null 保持下标对齐，英文侧回退原文。）
+  overrideWarnings.forEach((w) => { base.warnings.push(w); base.warningKeys.push(null); });
 
   const est = estimate(base);
   base.estimate = est;
@@ -607,6 +636,22 @@ function mergeModelSlots(text, slots) {
 
 // 计划卡 → 给人看的几行说明（UI 计划卡、日志共用）。
 // P3：可选 lang —— 英文模式返回独立英文说明；默认/zh 逐字返回改造前的中文（零回归）。
+// 2026-11-18 S0：计划卡警告的英文渲染。输入是 buildPlan 产出的 {key, params}，
+// 不认识/为空时返回 ''（调用方回退原文，避免把中文硬翻成英文）。
+function warningTextEn(wk) {
+  const p = (wk && wk.params) || {};
+  switch (wk && wk.key) {
+    case 'plan.roundUp':
+      return `you asked for ${p.requestedMinutes} min; at ${p.clipSec}s per clip that rounds up to `
+        + `${p.clipCount} clips = ${p.totalMinutes} min.`;
+    case 'plan.themeIgnored':
+      return `you mentioned "${p.theme}": this pipeline draws different scenes from the scene-card library `
+        + 'in chapter order instead of following one theme, so the word does not change the output — noted for reference only.';
+    default:
+      return '';
+  }
+}
+
 function describe(plan, lang) {
   if (!plan || typeof plan !== 'object') return [];
   if (String(lang || '').toLowerCase().startsWith('en')) {
@@ -618,7 +663,7 @@ function describe(plan, lang) {
       : (minsEn >= 1 ? `${minsEn.toFixed(2)} minutes` : `${secTotalEn} seconds`);
     linesEn.push(`Total length ${durLabelEn} (${plan.clipCount} clips × ${plan.clipDurationSec} s)`);
     if (plan.themeLabel) linesEn.push(`Theme: ${plan.themeLabel}`);
-    linesEn.push(`Model: ${plan.modelLabel} · ${plan.resolution}`);
+    linesEn.push(`Model: ${plan.modelLabelEn || plan.modelLabel} · ${plan.resolution}`);
     linesEn.push(plan.sceneCards
       ? `Scenes: ${plan.clipCount} distinct cards drawn from the scene-card library, played in chapter order without repeats`
       : 'Scenes: free-form prompts (scene cards off)');
@@ -636,7 +681,11 @@ function describe(plan, lang) {
     if (plan.fillMaxClips !== undefined) {
       linesEn.push(`Failure fill-in: up to ${plan.fillMaxClips} clips (≤5% and ≤10 clips)`);
     }
-    (plan.warnings || []).forEach((w) => linesEn.push('Note: ' + w));
+    // 2026-11-18 S0：英文警告走结构化 key；只有「用户内容类」提示（没有 key）才回退中文原文。
+    (plan.warnings || []).forEach((w, i) => {
+      const wk = (plan.warningKeys || [])[i];
+      linesEn.push('Note: ' + (warningTextEn(wk) || w));
+    });
     return linesEn;
   }
   const lines = [];

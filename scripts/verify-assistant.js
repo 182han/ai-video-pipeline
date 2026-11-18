@@ -438,6 +438,38 @@ async function main() {
   ok('意图分类：10 分钟极光 → create', assistantMemory.classify('10 分钟极光').intent === 'create');
   ok('意图分类：你好 → greeting', assistantMemory.classify('你好').intent === 'greeting');
 
+  // ================= [3a-2] 2026-11-18 S0：用户实测的两句 + 听不懂要反问 =================
+  // 事故：用户在英文界面说「提示词呢」「场景卡看一下」→ 都被判 unknown，然后被当成"要排计划"
+  // 去反问总时长（答非所问）。这里锁住三点：① 两句归位；② 真·听不懂必须反问；
+  // ③ 带槽位的句子（720p / 改成 1080p）仍按续问处理，不许被"反问"拦截。
+  console.log('\n[3a-2] S0：宾语前置的两句 + 听不懂先反问（2026-11-18 用户实测）');
+  ok('意图分类：「提示词呢」→ plan_edit（不再 unknown）',
+    assistantMemory.classify('提示词呢').intent === 'plan_edit'
+    && assistantMemory.classify('那提示词呢').intent === 'plan_edit');
+  ok('意图分类：「场景卡看一下」→ plan_scenes（宾语前置也认）',
+    assistantMemory.classify('场景卡看一下').intent === 'plan_scenes'
+    && assistantMemory.classify('场景卡看看').intent === 'plan_scenes');
+  ok('负向：「提示词改成：雪山」不算查看（整句锚定，不误伤修改）',
+    assistantMemory.isPromptViewRequest('提示词改成：雪山') === false
+    && assistantMemory.classify('提示词改成：雪山').intent === 'plan_edit');
+  {
+    const sid = 'verify-s0-unknown-' + Date.now().toString(36);
+    const rZh = supervisor.handleMessage({ sessionId: sid, text: '随便说点什么', userId: 'local', lang: 'zh' });
+    ok('听不懂（中文）→ 反问一句，且不产出计划卡',
+      rZh.replyKey === 'assistant.reply.unknown' && !rZh.plan && /没接住/.test(rZh.reply));
+    ok('听不懂（中文）→ 不再背「我可以做三件事」的能力菜单',
+      !/可以做三件事/.test(rZh.reply));
+    const rEn = supervisor.handleMessage({ sessionId: sid + '-en', text: '???', userId: 'local', lang: 'en' });
+    ok('听不懂（英文）→ 全英文、无中文残留',
+      rEn.replyKey === 'assistant.reply.unknown' && !/[\u4e00-\u9fff]/.test(rEn.reply));
+    const rSlot = supervisor.handleMessage({ sessionId: sid + '-2', text: '2 分钟', userId: 'local', lang: 'zh' });
+    ok('带时长的话仍能排计划（反问不拦正常排计划）',
+      !!rSlot.plan && rSlot.replyKey === 'assistant.reply.plan');
+    const rRes = supervisor.handleMessage({ sessionId: sid + '-2', text: '改成 1080p', userId: 'local', lang: 'zh' });
+    ok('槽位句「改成 1080p」仍按续问处理（不被反问拦截）',
+      !!rRes.plan && String(rRes.plan.resolution).toLowerCase().includes('1080'));
+  }
+
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================
   console.log('\n[3b] 新意图：问「选了哪些场景卡」/ 要「纯文生视频」（只读，不建计划）');
   ok('意图分类：「哪三个场景」→ plan_scenes（不再当成新计划重问时长）',

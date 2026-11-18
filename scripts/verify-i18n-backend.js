@@ -402,14 +402,37 @@ ok('助手英文计划（I\'ve laid out + 计划卡结构）', enPlan.plan && en
 ok('助手计划回复带结构化 action=confirm（labelKey）',
   Array.isArray(enPlan.actions) && enPlan.actions[0].type === 'confirm'
   && enPlan.actions[0].labelKey === 'assistant.action.confirmExecute');
+
+// 2026-11-18 S0：英文计划卡的**动态文本**（模型名 / 取整提示）此前是中文硬拼，
+// 英文界面必现中文——而 i18n 门禁只扫源码字面量，扫不到这种运行时拼句。
+// 这里锁住四点：① 整卡无中文；② 模型名走 labelEn；③ 取整提示走结构化 key；
+// ④ warningKeys 与 warnings 等长（老计划卡没有 keys 时仍能回退原文）。
+{
+  const pc = require('../src/assistant/planCard');
+  const built = pc.buildPlan({ text: '25 秒' });
+  const enLines = pc.describe(built.plan, 'en');
+  const zhLines = pc.describe(built.plan, 'zh');
+  ok('英文计划卡：整卡零中文', Array.isArray(enLines) && enLines.length > 0
+    && enLines.every((l) => !/[\u4e00-\u9fff]/.test(l)));
+  ok('英文计划卡：模型名不泄漏中文（Wanxiang 英文标签）',
+    enLines.some((l) => /Model: .*Wanxiang/.test(l)));
+  ok('英文计划卡：取整提示为英文且浮点已格式化',
+    enLines.some((l) => /Note: you asked for 0\.42 min/.test(l)));
+  ok('计划卡：warningKeys 与 warnings 等长（可回退老数据）',
+    Array.isArray(built.plan.warningKeys) && built.plan.warningKeys.length === built.plan.warnings.length);
+  ok('中文计划卡：浮点不再直出 0.4166666666666667',
+    zhLines.some((l) => l.includes('0.42 分钟')) && !zhLines.some((l) => l.includes('0.4166')));
+}
 const enConfirm = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-1', text: '确认生成吗', lang: 'en' });
 ok('助手英文确认话术（Confirm and run）', enConfirm.replyKey === 'assistant.reply.confirm'
   && enConfirm.reply.includes('Confirm and run'));
 const enUnknown = assistantSupervisor.handleMessage({ sessionId: 'verify-i18n-en-2', text: '???', lang: 'en' });
+// 2026-11-18 S0：原断言钉死了三句旧文案（"I can do three things" 等）。
+// 听不懂的回复已改成"反问一句"，所以这里改为断言**性质**而非字面：
+//   英文语种 + 回复不含任何中文 + 仍然把话题指向"排计划"。
 ok('助手英文听不懂/追问不回中文长句', enUnknown.lang === 'en'
-  && (enUnknown.reply.includes('How long should the video be')
-    || enUnknown.reply.includes('I can do three things')
-    || enUnknown.reply.includes("I've laid out a")));
+  && !/[\u4e00-\u9fff]/.test(enUnknown.reply)
+  && /plan/i.test(enUnknown.reply));
 ok('catalog 有生成器错误 key（供 task/clip 反查 errorKey）',
   i18n.hasKey('en', 'gen.error.unsupportedModel') && i18n.hasKey('en', 'gen.error.dashscopeKeyMissing')
   && i18n.keyForText('DashScope API Key 未配置，请在设置中填写', { prefix: true }) === 'gen.error.dashscopeKeyMissing');

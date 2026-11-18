@@ -81,6 +81,8 @@ export default {
         download: '下载',
         unknown: '未知',
         unconfigured: '未配置',
+        // 2026-11-18 S0：调色派生图的后端 label 原本只有中文，英文界面必现。显示层按 cost.basis 本地化。
+        costDerived: '调色派生 · 不重复计费',
         loading: '加载中…',
         loadFailed: '读取失败',
         file: '文件',
@@ -401,6 +403,7 @@ export default {
         download: 'Download',
         unknown: 'Unknown',
         unconfigured: 'Not configured',
+        costDerived: 'Color-graded derivative · not billed again',
         loading: 'Loading…',
         loadFailed: 'Failed to load',
         file: 'File',

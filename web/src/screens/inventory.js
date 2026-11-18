@@ -29,6 +29,20 @@ function shortTaskId(id) {
   return s.length <= 14 ? s : s.slice(0, 9) + '…' + s.slice(-4);
 }
 
+// 2026-11-18 S0（A13）：未完成列表此前只显示半句 prompt，与其它页的「统一任务名」不一致。
+// 本文件 import 行被静态断言锁定（见上方注释），所以这里内联同一套规则：
+// 摘要（prompt/optimizedPrompt/theme）+ 模型 + 短 ID；都没有才显示「无提示词」。
+function unfinishedName(t) {
+  const task = t && typeof t === 'object' ? t : {};
+  const raw = String(task.prompt || task.optimizedPrompt || task.theme || '').replace(/\s+/g, ' ').trim();
+  const parts = [];
+  if (raw) parts.push(raw.length > 56 ? raw.slice(0, 56) + '…' : raw);
+  if (task.model) parts.push(String(task.model));
+  const id = shortTaskId(task.taskId);
+  if (id) parts.push(id);
+  return parts.length ? parts.join(' · ') : tr('library.common.noPrompt');
+}
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
@@ -71,6 +85,14 @@ function costText(cost) {
   return Number.isFinite(n) ? '¥' + n.toFixed(2) : '';
 }
 
+// 2026-11-18 S0（B4）：后端把「调色派生 · 不重复计费」当中文 label 塞进数据，英文界面必现中文。
+// 用 cost.basis 这个稳定枚举在**显示层**本地化，不去改历史数据（改数据不可逆、且会与快照口径冲突）。
+function costSuffix(cost) {
+  if (!cost) return '';
+  if (cost.basis === 'derived') return ' · ' + tr('library.common.costDerived');
+  return cost.label ? ' · ' + cost.label : '';
+}
+
 function qcText(qc) {
   if (!qc) return tr('library.qc.notChecked');
   if (qc.passed) return tr('library.qc.passed');
@@ -95,11 +117,18 @@ const ORIGIN_KEYS = { task: 'library.origin.task', library: 'library.origin.libr
 const originText = (o) => (o && ORIGIN_KEYS[o]) ? tr(ORIGIN_KEYS[o]) : (o || tr('library.common.unknown'));
 
 // 费用：没有快照就显示“未知”，绝不写 ¥0.00（2026-11-15 口径）。
+// 2026-11-18 S0（B3/C3）：同屏混币——片段写 ¥3.00、计划卡写 ¥12.00、预算写 $2.00，用户看不出关系。
+// 改成「原币 + 括号近似另一种币」，两个都给，不制造新歧义。
+// 注：7.2 只是**显示用**折算，不是结算口径；真正收口到单一价目表在后续阶段做。
+const CNY_PER_USD = 7.2;
 function costLabel(cost) {
   if (!cost) return tr('library.common.unknown');
   if (cost.computed === false) return tr('library.common.unknown');
   const n = Number(cost.amount);
-  return Number.isFinite(n) ? '¥' + n.toFixed(2) : tr('library.common.unknown');
+  if (!Number.isFinite(n)) return tr('library.common.unknown');
+  const cur = String(cost.currency || 'CNY').toUpperCase();
+  if (cur === 'USD') return '$' + n.toFixed(2) + ' (≈¥' + (n * CNY_PER_USD).toFixed(2) + ')';
+  return '¥' + n.toFixed(2) + ' (≈$' + (n / CNY_PER_USD).toFixed(2) + ')';
 }
 
 function qcBadge(qc) {
@@ -232,7 +261,7 @@ export function ClipsPanel({ onChanged }) {
         <div key=${g.label} className="mb-4">
           <div className="flex items-baseline gap-2 border-b border-white/[.08] pb-1 mb-2">
             <span className="text-[12px] font-medium text-ink">${g.label}</span>
-            <span className="text-[10px] text-ink3 font-num">${tp('library.clips.count', g.count)}</span>
+            <span className="text-[10px] text-ink3 font-num">${tp('library.clips.count', (g.items || []).length)}</span>
           </div>
           <div className="grid grid-cols-4 gap-3">
             ${(g.items || []).map((it) => html`
@@ -251,12 +280,12 @@ export function ClipsPanel({ onChanged }) {
                     <span className="opacity-40">·</span>
                     <span>${tr('library.clips.cost', { cost: costLabel(it.cost) })}</span>
                   </p>
-                  <div className="mt-1 flex items-center gap-2">
+                  <div className="mt-1 flex items-center gap-2" style=${{ flexWrap: 'wrap', rowGap: '4px' }}>
                     <button onClick=${() => toggleFav(it.id, it.favorite)}
                       className=${'h-6 px-1.5 rounded-[4px] text-[12px] hover:bg-white/[.06] ' +
                         (it.favorite ? 'text-accent' : 'text-ink3')}
                     >${it.favorite ? '★' : '☆'}</button>
-                    <span className="text-[10px] text-ink3 font-num">${it.model || ''}</span>
+                    <span className="text-[10px] text-ink3 font-num truncate" style=${{ maxWidth: '96px' }}>${it.model || ''}</span>
                     <span className="flex-1"></span>
                     <button onClick=${() => setDetail(it)}
                       className="h-6 px-1.5 rounded-[4px] text-[10px] text-ink3 hover:bg-white/[.06]">${tr('library.clips.detail')}</button>
@@ -297,7 +326,7 @@ export function ClipsPanel({ onChanged }) {
                 detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ')}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.costLabel')}</span>
-              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}${detail.cost && detail.cost.attempts ? tr('library.common.attempts', { n: detail.cost.attempts }) : ''}</span>
+              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${costSuffix(detail.cost)}${detail.cost && detail.cost.attempts ? tr('library.common.attempts', { n: detail.cost.attempts }) : ''}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.qcLabel')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${qcText(detail.qc)}${detail.qc && detail.qc.reason ? ' · ' + detail.qc.reason : ''}${detail.qc && detail.qc.qcVersion ? ' · v' + detail.qc.qcVersion : ''}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.sourceTask')}</span>
@@ -909,7 +938,7 @@ export function PhotosPanel({ onChanged }) {
                 detail.sizeBytes ? (Number(detail.sizeBytes) / 1048576).toFixed(2) + ' MB' : ''
               ].filter(Boolean).join(' · ') || '-'}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.genCost')}</span>
-              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${detail.cost && detail.cost.label ? ' · ' + detail.cost.label : ''}</span>
+              <span style=${{ color: 'var(--ink2)' }}>${costText(detail.cost) || '-'}${costSuffix(detail.cost)}</span>
               ${detail.failureSummary && html`
                 <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.failure')}</span>
                 <span style=${{ color: 'var(--ink2)' }}>${detail.failureSummary}</span>`}
@@ -1049,7 +1078,7 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
             <div key=${t.taskId} className="flex items-center gap-2.5 py-1.5 border-t border-white/[.05]">
               <span className=${'w-[6px] h-[6px] rounded-full shrink-0 ' + st.dot}></span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[12px] text-ink truncate">${(t.prompt || tr('library.common.noPrompt')).slice(0, 80)}</span>
+                <span className="block text-[12px] text-ink truncate">${unfinishedName(t)}</span>
                 <span className="block text-[10px] text-ink3 font-num">
                   ${t.createdAt ? fmtDateTime(t.createdAt) : '-'}
                   ${' · ' + st.text}

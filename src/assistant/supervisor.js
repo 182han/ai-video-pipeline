@@ -300,13 +300,18 @@ function replyForGreeting(lang) {
     + '也可以问「上一次的视频」或「现在进度怎样」。语音按钮在输入框左侧。';
 }
 
-function replyUnknown(lang) {
-  if (i18n.normalizeLang(lang) === 'en') {
-    return 'I can do three things: ① lay out a plan from the total length (scenes are drawn from the scene-card library; no theme needed); '
-      + '② find your "last video"; ③ report current task progress. For example: 10 minutes / last video / progress.';
+function replyUnknown(lang, hasPlan) {
+  const en = i18n.normalizeLang(lang) === 'en';
+  // 2026-11-18 S0：听不懂时**反问一句**，不再背"我可以做三件事"的能力菜单。
+  // 菜单式回答会让用户以为小智只会这些；反问才能把含糊的一句话收敛回一个动作。
+  if (hasPlan) {
+    return en
+      ? 'I did not catch that. Do you want to change the plan we already have (say which segment, or swap a scene card), or lay out a new one (for example "2 minutes")?'
+      : '这句我没接住。你是想改当前这版计划（说第几段、或换哪张场景卡），还是重新排一条（比如「2 分钟」）？';
   }
-  return '我可以做三件事：① 按总时长排计划（场景从场景卡库自动抽取，不需要说主题）；'
-    + '② 帮你找「上一次的视频」；③ 报当前任务进度。比如：10 分钟 / 上一次的视频 / 进度。';
+  return en
+    ? 'I did not catch that. To lay out a plan, tell me a total length (for example "2 minutes"). To look something up, try "progress" or "last video".'
+    : '这句我没接住。要排计划就告诉我总时长（比如「2 分钟」）；要查东西可以说「进度」或「上一次的视频」。';
 }
 
 function retrieveRefs(query, limit = 5) {
@@ -1654,45 +1659,57 @@ function handleMessage(opts = {}) {
     // create / unknown 都尝试排计划；听不懂时 buildPlan 会返回明确的追问。
     const last = memory.lastPlan(sessionId);
     const parsed = planCard.parseUtterance(text);
-    let input = { text, sessionId };
     // 只给了「槽位词」也算续问：例如单独说「1080p」「720p」「15 秒/段」——
     // 用户直觉是「改上次那个」，不该被当成"没说时长"再问一遍（2026-11-16 用户反馈）。
     const slotOnly = parsed.totalMinutes === null && parsed.clipCount === null
       && (parsed.resolution !== null || parsed.clipDurationSec !== null || parsed.model !== null);
     const follow = !sceneCardsOff && last && (isFollowUp(text) || isRepeat(text) || slotOnly);
-    if (follow) input = { ...inputFromLast(last, parsed, text), sessionId };
-    else {
-      input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;
-      input.clipDurationSec = parsed.clipDurationSec !== null ? parsed.clipDurationSec : undefined;
-      input.clipCount = parsed.clipCount !== null ? parsed.clipCount : undefined;
-      input.resolution = parsed.resolution || undefined;
-      input.model = parsed.model || undefined;
-      // 主题词不进入计划：长片按场景卡库自动抽取不同场景（2026-11-16 用户口径）。
-      input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
-    }
-    const built = planCard.buildPlan(input);
-    const isEn = lang === 'en';
-    if (!built.ok) {
-      if (built.missing || built.code === 'PLAN_NEED_DURATION') {
-        missing = built.missing || ['totalMinutes'];
-        // P3/2026-11-18：英文模式给英文追问/错误；中文模式沿用 planCard 原文（零回归）。
-        reply = planFailureReply(built, lang, input, parsed);
-        replyKey = 'assistant.question.duration';
-        actions = [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }];
-      } else if (intent.intent === 'unknown') {
-        reply = replyUnknown(lang) + (isEn ? '' : '\n（' + built.error + '）');
-        replyKey = 'assistant.reply.unknown';
-      } else {
-        reply = planFailureReply(built, lang, input, parsed);
-        replyKey = 'assistant.reply.planError';
-      }
+    // 2026-11-18 S0（用户实测：答非所问）：真·听不懂时**先反问一句**，绝不猜成"排计划"。
+    // 判据：intent=unknown 且句子里没有任何可执行槽位（时长/段数/分辨率/每段秒数/模型/场景卡开关）。
+    // 反面例子：「720p」「改成 1080p」「不要场景卡」都带槽位，仍按续问/改设置处理，不许被这条拦掉。
+    const hasSlot = slotOnly
+      || parsed.totalMinutes !== null || parsed.clipCount !== null
+      || parsed.resolution !== null || parsed.clipDurationSec !== null
+      || parsed.model !== null || parsed.sceneCards !== null;
+    if (intent.intent === 'unknown' && !hasSlot && !follow) {
+      reply = replyUnknown(lang, !!last);
+      replyKey = 'assistant.reply.unknown';
     } else {
-      plan = built.plan;
-      planCache.set(plan.planId, plan);
-      memory.addPlan(sessionId, plan);
-      reply = replyForPlan(plan, lang);
-      replyKey = 'assistant.reply.plan';
-      actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
+      let input = { text, sessionId };
+      if (follow) input = { ...inputFromLast(last, parsed, text), sessionId };
+      else {
+        input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;
+        input.clipDurationSec = parsed.clipDurationSec !== null ? parsed.clipDurationSec : undefined;
+        input.clipCount = parsed.clipCount !== null ? parsed.clipCount : undefined;
+        input.resolution = parsed.resolution || undefined;
+        input.model = parsed.model || undefined;
+        // 主题词不进入计划：长片按场景卡库自动抽取不同场景（2026-11-16 用户口径）。
+        input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
+      }
+      const built = planCard.buildPlan(input);
+      const isEn = lang === 'en';
+      if (!built.ok) {
+        if (built.missing || built.code === 'PLAN_NEED_DURATION') {
+          missing = built.missing || ['totalMinutes'];
+          // P3/2026-11-18：英文模式给英文追问/错误；中文模式沿用 planCard 原文（零回归）。
+          reply = planFailureReply(built, lang, input, parsed);
+          replyKey = 'assistant.question.duration';
+          actions = [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }];
+        } else if (intent.intent === 'unknown') {
+          reply = replyUnknown(lang, !!last) + (isEn ? '' : '\n（' + built.error + '）');
+          replyKey = 'assistant.reply.unknown';
+        } else {
+          reply = planFailureReply(built, lang, input, parsed);
+          replyKey = 'assistant.reply.planError';
+        }
+      } else {
+        plan = built.plan;
+        planCache.set(plan.planId, plan);
+        memory.addPlan(sessionId, plan);
+        reply = replyForPlan(plan, lang);
+        replyKey = 'assistant.reply.plan';
+        actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
+      }
     }
   }
 
