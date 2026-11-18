@@ -31,6 +31,55 @@ function textOf(v) {
   return String(v).trim();
 }
 
+// ==========================================
+// 人类可读任务标签（2026-11-18 用户反馈）
+// ------------------------------------------------------------
+// 用户原话：小智回复「任务 task_mwiugoxq_z01l（failed）」看不懂——他要的是「做的是什么、
+// 什么时候、什么状态」。这里改成「提示词摘要 · 模型 · 时间 · 状态 · 短 ID」；
+// **完整 taskId 仍保留**（diagnose 结果字段 + summary 里显式带一次），既有断言/排查不受影响。
+// ==========================================
+function shortTaskId(taskId) {
+  const s = String(taskId || '');
+  if (!s) return '…';
+  const tail = s.replace(/^task_/, '').slice(-6);
+  return `…${tail}`;
+}
+
+function promptSummary(task, max = 24) {
+  const raw = textOf(task && (task.prompt || task.optimizedPrompt))
+    || textOf(task && task.prompts && task.prompts[0] && task.prompts[0].text);
+  const s = raw.replace(/\s+/g, ' ').trim();
+  if (!s) return '（无提示词）';
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function taskWhen(task) {
+  const raw = task && (task.completedAt || task.createdAt);
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 完整标签：给人看；不含完整 taskId（调用方需要 ID 时单独拼，见 summary）
+function taskLabel(task) {
+  if (!task) return '任务（未记录）';
+  const bits = [`「${promptSummary(task)}」`];
+  if (task.model) bits.push(String(task.model));
+  const when = taskWhen(task);
+  if (when) bits.push(when);
+  bits.push(`${task.status || '未知'} · ${shortTaskId(task.taskId)}`);
+  return bits.join(' · ');
+}
+
+// 列表用紧凑标签：短提示词 + 状态 + 短 ID
+function compactTaskLabel(task) {
+  if (!task) return '任务（未记录）';
+  return `「${promptSummary(task, 16)}」${task.status || '未知'} · ${shortTaskId(task.taskId)}`;
+}
+
+
 function classify(reasonText) {
   const s = reasonText;
   if (/余额不足|预算|INSUFFICIENT_BUDGET|budget|额度/i.test(s)) return 'budget';
@@ -180,7 +229,7 @@ function diagnose(task) {
   }
 
   const first = suggestions[0];
-  const summary = `任务 ${task.taskId}（${task.status || '未知'}）`
+  const summary = `${taskLabel(task)}（任务 ID ${task.taskId}）`
     + (failed ? `有 ${failed} 段没成功` : '未出成片')
     + `：${reasons[0]}。建议：${first.label}。`;
 
@@ -199,4 +248,4 @@ function diagnose(task) {
   };
 }
 
-module.exports = { CATEGORY_LABELS, diagnose, classify };
+module.exports = { CATEGORY_LABELS, diagnose, classify, taskLabel, compactTaskLabel, shortTaskId, promptSummary };

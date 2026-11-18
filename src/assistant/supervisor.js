@@ -348,7 +348,7 @@ function replyForStatus(sessionId) {
     try { live = assistantContext.contextOf(sessionId).tasks.active; } catch (e) { live = []; }
     if (live.length) {
       return `【小智简报】现在有 ${live.length} 个任务在跑（全局）：\n`
-        + live.map((t) => `· ${t.taskId}：${t.status}，成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
+        + live.map((t) => `· ${diagnose.taskLabel(t)}（ID ${t.taskId}）：成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
         + '\n（只读播报：不会新建任务、不会重跑。）';
     }
     return '现在没有正在执行的任务。说个时长，我来排计划。';
@@ -362,7 +362,7 @@ function replyForStatus(sessionId) {
     return `任务停在「${stateMachine.LABELS[state.state]}」：${state.reason || state.lastError || '原因未记录'}。`;
   }
   if (!task) return `任务状态：${stateMachine.LABELS[state.state] || state.state}。`;
-  return `任务${task.taskId} 正在「${stateMachine.LABELS[state.state] || state.state}」：`
+  return `${diagnose.taskLabel(task)}（ID ${task.taskId}）正在「${stateMachine.LABELS[state.state] || state.state}」：`
     + `当前 ${task.currentStep || task.status}，成功片段 ${(task.clips || []).filter((c) => c.status === 'success').length}/${task.totalClips}。`;
 }
 
@@ -434,11 +434,14 @@ function planSceneEntries(plan) {
   }
 }
 
-function replyForPlanScenes(sessionId) {
+function replyForPlanScenes(sessionId, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
-    return '现在还没有计划卡，所以我还没选卡。先说总时长（比如「30 秒」「10 分钟」），'
-      + '我排好计划后就把要用的场景卡列给你看。';
+    return isEn
+      ? 'No plan card yet, so no scene cards have been chosen. Tell me the total length (for example "30 seconds" or "10 minutes"); once the plan is ready I will list the cards it will use.'
+      : '现在还没有计划卡，所以我还没选卡。先说总时长（比如「30 秒」「10 分钟」），'
+        + '我排好计划后就把要用的场景卡列给你看。';
   }
   // 已开工：以任务里实际分配的卡为准（可能已有 buffer 替换）。
   // 只认**这条计划自己的**状态；不能用「会话里最新的状态」——用户可能在上一条计划之后
@@ -447,13 +450,19 @@ function replyForPlanScenes(sessionId) {
   const taskId = state && state.taskId ? state.taskId : null;
   const task = taskId ? taskManager.getTask(taskId) : null;
   if (task && task.sceneCards && Array.isArray(task.sceneCards.used) && task.sceneCards.used.length) {
-    return `任务 ${task.taskId} 实际分配到 ${task.sceneCards.used.length} 张场景卡（按计划顺序）：\n`
-      + formatSceneEntries(task.sceneCards.used)
-      + '\n这些卡已写进各段提示词；要换卡得新开一条计划。';
+    const head = isEn
+      ? `${diagnose.taskLabel(task)}（ID ${task.taskId}）used ${task.sceneCards.used.length} scene cards in plan order:\n`
+      : `${diagnose.taskLabel(task)}（ID ${task.taskId}）实际分配到 ${task.sceneCards.used.length} 张场景卡（按计划顺序）：\n`;
+    const tail = isEn
+      ? '\nThese cards are already written into each clip prompt; to change cards, start a new plan.'
+      : '\n这些卡已写进各段提示词；要换卡得新开一条计划。';
+    return head + formatSceneEntries(task.sceneCards.used) + tail;
   }
   if (plan.sceneCards === false) {
-    return '这条计划关掉了场景卡（自由提示词），所以没有选卡。'
-      + '想要卡库选场景，就新排一条（不要说「不要场景卡」）。';
+    return isEn
+      ? 'This plan turned scene cards off (free-form prompts), so no cards were chosen. To use the card library, start a new plan (do not say "no scene cards").'
+      : '这条计划关掉了场景卡（自由提示词），所以没有选卡。'
+        + '想要卡库选场景，就新排一条（不要说「不要场景卡」）。';
   }
   try {
     // 计划阶段固定下来的卡（换卡后这里就是新卡）；旧计划没有 ids 时回退纯函数预览。
@@ -461,13 +470,22 @@ function replyForPlanScenes(sessionId) {
     // createTask 执行时按同一批 id 取卡，所以这份预览与真正要用的卡一致。
     const preview = planSceneEntries(plan);
     if (!preview.length) {
-      return '场景卡库暂时读不到，计划还在，稍后再问一次就行。';
+      return isEn
+        ? 'The scene-card library cannot be read right now. The plan is intact; ask again in a moment.'
+        : '场景卡库暂时读不到，计划还在，稍后再问一次就行。';
+    }
+    if (isEn) {
+      return `This plan has ${plan.clipCount} clips; when confirmed it will draw these ${preview.length} scene cards in plan order:\n`
+        + formatSceneEntries(preview)
+        + '\n(Preview only — no cards are reserved until you press "Confirm and run".)';
     }
     return `这条计划 ${plan.clipCount} 段，确认后会按计划顺序取这 ${preview.length} 张场景卡：\n`
       + formatSceneEntries(preview)
       + '\n（现在只是预览，还没占卡；真正点「确认执行」时才分配给任务。）';
   } catch (e) {
-    return `场景卡库暂时读不到：${(e && e.message) || e}。计划还在，稍后再问一次就行。`;
+    return isEn
+      ? `The scene-card library cannot be read right now: ${(e && e.message) || e}. The plan is intact; ask again in a moment.`
+      : `场景卡库暂时读不到：${(e && e.message) || e}。计划还在，稍后再问一次就行。`;
   }
 }
 
@@ -1047,28 +1065,96 @@ function promptTextOfSegment(plan, index) {
 }
 
 // A4：把第 N 段提示词原样贴出来。只读，不改计划、不建任务、不回传计划。
-function tryReplyPromptView(sessionId, text) {
+// 2026-11-18 修复：用户说「提示词看一下 / 看一下提示词」但**没说第几段**时，
+// 旧实现只在 planEditBranch 里被调用且会回「要看第几段？」，更早的 classify 还会把
+// 无段号的查看判成 unknown → 反问「这条视频要做多长？」。现在：
+//   · memory.classify 已把「提示词 + 查看动词」归入 plan_edit；
+//   · 有当前计划、无段号 → 直接展示全部（最多 5 段），不问时长、不新建计划；
+//   · 无计划 → 明确说明还没有计划卡（负向用例）。
+const PROMPT_VIEW_LIMIT = 5;
+
+function tryReplyPromptView(sessionId, text, lang) {
   const s = String(text || '');
+  const isEn = i18n.normalizeLang(lang) === 'en';
   if (!RE_PROMPT_VIEW.test(s)) return null;
   if (RE_PROMPT_SET_VERB.test(s)) return null; // 「…提示词改成：X」走既有整段替换
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
-    return '现在还没有计划卡，没有哪一段的提示词可看。先说总时长（比如「30 秒」「10 分钟」），我排好计划再贴给你。';
+    return isEn
+      ? 'There is no plan card yet, so there is no prompt to show. Tell me the total length (for example "30 seconds" or "10 minutes"), and I will lay out the plan first.'
+      : '现在还没有计划卡，没有哪一段的提示词可看。先说总时长（比如「30 秒」「10 分钟」），我排好计划再贴给你。';
   }
-  const n = resolvePromptTarget(sessionId, plan, s);
-  if (!n) {
-    return '要看第几段？说「把第 2 段的提示词给我看一下」；要改就说「第 2 段：把『A』改成『B』」。';
+  const off = planSceneCardsOffReply(plan);
+  if (off) {
+    return isEn
+      ? 'This plan has scene cards turned off (free-form prompts), so per-clip prompts cannot be shown or edited here. To control clips individually, start a new plan with scene cards.'
+      : off;
   }
+
+  // 只有显式「第 N 段」才贴单段；否则展示全部/前 N 段（用户真实原话没有段号）。
+  const explicit = matchSegmentIndex(s);
+  if (!explicit) {
+    const total = Number(plan.clipCount) || 0;
+    const limit = Math.min(total, PROMPT_VIEW_LIMIT);
+    const parts = [];
+    let missing = 0;
+    for (let i = 1; i <= limit; i += 1) {
+      const seg = promptTextOfSegment(plan, i - 1);
+      if (!seg) { missing += 1; continue; }
+      const from = seg.source === 'user-edit'
+        ? (isEn ? 'source: your edited text' : '来源：你手动改过的文本')
+        : (isEn
+          ? `source: scene card ${seg.card ? seg.card.scene_key : ''} (composed from the card)`
+          : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`);
+      parts.push(isEn
+        ? `Clip ${i} (${seg.text.length} chars; ${from}):\n${seg.text}`
+        : `第 ${i} 段（${seg.text.length} 字；${from}）：\n${seg.text}`);
+    }
+    if (!parts.length) {
+      return isEn
+        ? 'The scene cards for this plan cannot be read (the card library may have changed), so the prompts cannot be shown. Nothing was changed.'
+        : '这条计划的场景卡读不到（卡库可能被替换），提示词暂时贴不出来；计划没有改动。';
+    }
+    const header = isEn
+      ? `This plan has ${total} clips; here are the first ${limit} prompts (read-only, nothing changed):`
+      : `这条计划共 ${total} 段，先贴前 ${limit} 段提示词（只读，没有改动）：`;
+    const more = total > limit
+      ? (isEn
+        ? `\n…… ${total - limit} more clips. Say "show the prompt for clip N" to see one.`
+        : `\n…… 其余 ${total - limit} 段：说「第 N 段的提示词」单独看。`)
+      : '';
+    const missingLine = missing
+      ? (isEn ? `\n(${missing} clip prompt(s) could not be read.)` : `\n（有 ${missing} 段提示词读不到。）`)
+      : '';
+    const hint = isEn
+      ? '\nNothing changed. To edit, say "change \'A\' to \'B\'", "remove \'C\'", or "use this: ...".'
+      : '\n这条计划没有改动。要改就说「把『…』改成『…』」「去掉『…』」或「用这个：……」。';
+    return header + '\n' + parts.join('\n\n') + missingLine + more + hint;
+  }
+
+  const n = explicit;
   if (n < 1 || n > plan.clipCount) {
-    return `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
+    return isEn
+      ? `This plan only has ${plan.clipCount} clips; there is no clip ${n}.`
+      : `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
   }
   const seg = promptTextOfSegment(plan, n - 1);
   if (!seg) {
-    return `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
+    return isEn
+      ? `The scene card for clip ${n} cannot be read (the card library may have changed), so this plan needs to be rebuilt. Nothing was changed.`
+      : `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
   }
-  const from = seg.source === 'user-edit'
-    ? '来源：你手动改过的文本'
-    : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`;
+  const from = isEn
+    ? (seg.source === 'user-edit'
+      ? 'source: your edited text'
+      : `source: scene card ${seg.card ? seg.card.scene_key : ''} (composed from the card)`)
+    : (seg.source === 'user-edit'
+      ? '来源：你手动改过的文本'
+      : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`);
+  if (isEn) {
+    return `Prompt for clip ${n} (${seg.text.length} chars; ${from}):\n${seg.text}\n`
+      + 'Nothing was changed. To edit, say "change \'A\' to \'B\'", "remove \'C\'", or "use this: ...".';
+  }
   return `第 ${n} 段提示词（${seg.text.length} 字；${from}）：\n${seg.text}\n`
     + '这条计划没有改动。要改就说「把『…』改成『…』」「去掉『…』」或「用这个：……」。';
 }
@@ -1170,11 +1256,14 @@ function applyDiffs(sessionId, plan, text, diffs) {
     + `当前提示词（${now.length} 字）：${now}${warn}${missLine}`;
 }
 
-function replyForPlanEdit(sessionId, text) {
+function replyForPlanEdit(sessionId, text, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
-    return '现在还没有计划卡，所以没有哪一段可改。先说总时长（比如「30 秒」「10 分钟」），'
-      + '我排好计划你再改第几段。';
+    return isEn
+      ? 'There is no plan card yet, so there is no clip to edit. Tell me the total length (for example "30 seconds" or "10 minutes"); once the plan exists you can change a clip.'
+      : '现在还没有计划卡，所以没有哪一段可改。先说总时长（比如「30 秒」「10 分钟」），'
+        + '我排好计划你再改第几段。';
   }
   // 2026-11-17 V1（A5）：用户自带文本「用这个：…」→ 原样替换目标段（Q9=A，不润色、不加后缀）。
   const useThis = extractUseThisText(text);
@@ -1186,29 +1275,38 @@ function replyForPlanEdit(sessionId, text) {
   const batch = memory.isBatchSceneEdit(text);
   if (!m) {
     // 2026-11-16 用户反馈：看完整批卡后说「三个都想换掉」→ 整批换，不要重排计划。
-    if (batch) return replyForBatchSwap(sessionId, plan);
+    if (batch) return replyForBatchSwap(sessionId, plan, lang);
     // 2026-11-16 Lead 复核：用户指代卡片（「这个地方的换一个」/「这一段不想要」）时没有段号，
     // 直接告诉他怎么补段号；不要掉回「这条视频要做多长」。
     // 2026-11-17 V1（A1/A2）：这里同时承担「场景/场景卡 + 换/改/不满意」的兜底，
     // 顺带说明「换卡 vs 改提示词」的区别（A2 的验收点）。
-    return '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」，'
-      + '或者「把第 2 段的提示词给我看一下」再「用这个：……」/「把『A』改成『B』」。';
+    return isEn
+      ? 'Which clip should change? Say "swap clip 2"; to edit a prompt say "change clip 2 prompt to: ...", '
+        + 'or say "show the prompt for clip 2" first and then "use this: ..." / "change A to B".'
+      : '要换第几段？说「第 2 段换一个」；改提示词就说「第 2 段提示词改成：……」，'
+        + '或者「把第 2 段的提示词给我看一下」再「用这个：……」/「把『A』改成『B』」。';
   }
   const n = planCard.parseCnNumber(m[1]);
   if (!Number.isInteger(n) || n < 1 || n > plan.clipCount) {
-    return `这条计划只有 ${plan.clipCount} 段，没有第 ${m[1]} 段。`;
+    return isEn
+      ? `This plan only has ${plan.clipCount} clips; there is no clip ${m[1]}.`
+      : `这条计划只有 ${plan.clipCount} 段，没有第 ${m[1]} 段。`;
   }
   if (plan.sceneCards === false) {
-    return '这条计划关了场景卡（自由提示词），不支持按段换卡/改提示词；'
-      + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
+    return isEn
+      ? 'This plan has scene cards turned off (free-form prompts), so per-clip card swaps or prompt edits are not supported here. To control clips individually, start a new plan with scene cards.'
+      : '这条计划关了场景卡（自由提示词），不支持按段换卡/改提示词；'
+        + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
   }
   const index = n - 1;
   const payload = extractPromptEditText(text);
   const promptHint = /提示词|画面/.test(text);
   const vague = !payload || RE_VAGUE_PAYLOAD.test(payload);
   if (promptHint && vague) {
-    return `第 ${n} 段要改成什么？直接说「第 ${n} 段提示词改成：……」（每段最多 `
-      + `${promptComposer.MAX_PROMPT_OVERRIDE_CHARS} 字）。`;
+    return isEn
+      ? `What should clip ${n} become? Say "change clip ${n} prompt to: ..." (up to ${promptComposer.MAX_PROMPT_OVERRIDE_CHARS} characters per clip).`
+      : `第 ${n} 段要改成什么？直接说「第 ${n} 段提示词改成：……」（每段最多 `
+        + `${promptComposer.MAX_PROMPT_OVERRIDE_CHARS} 字）。`;
   }
   // 判定顺序（写死，测试按这两条断言）：
   //   1) 给了具体正文（且不是「换成别的」这类空指代）→ 改提示词；
@@ -1254,16 +1352,21 @@ function replyForPlanEdit(sessionId, text) {
 //   · planId 不变、不建任务、不重新 allocate；
 //   · 逐段取「下一张未用过」的候选（与单段换卡同一规则），批内不重复；
 //   · 任何一段取不到（卡库耗尽）就整批放弃、计划保持原样，不留下换了一半的状态。
-function replyForBatchSwap(sessionId, plan) {
+function replyForBatchSwap(sessionId, plan, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   if (plan.sceneCards === false) {
-    return '这条计划关了场景卡（自由提示词），没有可换的卡；'
-      + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
+    return isEn
+      ? 'This plan has scene cards turned off (free-form prompts), so there are no cards to swap. To use the card library, start a new plan with scene cards.'
+      : '这条计划关了场景卡（自由提示词），没有可换的卡；'
+        + '想要逐段控制，请新排一条带场景卡的（不要说「不要场景卡」）。';
   }
   const currentIds = (Array.isArray(plan.sceneCardIds) && plan.sceneCardIds.length === plan.clipCount)
     ? plan.sceneCardIds.slice()
     : planSceneEntries(plan).map((e) => e.id);
   if (!currentIds.length) {
-    return '这条计划还没有场景卡，没法整批换；先确认场景卡是开着的。';
+    return isEn
+      ? 'This plan has no scene cards yet, so there is nothing to swap as a batch. Check that scene cards are on.'
+      : '这条计划还没有场景卡，没法整批换；先确认场景卡是开着的。';
   }
   const used = new Set(currentIds);
   const nextIds = currentIds.slice();
@@ -1275,7 +1378,9 @@ function replyForBatchSwap(sessionId, plan) {
     try {
       next = sceneCardLibrary.nextSwapCandidate(oldId, [...used]);
     } catch (e) {
-      return `整批换卡失败（第 ${i + 1} 段）：${(e && e.message) || e}；计划没有改动。`;
+      return isEn
+        ? `Batch swap failed at clip ${i + 1}: ${(e && e.message) || e}. The plan was not changed.`
+        : `整批换卡失败（第 ${i + 1} 段）：${(e && e.message) || e}；计划没有改动。`;
     }
     const nextCard = sceneCardLibrary.getCardById(next.id);
     nextIds[i] = next.id;
@@ -1284,12 +1389,21 @@ function replyForBatchSwap(sessionId, plan) {
     const toKey = nextCard ? nextCard.scene_key : next.id;
     const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
       ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
-    changes.push(`#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`);
+    changes.push(isEn
+      ? `#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`
+      : `#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`);
   }
   plan.sceneCardIds = nextIds;
   savePlanInPlace(sessionId, plan);
   const shown = changes.slice(0, SCENE_PREVIEW_LIMIT);
-  if (changes.length > shown.length) shown.push(`…… 共 ${changes.length} 段，其余同样换了。`);
+  if (changes.length > shown.length) {
+    shown.push(isEn ? `… ${changes.length} clips in total; the rest were swapped the same way.` : `…… 共 ${changes.length} 段，其余同样换了。`);
+  }
+  if (isEn) {
+    return `Swapped all ${nextIds.length} clips:\n${shown.join('\n')}\n`
+      + `Current ${plan.clipCount} scene cards:\n${formatSceneEntries(planSceneEntries(plan))}\n`
+      + describeReply(plan, 'en');
+  }
   return `已换掉全部 ${nextIds.length} 段：\n${shown.join('\n')}\n`
     + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
     + describeReply(plan);
@@ -1424,6 +1538,14 @@ function isPlanPromptEditForm(text) {
  * 对话入口：听懂 → 排计划 / 检索记录 / 报进度。不创建任务、不发付费请求。
  * @param {object} opts { sessionId?, text, options? }
  */
+// 2026-11-18：英文界面下常见 PLAN_* 错误也要英文（用户报「十秒 每段5秒」仍回中文）。
+// 中文路径逐字返回 planCard 原文（零回归）；未覆盖的 code 保留中文原文（如实，不机翻）。
+function planFailureReply(built, lang, input, parsed) {
+  if (i18n.normalizeLang(lang) !== 'en') return built.error;
+  const en = planCard.describeErrorEn(built.code, { input, parsed });
+  return en || built.error;
+}
+
 function handleMessage(opts = {}) {
   const text = String(opts.text || '').trim();
   // P3：助手话术语言（默认 zh → 现有中文回复逐字不变；en → 核心链路走英文模板）
@@ -1462,7 +1584,7 @@ function handleMessage(opts = {}) {
     replyKey = 'assistant.reply.status';
   } else if (intent.intent === 'plan_scenes') {
     // 2026-11-16 用户问题 a：问「选了哪几个场景」→ 只读预览，不重排计划、不占卡。
-    reply = replyForPlanScenes(sessionId);
+    reply = replyForPlanScenes(sessionId, lang);
     replyKey = 'assistant.reply.planScenes';
   } else if (intent.intent === 'no_image') {
     // 2026-11-16 用户问题 b：要纯文生视频 → 告诉用户卡上的开关位置，不新建计划。
@@ -1505,12 +1627,12 @@ function handleMessage(opts = {}) {
     // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
     // 2026-11-17 V1（A4）：先看是不是「把第 N 段的提示词给我看」这种**纯只读**请求；
     // 是的话只贴原文、计划一个字节都不动，也不回传计划（前端据此不弹卡）。
-    const viewed = tryReplyPromptView(sessionId, text);
+    const viewed = tryReplyPromptView(sessionId, text, lang);
     if (viewed) {
       reply = viewed;
       replyKey = 'assistant.reply.promptView';
     } else {
-      reply = replyForPlanEdit(sessionId, text);
+      reply = replyForPlanEdit(sessionId, text, lang);
       replyKey = 'assistant.reply.planEdit';
       // 2026-11-16 Lead 复核：把更新后的计划一并回传（planId 不变）。
       // 前端 sendXiaozhi 里的 `if (j.plan) setPlan(j.plan)` 依赖它刷新手上的计划卡；
@@ -1553,17 +1675,15 @@ function handleMessage(opts = {}) {
     if (!built.ok) {
       if (built.missing || built.code === 'PLAN_NEED_DURATION') {
         missing = built.missing || ['totalMinutes'];
-        // P3：英文模式给英文追问；中文模式沿用 planCard 原文（零回归）。
-        reply = (isEn && built.code === 'PLAN_NEED_DURATION')
-          ? 'How long should the video be? For example "30 seconds", "10 minutes", or "half an hour".'
-          : (built.question || built.error);
+        // P3/2026-11-18：英文模式给英文追问/错误；中文模式沿用 planCard 原文（零回归）。
+        reply = planFailureReply(built, lang, input, parsed);
         replyKey = 'assistant.question.duration';
         actions = [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }];
       } else if (intent.intent === 'unknown') {
         reply = replyUnknown(lang) + (isEn ? '' : '\n（' + built.error + '）');
         replyKey = 'assistant.reply.unknown';
       } else {
-        reply = built.error;
+        reply = planFailureReply(built, lang, input, parsed);
         replyKey = 'assistant.reply.planError';
       }
     } else {

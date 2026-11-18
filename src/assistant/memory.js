@@ -248,8 +248,25 @@ const RE_SEGMENT_SWAP_WORD = /换一个|换一张|换个|换掉|换成别的|换
 // 判定：批量指代（都/全部/三个/三张/这批/整批/整个/重抽…）+ 换卡动作
 // （换掉/换一个/换一批/要换（非「要换成」）/不满意/不想要…），且**不是配乐句**。
 // 故意不收「改成/换成（+分辨率）」这类词，避免抢「都换成 1080p」的分辨率续问。
-const RE_SEGMENT_BATCH_REF = /都|全部|全都|全换|三个|三张|3\s*[个张]|这几[个张]|这两个|这一批|这批|整批|一批|这一?组|整个|重抽|重新抽|重新选/;
-const RE_SEGMENT_BATCH_SWAP = /换掉|换一个|换一张|换一批|换个|全换|重抽|重新抽|重新选|换成别的|换别的|不满意|不想要|不要了|要换(?![成为])|都换(?![成为])/;
+const RE_SEGMENT_BATCH_REF = /都|全部|全都|全换|三个|三张|3\s*[个张]|这几[个张]|这两个|这一批|这批|整批|一批|这一?组|一组|整组|整个|重抽|重新抽|重新选/;
+const RE_SEGMENT_BATCH_SWAP = /换掉|换一个|换一张|换一批|换一组|再换一组|重新来一组|重来一组|再来一组|换个|全换|重抽|重新抽|重新选|换成别的|换别的|不满意|不想要|不要了|要换(?![成为])|都换(?![成为])/;
+
+// 2026-11-18 用户报「提示词看一下 → 小智却问这条视频要做多长」：
+// 「提示词 + 查看动词」在**没有段号**时原来 classify 返回 unknown，落到 supervisor 的 else
+// 分支 → planCard.buildPlan → PLAN_NEED_DURATION。这里把它归入 plan_edit，让 supervisor 的
+// tryReplyPromptView 接住（有当前计划就只读展示，不新建计划、不问时长）。
+// 注意护栏：「提示词改成/换成/：」是修改动作，不是查看，不在此列（仍走既有 plan_edit 路径）。
+const RE_PROMPT_VIEW_NOUN = /提示词|画面内容/;
+const RE_PROMPT_VIEW_VERB = /给我看|看一下|看下|看看|贴一下|贴出来|是什么|是啥|显示|念一下|读一下|发我|瞧一眼/;
+const RE_PROMPT_SET_VERB = /(?:提示词|画面内容)\s*(?:改成|换成|改为|写成|[:：])/;
+
+function isPromptViewRequest(text) {
+  const s = String(text || '');
+  if (!RE_PROMPT_VIEW_NOUN.test(s)) return false;
+  if (!RE_PROMPT_VIEW_VERB.test(s)) return false;
+  if (RE_PROMPT_SET_VERB.test(s)) return false;
+  return true;
+}
 // 2026-11-17 小智 2.0 V1（设计定稿 §9.1-1）：plan_edit 的**第 4 个入口**。
 // 用户真实原话（截图实证）：「换一个场景卡，我不太满意。」「场景不太满意，场景卡就是提示词的内容。」
 // 两句都没有「第 N 段」，所以进不了既有三个分支，会掉进 create 被重排成新计划（错）。
@@ -353,6 +370,11 @@ function classify(text) {
   // 2026-11-17 V1（§9.1-6）：确认问句必须排在最前（RE_CREATE 的「生成」会把它抢成排计划）。
   // 注意顺序：放在 plan_edit/bgm/create 之前，但仍在「查场景 / 不要出图」之后。
   if (isConfirmRequest(s)) return { intent: 'confirm' };
+  // 2026-11-18：「提示词看一下 / 看一下提示词」（无段号）先归 plan_edit → 只读展示，
+  // 不再落到 else 被当成排计划、反问总时长（用户报的答非所问）。
+  if (isPromptViewRequest(s)) return { intent: 'plan_edit' };
+  // 「提示词改成：X」即使没段号也应按段编辑处理（supervisor 会问第几段），不要落到排计划。
+  if (RE_PROMPT_SET_VERB.test(s)) return { intent: 'plan_edit' };
   // 2026-11-16 P7-A：计划内修改必须排在 create 之前（否则「第 2 个场景换一个」会被当成新计划重排）；
   // 但只能匹配带「第 N 段/个」、「这个地方/这里 + 换一个」或「三个/都 + 换掉」的句子，
   // 不能抢「改成 1080p」「每段 15 秒」「再来一条」。
@@ -515,6 +537,7 @@ module.exports = {
   listSessions,
   classify,
   isBatchSceneEdit,
+  isPromptViewRequest,
   isSceneCardEdit,
   isSceneCardsOff,
   isConfirmRequest,

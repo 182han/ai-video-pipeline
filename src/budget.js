@@ -135,12 +135,24 @@ function estimateTask({ clips, seconds, resolution, images = 0, llmCalls = 0 }) 
 }
 
 function status() {
+  const uncertain = state.entries.filter((e) => e.kind === 'video' && e.billingUncertain && !e.settled);
   return {
     currency: 'USD',
     initialUsd: round4(state.initialUsd),
     balanceUsd: round4(state.balanceUsd),
     spentUsd: round4(state.spentUsd),
     updatedAt: state.updatedAt,
+    // 计费不确定（2026-11-18）：网络/超时类失败时外部可能已扣费，预扣保持不退款。
+    // 这些条目只能人工对账（resolveUncertain）或任务之后真的完成（settle）才结清。
+    uncertainCount: uncertain.length,
+    uncertainUsd: round4(uncertain.reduce((n, e) => n + (Number(e.usd) || 0), 0)),
+    uncertainEntries: uncertain.slice(-10).map((e) => ({
+      taskId: e.taskId,
+      reservedUsd: round4(e.usd),
+      reason: e.billingUncertainReason || null,
+      at: e.billingUncertainAt || e.at,
+      kind: e.kind
+    })),
     rates: {
       video: { ...RATES.video },
       image: RATES.image,
@@ -211,12 +223,130 @@ function settle(taskId, actualUsd) {
       e.settled = true;
       e.actualUsd = actual;
       e.refundUsd = refund;
+      // 若曾被标为「计费不确定」，任务之后真的完成（或显式结算）即视为已结清；
+      // 保留历史痕迹（wasBillingUncertain）便于对账审计。
+      if (e.billingUncertain) {
+        e.wasBillingUncertain = true;
+        e.billingUncertain = false;
+        e.billingUncertainResolvedAt = new Date().toISOString();
+        e.billingUncertainResolution = 'settled-by-task';
+      }
       state.updatedAt = new Date().toISOString();
       persist();
       return { taskId, reservedUsd: reserved, actualUsd: actual, refundUsd: refund, balanceUsd: state.balanceUsd };
     }
   }
   return null;
+}
+
+// ==========================================
+// 计费不确定（2026-11-18 用户报「本地退款但真实余额没退」）
+// ------------------------------------------------------------
+// 事故：task_mwiugoxq_z01l 失败原因是 `fetch failed`（网络失败，外部可能已经扣费），
+// 旧逻辑在 failed 时按成功片段数结算（0 段 → 全额退 2.003），账本显示 196.28，
+// 而用户真实余额 194.27 —— 本地账面比真实多出正好一笔。
+// 新口径：
+//   · 显式 4xx（外部明确拒绝，通常不计费）→ 仍可全额退（definite）；
+//   · 网络/超时/连接中断类 → **不自动退款**，标记 billingUncertain（余额保持预扣），
+//     留人工对账（resolveUncertain）或任务后续真的完成（settle）时结清；
+//   · 其它未知原因 → 保持既有行为（由调用方按原逻辑结算），不在这里改变。
+// ==========================================
+const RE_EXPLICIT_4XX = /(?:HTTP\s*|状态码\s*|API\s*错误\s*[（(]\s*|\()\s*(4\d{2})\b/i;
+const RE_NETWORK_UNCERTAIN = /fetch failed|network|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|timeout|timed\s*out|超时|连接(?:被)?(?:重置|中断|失败)|aborted|AbortError|certificate|TLS handshake|上游连接/i;
+
+// 失败原因 → 计费口径：'definite'（可全额退）| 'uncertain'（不自动退）| 'unknown'（沿用旧逻辑）
+function classifyFailure(reasonText) {
+  const s = String(reasonText || '');
+  if (!s) return 'unknown';
+  if (RE_EXPLICIT_4XX.test(s)) return 'definite';
+  if (RE_NETWORK_UNCERTAIN.test(s)) return 'uncertain';
+  return 'unknown';
+}
+
+function _findOpenReservation(taskId) {
+  for (let i = state.entries.length - 1; i >= 0; i--) {
+    const e = state.entries[i];
+    if (e.kind === 'video' && e.taskId === taskId && !e.settled) return e;
+  }
+  return null;
+}
+
+// 标记「计费不确定」：不退款、不改 spent，只给这条预扣打标 + 记录原因。
+// 幂等：同一任务重复标记只刷新原因/时间，不重复累计。
+function markUncertain(taskId, opts = {}) {
+  if (!taskId) return null;
+  const entry = _findOpenReservation(taskId);
+  if (!entry) return null;
+  const now = new Date().toISOString();
+  entry.billingUncertain = true;
+  entry.billingUncertainAt = entry.billingUncertainAt || now;
+  entry.billingUncertainReason = String(opts.reason || entry.billingUncertainReason || '').slice(0, 500);
+  entry.billingUncertainMeta = opts.meta || entry.billingUncertainMeta || undefined;
+  state.updatedAt = now;
+  persist();
+  return {
+    taskId,
+    reservedUsd: round4(entry.usd),
+    balanceUsd: round4(state.balanceUsd),
+    spentUsd: round4(state.spentUsd),
+    reason: entry.billingUncertainReason || null,
+    at: entry.billingUncertainAt
+  };
+}
+
+// 人工对账：把「计费不确定」的预扣按实际扣费结清。
+//   · actualUsd 省略 → 视为外部已按预扣全额计费（不退款）；
+//   · actualUsd 给数字 → 按数字计费，差额退回本地账本。
+// 返回 null 表示没有待对账的条目（幂等，不重复退款）。
+function resolveUncertain(taskId, opts = {}) {
+  if (!taskId) return null;
+  for (let i = state.entries.length - 1; i >= 0; i--) {
+    const e = state.entries[i];
+    if (e.kind !== 'video' || e.taskId !== taskId || e.settled || !e.billingUncertain) continue;
+    const reserved = round4(e.usd);
+    const wanted = opts.actualUsd === undefined || opts.actualUsd === null
+      ? reserved
+      : Math.max(0, Math.min(reserved, round4(opts.actualUsd)));
+    const refund = round4(reserved - wanted);
+    if (refund > 0) {
+      state.balanceUsd = round4(state.balanceUsd + refund);
+      state.spentUsd = Math.max(0, round4(state.spentUsd - refund));
+    }
+    e.settled = true;
+    e.actualUsd = wanted;
+    e.refundUsd = refund;
+    e.wasBillingUncertain = true;
+    e.billingUncertain = false;
+    e.billingUncertainResolvedAt = new Date().toISOString();
+    e.billingUncertainResolution = 'manual';
+    e.billingUncertainNote = String(opts.note || '').slice(0, 500) || undefined;
+    e.billingUncertainActor = String(opts.actor || 'manual').slice(0, 80);
+    state.updatedAt = new Date().toISOString();
+    persist();
+    return {
+      taskId,
+      reservedUsd: reserved,
+      actualUsd: wanted,
+      refundUsd: refund,
+      balanceUsd: round4(state.balanceUsd),
+      spentUsd: round4(state.spentUsd),
+      note: e.billingUncertainNote || null
+    };
+  }
+  return null;
+}
+
+// 只读：待人工对账列表（给未来 /api/budget 或运维脚本用；本任务不改 server.js）
+function listUncertain() {
+  return state.entries
+    .filter((e) => e.kind === 'video' && e.billingUncertain && !e.settled)
+    .map((e) => ({
+      taskId: e.taskId,
+      reservedUsd: round4(e.usd),
+      reason: e.billingUncertainReason || null,
+      at: e.billingUncertainAt || e.at,
+      balanceAfterUsd: e.balanceAfterUsd
+    }));
 }
 
 // 对账/手动修正：把剩余余额设成实际值（initial 会按 spent 反推，便于审计）
@@ -254,6 +384,10 @@ module.exports = {
   canAfford,
   reserve,
   settle,
+  classifyFailure,
+  markUncertain,
+  resolveUncertain,
+  listUncertain,
   setBalance,
   InsufficientBudgetError
 };

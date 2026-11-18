@@ -272,6 +272,54 @@ function fail(code, error, extra = {}) {
   return { ok: false, code, error, ...extra };
 }
 
+// 2026-11-18：英文界面下常见 PLAN_* 错误 → 英文话术（用户报「十秒 每段5秒」仍回中文）。
+// 中文路径不经过这里：supervisor 只在 lang==='en' 时调用；未覆盖的 code 返回 null，
+// 调用方回退中文原文（如实，不机器翻译动态细节）。
+function describeErrorEn(code, ctx = {}) {
+  const input = ctx.input || {};
+  const parsed = ctx.parsed || {};
+  const modelId = String(input.model || parsed.model || 'openai-video');
+  const model = MODELS[modelId];
+  const clipSec = input.clipDurationSec !== undefined && input.clipDurationSec !== null
+    ? input.clipDurationSec
+    : parsed.clipDurationSec;
+  const resolution = String(input.resolution || parsed.resolution || '').toLowerCase();
+  const allowedSec = LIMITS.sceneCardClipSecAllowed.join(' or ');
+  switch (code) {
+    case 'PLAN_NEED_DURATION':
+      return 'How long should the video be? For example "30 seconds", "10 minutes", or "half an hour".';
+    case 'PLAN_SCENE_CARD_DURATION':
+      return `Scene cards support only ${allowedSec} seconds per clip (default ${LIMITS.sceneCardClipSec} s). `
+        + `You gave ${clipSec === null || clipSec === undefined ? '(nothing)' : `${clipSec} s`}. `
+        + `Use ${allowedSec} s, or say "no scene cards".`;
+    case 'PLAN_BAD_CLIP_DURATION':
+      return `Each clip must be ${model ? `${model.minSec}–${model.maxSec}` : 'within the model limit'} s for `
+        + `${model ? model.label : modelId} (you gave ${clipSec === null || clipSec === undefined ? '(nothing)' : `${clipSec} s`}).`;
+    case 'PLAN_UNKNOWN_MODEL':
+      return `Unknown video model: ${modelId}. Available: ${Object.keys(MODELS).join(' / ')}.`;
+    case 'PLAN_BAD_RESOLUTION':
+      return `Unsupported resolution: ${resolution || '(empty)'}. Use 480p, 720p, 1080p, or 4k.`;
+    case 'PLAN_BAD_COUNT':
+      return 'A plan needs at least 1 clip.';
+    case 'PLAN_TOO_LONG':
+      return `A single task is limited to ${LIMITS.maxMinutes} minutes. Shorten it, or split it into multiple tasks.`;
+    case 'PLAN_TOO_MANY_CLIPS':
+      return `A single task is limited to ${LIMITS.maxClips} clips. Reduce the clip count or make each clip longer.`;
+    case 'PLAN_SCENE_CARDS_EXHAUSTED':
+      return `The scene-card library has only ${LIMITS.sceneCardMaxClips} feature cards `
+        + `(${(LIMITS.sceneCardMaxClips * LIMITS.sceneCardClipSec / 60).toFixed(0)} minutes at ${LIMITS.sceneCardClipSec} s per clip). `
+        + 'Expand the library first, or say "no scene cards".';
+    case 'PLAN_SCENE_CARDS_ERROR':
+      return 'Could not draw scene cards. Ask again in a moment, or say "no scene cards".';
+    case 'PLAN_PROMPT_OVERRIDE_NEEDS_SCENE_CARDS':
+      return 'Per-clip prompt overrides require scene cards.';
+    case 'PLAN_BAD_PROMPT_OVERRIDES':
+      return 'The per-clip prompt overrides are invalid.';
+    default:
+      return null;
+  }
+}
+
 function estimate(plan) {
   let unit = { amountPerAttempt: 0, currency: 'CNY', detail: '测试模式，不产生费用' };
   try {
@@ -629,5 +677,6 @@ module.exports = {
   buildPlan,
   mergeModelSlots,
   estimate,
-  describe
+  describe,
+  describeErrorEn
 };

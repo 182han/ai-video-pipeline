@@ -783,17 +783,63 @@ class TaskManager {
     this._saveTask(taskId);
     console.log(`任务 ${taskId} 状态: ${newStatus}`);
 
-    // 预算结算（2026-11-14）：创建任务时按「段数 × 时长」预扣美元，
-    // 结束/失败时按真正成功的片段数修正，避免失败任务把余额锁死。
+    // 预算结算（2026-11-14 / 2026-11-18 修订）：
+    // 创建任务时按「段数 × 时长」预扣美元；completed 按成功片段结算。
+    // failed 分三态（用户 2026-11-18 报「本地退款 2.003、真实余额没退」）：
+    //   · 显式 4xx（外部明确拒绝，通常不计费）→ 仍全额/按成功数退；
+    //   · 网络/超时/连接中断（外部可能已扣费）→ **不自动退款**，标记 billingUncertain
+    //     保持预扣，等人工对账或任务之后真的完成再结清；
+    //   · 其它未知原因 → 沿用旧逻辑（按成功片段结算），不扩大行为变化。
     if (newStatus === 'completed' || newStatus === 'failed') {
       try {
         const clips = Array.isArray(task.clips) ? task.clips : [];
         const success = clips.filter(c => c && c.status === 'success').length;
         // 合成素材（Mock 降级）不产生真实费用，结算按 0 计，全额退回预扣
         const synthetic = task.mockFallback === true || task.model === 'mock';
-        const count = synthetic ? 0 : (success > 0 ? success : (newStatus === 'completed' ? (task.totalClips || 0) : 0));
         const seconds = Number(task.clipDuration) || 0;
-        budget.settle(taskId, count * seconds * budget.videoRate(task.resolution));
+
+        if (newStatus === 'completed') {
+          const count = synthetic ? 0 : (success > 0 ? success : (task.totalClips || 0));
+          budget.settle(taskId, count * seconds * budget.videoRate(task.resolution));
+          // 曾因网络失败被标记不确定的任务，之后真的跑完 → 结清标记（保留历史原因）
+          if (task.billingUncertain) {
+            task.billingUncertain = false;
+            task.billingUncertainResolvedAt = new Date().toISOString();
+            task.billingUncertainResolution = 'completed';
+            this._saveTask(taskId);
+          }
+        } else {
+          // 失败：先判断计费口径。已经标记过 uncertain 的任务，后续失败不再自动结算
+          // （否则一次网络失败 + 一次 400 重试就会把可能已扣的费用全额退回）。
+          const failureText = [
+            extra.error,
+            task.error,
+            ...clips.map((c) => (c && c.error ? String(c.error) : '')),
+            ...clips.map((c) => (c && c.qcResult && c.qcResult.reason ? String(c.qcResult.reason) : ''))
+          ].filter(Boolean).join(' | ');
+          const verdict = synthetic ? 'definite' : budget.classifyFailure(failureText);
+
+          if (!synthetic && (task.billingUncertain || verdict === 'uncertain')) {
+            const marked = task.billingUncertain
+              ? { reservedUsd: task.billingUncertainReservedUsd, reason: task.billingUncertainReason }
+              : budget.markUncertain(taskId, {
+                reason: failureText.slice(0, 500),
+                meta: { model: task.model, clips: task.totalClips, seconds }
+              });
+            if (marked) {
+              task.billingUncertain = true;
+              task.billingUncertainReason = String(marked.reason || failureText).slice(0, 500);
+              task.billingUncertainAt = task.billingUncertainAt || new Date().toISOString();
+              task.billingUncertainReservedUsd = marked.reservedUsd !== undefined
+                ? marked.reservedUsd : task.billingUncertainReservedUsd;
+              // 计费不确定：不调 budget.settle —— 预扣保持，余额不自动退回。
+              this._saveTask(taskId);
+            }
+          } else {
+            const count = synthetic ? 0 : (success > 0 ? success : 0);
+            budget.settle(taskId, count * seconds * budget.videoRate(task.resolution));
+          }
+        }
       } catch (e) {
         console.warn('[budget] 任务结算失败:', e && e.message ? e.message : e);
       }

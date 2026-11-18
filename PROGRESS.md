@@ -1282,3 +1282,47 @@ P3 完成（**中文默认逐字不变**，英文为独立撰写的模板，不�
 **未验证**：live 双语 API 探针（需重启 3001）；英文端到端浏览器交互（前端未接线，人工验收留给 P4）。
 **前端待接点**：`aiLang` 字段（设置页开关属 v2-ui-dev 作用域，后端只接收/透传）；
 `/api/assistant/*` 的 `replyKey/actions`；提示词请求体带 `aiLang` 即可得到英文提示词。
+
+### 2026-11-18 · 小智「答非所问」+ 任务名 + 计费不确定（task-3，用户 15:04 报 5 问题之后端部分）
+
+**修复范围（只改 src/assistant/{memory,supervisor,diagnose,planCard}.js、src/taskManager.js、src/budget.js）**
+
+1. **提示词查看（无段号）**：`memory.classify` 新增 `isPromptViewRequest`（提示词/画面内容 + 查看动词，
+   排除「改成/换成/：」），无段号的「提示词看一下 / 看一下提示词 / 提示词是什么」→ `plan_edit`；
+   `supervisor.tryReplyPromptView` 有当前计划且无段号时**只读展示前 5 段**（不再问「这条视频要做多长」、
+   不新建计划）；无计划时明确说明「还没有计划卡」；显式「第 N 段」行为不变。
+2. **换一组**：`RE_SEGMENT_BATCH_REF/SWAP` 补「一组 / 换一组 / 再换一组 / 重新来一组 / 换一批」等；
+   → `plan_edit` → `replyForBatchSwap` 整批换卡，planId 不变、不建任务（不再重排新计划）。
+3. **英文 PLAN_* 错误**：`planCard.describeErrorEn` 覆盖 NEED_DURATION / SCENE_CARD_DURATION /
+   BAD_CLIP_DURATION / UNKNOWN_MODEL / BAD_RESOLUTION / TOO_LONG / TOO_MANY_CLIPS / SCENE_CARDS_EXHAUSTED 等；
+   supervisor 仅在 `lang=en` 时使用（中文逐字不变，未覆盖 code 回退中文原文）。
+   同时把「提示词查看 / 计划内编辑 / 场景卡预览 / 整批换卡」的常用话术补了英文分支。
+4. **人类可读任务标签**：`diagnose.taskLabel/compactTaskLabel/shortTaskId`；
+   diagnose.summary / supervisor status / context / plan_scenes 不再以裸 `task_mwiugoxq_z01l（failed）」开头，
+   改为「`提示词摘要` · 模型 · 时间 · 状态 · 短 ID」；**完整 taskId 仍保留**（summary 显式「任务 ID …」，
+   status 列表带 ID），既有断言（verify-assistant B1/B2）继续通过。
+5. **计费不确定（budget）**：
+   - `budget.classifyFailure()`：显式 4xx → `definite`（仍可退）；网络/超时/连接中断 → `uncertain`；
+     其它 → `unknown`（沿用旧逻辑，不扩大行为变化）；
+   - `budget.markUncertain(taskId)`：只给预扣打标，**不改余额/spent**（幂等）；
+   - `taskManager.updateTaskStatus('failed')`：网络类失败不调 `budget.settle`，任务写
+     `billingUncertain / billingUncertainReason / billingUncertainAt / billingUncertainReservedUsd`；
+     显式 4xx 仍按成功片段数结算退款；`completed` 时正常结算并清 uncertain 标记（`resolution='completed'`）；
+   - 人工对账入口（本任务不改 server.js，故先以模块 API 提供）：
+     `budget.listUncertain()`、`budget.resolveUncertain(taskId, {actualUsd, note})`（省略 actualUsd =
+     按全额计费不退款；给数字 = 按实际扣费退差额，幂等）；`budget.status()` 增加
+     `uncertainCount / uncertainUsd / uncertainEntries`（加法式）。真实 `data/budget.json` 对账由 Lead 做。
+
+**新增验收**
+- `scripts/verify-assistant-followup.js`：**42 通过 / 0 失败**（真实用户原话中英各跑 + 负向无计划 + 不建任务 +
+  planId/任务数不变 + 人类标签 + 源码接线静态断言）。
+- `scripts/verify-budget-uncertain.js`：**41 通过 / 0 失败**（classifyFailure 三态、预扣保持、幂等、
+  4xx 仍退、部分成功网络失败、人工对账、完成后结清；全程临时 BUDGET_FILE，不碰真实 data/）。
+- 回归：`verify-assistant` **237/0**、`verify-budget-guard` 48/0、`verify-i18n --strict` 12/0、
+  `verify-i18n-runtime` 29/0、`verify-image-first-ui` 90/0（5 跳过）、`verify-scene-cards` 58/0、
+  `verify-whaletv-video` 37/0。未重启 3001、零计费。
+
+**未验证/后续**
+- 真实 `data/budget.json` 的历史两笔对账（194.27 vs 196.28）由 Lead 按交接文档 §4 做，本窗口未动真实数据；
+- 小智英文话术只覆盖核心链路与本次修复点；更长的英文回复（状态/上次视频/配乐等）仍中文，后续可按 replyKey 补；
+- 浏览器端到端人工验收未做（前端已由 task-4 独立提交，不在本窗口作用域）。
