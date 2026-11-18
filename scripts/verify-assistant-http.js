@@ -158,7 +158,13 @@ async function main() {
     })());
     ok('ASR 探针可用（离线 sherpa-onnx）', info.json && info.json.asr && info.json.asr.available === true
       && info.json.asr.engine === 'sherpa-onnx');
-    ok('新端点清单包含 execute/message/asr', (info.json && info.json.endpoints || []).length === 7);
+    // 2026-11-18 Lead：V2（d1b4847）按「加法式」追加了 6 个只读/approved 端点，
+    // 旧断言写死 length === 7 因此假红。契约是「原有端点仍在、清单只增不减」。
+    const eps = (info.json && info.json.endpoints) || [];
+    ok('新端点清单包含 execute/message/asr', eps.length >= 7
+      && ['/api/assistant/info', '/api/assistant/message', '/api/assistant/execute', '/api/assistant/asr']
+        .every((p) => eps.includes(p)),
+      `共 ${eps.length} 个`);
 
     // ---------- [2] 对话 / 记忆 ----------
     console.log('\n[2] POST /api/assistant/message（对话，不建任务/不计费）');
@@ -194,8 +200,10 @@ async function main() {
     console.log('\n[3] 付费闸门');
     const realPlanMsg = await postJson('/api/assistant/message', { sessionId: sid, text: '1段极光，每段10秒' });
     const realPlan = realPlanMsg.json && realPlanMsg.json.plan;
-    ok('真实计费模型计划（dashscope / 需付费确认）', realPlan && realPlan.model === 'dashscope'
-      && realPlan.requiresPaymentApproval === true);
+    // 2026-11-18 Lead：默认模型自 2026-11-16 起是 openai-video（用户要求走 WhaleTV key），
+    // 旧断言写死 dashscope 因此假红。契约是「未指定模型 → 非 mock 的真实计费模型 + 需付费确认」。
+    ok('真实计费模型计划（默认非 mock / 需付费确认）', realPlan && realPlan.model && realPlan.model !== 'mock'
+      && realPlan.requiresPaymentApproval === true, realPlan && realPlan.model);
     const tasksBefore = await getJson('/api/tasks');
     const payDenied = await postJson('/api/assistant/execute', {
       sessionId: sid, planId: realPlan.planId, approved: false
