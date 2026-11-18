@@ -30,10 +30,16 @@ const F = {
   settings: path.join(WEB, 'screens', 'settingsPage.js'),
   msgAssist: path.join(WEB, 'i18n', 'messages', 'assistant.js'),
   msgSettings: path.join(WEB, 'i18n', 'messages', 'settings.js'),
+  msgTasks: path.join(WEB, 'i18n', 'messages', 'tasks.js'),
   broadcast: path.join(WEB, 'components', 'assistantBroadcast.js'),
   context: path.join(WEB, 'components', 'assistantContext.js'),
   prefs: path.join(WEB, 'components', 'assistantPreferences.js'),
   repair: path.join(WEB, 'components', 'assistantRepair.js'),
+  taskName: path.join(WEB, 'components', 'taskName.js'),
+  taskDrawer: path.join(WEB, 'components', 'taskDrawer.js'),
+  gen: path.join(WEB, 'screens', 'gen.js'),
+  history: path.join(WEB, 'screens', 'history.js'),
+  inventory: path.join(WEB, 'screens', 'inventory.js'),
   verifyAll: path.join(ROOT, 'scripts', 'verify-all.js')
 };
 
@@ -170,10 +176,11 @@ function literalKeys(src) {
   const context = await import(url(F.context));
   const prefs = await import(url(F.prefs));
   const repair = await import(url(F.repair));
+  const taskName = await import(url(F.taskName));
 
   // ================= [1] 文件与模块图 =================
   console.log('[1] 文件与模块图');
-  ok('新增 4 个 V2 前端模块 + 修改 2 个页面/组件（文件都存在）',
+  ok('V2 前端模块 + 任务显示名模块 + 被接入的页面/组件（文件都存在）',
     Object.keys(F).every((k) => fs.existsSync(F[k])),
     missingFiles.join(','));
   const pageCode = code(F.page);
@@ -185,6 +192,11 @@ function literalKeys(src) {
   const repairCode = code(F.repair);
   const assistCode = code(F.assist);
   const settingsCode = code(F.settings);
+  const taskNameCode = code(F.taskName);
+  const taskDrawerCode = code(F.taskDrawer);
+  const genCode = code(F.gen);
+  const historyCode = code(F.history);
+  const inventoryCode = code(F.inventory);
   ok('静态判据先在剥注释后的代码上执行（注释里的字样不算实现）',
     broadcastCode.length > 500
     && fs.readFileSync(F.broadcast, 'utf8').includes('断线指数退避重连')
@@ -365,10 +377,17 @@ function literalKeys(src) {
     summary.preferences.model === 'dashscope' && summary.preferences.resolution === '1080p'
     && summary.preferences.clipDurationSec === 10 && summary.preferences.bgmStyle === '轻音乐'
     && summary.preferences.updatedAt === '2026-11-17T00:00:00.000Z');
-  ok('卡片渲染 Key 有/无（用 i18n 词条，不显示值）',
-    /assistant\.context\.keyPresent/.test(contextCode)
-    && /assistant\.context\.keyAbsent/.test(contextCode)
+  ok('Key 卡只列已配置项（present 过滤，不再逐项列「无」）',
+    /keys\.filter\(\(k\) => k\.present === true\)/.test(contextCode)
+    && /presentKeys/.test(contextCode)
+    && !/keyAbsent/.test(contextCode)
     && /export function AssistantContextCard\(/.test(contextCode));
+  ok('一个 present 都没有 → 一行说明（服务端环境变量 vs 浏览器设置）',
+    /presentKeys\.length > 0 \?/.test(contextCode)
+    && /assistant\.context\.keysNone/.test(contextCode));
+  ok('有 present → 只列已配置项并保留说明',
+    /assistant\.context\.keysHint/.test(contextCode)
+    && /presentKeys\.map\(/.test(contextCode));
   ok('assistant.js 打开/对话时拉 context，并支持手动刷新',
     /fetchAssistantContext\(sessionId, \{ page: contextPageParam\(\) \}\)/.test(assistCode)
     && /refreshContextRef\.current = load/.test(assistCode)
@@ -390,15 +409,28 @@ function literalKeys(src) {
     /fetch\('\/api\/assistant\/preferences'/.test(prefsCode));
   ok('清空偏好：POST /api/assistant/preferences/clear',
     /\/api\/assistant\/preferences\/clear/.test(prefsCode));
-  const prefsConfirmAt = prefsCode.indexOf('window.confirm');
-  const prefsClearAt = prefsCode.indexOf('/api/assistant/preferences/clear');
-  ok('清空确认门：window.confirm 出现在清空请求之前（未确认不发请求）',
-    prefsConfirmAt >= 0 && prefsClearAt > prefsConfirmAt,
-    `confirm@${prefsConfirmAt} clear@${prefsClearAt}`);
-  ok('清空端点只出现一次（不存在第二处绕过确认的调用）',
-    countOf(prefsCode, '/api/assistant/preferences/clear') === 1);
-  ok('偏好区 POST 只出现在清空函数（初始化只 GET）',
-    countOf(prefsCode, "method: 'POST'") === 1);
+  const prefsConfirmBlockAt = prefsCode.indexOf('confirming && pref');
+  const prefsConfirmBtnAt = prefsCode.indexOf('onClick=${clearPreferences}');
+  ok('清空按钮不再被「无偏好」禁用（disabled 只看 busy，始终可点）',
+    !/disabled=\$\{busy \|\| !pref\}/.test(prefsCode)
+    && /onClick=\$\{startClear\}/.test(prefsCode)
+    && /disabled=\$\{busy\}/.test(prefsCode));
+  ok('无偏好时点击给提示（noneToClear，不发请求）',
+    /if \(!pref\)/.test(prefsCode)
+    && /settings\.xiaozhi\.noneToClear/.test(prefsCode)
+    && /tone: 'muted'/.test(prefsCode));
+  ok('清空改用内联确认（不再用 window.confirm）',
+    !/window\.confirm/.test(prefsCode));
+  ok('内联确认：确认清空 / 取消 两个按钮，确认按钮只在 confirming 块里',
+    /settings\.xiaozhi\.clearConfirmYes/.test(prefsCode)
+    && /tr\('common\.cancel'\)/.test(prefsCode)
+    && prefsConfirmBlockAt >= 0 && prefsConfirmBtnAt > prefsConfirmBlockAt
+    && countOf(prefsCode, 'onClick=${clearPreferences}') === 1,
+    `confirmBlock@${prefsConfirmBlockAt} btn@${prefsConfirmBtnAt}`);
+  ok('清空端点只出现一次，且 POST 只有一条（approved 只在确认后构造）',
+    countOf(prefsCode, '/api/assistant/preferences/clear') === 1
+    && /buildClearPreferencesRequest\(\{ confirmed: true \}\)/.test(prefsCode)
+    && countOf(prefsCode, "method: 'POST'") === 1);
   ok('buildClearPreferencesRequest：未确认返回 null（负向）',
     prefs.buildClearPreferencesRequest({}) === null
     && prefs.buildClearPreferencesRequest({ confirmed: false }) === null);
@@ -493,8 +525,17 @@ function literalKeys(src) {
   console.log('\n[7] i18n：新文案走词条（zh/en 对等）');
   const msgAssist = (await import(url(F.msgAssist))).default;
   const msgSettings = (await import(url(F.msgSettings))).default;
-  const zh = { ...flatten(msgAssist.zh, '', {}), ...flatten(msgSettings.zh, '', {}) };
-  const en = { ...flatten(msgAssist.en, '', {}), ...flatten(msgSettings.en, '', {}) };
+  const msgTasks = (await import(url(F.msgTasks))).default;
+  const zh = {
+    ...flatten(msgAssist.zh, '', {}),
+    ...flatten(msgSettings.zh, '', {}),
+    ...flatten(msgTasks.zh, '', {})
+  };
+  const en = {
+    ...flatten(msgAssist.en, '', {}),
+    ...flatten(msgSettings.en, '', {}),
+    ...flatten(msgTasks.en, '', {})
+  };
   const required = [
     'assistant.context.title', 'assistant.context.refresh', 'assistant.context.loading',
     'assistant.context.error', 'assistant.context.page', 'assistant.context.tasks',
@@ -502,7 +543,7 @@ function literalKeys(src) {
     'assistant.context.budgetUnknown', 'assistant.context.assets', 'assistant.context.assetsValue',
     'assistant.context.service', 'assistant.context.serviceValue', 'assistant.context.ffmpegOn',
     'assistant.context.ffmpegOff', 'assistant.context.prefs', 'assistant.context.prefsValue',
-    'assistant.context.keys', 'assistant.context.keyPresent', 'assistant.context.keyAbsent',
+    'assistant.context.keys', 'assistant.context.keysNone', 'assistant.context.keysHint',
     'assistant.context.keyWhaletv', 'assistant.context.keyDashscope', 'assistant.context.keyKling',
     'assistant.context.keyImage', 'assistant.context.keyMultimodal', 'assistant.context.keyLlm',
     'assistant.context.note',
@@ -516,8 +557,11 @@ function literalKeys(src) {
     'settings.xiaozhi.modelValue', 'settings.xiaozhi.resolution', 'settings.xiaozhi.clipDuration',
     'settings.xiaozhi.seconds', 'settings.xiaozhi.bgmStyle', 'settings.xiaozhi.updatedAt',
     'settings.xiaozhi.clear', 'settings.xiaozhi.clearing', 'settings.xiaozhi.clearConfirm',
+    'settings.xiaozhi.clearConfirmYes', 'settings.xiaozhi.noneToClear',
     'settings.xiaozhi.clearDone', 'settings.xiaozhi.clearNothing', 'settings.xiaozhi.clearFailed',
-    'settings.xiaozhi.loadFailed'
+    'settings.xiaozhi.loadFailed',
+    'tasks.displayName', 'tasks.displayNameNoPrompt', 'tasks.displayNameUnnamed',
+    'tasks.shortId', 'tasks.taskIdTooltip', 'tasks.drawer.taskId'
   ];
   const missingZh = required.filter((k) => zh[k] === undefined);
   const missingEn = required.filter((k) => en[k] === undefined);
@@ -536,36 +580,96 @@ function literalKeys(src) {
   }
   ok('代码里 tr/t(assistant./settings.) 用到的键都有中英词条',
     usedMissing.length === 0, usedMissing.slice(0, 8).join(', '));
+  const taskUsedMissing = literalKeys(taskNameCode)
+    .filter((k) => /^tasks\./.test(k) && (zh[k] === undefined || en[k] === undefined));
+  ok('taskName.js 里 tr(tasks.*) 用到的键都有中英词条',
+    taskUsedMissing.length === 0, taskUsedMissing.slice(0, 8).join(', '));
   // settingsPage.js 有一行 i18n-allow（后端中文错误前缀匹配，属功能性中文），
   // 由 verify-i18n --strict 逐行豁免；这里只检查本次新增的模块与 assistant.js。
   ok('新模块与 assistant.js 没有硬编码中文界面文案（词条文件除外；注释已被剥离）',
-    [F.broadcast, F.context, F.prefs, F.repair, F.assist]
+    [F.broadcast, F.context, F.prefs, F.repair, F.assist, F.taskName]
       .every((file) => !/[\u4e00-\u9fff]/.test(code(file))));
 
-  // ================= [8] 注册进 verify-all.js =================
-  console.log('\n[8] 门禁注册');
+  // ================= [8] 任务显示名（用户 UX：不再露原始 taskId） =================
+  console.log('\n[8] 任务显示名：prompt 摘要 + 模型 + 时间（原始 ID 只留详情/tooltip）');
+  ok('taskName.js 导出统一显示名 / 短 ID / 摘要三个函数',
+    /export function taskDisplayName\(/.test(taskNameCode)
+    && /export function taskShortId\(/.test(taskNameCode)
+    && /export function taskPromptSummary\(/.test(taskNameCode));
+  ok('taskShortId：长 ID 压缩成 task_mwiu…z01l（保留前缀与尾 4 位）',
+    taskName.taskShortId('task_mwiugoxq_z01l') === 'task_mwiu…z01l',
+    taskName.taskShortId('task_mwiugoxq_z01l'));
+  ok('taskShortId：短 ID 原样返回；空值返回空串',
+    taskName.taskShortId('short_id') === 'short_id'
+    && taskName.taskShortId('') === '' && taskName.taskShortId(null) === '');
+  ok('taskPromptSummary：多行压成一行并去首尾空白',
+    taskName.taskPromptSummary({ prompt: '  雪山\n\n日出  ' }) === '雪山 日出',
+    JSON.stringify(taskName.taskPromptSummary({ prompt: '  雪山\n\n日出  ' })));
+  const truncated = taskName.taskPromptSummary({ prompt: 'x'.repeat(40) }, 10);
+  ok('taskPromptSummary：超长截断并加省略号（20–30 字可配）',
+    truncated.length === 11 && truncated.endsWith('…'), truncated);
+  ok('taskPromptSummary：无 prompt 时回退 prompts[0].text',
+    taskName.taskPromptSummary({ prompts: [{ text: '多提示词第一条' }, { text: '第二条' }] }) === '多提示词第一条');
+  const dn = taskName.taskDisplayName({ prompt: '雪山日出', model: 'dashscope', createdAt: '2026-11-18T07:00:00Z' });
+  ok('taskDisplayName：含 prompt 摘要 + 模型（时间同处）',
+    dn.includes('雪山日出') && dn.includes('dashscope') && dn.includes('2026'));
+  ok('taskDisplayName：不把完整 taskId 拼进显示名（负向）',
+    !dn.includes('task_'));
+  const dnNoPrompt = taskName.taskDisplayName({ taskId: 'task_abcdefgh_1234', model: 'mock', createdAt: '2026-11-18T07:00:00Z' });
+  ok('taskDisplayName：无 prompt → 模型 + 时间，不露完整 ID（负向）',
+    dnNoPrompt.includes('mock') && !dnNoPrompt.includes('task_abcdefgh'), dnNoPrompt);
+  const dnUnnamed = taskName.taskDisplayName({ taskId: 'task_abcdefgh_1234' });
+  ok('taskDisplayName：无 prompt/模型/时间 → 「未命名任务 + 短 ID」',
+    dnUnnamed.includes('task_abcd…1234') && !dnUnnamed.includes('task_abcdefgh'), dnUnnamed);
+  ok('TaskDrawer 标题用 taskDisplayName（不再直接渲染 taskId），完整 ID 放进详情行',
+    /import \{ taskDisplayName, taskShortId \} from '\.\/taskName\.js'/.test(taskDrawerCode)
+    && /taskDisplayName\(t\)/.test(taskDrawerCode)
+    && /tasks\.drawer\.taskId/.test(taskDrawerCode)
+    && /\$\{t\.taskId \|\| taskId\}/.test(taskDrawerCode)
+    && !/font-num truncate">\$\{taskId\}/.test(taskDrawerCode)
+    && /tasks\.taskIdTooltip/.test(taskDrawerCode));
+  ok('生成中页用任务显示名 + 短 ID（不再把 taskId 当标题）',
+    /taskDisplayName\(task\)/.test(genCode)
+    && /tasks\.shortId/.test(genCode)
+    && /taskShortId\(task\.taskId\)/.test(genCode)
+    && !/text-ink3 font-num">\s*\$\{task\.taskId\}/.test(genCode));
+  ok('历史回收站用时间 + 短 ID（tooltip 给完整 ID）',
+    /taskShortId\(/.test(historyCode) && /tasks\.shortId/.test(historyCode)
+    && /tasks\.taskIdTooltip/.test(historyCode)
+    && !/\$\{t\.taskId \|\| id\}/.test(historyCode));
+  ok('任务回收站抽屉用短 ID（tooltip 完整 ID；import 行数保持不变以免打翻既有套件）',
+    /function shortTaskId\(/.test(inventoryCode)
+    && /tasks\.shortId/.test(inventoryCode) && /tasks\.taskIdTooltip/.test(inventoryCode)
+    && !/\$\{it\.taskId\} · /.test(inventoryCode)
+    && (inventoryCode.match(/^import /gm) || []).length === 5);
+
+  // ================= [9] 注册进 verify-all.js =================
+  console.log('\n[9] 门禁注册');
   const verifyAllCode = code(F.verifyAll);
   ok('已注册进 scripts/verify-all.js（name/script/group=fast）',
     /name: 'assistant-frontend'/.test(verifyAllCode)
     && /script: 'verify-assistant-frontend\.js'/.test(verifyAllCode)
     && /group: 'fast'/.test(verifyAllCode));
 
-  // ================= [9] 防永真自检 =================
-  console.log('\n[9] 判据自检（防止断言永真）');
+  // ================= [10] 防永真自检 =================
+  console.log('\n[10] 判据自检（防止断言永真）');
   const predWs = (s) => /new WS\(url\)/.test(s);
   const predSystemMsg = (s) => /role: 'system'/.test(s);
-  const predClearGate = (s) => {
-    const a = s.indexOf('window.confirm');
-    const b = s.indexOf('/api/assistant/preferences/clear');
+  const predDisplayName = (s) => /taskDisplayName\(t\)/.test(s);
+  const predInlineConfirm = (s) => {
+    const a = s.indexOf('confirming && pref');
+    const b = s.indexOf('onClick=${clearPreferences}');
     return a >= 0 && b > a;
   };
   ok('判据在空源码上不通过（WS 客户端判据）', predWs('') === false && predWs(broadcastCode) === true);
   ok('判据在空源码上不通过（系统消息判据）', predSystemMsg('') === false && predSystemMsg(assistCode) === true);
-  ok('判据在空源码/乱序上不通过（确认门顺序判据）',
-    predClearGate('') === false
-    && predClearGate('/api/assistant/preferences/clear window.confirm') === false
-    && predClearGate(prefsCode) === true);
-  ok('断言数量足够（>= 45 条，且失败会体现在退出码）', passed + failed >= 45);
+  ok('判据在空源码上不通过（任务显示名判据）',
+    predDisplayName('') === false && predDisplayName(taskDrawerCode) === true);
+  ok('判据在空源码/乱序上不通过（内联确认顺序判据）',
+    predInlineConfirm('') === false
+    && predInlineConfirm('onClick=${clearPreferences} confirming && pref') === false
+    && predInlineConfirm(prefsCode) === true);
+  ok('断言数量足够（>= 60 条，且失败会体现在退出码）', passed + failed >= 60);
 
   console.log('\n结果: ' + passed + ' 通过 / ' + failed + ' 失败');
   process.exit(failed === 0 ? 0 : 1);

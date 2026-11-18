@@ -20,6 +20,15 @@ import { TaskDrawer } from '../components/taskDrawer.js';
 import { statusMeta } from '../components/pauseControl.js';
 import { t as tr, tp, fmtDateTime } from '../i18n/index.js';
 
+// 2026-11-18：任务回收站不再露原始 taskId（与 components/taskName.js 的 taskShortId 同一规则）。
+// 说明：本文件 import 行数被 verify-photo-adjust-ui / verify-p6-offline 的静态断言锁定，
+// 所以这里内联同一条规则、不新增 import；任务显示名统一逻辑仍在 components/taskName.js。
+function shortTaskId(id) {
+  const s = String(id === undefined || id === null ? '' : id).replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  return s.length <= 14 ? s : s.slice(0, 9) + '…' + s.slice(-4);
+}
+
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
@@ -1131,7 +1140,8 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
             <div key=${it.taskId} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
               <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${it.prompt || tr('library.common.noPrompt')}</div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
-                ${it.taskId} · ${it.model || '-'}${tr('library.taskTrash.clipsUnit', { n: it.totalClips || 0 })}${tr('library.taskTrash.deletedAt', { time: String(it.deletedAt || '').slice(0, 19).replace('T', ' ') })}
+                <span title=${tr('tasks.taskIdTooltip', { id: it.taskId || '' })}>${tr('tasks.shortId', { id: shortTaskId(it.taskId) })}</span>
+                · ${it.model || '-'}${tr('library.taskTrash.clipsUnit', { n: it.totalClips || 0 })}${tr('library.taskTrash.deletedAt', { time: String(it.deletedAt || '').slice(0, 19).replace('T', ' ') })}
               </div>
               <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                 <button onClick=${() => restore(it)} disabled=${busy === it.taskId} style=${btn(true)}>${tr('library.taskTrash.restore')}</button>

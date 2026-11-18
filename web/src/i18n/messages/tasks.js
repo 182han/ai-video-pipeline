@@ -6,6 +6,11 @@
 export default {
   zh: {
     tasks: {
+      displayName: '{prompt} · {model} · {time}',
+      displayNameNoPrompt: '{model} · {time}',
+      displayNameUnnamed: '未命名任务 {id}',
+      shortId: 'ID {id}',
+      taskIdTooltip: '完整任务 ID：{id}',
       status: {
         completed: '已完成',
         generating: '生成中',
@@ -42,6 +47,7 @@ export default {
       },
       drawer: {
         title: '任务详情',
+        taskId: '任务 ID',
         close: '关闭',
         loading: '加载中…',
         loadFailed: '读取失败：',
@@ -115,6 +121,11 @@ export default {
   },
   en: {
     tasks: {
+      displayName: '{prompt} · {model} · {time}',
+      displayNameNoPrompt: '{model} · {time}',
+      displayNameUnnamed: 'Untitled task {id}',
+      shortId: 'ID {id}',
+      taskIdTooltip: 'Full task ID: {id}',
       status: {
         completed: 'Completed',
         generating: 'Generating',
@@ -151,6 +162,7 @@ export default {
       },
       drawer: {
         title: 'Task details',
+        taskId: 'Task ID',
         close: 'Close',
         loading: 'Loading…',
         loadFailed: 'Failed to load: ',

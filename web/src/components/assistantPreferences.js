@@ -6,8 +6,9 @@
 //   POST /api/assistant/preferences/clear  → 必须 { approved:true }
 // 硬约束（scripts/verify-assistant-frontend.js 逐条断言）：
 //   · 只读展示 model / resolution / clipDurationSec / bgmStyle（有 updatedAt 就显示）；
-//   · 「清空偏好」**必须先二次确认**（window.confirm）；未确认绝不发请求，
-//     approved:true 只能在确认之后由 buildClearPreferencesRequest 生成；
+//   · 「清空偏好」**必须先二次确认**：按钮始终可点，点击后出**内联确认**（确认清空 / 取消）；
+//     未确认绝不发请求，approved:true 只能在确认之后由 buildClearPreferencesRequest 生成；
+//   · 无偏好时点击提示「当前没有可清空的偏好」（不再把按钮禁用，2026-11-18 用户反馈）；
 //   · 结果三态展示：成功（removed=true/false 分开说）/ 业务失败 / 网络失败，不假装成功。
 // ============================================================
 import { t as tr, fmtDateTime } from '../i18n/index.js';
@@ -65,6 +66,7 @@ export function AssistantPreferencesSection() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState(null);
 
   function load() {
@@ -81,10 +83,28 @@ export function AssistantPreferencesSection() {
 
   useEffect(() => { load(); }, []);
 
+  // 用户点「清空偏好」：无偏好就给提示（按钮始终可点），有偏好才进入内联确认。
+  // 2026-11-18 用户反馈：按钮被 disabled=${!pref} 禁用，看起来像确认框点不了。
+  function startClear() {
+    if (busy) return;
+    if (!pref) {
+      setConfirming(false);
+      setResult({ tone: 'muted', text: tr('settings.xiaozhi.noneToClear') });
+      return;
+    }
+    setResult(null);
+    setConfirming(true);
+  }
+
+  function cancelClear() {
+    if (busy) return;
+    setConfirming(false);
+    setResult(null);
+  }
+
   async function clearPreferences() {
     if (busy) return;
-    // 二次确认：未点「确定」不发请求（approved 门在 builder 里再拦一次）。
-    if (!window.confirm(tr('settings.xiaozhi.clearConfirm'))) return;
+    // 内联确认的「确认清空」才会走到这里；未确认的直接 no-op（approved 门在 builder 再拦一次）。
     const body = buildClearPreferencesRequest({ confirmed: true });
     if (!body) return;
     setBusy(true);
@@ -99,7 +119,7 @@ export function AssistantPreferencesSection() {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || j.ok !== true) {
         setResult({
-          ok: false,
+          tone: 'error',
           text: tr('settings.xiaozhi.clearFailed', {
             error: (j && (j.error || j.code)) || ('HTTP ' + r.status)
           })
@@ -107,17 +127,18 @@ export function AssistantPreferencesSection() {
         return;
       }
       setResult({
-        ok: true,
+        tone: 'ok',
         text: j.removed ? tr('settings.xiaozhi.clearDone') : tr('settings.xiaozhi.clearNothing')
       });
       setData({ ok: true, preferences: null });
     } catch (e) {
       setResult({
-        ok: false,
+        tone: 'error',
         text: tr('settings.xiaozhi.clearFailed', { error: (e && e.message) || String(e) })
       });
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
   }
 
@@ -138,12 +159,31 @@ export function AssistantPreferencesSection() {
         >${loading ? tr('settings.xiaozhi.loading') : tr('settings.xiaozhi.refresh')}</button>
         <button
           type="button"
-          onClick=${clearPreferences}
-          disabled=${busy || !pref}
+          onClick=${startClear}
+          disabled=${busy}
           className="h-7 px-2 rounded-[5px] border border-danger/50 text-[11px] text-danger
                      hover:bg-danger/[.08] disabled:opacity-40"
         >${busy ? tr('settings.xiaozhi.clearing') : tr('settings.xiaozhi.clear')}</button>
       </div>
+      ${confirming && pref ? html`
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap rounded-[6px] border border-danger/30 bg-danger/[.06] px-2.5 py-2">
+          <span className="text-[11px] leading-[1.6] text-ink2">${tr('settings.xiaozhi.clearConfirm')}</span>
+          <span className="flex-1"></span>
+          <button
+            type="button"
+            onClick=${clearPreferences}
+            disabled=${busy}
+            className="h-7 px-2 rounded-[5px] bg-danger text-white text-[11px] disabled:opacity-40"
+          >${busy ? tr('settings.xiaozhi.clearing') : tr('settings.xiaozhi.clearConfirmYes')}</button>
+          <button
+            type="button"
+            onClick=${cancelClear}
+            disabled=${busy}
+            className="h-7 px-2 rounded-[5px] border border-white/[.10] text-[11px] text-ink2
+                       hover:bg-white/[.05] disabled:opacity-40"
+          >${tr('common.cancel')}</button>
+        </div>
+      ` : null}
       ${error ? html`
         <p className="mt-1.5 text-[11px] leading-[1.6] text-danger">${error}</p>
       ` : null}
@@ -162,7 +202,8 @@ export function AssistantPreferencesSection() {
         </p>
       ` : null}
       ${result ? html`
-        <p className=${'mt-1.5 text-[11px] leading-[1.6] ' + (result.ok ? 'text-accent' : 'text-danger')}>
+        <p className=${'mt-1.5 text-[11px] leading-[1.6] '
+          + (result.tone === 'error' ? 'text-danger' : (result.tone === 'ok' ? 'text-accent' : 'text-ink3'))}>
           ${result.text}
         </p>
       ` : null}

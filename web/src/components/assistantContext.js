@@ -149,6 +149,9 @@ function keyLabelOf(k, index) {
 
 export function AssistantContextCard({ ctx, loading, error, onRefresh } = {}) {
   const summary = ctx ? summarizeContext(ctx) : null;
+  // 2026-11-18 用户反馈：一排「视频·中转 无」让人以为自己设置里的 Key 没生效。
+  // 口径：只列**服务端环境变量里已配置**的 Key；一个都没有时给一行说明，不逐项列「无」。
+  const presentKeys = summary ? summary.keys.filter((k) => k.present === true) : [];
   return html`
     <div className="rounded-[8px] border border-white/[.08] bg-s1 px-3 py-2.5" data-card="assistant-context">
       <div className="flex items-center gap-2">
@@ -196,19 +199,22 @@ export function AssistantContextCard({ ctx, loading, error, onRefresh } = {}) {
           resolution: summary.preferences.resolution || '—',
           sec: summary.preferences.clipDurationSec || 0
         })) : null}
-        <div className="mt-1 flex items-start gap-2">
-          <span className="w-[64px] shrink-0 text-[11px] text-ink3">${tr('assistant.context.keys')}</span>
-          <span className="flex-1 flex flex-wrap gap-x-3 gap-y-1">
-            ${summary.keys.map((k, i) => html`
-              <span key=${i} className="text-[11px] text-ink2">
-                ${keyLabelOf(k, i)}
-                <b className=${k.present ? 'text-accent' : 'text-ink3'}>
-                  ${k.present ? tr('assistant.context.keyPresent') : tr('assistant.context.keyAbsent')}
-                </b>
-              </span>
-            `)}
-          </span>
-        </div>
+        ${presentKeys.length > 0 ? html`
+          <div className="mt-1 flex items-start gap-2">
+            <span className="w-[64px] shrink-0 text-[11px] text-ink3">${tr('assistant.context.keys')}</span>
+            <span className="flex-1 flex flex-wrap gap-x-3 gap-y-1">
+              ${presentKeys.map((k) => html`
+                <span key=${k.index} className="text-[11px] text-ink2">✓ ${keyLabelOf(k, k.index)}</span>
+              `)}
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] leading-[1.6] text-ink3">${tr('assistant.context.keysHint')}</p>
+        ` : html`
+          <div className="mt-1 flex items-start gap-2">
+            <span className="w-[64px] shrink-0 text-[11px] text-ink3">${tr('assistant.context.keys')}</span>
+            <span className="flex-1 text-[11px] leading-[1.6] text-ink3">${tr('assistant.context.keysNone')}</span>
+          </div>
+        `}
       ` : null}
       <p className="mt-1.5 text-[10px] leading-[1.6] text-ink3">${tr('assistant.context.note')}</p>
     </div>

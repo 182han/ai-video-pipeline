@@ -7,6 +7,8 @@
 import { navigate } from '../router.js';
 import { t } from '../i18n/index.js';
 import { PauseButton, statusMeta, isRunningTask } from '../components/pauseControl.js';
+// 2026-11-18：生成中也显示任务名（prompt 摘要 + 模型 + 时间），不再拿原始 taskId 当标题。
+import { taskDisplayName, taskShortId } from '../components/taskName.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -85,8 +87,9 @@ export function GenView({ tasks }) {
         >${t('gen.exit')}</button>
       </div>
 
-      <p className="mt-1.5 text-[12px] text-ink3 font-num">
-        ${task.taskId}
+      <p className="mt-1.5 text-[12px] text-ink3">
+        <span title=${t('tasks.taskIdTooltip', { id: task.taskId })}>${taskDisplayName(task)}</span>
+        <span className="font-num"> · ${t('tasks.shortId', { id: taskShortId(task.taskId) })}</span>
         ${cost != null ? t('gen.spent', { amount: Number(cost).toFixed(2) }) : ''}
         ${task.failureCode ? ' · ' + task.failureCode : ''}
       </p>

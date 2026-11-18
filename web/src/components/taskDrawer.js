@@ -10,6 +10,9 @@
 // ============================================================
 import { statusMeta, PauseButton } from './pauseControl.js';
 import { t as tr, has, fmtDateTime } from '../i18n/index.js';
+// 2026-11-18 用户反馈：抽屉标题直接显示原始 task_mwiugoxq_z01l（像报错）。
+// 面向用户统一用 taskDisplayName；完整 taskId 保留在详情行 tasks.drawer.taskId。
+import { taskDisplayName, taskShortId } from './taskName.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -272,7 +275,10 @@ export function TaskDrawer({ taskId, onClose }) {
         <header className="shrink-0 h-12 flex items-center gap-2 px-4 border-b border-white/[.06]">
           <span className=${'w-[7px] h-[7px] rounded-full ' + st.dot}></span>
           <span className=${'text-[12px] ' + st.cls}>${st.text}</span>
-          <span className="text-[11px] text-ink3 font-num truncate">${taskId}</span>
+          <span
+            className="text-[11px] text-ink3 truncate min-w-0"
+            title=${tr('tasks.taskIdTooltip', { id: taskId })}
+          >${t ? taskDisplayName(t) : taskShortId(taskId)}</span>
           <span className="flex-1"></span>
           ${t && html`
             <${PauseButton}
@@ -328,6 +334,9 @@ export function TaskDrawer({ taskId, onClose }) {
               <${Row} label=${tr('tasks.drawer.finalDuration')}>${t.totalDuration ? t.totalDuration + 's' : '-'}</${Row}>
               <${Row} label=${tr('tasks.drawer.created')}>
                 ${t.createdAt ? fmtDateTime(t.createdAt) : '-'}
+              </${Row}>
+              <${Row} label=${tr('tasks.drawer.taskId')}>
+                <span className="font-num text-[11px] break-all">${t.taskId || taskId}</span>
               </${Row}>
               ${t.error && html`<${Row} label=${tr('tasks.drawer.error')}><span className="text-danger">${t.error}</span></${Row}>`}
               ${t.failureCode && html`<${Row} label=${tr('tasks.drawer.aborted')}>

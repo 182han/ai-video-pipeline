@@ -15,6 +15,7 @@
 // ============================================================
 import { TaskDrawer } from '../components/taskDrawer.js';
 import { statusMeta } from '../components/pauseControl.js';
+import { taskShortId } from '../components/taskName.js';
 import { t as tr, tp, fmtDateTime } from '../i18n/index.js';
 
 const { React } = window;
@@ -208,7 +209,11 @@ export function HistoryView({ onChanged }) {
                   <b className="block text-[12.5px] font-normal text-ink truncate">
                     ${(t.prompt || tr('history.noPrompt')).slice(0, 70)}
                   </b>
-                  <span className="block text-[10px] text-ink3 font-num">${t.taskId || id}</span>
+                  <span className="block text-[10px] text-ink3 font-num"
+                    title=${tr('tasks.taskIdTooltip', { id: t.taskId || id })}>
+                    ${((t.deletedAt || t.createdAt) ? fmtDateTime(t.deletedAt || t.createdAt) + ' · ' : '')
+                      + tr('tasks.shortId', { id: taskShortId(t.taskId || id) })}
+                  </span>
                 </span>
                 <button onClick=${() => restoreOne(id)} disabled=${busy === id}
                   className="h-7 px-2 rounded-[5px] text-[11px] text-ink2 hover:bg-white/[.06] disabled:opacity-40">${tr('history.restore')}</button>

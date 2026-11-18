@@ -136,15 +136,15 @@ export default {
         prefs: '偏好',
         prefsValue: '{model} · {resolution} · 每段 {sec} 秒',
         keys: 'Key',
-        keyPresent: '有',
-        keyAbsent: '无',
+        keysNone: '服务端环境变量里没有配置 Key。浏览器设置页里填的 Key 小智看不到、也不在此显示，不影响生成（生成时由浏览器随请求发送）。',
+        keysHint: '这里只列服务端环境变量里已配置的 Key；浏览器设置页里填的 Key 不在此显示，不影响生成。',
         keyWhaletv: '视频·中转',
         keyDashscope: '视频·百炼',
         keyKling: '视频·可灵',
         keyImage: '图片',
         keyMultimodal: '多模态',
         keyLlm: '文案 LLM',
-        note: '只读：不建任务、不触发付费；Key 只显示有/无，不显示值。'
+        note: '只读：不建任务、不触发付费；任何 Key 值都不会显示。'
       },
       repair: {
         title: '可执行的修复建议',
@@ -299,15 +299,15 @@ export default {
         prefs: 'Preferences',
         prefsValue: '{model} · {resolution} · {sec}s per clip',
         keys: 'Keys',
-        keyPresent: 'set',
-        keyAbsent: 'none',
+        keysNone: 'No keys are configured in the server environment. Keys entered in the browser settings are not visible to XiaoZhi and are not listed here; they do not affect generation (the browser sends them with each request).',
+        keysHint: 'Only keys configured in the server environment are listed. Keys entered in the browser settings are not listed here and do not affect generation.',
         keyWhaletv: 'Video · proxy',
         keyDashscope: 'Video · DashScope',
         keyKling: 'Video · Kling',
         keyImage: 'Image',
         keyMultimodal: 'Multimodal',
         keyLlm: 'Prompt LLM',
-        note: 'Read-only: no tasks created, no paid calls. Keys show only whether they are set.'
+        note: 'Read-only: no tasks created, no paid calls. No key values are shown.'
       },
       repair: {
         title: 'Executable repairs',
