@@ -295,8 +295,10 @@ const OPTS = { apiKey: SECRET, baseUrl: 'https://relay.example/v1/', model: 'dee
   check(/url: failure && failure\.url/.test(serverSrc), '助手失败响应带实际请求地址');
   check(/hint: info\.hint/.test(serverSrc), '助手失败响应带 hint');
   check(/detail: info\.detail/.test(serverSrc), '助手失败响应带 detail');
-  check(/message: '助手没有响应，请检查网络或 API Key 后重试'/.test(serverSrc),
-    '首行文案保持不变（其余字段是新增，不破坏旧调用方）');
+  // 2026-11-18 Lead：i18n P3（ec7dac5）把 message 改成 `replyLang === 'en' ? … : 原文` 三元式，
+  // 旧断言写死 `message: '…'` 因此假红。契约本身仍成立（中文首行逐字不变），断言改为匹配两种形态。
+  check(/[:?]\s*'助手没有响应，请检查网络或 API Key 后重试'/.test(serverSrc),
+    '首行文案保持不变（中文逐字；其余字段是新增，不破坏旧调用方）');
   check(!/const raw = await llmService\.chatMulti/.test(serverSrc),
     '调用点已改为解构 { text, failure }（防止回退成旧签名）');
   check(!/describeLlmFailure/.test(serverSrc), '描述函数只在 llmService 里一份（没有重复实现）');
@@ -314,7 +316,10 @@ const OPTS = { apiKey: SECRET, baseUrl: 'https://relay.example/v1/', model: 'dee
   check(/req\.body\.stream === true/.test(serverSrc), '后端识别 stream:true（老前端不带该字段仍走整段返回）');
   check(/x-ndjson/.test(serverSrc), '流式响应用 NDJSON（POST 用不了 EventSource）');
   check(/streamAssistant\(/.test(serverSrc), '流式分支调用 streamAssistant');
-  check(/json\(buildAssistantReply\(raw\)\)/.test(serverSrc) && /\.\.\.buildAssistantReply\(/.test(serverSrc),
+  // 2026-11-18 Lead：i18n P3 给 buildAssistantReply 增加 lang 参数（buildAssistantReply(raw, lang)），
+  // 旧断言要求无参调用因此假红。契约是「两条路径共用同一函数」，允许可选第二参。
+  check(/json\(buildAssistantReply\(raw(?:,\s*[A-Za-z_$][\w$]*)?\)\)/.test(serverSrc)
+    && /\.\.\.buildAssistantReply\(/.test(serverSrc),
     '整段与流式共用 buildAssistantReply（两条路径判定不会走岔）');
   check(/llmService\.extractMessagePrefix\(/.test(serverSrc), '服务端只吐 message 前缀（不把 JSON 脚手架怼到气泡）');
   check(/type: 'final'/.test(serverSrc) && /type: 'message'/.test(serverSrc), '事件类型 message/final 齐全');

@@ -392,6 +392,24 @@ const SUITES = [
     desc: '小智 V2 前端集成（任务播报 WS/eventId 去重/退避重连/卸载关闭、context 页面上报、偏好清空与一键修复/设置确认的 approved 门；静态 + 纯函数 + 桩 WS，零计费）'
   },
   {
+    name: 'assistant-followup',
+    script: 'verify-assistant-followup.js',
+    group: 'fast',
+    desc: '小智答非所问修复（无段号提示词查看/换一组整批换卡/英文 PLAN_* / 人类可读任务名；真实原话中英 + 负向 + 不建任务，零计费）'
+  },
+  {
+    name: 'budget-uncertain',
+    script: 'verify-budget-uncertain.js',
+    group: 'fast',
+    desc: '计费不确定口径（网络类失败不自动退款/4xx 仍退/人工对账幂等；临时 BUDGET_FILE，不碰真实 data/）'
+  },
+  {
+    name: 'budget-guard',
+    script: 'verify-budget-guard.js',
+    group: 'fast',
+    desc: '预算守卫（创作页余额展示/不足提示/重复提交二次确认/任务结束结算；静态 + 纯函数）'
+  },
+  {
     name: 'image-first-http',
     script: 'verify-image-first-http.js',
     group: 'real',
