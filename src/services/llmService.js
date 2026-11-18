@@ -124,14 +124,22 @@ class LLMService {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...messages
-          ],
-          temperature: 0.8
-        }),
+        body: JSON.stringify((() => {
+          // 2026-11-18 S1：允许调用方覆盖 temperature / 传 response_format。
+          // 向后兼容：不传时行为与原来完全一致（temperature 固定 0.8、无 response_format）。
+          const payload = {
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...messages
+            ],
+            temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.8
+          };
+          if (options.responseFormat && typeof options.responseFormat === 'object') {
+            payload.response_format = options.responseFormat;
+          }
+          return payload;
+        })()),
         signal: controller.signal
       });
       if (!resp.ok) {

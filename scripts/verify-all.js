@@ -51,6 +51,12 @@ const SUITES = [
     desc: 'P2/P3 后端 i18n（lang 解析/catalog 中英对等/err 加法式字段/task.lang/质检 labelKey/WS lang/原中文串仍在；live 双语需 --probe + 重启后手跑）'
   },
   {
+    name: 'brain',
+    script: 'verify-brain.js',
+    group: 'fast',
+    desc: '2026-11-18 S1：大脑 C1 理解契约（JSON 提取/输出校验/无 Key·HTTP 错·坏 JSON 三条失败路径/工具白名单/temperature 透传/与规则层比对；全程 stub fetch 不花钱）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
