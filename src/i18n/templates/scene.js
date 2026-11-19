@@ -107,13 +107,19 @@ function clamp(text) {
 }
 
 function negativeEn(card) {
-  // 卡里的负向词是内容数据；保留原词，仅归一空白/分隔符（不做机翻）
+  // 英文负向词**只取 *_en**，不回退中文（英文模式零中文的硬要求）：
+  //   negative_en 是主列表；avoid_en 去掉 "no " 前缀；science.forbidden_en 是卡级补充。
+  // 旧卡（没有 _en）才用通用英文负向词兜底，保证英文模式永不漏出中文。
   const raw = [];
-  if (card && card.negative) raw.push(card.negative);
-  if (card && card.avoid) raw.push(card.avoid);
+  if (card && card.negative_en) raw.push(String(card.negative_en));
+  if (card && card.avoid_en) raw.push(String(card.avoid_en).replace(/\bno\s+/gi, ''));
+  if (card && card.science && card.science.forbidden_en) raw.push(String(card.science.forbidden_en));
+  if (!raw.length) {
+    raw.push('people, text, watermark, buildings, excessive HDR, over-sharpening, plastic look, clipped highlights');
+  }
   const tokens = [];
   const seen = new Set();
-  for (const chunk of raw.join(',').split(/[,，、;；。]+/)) {
+  for (const chunk of raw.join(',').split(/[,;]+/)) {
     const t = chunk.trim();
     if (!t || seen.has(t)) continue;
     seen.add(t);
