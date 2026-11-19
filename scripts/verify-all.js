@@ -63,6 +63,12 @@ const SUITES = [
     desc: '2026-11-19 B 目标：工具调用 agent 契约（工具白名单无 execute/JSON 契约/参数校验/一次重试/say 接地/失败回退/总开关默认关；全程 stub 不花钱、未接线）'
   },
   {
+    name: 'agent-scenarios',
+    script: 'verify-agent-scenarios.js',
+    group: 'fast',
+    desc: '2026-11-19 B 目标：agent 多轮剧本（协作生成→改段→预算→确认→进度→诊断 / 幻觉越权回退 / 总开关 / 英文；脚本化模型 0 花费，不证明真实模型理解力）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
