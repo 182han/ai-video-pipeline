@@ -892,6 +892,11 @@ async function main() {
       settingsSrc.indexOf("fetchJson('/api/assistant/agent')") !== -1
       && /function toggleAgent|async function toggleAgent/.test(settingsSrc)
       && settingsSrc.indexOf('agentTitle') !== -1);
+    // 2026-11-19 事故：React 的 style 只接受对象；上一版把 'opacity:.5;...' 字符串传进去
+    // → 整个设置页崩成 "Minified React error #62"（用户重启后「设置页没有了」）。
+    ok('设置页 style 只传对象（防 React #62 字符串 style 崩页）',
+      settingsSrc.indexOf("'opacity:.5;cursor:not-allowed'") === -1
+      && /style=\$\{agentSwitch && agentSwitch\.envForced \? \{ opacity: 0\.5/.test(settingsSrc));
     const msgs = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'i18n', 'messages', 'settings.js'), 'utf8');
     ok('i18n：开关文案中英都齐（agentTitle/agentDesc/agentSaved）',
       (msgs.match(/agentTitle:/g) || []).length === 2

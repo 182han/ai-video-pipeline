@@ -318,7 +318,7 @@ export function SettingsView() {
             <span className="flex-1"></span>
             <button onClick=${() => { if (agentSwitch && agentSwitch.envForced) return; toggleAgent(!(agentSwitch && agentSwitch.enabled)); }}
               disabled=${!!(agentSwitch && agentSwitch.envForced)}
-              style=${agentSwitch && agentSwitch.envForced ? 'opacity:.5;cursor:not-allowed' : ''}
+              style=${agentSwitch && agentSwitch.envForced ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
               className="h-8 px-3 rounded-[5px] border border-white/[.09] bg-s2 text-[12px] text-ink hover:bg-white/[.06]">
               ${agentSwitch && agentSwitch.enabled ? t('settings.xiaozhi.agentDisable') : t('settings.xiaozhi.agentEnable')}
             </button>
