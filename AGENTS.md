@@ -256,6 +256,19 @@ Error: spawn EPERM
       并在交付里标「未验证」直到同配置真实补跑成功；
    ⑤ **禁止**把换通道/改秒数作为默认建议或静默降级；要改必须用户明确同意并记录决策。
 
+21. **任务最终态必须真的落库；片段成功必须写实测时长（2026-11-19 新增）**：
+   事故：`task_mwnosz8o_uyl4` 补跑成功（内存/JSON 为 completed、成片已出），但数据库停在 `mixing`、
+   `output_path`/`final_qc` 为空；若此时重启，启动僵尸回收会把已完成任务标成 failed。
+   同时 3 个 success 片段的 `duration` 一直是 0，导致终检「接缝/色彩」永远「未执行」→ 假红。
+   判据：① 同一任务的异步落库必须**串行**（`taskManager.saveChains`）；删除/清理前必须
+      `await taskManager.flushSaves(taskId)`，避免「删完又被迟到写入写回」；
+   ② 写库连接级瞬时错误（`Connection terminated` / timeout / ECONNRESET）必须重试一次并重建连接池
+      （`src/storage/index.js` + `postgres.js resetPool()`）；连接/约束类错误不得全部吞掉；
+   ③ 片段 status=success 时必须写 `duration`（优先取片段质检实测值），并清空上一次失败的 `error`；
+   ④ 交付前证明「内存态 = 数据库态」（至少查一次 DB 的 status/output_path/final_qc），
+      不允许只凭内存/JSON 就宣布完成；
+   ⑤ 终检里「未执行」不得被当成通过，也不得被当成「片子差」；必须先修到能真实测量再下结论。
+
 ---
 
 ## 6. 验收口径

@@ -76,10 +76,14 @@ async function cleanupTask(taskId, taskManager) {
     try { await storage.deleteTask(taskId); } catch (e) {}
   };
   if (storage) {
+    // 2026-11-19：落库已改为按任务串行；删除前先等排队写入全部完成，
+    // 否则「先删后到」的迟到写入会把记录又写回来（本机已踩到）。
+    if (typeof tm.flushSaves === 'function') { try { await tm.flushSaves(taskId); } catch (e) {} }
     await deleteOnce();
     removed.push('db');
     // 等一个事件循环 + 短延时，让迟到的 saveTask 落库后再删一次
     await new Promise(r => setTimeout(r, 150));
+    if (typeof tm.flushSaves === 'function') { try { await tm.flushSaves(taskId); } catch (e) {} }
     await deleteOnce();
     // 本地 JSON 也可能被迟到的同步写入重建，再清一次
     try {

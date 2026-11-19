@@ -51,9 +51,26 @@ async function close() {
 
 // ===== 任务 CRUD =====
 
+// 「连接被掐断」类瞬时错误：云数据库（Supabase / Neon）会回收空闲连接，
+// 一次失败并不代表数据写不进去。这里只对连接级错误重试一次，
+// 约束/语法/权限类错误照旧直接抛出，避免掩盖真实问题。
+function isTransientConnError(e) {
+  const msg = String((e && e.message) || e || '');
+  return /Connection terminated|connection timeout|connection closed|ECONNRESET|EPIPE|terminating connection|Client has encountered a connection error/i.test(msg);
+}
+
 /** 保存任务（整条 upsert） */
 async function saveTask(task) {
-  return getDriver().saveTask(task);
+  const d = getDriver();
+  try {
+    return await d.saveTask(task);
+  } catch (e) {
+    if (!isTransientConnError(e) || typeof d.resetPool !== 'function') throw e;
+    console.warn(`[storage] 写库连接异常，回收连接池后重试一次: ${e.message}`);
+    try { await d.resetPool(); } catch (err) { /* 重建失败则让重试自己报错 */ }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return d.saveTask(task);
+  }
 }
 
 /** 读取单个任务（质检结论已带可信度标注 + 历史任务字段补全） */

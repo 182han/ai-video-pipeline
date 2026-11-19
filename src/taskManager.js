@@ -20,6 +20,9 @@ const i18n = require('./i18n');
 const DATA_DIR = config.STORAGE.dataDir;
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
 
+// 同一任务的异步落库串行链：key = taskId，value = 最近一次写入的 Promise。
+const saveChains = new Map();
+
 // 确保目录存在
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -86,9 +89,30 @@ class TaskManager {
     }
 
     // 2. 异步写入数据库（失败不影响主流程，只记日志）
-    storage.saveTask(safe).catch(err => {
-      console.error('数据库保存任务失败:', taskId, err.message);
+    //    2026-11-19 事故：多个 saveTask 并发在飞时，较早的快照可能后落库，
+    //    把 completed 覆盖回 mixing。这里按 taskId 串行化：上一次写完再写下一次，
+    //    保证数据库最终态与内存态一致（本地 JSON 是同步写的，不受此影响）。
+    const prev = saveChains.get(taskId) || Promise.resolve();
+    const next = prev
+      .catch(() => { /* 上一次失败不阻断后续状态落库 */ })
+      .then(() => storage.saveTask(safe))
+      .catch(err => {
+        console.error('数据库保存任务失败:', taskId, err.message);
+      });
+    saveChains.set(taskId, next);
+    next.finally(() => {
+      if (saveChains.get(taskId) === next) saveChains.delete(taskId);
     });
+  }
+
+  // 等待某任务所有排队的异步落库完成。
+  // 用途：测试清理 / 进程收尾 —— 避免「删完记录后，迟到的 saveTask 又把它写回来」。
+  async flushSaves(taskId) {
+    let guard = 0;
+    while (saveChains.has(taskId) && guard < 100) {
+      await saveChains.get(taskId).catch(() => {});
+      guard += 1;
+    }
   }
 
   // 从数据库重新加载全部任务（服务启动时可用，也可手动触发）

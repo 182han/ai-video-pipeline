@@ -149,6 +149,78 @@ function testLogFile() {
   ok(exists, '日志目录已有实际文件（启动过一次即产生）');
 }
 
+// ============================================================
+// 5. 片段成功收口：duration + error（2026-11-19 终检假红事故）
+// ============================================================
+async function testClipSuccessFields() {
+  console.log('\n[5] 片段成功收口：写实测 duration、清掉上次失败的 error');
+  const { cleanupTask } = require('./_test-cleanup');
+  const t = taskManager.createTask('成功字段测试', { model: 'mock', totalClips: 1, clipDuration: 10 });
+  const id = t.taskId;
+  try {
+    // 模拟补跑前：上一次失败留下的脏 error + duration=0
+    taskManager.updateClip(id, 0, { status: 'failed', error: '图生视频 API 错误 (504): {}' });
+    taskManager.setQCResult(id, 0, {
+      passed: true,
+      details: { duration: { passed: true, duration: 10.03, expectedDuration: 10 } }
+    });
+    pipeline._finishClipSuccess(id, 0, 1, { genStartedAt: new Date().toISOString() });
+    const clip = taskManager.getTask(id).clips[0];
+    ok(clip.status === 'success', '片段状态 success', clip.status);
+    ok(Number(clip.duration) === 10.03, 'duration 写入质检实测值 10.03（不再是 0）', String(clip.duration));
+    ok(clip.error === null, '上一次失败的 error 已清空（状态成功但错误字段还是 504 会误导）', String(clip.error));
+    // 纯函数校验：真实模型 + 有 duration 的片段 → 接缝质检能定位缝（Mock 会合法跳过，故此处不进）
+    const seamOpt = pipeline._seamQcOptions({
+      model: 'dashscope',
+      runtimeConfig: {},
+      steps: {},
+      clips: [{ index: 0, status: 'success', duration: 10.03 }]
+    });
+    ok(Array.isArray(seamOpt.clipDurations) && seamOpt.clipDurations.length === 1,
+      '接缝质检能拿到 1 个有效片段时长（终检不再「未执行」）');
+  } finally {
+    await cleanupTask(id, taskManager);
+  }
+}
+
+// ============================================================
+// 6. 任务落库串行化（2026-11-19 数据库停在 mixing 事故）
+// ============================================================
+async function testSaveSerialization() {
+  console.log('\n[6] 任务落库串行化：较早快照不得覆盖最终状态');
+  const storage = require('../src/storage');
+  const orig = storage.saveTask;
+  const calls = [];
+  let n = 0;
+  storage.saveTask = async (task) => {
+    const seq = ++n;
+    const rec = { seq, status: task.status, start: Date.now(), end: 0 };
+    calls.push(rec);
+    // 第一笔故意慢：旧实现下第二笔会先完成、第一笔再把它覆盖回去
+    await new Promise((r) => setTimeout(r, seq === 1 ? 120 : 0));
+    rec.end = Date.now();
+    return task;
+  };
+  const { cleanupTask } = require('./_test-cleanup');
+  const t = taskManager.createTask('落库顺序测试', { model: 'mock', totalClips: 1, clipDuration: 3 });
+  const id = t.taskId;
+  try {
+    await new Promise((r) => setTimeout(r, 20));
+    calls.length = 0;
+    taskManager.updateTaskStatus(id, 'concatenating');
+    taskManager.updateTaskStatus(id, 'completed', { outputPath: 'x.mp4' });
+    await new Promise((r) => setTimeout(r, 300));
+    const overlap = calls.length >= 2 && calls[1].start < calls[0].end;
+    ok(calls.length >= 2, `两次状态都尝试落库（${calls.length} 次）`);
+    ok(!overlap, '第二次落库在第一次完成后才开始（不再并发乱序）');
+    ok(calls.length >= 2 && calls[calls.length - 1].status === 'completed',
+      '最终落库状态是 completed（不会被 mixing 覆盖）', calls.map((c) => c.status).join('→'));
+  } finally {
+    storage.saveTask = orig;
+    await cleanupTask(id, taskManager);
+  }
+}
+
 async function main() {
   console.log('='.repeat(66));
   console.log('三个缺陷修复验收');
@@ -157,6 +229,8 @@ async function main() {
   testClipLossDetection();
   await testReconcile();
   testLogFile();
+  await testClipSuccessFields();
+  await testSaveSerialization();
 
   console.log('\n' + '='.repeat(66));
   console.log(`结果: ${pass} 通过 / ${fail} 失败`);

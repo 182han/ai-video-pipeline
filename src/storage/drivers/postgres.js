@@ -51,6 +51,17 @@ async function q(text, params) {
   return res;
 }
 
+// 连接池自愈（2026-11-19 事故）：Supabase/Neon 等会把空闲连接掐掉，
+// 写库时可能收到 "Connection terminated due to connection timeout"。
+// 这种错误是瞬时的，回收旧池后重建一次即可恢复；不处理会让任务的最终状态
+// （completed / outputPath / finalQC）永远留在数据库里上一次的中间态。
+async function resetPool() {
+  if (!pool) return;
+  const old = pool;
+  pool = null;
+  try { await old.end(); } catch (e) { /* 旧连接已坏，end 失败不影响重建 */ }
+}
+
 // ===== 账号（登录墙）辅助 =====
 
 let usersTableReady = false;
@@ -141,6 +152,7 @@ function rowToClip(row) {
 
 module.exports = {
   name: 'postgres',
+  resetPool,
 
   async init() {
     // 探活，顺便验证 schema 是否已执行

@@ -3217,13 +3217,21 @@ class Pipeline {
       clipDurationSec: task.clipDuration,
       modelId: task.runtimeConfig && task.runtimeConfig.modelId
     }, attempt);
-    const clip = taskManager.updateClip(taskId, index, {
-      status: 'success',
-      attempts: attempt,
-      timing: t,
-      cost,
-      ...extra
-    });
+
+    // 2026-11-19 事故：成功片段的 duration 一直是 0，导致终检「接缝质量/色彩连续性」
+    // 拿不到片段时长 → 判定「未执行」→ 真实成片被标成质检未通过（seam/color 永假红）。
+    // 这里把实际时长写进片段（优先用片段质检里的实测值；没有则用任务配置兜底），
+    // 同时清掉上一次失败留下的 error，避免「状态成功但错误字段还是 504」的误导。
+    const current = task && Array.isArray(task.clips) ? task.clips[index] : null;
+    const qcDur = current && current.qcResult && current.qcResult.details
+      && current.qcResult.details.duration
+      && Number(current.qcResult.details.duration.duration);
+    const fallbackDur = Number(task && task.clipDuration);
+    const patch = { status: 'success', attempts: attempt, timing: t, cost, ...extra };
+    if (Number.isFinite(qcDur) && qcDur > 0) patch.duration = qcDur;
+    else if (Number.isFinite(fallbackDur) && fallbackDur > 0) patch.duration = fallbackDur;
+    patch.error = null;
+    const clip = taskManager.updateClip(taskId, index, patch);
     // 入库：mock 模式在 library.ingestClip 内部直接跳过
     try {
       library.ingestClip(taskManager.getTask(taskId), clip);
