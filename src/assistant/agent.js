@@ -62,9 +62,15 @@ const TOOLS = Object.freeze([
   },
   {
     name: 'show_plan',
-    desc: '把当前计划的内容/摘要读给用户看（只读）',
-    descEn: 'Show the current plan (read-only)',
+    desc: '把当前计划的摘要读给用户看（只读；不含各段提示词）',
+    descEn: 'Show the current plan summary (read-only; not the per-clip prompts)',
     params: {}
+  },
+  {
+    name: 'show_prompt',
+    desc: '把当前计划各段的提示词原文贴给用户看（只读；可指定第几段）',
+    descEn: 'Show the actual per-clip prompt text of the current plan (read-only; optional segment)',
+    params: { segment: 'number?' }
   },
   {
     name: 'show_scene_cards',
@@ -199,7 +205,8 @@ function buildSystemPrompt(lang, ctx) {
       toolLines('en'),
       '',
       'Easy-to-mistake distinctions:',
-      '· "show the prompt / show the scene cards" -> show_plan / show_scene_cards (read-only), NOT a new plan.',
+      '· "show me the prompt" -> show_prompt (actual prompt text); "show the scene cards" -> show_scene_cards; "show the plan" -> show_plan. None of them creates a new plan.',
+      '· If the user asks you to explain what you just said ("what did you write?", "what was that?") -> use say to explain the previous message; do NOT call show_plan and repeat the card.',
       '· "which cards does this plan use" -> show_scene_cards; "how many cards/photos are left" -> assets.',
       '· "make it 1080p" with a plan present -> edit_plan(set_resolution); "default / from now on" -> settings_change.',
       '· "swap them all / another batch" -> edit_plan(action=swap_all).',
@@ -242,7 +249,8 @@ function buildSystemPrompt(lang, ctx) {
     toolLines('zh'),
     '',
     '几个容易做错的区分：',
-    '· 「提示词呢 / 场景卡看一下」= 查看当前计划（show_plan / show_scene_cards），不是新计划；',
+    '· 「提示词呢 / 我看看提示词」= show_prompt（贴出各段提示词原文）；「场景卡看一下」= show_scene_cards；「计划里有什么」= show_plan；都不是新计划；',
+    '· 用户让你解释你刚说过的话（「你写的什么」「刚才那段是什么」）→ 用 say 解释上一句，**不要**再调 show_plan 重复计划卡；',
     '· 「看当前计划用了哪些卡」= show_scene_cards；「还剩多少张卡/库存」= assets；',
     '· 「改成 1080p」且已有计划 = edit_plan(set_resolution)；说「默认/以后都用」才是 settings_change；',
     '· 「换一组 / 都换掉」= edit_plan(action=swap_all)；',
@@ -460,6 +468,13 @@ async function runTurn(opts) {
     temperature: o.temperature !== undefined ? o.temperature : 0.3
   };
   if (o.timeoutMs) llmOpts.timeoutMs = o.timeoutMs;
+  // 2026-11-19 延迟优化：真实模型默认在「思考」，实测简单回合 8–15s。
+  // 小智只需要选工具/说一句，默认关掉思考；需要更强推理时传 thinking:{type:'enabled'}，
+  // 或设环境变量 ASSISTANT_AGENT_THINKING=on。
+  const thinkingDefault = String(process.env.ASSISTANT_AGENT_THINKING || '').toLowerCase() === 'on'
+    ? null : { type: 'disabled' };
+  if (o.thinking !== undefined) llmOpts.thinking = o.thinking;
+  else if (thinkingDefault) llmOpts.thinking = thinkingDefault;
   const system = buildSystemPrompt(lang, ctx);
   const started = Date.now();
   let raw = null;

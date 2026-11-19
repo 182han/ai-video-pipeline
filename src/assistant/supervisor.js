@@ -2411,6 +2411,15 @@ const AGENT_TOOL_HANDLERS = {
     if (!plan) return agentNoPlan(ctx.lang);
     return { ok: true, reply: describeReply(plan, ctx.lang), replyKey: 'assistant.reply.plan', plan, actions: null };
   },
+  show_prompt(sessionId, args, ctx) {
+    const lang = (ctx && ctx.lang) || 'zh';
+    const seg = Number(args && args.segment);
+    // 复用规则路径的提示词视图：显式段号只贴单段，否则贴全部/前 N 段。
+    const text = Number.isInteger(seg) && seg >= 1 ? `第 ${seg} 段提示词给我看` : '提示词给我看';
+    const reply = tryReplyPromptView(sessionId, text, lang);
+    if (!reply) return agentToolFail('AGENT_PROMPT_VIEW_FAILED', '提示词读取失败（可能没有计划卡）');
+    return { ok: true, reply, replyKey: 'assistant.reply.promptView', plan: null, actions: null };
+  },
   show_scene_cards(sessionId, args, ctx) {
     return {
       ok: true, reply: replyForPlanScenes(sessionId, ctx.lang),

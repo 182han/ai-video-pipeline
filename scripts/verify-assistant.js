@@ -646,8 +646,8 @@ async function main() {
       tool, args, sessionId: sidA, userId: 'local', lang: 'zh'
     });
 
-    ok('工具门面白名单 13 个且**没有** execute',
-      supervisor.AGENT_TOOL_NAMES.length === 13
+    ok('工具门面白名单 14 个且**没有** execute',
+      supervisor.AGENT_TOOL_NAMES.length === 14
       && ['execute', 'delete', 'create_task', 'pay'].every((n) => supervisor.AGENT_TOOL_NAMES.indexOf(n) === -1),
       supervisor.AGENT_TOOL_NAMES.join(','));
 
@@ -661,6 +661,17 @@ async function main() {
     ok('show_plan → 只读摘要、planId 不变、不建任务',
       shown.ok === true && !!shown.plan && shown.plan.planId === created.plan.planId
       && taskManager.getAllTasks().length === toolsBefore);
+
+    const showPrompt = t('show_prompt');
+    ok('show_prompt → 贴出各段提示词（含第 1 段）、plan=null、不建任务',
+      showPrompt.ok === true && showPrompt.plan === null
+      && /第 1 段/.test(showPrompt.reply) && showPrompt.reply.length > 40,
+      showPrompt.ok ? showPrompt.reply.slice(0, 40) : showPrompt.code);
+    const showPrompt2 = t('show_prompt', { segment: 2 });
+    ok('show_prompt(segment=2) → 只贴第 2 段',
+      showPrompt2.ok === true && /第 2 段/.test(showPrompt2.reply)
+      && !/第 1 段/.test(showPrompt2.reply),
+      showPrompt2.ok ? showPrompt2.reply.slice(0, 40) : showPrompt2.code);
 
     const cards = t('show_scene_cards');
     ok('show_scene_cards → 只读预览（plan=null）',

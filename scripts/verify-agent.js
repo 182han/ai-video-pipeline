@@ -48,8 +48,8 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
     agent.FORBIDDEN_TOOL_NAMES.every((n) => agent.TOOL_NAMES.indexOf(n) === -1),
     agent.TOOL_NAMES.join(','));
   ok('工具名唯一', new Set(agent.TOOL_NAMES).size === agent.TOOL_NAMES.length);
-  ok('v1 必备工具齐全（计划/编辑/看卡/状态/预算/诊断/配乐/库存/确认）',
-    ['plan_video', 'edit_plan', 'show_plan', 'show_scene_cards', 'status',
+  ok('v1 必备工具齐全（计划/编辑/看卡/看提示词/状态/预算/诊断/配乐/库存/确认）',
+    ['plan_video', 'edit_plan', 'show_plan', 'show_prompt', 'show_scene_cards', 'status',
       'last_video', 'budget', 'diagnose', 'bgm', 'assets', 'confirm_plan', 'prefs', 'settings_change']
       .every((n) => agent.TOOL_NAMES.indexOf(n) !== -1));
 
@@ -72,6 +72,10 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
   const vPlan = agent.validateOutput({ tool: 'plan_video', args: { totalMinutes: 2, resolution: '1080p' } });
   ok('plan_video 合法输出通过', vPlan.ok && vPlan.mode === 'tool' && vPlan.args.totalMinutes === 2);
   ok('edit_plan swap_all 合法', agent.validateOutput({ tool: 'edit_plan', args: { action: 'swap_all' } }).ok);
+  ok('show_prompt 合法（可带段号；段号必须数字）',
+    agent.validateOutput({ tool: 'show_prompt' }).ok
+    && agent.validateOutput({ tool: 'show_prompt', args: { segment: 2 } }).ok
+    && agent.validateOutput({ tool: 'show_prompt', args: { segment: 'x' } }).error === 'BAD_ARG');
   ok('say-only 合法', agent.validateOutput({ say: '你好，我是小智。' }).ok);
   ok('clarify 合法', agent.validateOutput({ clarify: '你要做多长？' }).ok);
   ok('未知工具被拒', agent.validateOutput({ tool: 'delete_everything' }).error === 'TOOL_NOT_ALLOWED');
@@ -225,10 +229,28 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
     && ungrounded.failure.reason === 'UNGROUNDED_MONEY');
 
   // 默认调用链走 llmService.chatMulti（接线前的最后一道保险）
-  const restore = stubChat(async () => reply({ tool: 'status', args: {} }));
+  let capturedThinkingOpts = null;
+  const restore = stubChat(async (system, messages, opts) => {
+    capturedThinkingOpts = opts || {};
+    return reply({ tool: 'status', args: {} });
+  });
   const defaultTurn = await agent.runTurn({ text: '进度', lang: 'zh', ctx: CTX });
   restore();
   ok('默认调用走 llmService.chatMulti', defaultTurn.ok && defaultTurn.tool === 'status');
+  ok('默认关闭思考（thinking disabled，降低真实模型延迟）',
+    !!capturedThinkingOpts && capturedThinkingOpts.thinking
+    && capturedThinkingOpts.thinking.type === 'disabled',
+    JSON.stringify(capturedThinkingOpts && capturedThinkingOpts.thinking));
+  let enabledThinkingOpts = null;
+  const restore2 = stubChat(async (system, messages, opts) => {
+    enabledThinkingOpts = opts || {};
+    return reply({ tool: 'status', args: {} });
+  });
+  await agent.runTurn({ text: '进度', lang: 'zh', ctx: CTX, thinking: { type: 'enabled' } });
+  restore2();
+  ok('调用方可以显式开回思考（thinking enabled）',
+    !!enabledThinkingOpts && enabledThinkingOpts.thinking
+    && enabledThinkingOpts.thinking.type === 'enabled');
 
   // 2026-11-19 真机 A/B 抓到：把 llmService.chatMulti 赋给变量再调用会丢 this
   // （chatMulti 内部用 this._resolve → 0ms THROWN、46/46 回退）。这里用「检查 this」的

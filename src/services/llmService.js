@@ -138,6 +138,11 @@ class LLMService {
           if (options.responseFormat && typeof options.responseFormat === 'object') {
             payload.response_format = options.responseFormat;
           }
+          // 2026-11-19 延迟优化：relay 默认带 reasoning_content（思考），复杂回合会把
+          // 决策拖到 8–15s。允许调用方传 thinking:{type:'disabled'} 关掉；不传时行为不变。
+          if (options.thinking && typeof options.thinking === 'object') {
+            payload.thinking = options.thinking;
+          }
           return payload;
         })()),
         signal: controller.signal

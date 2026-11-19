@@ -25,6 +25,7 @@ const TOOL_INTENT = Object.freeze({
   plan_video: 'create',
   edit_plan: 'plan_edit',
   show_plan: 'plan_edit',
+  show_prompt: 'plan_edit',
   show_scene_cards: 'plan_scenes',
   status: 'status',
   last_video: 'last',

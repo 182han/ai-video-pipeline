@@ -242,6 +242,39 @@ const stamp = () => Date.now().toString(36) + '_' + Math.random().toString(36).s
       reply.split('\n')[0]);
   }
 
+  // ================= F =================
+  group('F. 看提示词（show_prompt，不是重复计划卡）');
+  {
+    const sid = 'scn-f-' + stamp();
+    const tasks0 = taskManager.getAllTasks().length;
+    const f1 = await turn({
+      text: '做个 30 秒的极光片',
+      sessionId: sid,
+      decisions: [{ tool: 'plan_video', args: { totalMinutes: 0.5 } }]
+    });
+    ok('F1 先排计划（3 段）', f1.source === 'agent' && f1.r.plan && f1.r.plan.clipCount === 3);
+    const f2 = await turn({
+      text: '我看看提示词',
+      sessionId: sid,
+      decisions: [{ tool: 'show_prompt', args: {} }]
+    });
+    ok('F2 「我看看提示词」→ show_prompt + 贴出第 1 段原文（不是计划摘要）',
+      f2.source === 'agent' && f2.r.agent && f2.r.agent.tool === 'show_prompt'
+      && /第 1 段/.test(f2.r.reply) && f2.r.reply.length > 40,
+      String(f2.r.reply).slice(0, 30));
+    const f3 = await turn({
+      text: '第二段提示词呢',
+      sessionId: sid,
+      decisions: [{ tool: 'show_prompt', args: { segment: 2 } }]
+    });
+    ok('F3 指定第 2 段 → 只贴第 2 段',
+      f3.r.agent && f3.r.agent.tool === 'show_prompt'
+      && /第 2 段/.test(f3.r.reply) && !/第 1 段/.test(f3.r.reply));
+    ok('F4 只读：计划不变、0 任务',
+      assistantMemory.lastPlan(sid).planId === f1.r.plan.planId
+      && taskManager.getAllTasks().length === tasks0);
+  }
+
   console.log('\n================================================================');
   console.log('结果: ' + pass + ' 通过 / ' + fail + ' 失败');
   console.log('================================================================');
