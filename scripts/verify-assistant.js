@@ -470,6 +470,90 @@ async function main() {
       !!rRes.plan && String(rRes.plan.resolution).toLowerCase().includes('1080'));
   }
 
+  // ================= [3a-3] 2026-11-19 D1–D3：E0 找出的确定性缺口 =================
+  // 背景（交接 §16）：57 句语料里 12 句零命中，逐条看只有 3 句是真垃圾输入，
+  // 其余 9 句是**确定性缺口**——规则就能补齐，不需要 4 秒/次的模型。
+  // 这里按 D1→D2→D3 逐条锁死；**只纠正意图标签，不改执行路径**：
+  // 槽位句仍走既有「按上次计划续问」逻辑（回复一张新计划卡），避免动场景卡分配 / planId 语义。
+  console.log('\n[3a-3] D1–D3：零命中句的确定性改造（2026-11-19）');
+  ok('D1 槽位句（只给分辨率）→ plan_edit，不再 unknown',
+    ['1080p', '480p', '改成 1080p', '换成 1080p', '改成 720p', '分辨率 1080p']
+      .every((t) => assistantMemory.classify(t).intent === 'plan_edit'),
+    ['1080p', '改成 1080p'].map((t) => t + '=' + assistantMemory.classify(t).intent).join(' / '));
+  ok('D1 负向：带「分辨率/通道」名词的显式设置句仍走 settings（不抢 V2 B6）',
+    assistantMemory.classify('把分辨率改成 1080p').intent === 'settings');
+  ok('D1 槽位句带 reason=slot_only（supervisor 据此走续问路径，不进「按段编辑」）',
+    assistantMemory.classify('1080p').reason === 'slot_only'
+    && assistantMemory.classify('改成 1080p').reason === 'slot_only');
+  ok('D1 负向：带主题 / 中文时长的句子仍是 create（槽位分支不抢排计划）',
+    assistantMemory.classify('10 分钟极光').intent === 'create'
+    && assistantMemory.classify('每段 15 秒').intent === 'create'
+    && assistantMemory.classify('10 分钟').intent === 'create');
+  ok('D1 负向：带指代的「这里换成1080p」/「都换成 1080p」不归 plan_edit（不抢既有续问）',
+    assistantMemory.classify('这里换成1080p').intent !== 'plan_edit'
+    && assistantMemory.classify('都换成 1080p').intent !== 'plan_edit');
+  ok('D1 英文时长句与中文对称：「25 seconds」→ create（中文「25 秒」本来就是 create）',
+    assistantMemory.classify('25 seconds').intent === 'create'
+    && assistantMemory.classify('2 minutes').intent === 'create');
+  {
+    const sidSlot = 'verify-d1-slot-' + Date.now().toString(36);
+    const noPlan = supervisor.handleMessage({ sessionId: sidSlot, text: '1080p', lang: 'zh' });
+    ok('D1 行为：没有计划时说「1080p」→ 问总时长（不问第几段）',
+      noPlan.ok === true && noPlan.intent === 'plan_edit' && noPlan.plan === null
+      && /要做多长|总时长/.test(noPlan.reply) && !/第几段/.test(noPlan.reply),
+      String(noPlan.reply || '').slice(0, 50));
+    const base = supervisor.handleMessage({ sessionId: sidSlot, text: '30 秒', lang: 'zh' });
+    const changed = supervisor.handleMessage({ sessionId: sidSlot, text: '1080p', lang: 'zh' });
+    ok('D1 行为：有计划时说「1080p」→ 按续问改计划（分辨率 1080p、不反问时长）',
+      base.ok === true && !!base.plan
+      && changed.ok === true && changed.intent === 'plan_edit'
+      && !!changed.plan && String(changed.plan.resolution).toLowerCase() === '1080p'
+      && changed.replyKey === 'assistant.reply.plan' && !/要做多长/.test(changed.reply),
+      `${changed.replyKey}/${changed.plan && changed.plan.resolution}`);
+  }
+  ok('D2 多命中优先级：同时有「总时长」和「看场景卡」→ create（时长信号不被抢走）',
+    assistantMemory.classify('我要1个20秒的，每段为10秒，把场景卡给我看一下').intent === 'create');
+  ok('D2 负向：没有时长信号时「看场景卡」仍是 plan_scenes（「第 2 段」不算时长）',
+    assistantMemory.classify('看一下场景卡').intent === 'plan_scenes'
+    && assistantMemory.classify('看一下第 2 段的场景卡').intent === 'plan_scenes');
+  ok('D2 行为：长句 → 排计划（20 秒 / 每段 10 秒 = 2 段），不落到场景预览',
+    (() => {
+      const r = supervisor.handleMessage({
+        sessionId: 'verify-d2-' + Date.now().toString(36),
+        text: '我要1个20秒的，每段为10秒，把场景卡给我看一下',
+        lang: 'zh'
+      });
+      return r.ok === true && r.intent === 'create' && !!r.plan
+        && r.plan.clipCount === 2 && r.replyKey === 'assistant.reply.plan';
+    })());
+  ok('D3 裸名词 / 口语问法 → plan_scenes',
+    ['场景卡', '场景卡呢', '那场景卡', '你选的是哪几张卡', '你选的是哪几张场景卡']
+      .every((t) => assistantMemory.classify(t).intent === 'plan_scenes'),
+    ['场景卡', '你选的是哪几张卡'].map((t) => t + '=' + assistantMemory.classify(t).intent).join(' / '));
+  ok('D3 负向：不要场景卡 / 配乐有哪些 / 场景从卡库选 的原分类不变',
+    assistantMemory.classify('不要场景卡').intent === 'unknown'
+    && assistantMemory.classify('配乐有哪些').intent === 'bgm'
+    && assistantMemory.classify('10 分钟，场景从卡库选。').intent === 'create');
+  {
+    const sidBare = 'verify-d3-bare-' + Date.now().toString(36);
+    supervisor.handleMessage({ sessionId: sidBare, text: '30 秒', lang: 'zh' });
+    const keys = assistantMemory.lastPlan(sidBare).sceneCardIds
+      .map((id) => sceneCardLibrary.getCardById(id).scene_key);
+    const bare = supervisor.handleMessage({ sessionId: sidBare, text: '场景卡', lang: 'zh' });
+    ok('D3 行为：有计划时说裸名词「场景卡」→ 只读预览（plan=null、列出已固定的卡）',
+      bare.ok === true && bare.intent === 'plan_scenes' && bare.plan === null
+      && keys.length === 3 && keys.every((k) => bare.reply.includes(k)),
+      bare.reply && bare.reply.split('\n')[0]);
+  }
+  ok('D1–D3 与 traceMatches 保持一致（首个命中映射后 = classify 结果）',
+    ['1080p', '改成 1080p', '25 seconds', '场景卡', '你选的是哪几张卡',
+      '我要1个20秒的，每段为10秒，把场景卡给我看一下']
+      .every((t) => {
+        const hits = assistantMemory.traceMatches(t);
+        const first = hits.length ? (hits[0].startsWith('plan_edit') ? 'plan_edit' : hits[0]) : 'unknown';
+        return first === assistantMemory.classify(t).intent;
+      }));
+
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================
   console.log('\n[3b] 新意图：问「选了哪些场景卡」/ 要「纯文生视频」（只读，不建计划）');
   ok('意图分类：「哪三个场景」→ plan_scenes（不再当成新计划重问时长）',
@@ -715,8 +799,10 @@ async function main() {
   ok('提示词超过 400 字 → 截断到 400 且回复告知（不静默）',
     longMsg.intent === 'plan_edit' && longPlan.promptOverrides['0'].length === 400
     && /截断/.test(longMsg.reply), `${longPlan.promptOverrides['0'].length} 字`);
-  ok('新意图不抢既有：改成 1080p / 每段 15 秒 / 再来一条 / 不要场景卡 分类不变',
-    assistantMemory.classify('改成 1080p').intent === 'unknown'
+  // 2026-11-19 D1：改成 1080p 由 unknown → plan_edit（纯分辨率槽位句）。
+  // 每段 15 秒 仍 create：中文「秒」被 RE_CREATE 接住，槽位分支只补今天掉 unknown 的那类。
+  ok('新意图不抢既有：改成 1080p（D1 起归 plan_edit）/ 每段 15 秒 / 再来一条 / 不要场景卡',
+    assistantMemory.classify('改成 1080p').intent === 'plan_edit'
     && assistantMemory.classify('每段 15 秒').intent === 'create'
     && assistantMemory.classify('再来一条').intent === 'create'
     && assistantMemory.classify('不要场景卡').intent === 'unknown');
@@ -1589,8 +1675,8 @@ async function main() {
   ok('B5 图片条目本身创建成功（两张：一通过一待审）',
     !!b5PhotoA && !!b5PhotoB && b5Totals.approved >= 1 && b5Totals.pending >= 1,
     `A=${b5PhotoA && b5PhotoA.status} B=${b5PhotoB && b5PhotoB.status}`);
-  ok('V2 新意图不抢 V1 既有分类（改成1080p→unknown / 每段15秒→create / 再来一条→create / 不要场景卡→unknown / 配乐有哪些→bgm / 你选了哪些场景卡→plan_scenes）',
-    assistantMemory.classify('改成 1080p').intent === 'unknown'
+  ok('V2 新意图不抢 V1 既有分类（改成1080p→plan_edit（D1）/ 每段15秒→create / 再来一条→create / 不要场景卡→unknown / 配乐有哪些→bgm / 你选了哪些场景卡→plan_scenes）',
+    assistantMemory.classify('改成 1080p').intent === 'plan_edit'
     && assistantMemory.classify('每段 15 秒').intent === 'create'
     && assistantMemory.classify('再来一条').intent === 'create'
     && assistantMemory.classify('不要场景卡').intent === 'unknown'

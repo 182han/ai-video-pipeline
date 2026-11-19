@@ -1561,12 +1561,17 @@ function handleMessage(opts = {}) {
   memory.appendMessage(sessionId, { role: 'user', text });
 
   const intent = memory.classify(text);
+  // 2026-11-19 D1：纯分辨率槽位句（「1080p」「改成 1080p」）的意图是 plan_edit，
+  // 但执行语义是**按上次计划续问**（与既有 buildPlan 续问路径一致），不能进「按段编辑」——
+  // 否则会回「要换第几段？」。这里只把它排除出 planEditBranch，让它落到下面的
+  // 续问/问时长分支（行为与 D1 之前完全一致，只把意图标签从 unknown 纠正为 plan_edit）。
+  const slotOnlyEdit = intent.intent === 'plan_edit' && intent.reason === 'slot_only';
   // 2026-11-17 V1（A5/A6）：口语形态兜底（见 isPlanPromptEditForm 的注释）。
   const promptEditForm = isPlanPromptEditForm(text);
   // 2026-11-17 V1 遗留 ⑤：关场景卡句（「去掉场景卡 / 场景卡不要了」）不是续问，
   // 不能被 isFollowUp 的「去掉」带进「按上次参数重排一条新计划」；与「不要场景卡」同一路径。
   const sceneCardsOff = memory.isSceneCardsOff(text);
-  const planEditBranch = intent.intent === 'plan_edit'
+  const planEditBranch = (intent.intent === 'plan_edit' && !slotOnlyEdit)
     || (promptEditForm && (intent.intent === 'unknown' || intent.intent === 'create'));
   const reportedIntent = planEditBranch ? 'plan_edit' : intent.intent;
   const userId = opts.userId ? String(opts.userId) : 'local';

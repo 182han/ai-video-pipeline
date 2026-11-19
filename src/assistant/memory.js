@@ -216,12 +216,27 @@ const RE_LAST = /上一次|上一次的|上个|上一条|上条|最近.{0,6}(?:�
 const RE_STATUS = /进度|到哪|跑到|状态|完成了吗|好了没|还要多久/;
 // 2026-11-16 Lead：用户新意图「看计划用了哪些场景卡」。
 // 触发例：「你可以给我看一下你选择的是哪三个场景吗」「选了哪些场景卡」「场景是哪几个」。
-// 注意必须要求疑问词，避免把「10 分钟，场景从卡库选」这类排计划的话误判成查场景。
+// 注意：本正则要求疑问词，避免把「10 分钟，场景从卡库选」这类排计划的话误判成查场景；
+// 2026-11-19 D3 补的「裸名词 / 口语问法」放在 RE_PLAN_SCENES_BARE / _COLLOQ 里（见下）。
 const RE_PLAN_SCENES = /(?:哪|几|哪些|什么)[^。，,；;？?!！]{0,6}?场景|场景卡?\s*(?:是|有|抽|选|用)\s*(?:哪|几|什么|哪些)|(?:看看|看一下|给我看|展示|预览|列一下|瞧一眼).{0,8}场景|场景.{0,6}(?:预览|列表|看看|看一下|看下|给我看|列一下|瞧一眼|有哪)/;
+// 2026-11-19 D3（E0 §16.2 零命中句）：裸名词与口语问法。
+//   · 「场景卡 / 场景卡呢 / 那场景卡」——整句只有一个名词，没有动词也算"看卡"；
+//     整句锚定是关键：不会抢「不要场景卡」（前面有否定词）或排计划长句。
+//   · 「你选的是哪几张卡 / 你选的是哪几张场景卡」——旧规则只认「选了哪些场景卡」，
+//     「选的是哪几张卡」掉 unknown。
+const RE_PLAN_SCENES_BARE = /^(?:那|这个|那个|然后|还有)?\s*场景卡?\s*(?:呢|啊|呀|嘛|吧)?\s*[？?]?$/;
+const RE_PLAN_SCENES_COLLOQ = /(?:选|挑|抽|取)(?:的|了)?(?:是)?\s*(?:哪|几|哪些)\s*(?:几)?\s*(?:张|个)?\s*(?:场景)?卡/;
+function isPlanScenesQuery(text) {
+  const s = String(text || '');
+  return RE_PLAN_SCENES.test(s) || RE_PLAN_SCENES_BARE.test(s) || RE_PLAN_SCENES_COLLOQ.test(s);
+}
 // 2026-11-16 Lead：用户新意图「切纯文生视频（不要出图）」。
 // 只认明确的「不出图」表达，不抢「文生图 → 图生视频」这类正常排计划描述。
 const RE_NO_IMAGE = /(?:不要|不用|别|取消|关闭|关掉|去掉|免了?)\s*(?:再)?\s*(?:逐段出图|出图|图片|配图|生成图|插图)|(?:纯|只|直接)\s*(?:用|走|要|做|跑|出)?\s*文生视频|文生视频\s*(?:模式|就行|即可|好了|可以吗|能用吗|能选吗|能切吗)|不出图|无图模式|(?:选择|选|切|换|改成?|用)\s*(?:纯)?\s*文生图(?:的)?模式|文生图\s*模式/;
-const RE_CREATE = /(?:做|拍|生成|来|搞|安排|剪).{0,6}(?:一条|一个|一部)?|(?:分钟|小时|秒|段)/;
+// 2026-11-19 D1（E0 §16.2 零命中句「25 seconds」）：英文时长句与中文对称。
+// 中文「25 秒」本来就命中 RE_CREATE（→ create，前端弹计划卡），英文缺同义词就一直 unknown。
+// 只认「数字 + 英文时间单位」，避免把 "how long"、"hello" 这类话误判成排计划。
+const RE_CREATE = /(?:做|拍|生成|来|搞|安排|剪).{0,6}(?:一条|一个|一部)?|(?:分钟|小时|秒|段)|\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b/i;
 // 2026-11-16 P7-A：计划内精准修改（换单段场景卡 / 改单段提示词）。
 // 必须**同时**出现「第 N 段/个/张」与编辑动词才进本意图，避免抢走
 // 「改成 1080p」「每段 15 秒」「再来一条」「不要场景卡」这些既有续问路径。
@@ -237,6 +252,28 @@ const RE_BGM_ACTION = /有哪些|有什么|哪几首|换成|改成|改为|用第
 const RE_BGM_INDEX = /第\s*(?:\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
 const RE_BGM_SWAP = /换一首|换首|换一曲|再来一首/;
 const RE_TIME_WORD = /(?:分钟|小时|秒|段)/;
+// 2026-11-19 D2（E0 §16.4 多命中优先级）：只认「数字 + 时间单位」的**总时长**信号。
+// 不把「段」算进来——「看一下第 2 段的场景卡」里的「2 段」是段号，不是时长；
+// 若把「段」当时长，这句会被抢成 create（回归）。
+const RE_TOTAL_DURATION = /(?:\d+|[零〇一二两三四五六七八九十百]+)\s*(?:个)?\s*(?:小时|钟头|分钟|秒钟?)|\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b|半\s*(?:个)?\s*(?:小时|分钟)/i;
+// 2026-11-19 D1（E0 §16.4 槽位句）：整句只给了一个分辨率 = 改当前计划的画质。
+// 允许口语前后缀（那/就、把分辨率、改成/换成/设为、吧/呢/please…）；
+// 但任何其它内容都不算，**故意**不匹配「这里换成1080p」「都换成 1080p」——
+// 那两句是既有续问/整批换卡语义，D1 不许抢（verify-assistant 有负向断言）。
+const RE_RESOLUTION_TOKEN = /^(?:480p|720p|1080p|4k|2160p)$/i;
+function isResolutionOnlySlot(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  const stripped = s
+    .replace(/^(?:那|就|再|然后)\s*/i, '')
+    .replace(/^(?:把|将)\s*(?:分辨率|画质)?\s*/i, '')
+    .replace(/^(?:分辨率|画质)\s*/i, '')
+    .replace(/^(?:改成|改为|换成|换到|设为|设成|调到|调成|修改为|change\s+to|set\s+to|switch\s+to|make\s+it)\s*/i, '')
+    .replace(/^(?:为|成|到)\s*/i, '')
+    .replace(/\s*(?:吧|呢|啊|呀|呗|谢谢|please|pls|plz|即可|就行)\s*[。.!！?？]*$/i, '')
+    .trim();
+  return RE_RESOLUTION_TOKEN.test(stripped);
+}
 // 2026-11-16 Lead 收口：用户指着卡片说「不想要这个地方的换一个」时没有「第 N 段」。
 // 这类指代 + 换卡动作 → plan_edit（supervisor 回「要换第几段？」），不要再掉进"问时长"。
 // 2026-11-16 Lead 复核补充：同时覆盖「这一段/这一张/那一段」等常见口语（原来只认「这段」，
@@ -370,7 +407,11 @@ function classify(text) {
   if (RE_STATUS.test(s)) return { intent: 'status' };
   if (RE_LAST.test(s)) return { intent: 'last' };
   // 2026-11-16：查「选了哪些场景卡」不排新计划（只读预览）；「不要出图」只回开关位置。
-  if (RE_PLAN_SCENES.test(s)) return { intent: 'plan_scenes' };
+  // 2026-11-19 D2/D3：口径换成 isPlanScenesQuery（补裸名词 / 口语问法）；
+  // 且句子**同时给出总时长**时先排计划（create）——否则「20 秒的…把场景卡给我看一下」
+  // 会被「场景卡」抢成只读预览，时长信号被静默丢弃（E0 唯一一条真有信号损失的多命中）。
+  if (isPlanScenesQuery(s) && RE_TOTAL_DURATION.test(s)) return { intent: 'create' };
+  if (isPlanScenesQuery(s)) return { intent: 'plan_scenes' };
   if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
   // 2026-11-17 V1（§9.1-6）：确认问句必须排在最前（RE_CREATE 的「生成」会把它抢成排计划）。
   // 注意顺序：放在 plan_edit/bgm/create 之前，但仍在「查场景 / 不要出图」之后。
@@ -401,6 +442,11 @@ function classify(text) {
   // 「配乐有哪些」这类句子里没有预算/任务/Key 名词，不会被抢。
   if (isContextQuery(s)) return { intent: 'context' };
   if (RE_CREATE.test(s)) return { intent: 'create' };
+  // 2026-11-19 D1：只含分辨率的槽位句 = 改当前计划的画质（不是新计划）。
+  // 必须放在 RE_CREATE 之后：中文「每段 15 秒」仍由 RE_CREATE 接住、保持 create
+  // （前端按 intent=create 弹计划卡，改成 plan_edit 会让卡片不再弹出 = 可视化回归）。
+  // supervisor 见到 reason='slot_only' 时走既有「按上次计划续问」路径，不是按段编辑。
+  if (isResolutionOnlySlot(s)) return { intent: 'plan_edit', reason: 'slot_only' };
   return { intent: 'unknown' };
 }
 
@@ -410,15 +456,20 @@ function classify(text) {
 // 被"场景卡"抢先之后 create 信号就消失了。本函数把所有命中的分支都列出来，
 // 用于量化：零命中 / 单命中 / 多命中 各占多少，多命中里现有优先级会不会选错。
 // 与 classify 的一致性由 scripts/analyze-rule-ambiguity.js 断言（首个命中必须等于 classify 结果）。
+// 2026-11-19 D1–D3 之后本函数必须同步维护：新增分支（D2 时长优先 / D1 槽位句）已按
+// classify 的分支顺序插入，同名命中去重，保证「首个命中映射后 = classify」继续成立。
 function traceMatches(text) {
   const s = String(text || '').trim();
   const hits = [];
-  const add = (name, cond) => { if (cond) hits.push(name); };
+  // 同名分支只记一次（D2 的 create 与 RE_CREATE 可能同时成立，去重后仍按顺序可比）。
+  const add = (name, cond) => { if (cond && hits.indexOf(name) === -1) hits.push(name); };
   if (!s) return hits;
   add('greeting', RE_GREETING.test(s));
   add('status', RE_STATUS.test(s));
   add('last', RE_LAST.test(s));
-  add('plan_scenes', RE_PLAN_SCENES.test(s));
+  // 2026-11-19 D2：时长信号优先于「看场景卡」（与 classify 的分支顺序一致）。
+  add('create', isPlanScenesQuery(s) && RE_TOTAL_DURATION.test(s));
+  add('plan_scenes', isPlanScenesQuery(s));
   add('no_image', RE_NO_IMAGE.test(s));
   add('confirm', isConfirmRequest(s));
   add('plan_edit:promptView', isPromptViewRequest(s));
@@ -438,6 +489,8 @@ function traceMatches(text) {
   add('assets', isAssetsQuery(s));
   add('context', isContextQuery(s));
   add('create', RE_CREATE.test(s));
+  // 2026-11-19 D1：与 classify 同序——放在 create 之后（中文「秒」句仍先命中 create）。
+  add('plan_edit:slotOnly', isResolutionOnlySlot(s));
   return hits;
 }
 
