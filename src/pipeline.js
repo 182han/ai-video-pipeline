@@ -25,6 +25,7 @@ const imageGen = require('./generators/imageGen');
 const objectStore = require('./storage/objectStore');
 const dashscopeUpload = require('./generators/dashscopeUpload');
 const { getI2VInfo } = require('./generators/i2vSupport');
+const i2vImage = require('./processors/i2vImage');
 
 const CLIPS_DIR = config.STORAGE.clipsDir;
 const OUTPUT_DIR = config.STORAGE.outputDir;
@@ -2261,7 +2262,6 @@ class Pipeline {
     if (buf.length > 10 * 1024 * 1024) throw new Error('图生视频的源图片超过 10MB');
     const ext = path.extname(photo.filePath).toLowerCase();
     const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : (ext === '.webp' ? 'image/webp' : 'image/png');
-    const base64 = buf.toString('base64');
 
     // 注意：这里只构建输入，不标记“已使用”。只有片段真正生成成功后才 attachUsage，
     // 否则上传/生成失败也会把图片标成已用（用户 2026-11-14 反馈的显示错误）。
@@ -2295,15 +2295,31 @@ class Pipeline {
       }
     }
 
+    // 2026-11-19 事故：1696×960 PNG（3.2MB）→ dataUrl 4.3MB，3 段并发的 i2v 全部 504。
+    // 只有确实要发 dataUrl 时才压成 JPEG（URL 形态用原图，不无谓转码）。
+    let payloadBuf = buf;
+    let payloadMime = mime;
+    if (!url) {
+      const shrunk = i2vImage.shrinkForI2v(buf, mime);
+      payloadBuf = shrunk.buf;
+      payloadMime = shrunk.mime;
+      if (shrunk.shrunk) {
+        console.log(`[${task.taskId || 'i2v'}] 图生视频首帧压缩：${shrunk.note}`);
+      } else if (shrunk.note) {
+        console.warn(`[${task.taskId || 'i2v'}] 图生视频首帧未压缩：${shrunk.note}`);
+      }
+    }
+    const base64 = payloadBuf.toString('base64');
+
     return {
       photoId: photo.id,
       filePath: photo.filePath,
       base64,
-      dataUrl: `data:${mime};base64,${base64}`,
+      dataUrl: `data:${payloadMime};base64,${base64}`,
       url,
       urlProtocol,
-      mime,
-      sizeBytes: buf.length,
+      mime: payloadMime,
+      sizeBytes: payloadBuf.length,
       width: photo.width || null,
       height: photo.height || null,
       prompt: photo.prompt || ''
@@ -2793,6 +2809,15 @@ class Pipeline {
       this._composeSceneCardPrompts(taskId);
     }
 
+    // 2026-11-19：图生视频默认串行（I2V_CONCURRENCY 可调）。3 段并发曾同时撞上中转 60s 网关超时。
+    const i2vMode = !!(task.imagePerClip || task.sourcePhotoId);
+    const effectiveConcurrency = i2vMode
+      ? Math.min(this.concurrency, Math.max(1, Number(process.env.I2V_CONCURRENCY) || 1))
+      : this.concurrency;
+    if (i2vMode && effectiveConcurrency !== this.concurrency) {
+      console.log('[' + taskId + '] 图生视频串行提交：并发 ' + this.concurrency + ' → ' + effectiveConcurrency);
+    }
+
     // 图生视频：按片段取图（图片优先链路用 clip.photoId；旧任务回退 sourcePhotoId）。
     // 同一张图只解析/上传一次，避免 60 个片段重复上传 60 次。
     const i2vCache = new Map();
@@ -2905,7 +2930,7 @@ class Pipeline {
         }
       };
 
-      for (let i = 0; i < Math.min(this.concurrency, total); i++) {
+      for (let i = 0; i < Math.min(effectiveConcurrency, total); i++) {
         activeWorkers++;
         startWorker();
       }

@@ -165,7 +165,12 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(`图生视频 API 错误 (${response.status}): ${msgOf(data, '')}`);
+      // 2026-11-19：10 秒片段 + 3.2MB 首帧 + 3 并发时，中转在 ~64s 返回 504。
+      // 已在上游压缩首帧并默认串行提交；仍 504 时给出可照做的下一步。
+      const hint = response.status === 504
+        ? '（中转网关超时：10 秒图生视频更易触发；已压缩首帧并默认串行，仍失败请改用百炼/可灵通道或改 5 秒）'
+        : '';
+      throw new Error(`图生视频 API 错误 (${response.status})${hint}: ${msgOf(data, '')}`);
     }
     const taskId = data.task_id || data.id;
     if (!taskId) throw new Error('视频接口未返回任务 id: ' + JSON.stringify(data).slice(0, 200));

@@ -216,6 +216,8 @@ function buildSystemPrompt(lang, ctx) {
       '· "swap clip 2 / change clip 2" with a plan -> edit_plan(action=swap_scene, segment=2); "15s per clip" with a plan -> edit_plan(action=set_clip_duration, clipDurationSec=15).',
       '· "set the prompt to: X" with a plan -> edit_plan(action=set_prompt, segment=1, prompt=X); default to clip 1, do not ask back.',
       '· "change the default channel to Bailian" -> settings_change(key=model, value=dashscope); WhaleTV=openai-video, Kling=kling, Seedance=seedance.',
+      '· Photo colour/saturation question: yes, the user can adjust it in Library -> Photos -> pick a photo -> Adjust (local, free). The video plan itself has no separate saturation parameter; only prompts or the adjusted first frame can influence it.',
+      '· If your previous message was a question and the user answers briefly ("same scene", "a bit warmer"), that IS the answer -> continue the task; do not ask the same question again.',
       '',
       'Current context (read-only):',
       contextBlock(ctx)
@@ -260,6 +262,8 @@ function buildSystemPrompt(lang, ctx) {
     '· 「第二段换个场景 / 把第二段换成 X」且已有计划 → edit_plan(action=swap_scene, segment=2)；「每段 15 秒」且已有计划 → edit_plan(action=set_clip_duration, clipDurationSec=15)。',
     '· 「提示词改成：X」且已有计划 → edit_plan(action=set_prompt, segment=1, prompt=X)；用户没指定第几段时默认第 1 段，不要反问。',
     '· 「把默认通道改成百炼」→ settings_change(key=model, value=dashscope)；WhaleTV 中转=openai-video、可灵=kling、即梦=seedance。',
+    '· 用户问照片能不能调色/调饱和度 → 能：库 → 图片 → 选中照片 → 调色（本地、不计费）；视频计划本身没有单独的饱和度参数，只能靠提示词或调色后的首帧间接影响。',
+    '· 如果上一条是你在提问（例如「第三段想换什么感觉」），用户短回答（「还是这个场景」「更暖一点」）就是在回答你的问题 → 直接接着办，不要重复问一遍。',
     '',
     '当前上下文（只读）：',
     contextBlock(ctx)

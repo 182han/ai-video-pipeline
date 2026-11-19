@@ -117,6 +117,9 @@ export function Assistant({ page = false } = {}) {
   // 页面模式（2026-11-16）：整页对话页 / 面板共用同一套状态与接口。
   const visible = page || open;
   const pageScrollRef = useRef(null);
+  // 2026-11-19 用户反馈：任务跑着时往上翻聊天记录会被强行弹回底部。
+  // 只有「本来就在底部附近」才自动跟随；用户上翻后不再抢滚动。
+  const stickToBottomRef = useRef(true);
   // 建议 chips：用户只说时长，场景由场景卡库自动抽取（2026-11-16 用户指正：
   // 长片不围绕某个主题，60–180 段是不同场景，不能演示成主题式长片示例）。
   const PAGE_CHIPS = [
@@ -306,9 +309,11 @@ export function Assistant({ page = false } = {}) {
       .catch(() => {});
   }, [visible, backend.ok]);
 
-  // 页面模式：新消息 / 思考中 / 计划卡出现时自动滚到底部（像微信）
+  // 页面模式：新消息 / 思考中 / 计划卡出现时自动滚到底部（像微信）；
+  // 但用户主动上翻后不再抢滚动（2026-11-19 反馈）。
   useEffect(() => {
     if (!page || !pageScrollRef.current) return;
+    if (!stickToBottomRef.current) return;
     const el = pageScrollRef.current;
     el.scrollTop = el.scrollHeight;
   }, [page, msgs.length, thinking, plan, xstate]);
@@ -450,6 +455,8 @@ export function Assistant({ page = false } = {}) {
   async function send(override) {
     const text = String(override === undefined || override === null ? draft : override).trim();
     if (!text || thinking) return;
+    // 用户主动发消息 → 允许重新跟随到底部（否则上翻后永远不跳）。
+    stickToBottomRef.current = true;
     const next = [...msgs, { role: 'user', content: text }];
     setMsgs(next);
     setDraft('');
@@ -695,7 +702,7 @@ export function Assistant({ page = false } = {}) {
 
   // 审图暂停的三个动作（契约 §2.3/§2.4：用户点「继续」才结算并开始花视频的钱）。
   function goReview() {
-    navigate('/library');
+    navigate('/photos');
     if (!page) setOpen(false);
   }
 
@@ -937,7 +944,11 @@ export function Assistant({ page = false } = {}) {
     const canType = backend.ok || hasKey;
     return html`
       <div className="xz-page" data-page="xiaozhi">
-        <div className="xz-scroll" ref=${pageScrollRef}>
+        <div className="xz-scroll" ref=${pageScrollRef}
+          onScroll=${(e) => {
+            const el = e.currentTarget;
+            stickToBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+          }}>
           <div className=${'xz-stage' + (chatting ? '' : ' is-empty')}>
             <div className=${'xz-top' + (chatting ? ' is-compact' : '')}>
               <div className="xz-orb-wrap" aria-hidden="true">

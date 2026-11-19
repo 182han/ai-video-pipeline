@@ -8,6 +8,7 @@
 const path = require('path');
 
 const APP = path.join(__dirname, '..');
+const i2vImage = require('../src/processors/i2vImage');
 const REAL_FETCH = global.fetch;
 let pass = 0;
 let fail = 0;
@@ -195,6 +196,35 @@ console.log('================================================================');
     check(false, '探针异常: ' + (e && e.message ? e.message : e));
   } finally {
     global.fetch = REAL_FETCH;
+  }
+
+  // ===== 2026-11-19：task_mwnosz8o_uyl4（3 段 i2v 全 504）回归 =====
+  // 事故：1696×960 PNG 3.2MB → dataUrl 4.3MB，3 段并发提交，中转 ~64s 全部 504。
+  // 修复：首帧 >1.5MB 压成 JPEG（≤1280w），i2v 默认串行。这里验证压缩本身与接线。
+  try {
+    const fs = require('fs');
+    const os = require('os');
+    const { execFileSync } = require('child_process');
+    const config = require('../config');
+    const tmp = path.join(os.tmpdir(), 'i2v-shrink-' + Date.now() + '.png');
+    execFileSync(config.FFMPEG_PATH, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc2=size=2560x1440:duration=1', '-vf', 'noise=alls=40:allf=t',
+      '-frames:v', '1', tmp
+    ], { stdio: 'ignore', timeout: 30000 });
+    const src = fs.readFileSync(tmp);
+    const shr = i2vImage.shrinkForI2v(src, 'image/png');
+    check(shr.shrunk && shr.mime === 'image/jpeg' && shr.buf.length < 1200 * 1024
+      && shr.buf.slice(0, 3).toString('hex') === 'ffd8ff',
+      '首帧 >1.5MB → JPEG ≤1.2MB（magic ffd8ff）', shr.note);
+    const small = i2vImage.shrinkForI2v(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), 'image/png');
+    check(!small.shrunk && small.buf.length === 8, '小图原样返回（不转码）');
+    const pipeSrc = fs.readFileSync(path.join(APP, 'src', 'pipeline.js'), 'utf8');
+    check(/I2V_CONCURRENCY/.test(pipeSrc) && /i2vImage\.shrinkForI2v/.test(pipeSrc),
+      '流水线：i2v 串行 + 首帧压缩已接线');
+    try { fs.unlinkSync(tmp); } catch (e) { /* 忽略 */ }
+  } catch (e) {
+    check(false, 'i2v 压缩探针异常: ' + (e && e.message ? e.message : e));
   }
 
   console.log('\n================================================================');

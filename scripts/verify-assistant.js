@@ -908,6 +908,14 @@ async function main() {
     ok('设置页 style 只传对象（防 React #62 字符串 style 崩页）',
       settingsSrc.indexOf("'opacity:.5;cursor:not-allowed'") === -1
       && /style=\$\{agentSwitch && agentSwitch\.envForced \? \{ opacity: 0\.5/.test(settingsSrc));
+    // 2026-11-19 用户反馈：任务跑着时上翻聊天记录会被强行弹回底部；「去审图」打开的是库的成片页。
+    const chatSrc = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'components', 'assistant.js'), 'utf8');
+    ok('聊天滚动：只有贴底才自动跟随（上翻不再被弹回）',
+      /stickToBottomRef/.test(chatSrc)
+      && /onScroll=/.test(chatSrc)
+      && /scrollHeight - el\.scrollTop - el\.clientHeight/.test(chatSrc));
+    ok('审图深链：去审图打开 /photos（不是库默认成片页）',
+      /navigate\('\/photos'\)/.test(chatSrc));
     const msgs = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'i18n', 'messages', 'settings.js'), 'utf8');
     ok('i18n：开关文案中英都齐（agentTitle/agentDesc/agentSaved）',
       (msgs.match(/agentTitle:/g) || []).length === 2
