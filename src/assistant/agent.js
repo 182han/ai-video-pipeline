@@ -361,7 +361,9 @@ function validateOutput(obj) {
 // say 接地校验（防幻觉：报价 / 假执行 / 承诺）
 // ==========================================
 const RE_ACTION_CLAIM = /(?:已|已经)(?:经)?(?:帮你|为你|替你)?(?:生成|创建|删掉|删除|提交|执行|下单|付款|扣费|修改|换掉|下载)/;
+const RE_ACTION_CLAIM_EN = /\b(?:i(?:'ve|\s+have)?\s+(?:already\s+)?(?:generated|created|deleted|submitted|executed|paid|charged|downloaded)|it(?:'s|\s+is)\s+(?:done|generated|created|deleted|submitted|executed|paid))\b/i;
 const RE_PROMISE = /(?:一定|保证|绝对)(?:能|可以|会|成功)/;
+const RE_PROMISE_EN = /\b(?:i\s+(?:can\s+)?guarantee|guarantee(?:d)?\s+(?:to\s+)?(?:work|succeed|deliver)|definitely\s+(?:will|works?|succeed)|100%\s+(?:will\s+)?(?:work|succeed))\b/i;
 const RE_MONEY = /(?:[¥￥$]\s?\d+(?:\.\d+)?)|(?:\d+(?:\.\d+)?\s*(?:元|美元|块|USD|CNY))/gi;
 
 /**
@@ -387,8 +389,8 @@ function collectNumbers(node, out) {
 function checkSayGrounding(say, ctx) {
   const text = String(say === undefined || say === null ? '' : say);
   if (!text.trim()) return { ok: false, reason: 'EMPTY' };
-  if (RE_ACTION_CLAIM.test(text)) return { ok: false, reason: 'ACTION_CLAIM' };
-  if (RE_PROMISE.test(text)) return { ok: false, reason: 'PROMISE' };
+  if (RE_ACTION_CLAIM.test(text) || RE_ACTION_CLAIM_EN.test(text)) return { ok: false, reason: 'ACTION_CLAIM' };
+  if (RE_PROMISE.test(text) || RE_PROMISE_EN.test(text)) return { ok: false, reason: 'PROMISE' };
   const ctxText = JSON.stringify(ctx || {}).replace(/\s+/g, '');
   const ctxNumbers = [];
   collectNumbers(ctx || {}, ctxNumbers);

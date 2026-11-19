@@ -104,6 +104,18 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
   ok('无依据金额被拒', agent.checkSayGrounding('大概要 $3。', CTX).reason === 'UNGROUNDED_MONEY');
   ok('有依据金额通过（上下文里是 $196）', agent.checkSayGrounding('你现在余额是 $196。', CTX).ok);
   ok('普通聊天通过', agent.checkSayGrounding('你可以先告诉我总时长，我再帮你排。', CTX).ok);
+  ok('英文假执行被拒（I already generated）',
+    agent.checkSayGrounding('I already generated 3 clips for you.', CTX).reason === 'ACTION_CLAIM');
+  ok('英文假完成被拒（it is done）',
+    agent.checkSayGrounding('It is done, you can check the output.', CTX).reason === 'ACTION_CLAIM');
+  ok('英文承诺被拒（I can guarantee / definitely will）',
+    agent.checkSayGrounding('I can guarantee it will work.', CTX).reason === 'PROMISE'
+    && agent.checkSayGrounding('It will definitely work.', CTX).reason === 'PROMISE');
+  ok('英文否定承诺不误伤（I cannot guarantee）',
+    agent.checkSayGrounding('I cannot guarantee the result, but I can try.', CTX).ok);
+  ok('英文普通聊天不误伤（I can help you plan / the pipeline generated）',
+    agent.checkSayGrounding('I can help you plan a video.', CTX).ok
+    && agent.checkSayGrounding('The pipeline only generates clips after you confirm.', CTX).ok);
 
   // ================= [5] runTurn =================
   group('5. runTurn（stub，不花钱）');
