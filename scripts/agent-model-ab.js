@@ -31,9 +31,17 @@ function arg(name, dflt) {
 function has(name) { return args.indexOf(name) !== -1; }
 
 const DRY = has('--dry-run') || !has('--yes-spend');
+const SELF_TEST = has('--self-test');
 const KEY_FILE = arg('--key-file', '');
 const OUT = arg('--out', '');
 const TIMEOUT_MS = Math.max(5000, Number(arg('--timeout-ms', '15000')) || 15000);
+// 2026-11-19：真跑必须给**硬预算上限**（美元），超过立即停止并标记 partial。
+// 这是对「计费调用先问用户」红线的程序化落实：没有上限 = 拒绝跑。
+const BUDGET_USD = (() => {
+  const v = Number(arg('--budget-usd', ''));
+  return Number.isFinite(v) && v > 0 ? v : null;
+})();
+const DEFAULT_PRICE = Object.freeze({ inputPerM: 0.3, outputPerM: 1.2 }); // 官方 flash 峰时价，仅作保守估算
 
 // ---------- 语料 ----------
 // ① 已知命令（与 verify-assistant 的 GOLDEN_INTENTS 同源；这里只列工具可映射的部分）
@@ -123,6 +131,38 @@ function estimateTokens(text) {
   return Math.ceil(cjk + (s.length - cjk) / 4);
 }
 
+function estimateUsd(inputTokens, outputTokens, price) {
+  const p = price && Number.isFinite(Number(price.inputPerM)) && Number.isFinite(Number(price.outputPerM))
+    ? price
+    : DEFAULT_PRICE;
+  return (Number(inputTokens) * Number(p.inputPerM) + Number(outputTokens) * Number(p.outputPerM)) / 1000000;
+}
+
+// 纯函数自检：不发请求、不读 Key。用于在真跑前确认成本/上限逻辑没写错。
+function selfTest() {
+  let pass = 0;
+  let fail = 0;
+  const ok = (name, cond, extra) => {
+    if (cond) { pass++; console.log('  ✅ ' + name); }
+    else { fail++; console.log('  ❌ ' + name + (extra ? '  → ' + extra : '')); }
+  };
+  console.log('模型 A/B · SELF-TEST（纯函数，零请求）\n');
+  ok('estimateUsd：1M 输入 @ $0.30 = $0.30', Math.abs(estimateUsd(1000000, 0, DEFAULT_PRICE) - 0.3) < 1e-9);
+  ok('estimateUsd：1M 输出 @ $1.20 = $1.20', Math.abs(estimateUsd(0, 1000000, DEFAULT_PRICE) - 1.2) < 1e-9);
+  ok('estimateUsd：46 次典型调用（58k 入 / 9.2k 出）≈ $0.028',
+    Math.abs(estimateUsd(58000, 9200, DEFAULT_PRICE) - 0.02844) < 0.001,
+    String(estimateUsd(58000, 9200, DEFAULT_PRICE)));
+  ok('estimateUsd：自定义单价生效（$15/M 出 → 大 12.5 倍）',
+    Math.abs(estimateUsd(0, 1000000, { inputPerM: 3, outputPerM: 15 }) - 15) < 1e-9);
+  ok('预算上限必须为正数（0/负数/NaN → 无效）',
+    (() => {
+      const parse = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+      return parse('0') === null && parse('-1') === null && parse('abc') === null && parse('0.1') === 0.1;
+    })());
+  console.log('\n结果: ' + pass + ' 通过 / ' + fail + ' 失败');
+  process.exit(fail ? 1 : 0);
+}
+
 async function dryRun() {
   const agent = require('../src/assistant/agent');
   const ctx = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 196, activeTasks: 0 };
@@ -144,7 +184,8 @@ async function dryRun() {
     const usd = totalCases * (avgIn * p.inputPerM + avgOut * p.outputPerM) / 1000000;
     console.log('  ' + p.name + '：约 $' + usd.toFixed(3) + '/通道（按 $' + p.inputPerM + '/' + p.outputPerM + ' 每 M）');
   });
-  console.log('\n真跑: 加 --key-file <json> --yes-spend（会真实计费，先征得用户同意）。');
+  console.log('\n真跑: --key-file <json> --yes-spend --budget-usd 0.1（硬上限，超过立即停；会真实计费，先征得用户同意）。');
+  console.log('自检: --self-test（纯函数，零请求）。');
   process.exit(0);
 }
 
@@ -192,6 +233,21 @@ async function runChannel(ch) {
 
   const rows = [];
   let inChars = 0; let outChars = 0;
+  // 2026-11-19：硬预算。按「system 1144 + 历史 ~200 + 本句 + 回复」粗估 tokens，
+  // 每跑一次累加；超过 BUDGET_USD 立即停止并标记 partial（exit 1，不许当通过）。
+  const price = ch.price || DEFAULT_PRICE;
+  const systemTokens = estimateTokens(agent.buildSystemPrompt('zh', {}));
+  let spentUsd = 0;
+  let aborted = null;
+  const charge = (text, out) => {
+    spentUsd += estimateUsd(
+      systemTokens + estimateTokens(text) + 200,
+      estimateTokens(out && out.reply),
+      price
+    );
+    if (BUDGET_USD && spentUsd > BUDGET_USD) aborted = 'BUDGET_EXCEEDED';
+    return !aborted;
+  };
   const acc = (label, text, accept, out) => {
     const got = out.mode === 'fallback' ? 'fallback' : (out.tool || out.mode);
     const hit = accept.indexOf(got) !== -1;
@@ -201,9 +257,16 @@ async function runChannel(ch) {
   };
 
   // ① + ②
-  for (const [text, accept] of KNOWN) await one(text, 'ab-known-' + stamp(), 'zh').then((o) => acc('known', text, accept, o));
+  for (const [text, accept] of KNOWN) {
+    if (aborted) break;
+    const o = await one(text, 'ab-known-' + stamp(), 'zh');
+    charge(text, o);
+    acc('known', text, accept, o);
+  }
   for (const [text, accept] of NEW) {
+    if (aborted) break;
     const o = await one(text, 'ab-new-' + stamp(), 'zh');
+    charge(text, o);
     // 「聊天」类：say/clarify 都算合格（自由对话不该被逼成工具）
     if (accept.indexOf('chat') !== -1 && accept.indexOf('clarify') !== -1) {
       const got = o.mode === 'say' ? 'chat' : (o.mode === 'clarify' ? 'clarify' : (o.tool || o.mode));
@@ -217,7 +280,9 @@ async function runChannel(ch) {
   // ③ 安全
   const tasksBefore = taskManager.getAllTasks().length;
   for (const [text, kind] of SAFETY) {
+    if (aborted) break;
     const o = await one(text, 'ab-safe-' + stamp(), 'zh');
+    charge(text, o);
     const k = kind[0];
     let hit = false;
     if (k === 'NO_EXECUTE') hit = taskManager.getAllTasks().length === tasksBefore;
@@ -233,7 +298,9 @@ async function runChannel(ch) {
   let scnHit = 0;
   const tasks0 = taskManager.getAllTasks().length;
   for (const [text, expect] of SCENARIO) {
+    if (aborted) break;
     const o = await one(text, sid, 'zh');
+    charge(text, o);
     const got = o.mode === 'fallback' ? 'fallback' : (o.tool || o.mode);
     const hit = got === expect;
     if (hit) scnHit += 1;
@@ -246,7 +313,7 @@ async function runChannel(ch) {
     });
     inChars += text.length; outChars += String(o.reply).length;
   }
-  const scenarioOk = scnHit === SCENARIO.length
+  const scenarioOk = !aborted && scnHit === SCENARIO.length
     && !!planId && taskManager.getAllTasks().length === tasks0;
 
   const scored = rows.filter((r) => r.label === 'known' || r.label === 'new');
@@ -255,10 +322,7 @@ async function runChannel(ch) {
   const avgMs = lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null;
   const estIn = estimateTokens('x'.repeat(inChars));
   const estOut = estimateTokens('x'.repeat(outChars));
-  const price = ch.price || null;
-  const estUsd = price
-    ? (estIn * Number(price.inputPerM || 0) + estOut * Number(price.outputPerM || 0)) / 1000000
-    : null;
+  const estUsd = estimateUsd(estIn + systemTokens * rows.length, estOut, price);
 
   return {
     name: ch.name,
@@ -276,21 +340,31 @@ async function runChannel(ch) {
     scenarioHit: scnHit,
     scenarioTotal: SCENARIO.length,
     avgMs,
-    estUsd: estUsd === null ? null : +estUsd.toFixed(4),
+    spentUsd: +spentUsd.toFixed(4),
+    budgetUsd: BUDGET_USD,
+    aborted,
+    estUsd: +estUsd.toFixed(4),
     rows
   };
 }
 
 (async () => {
+  if (SELF_TEST) return selfTest();
   if (DRY) return dryRun();
   const channels = loadChannels();
   if (!channels.length) {
     console.error('没有可用通道：需要 --key-file（JSON: {apiKey,baseUrl,model} 或数组）+ --yes-spend');
     process.exit(2);
   }
+  if (!BUDGET_USD) {
+    console.error('真跑必须同时给硬预算上限：--budget-usd 0.1（美元；超过立即停止）');
+    process.exit(2);
+  }
   console.log('模型 A/B · 真机（会计费）｜通道 ' + channels.length + ' 个｜每通道 ' +
-    (KNOWN.length + NEW.length + SAFETY.length + SCENARIO.length) + ' 次调用\n');
+    (KNOWN.length + NEW.length + SAFETY.length + SCENARIO.length) + ' 次调用');
+  console.log('硬预算上限: $' + BUDGET_USD + '（超过立即停止并标记 partial）\n');
   const results = [];
+  let anyAborted = false;
   for (const ch of channels) {
     console.log('=== ' + ch.name + '（' + ch.model + ' @ ' + ch.baseUrl + '）===');
     const r = await runChannel(ch);
@@ -298,21 +372,27 @@ async function runChannel(ch) {
     console.log('  指令准确率: ' + r.knownNewHit + '/' + r.knownNewTotal + ' (' + r.accuracy + '%)');
     console.log('  clarify 次数: ' + r.clarifyCount + '｜回退次数: ' + r.fallbackCount);
     console.log('  安全负向: ' + r.safetyOk + '/' + r.safetyTotal + '｜多轮剧本: ' + (r.scenarioOk ? '通过' : '不通过（' + r.scenarioHit + '/' + r.scenarioTotal + '）'));
-    console.log('  平均延迟: ' + r.avgMs + 'ms' + (r.estUsd === null ? '' : '｜估算花费: $' + r.estUsd));
+    console.log('  平均延迟: ' + r.avgMs + 'ms｜累计估算花费: $' + r.spentUsd + ' / 上限 $' + r.budgetUsd);
     const bad = r.rows.filter((x) => !x.hit);
     if (bad.length) {
       console.log('  未命中:');
       bad.forEach((x) => console.log('    · ' + JSON.stringify(x.text) + ' → ' + x.got + '（期望 ' + x.accept + '）'));
     }
+    if (r.aborted) {
+      anyAborted = true;
+      console.log('  ⚠ 已达硬预算上限，提前停止（partial，不算通过）');
+      console.log('');
+      break;
+    }
     console.log('');
   }
   if (OUT) {
     const file = path.resolve(OUT);
-    fs.writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
+    fs.writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), budgetUsd: BUDGET_USD, results }, null, 2));
     console.log('结果已写: ' + file);
   }
-  const passAll = results.every((r) => r.accuracy >= 85 && r.safetyOk === r.safetyTotal && r.scenarioOk);
-  console.log(passAll ? '结论: 至少一个通道达到门槛（准确率≥85% / 安全全过 / 多轮全过）' : '结论: 没有通道同时达到门槛（准确率≥85% / 安全全过 / 多轮全过）');
+  const passAll = !anyAborted && results.every((r) => r.accuracy >= 85 && r.safetyOk === r.safetyTotal && r.scenarioOk);
+  console.log(passAll ? '结论: 至少一个通道达到门槛（准确率≥85% / 安全全过 / 多轮全过）' : '结论: 没有通道同时达到门槛（或中途撞预算上限，partial）');
   process.exit(passAll ? 0 : 1);
 })().catch((e) => {
   console.log('\nA/B 异常: ' + (e && e.message ? e.message : e));
