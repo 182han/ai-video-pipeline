@@ -584,6 +584,28 @@ function fmtUsd(n) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
 
+// 2026-11-19 B 目标第二刀：给 agent 的**只读紧凑上下文**（不把整个 context 塞进 prompt）。
+// 只含理解所需：有没有计划、计划摘要、最近任务、余额、在跑数、最近失败。
+function agentContextOf(opts = {}) {
+  const sessionId = opts && opts.sessionId ? String(opts.sessionId) : null;
+  const ctx = contextOf(sessionId, opts);
+  const plan = ctx.plan || null;
+  const active = ctx.tasks && Array.isArray(ctx.tasks.active) ? ctx.tasks.active : [];
+  const recent = ctx.tasks && Array.isArray(ctx.tasks.recent) ? ctx.tasks.recent : [];
+  const last = recent.length ? recent[0] : null;
+  const failed = ctx.tasks && Array.isArray(ctx.tasks.failedRecent) ? ctx.tasks.failedRecent[0] : null;
+  return {
+    hasPlan: !!plan,
+    planSummary: plan
+      ? `${plan.clipCount} 段 × ${plan.clipDurationSec} 秒 · ${plan.modelLabel || plan.model} · ${plan.resolution}（planId ${plan.planId}）`
+      : null,
+    lastTaskSummary: last ? `${last.taskId}（${last.status || '未知'}）` : null,
+    budgetUsd: ctx.budget ? ctx.budget.balanceUsd : null,
+    activeTasks: active.length,
+    recentError: failed ? `${failed.taskId}（${failed.status || 'failed'}）` : null
+  };
+}
+
 function replyForContext(sessionId, opts = {}) {
   const ctx = contextOf(sessionId, opts);
   const lines = [];
@@ -1551,6 +1573,87 @@ function planFailureReply(built, lang, input, parsed) {
   return en || built.error;
 }
 
+// ==========================================
+// 2026-11-19 B 目标第二刀：把「排计划 / 上次计划续问」抽成可复用的一步。
+// handleMessage 的 create/unknown 分支与 agent 工具门面都走这里，行为逐字不变。
+// opts:
+//   intentUnknown  —— 规则层判成 unknown 时才有「听不懂先反问」的护栏
+//   sceneCardsOff  —— 关场景卡句不当作续问
+//   forceFollow    —— 强制按上次计划续问（agent 的 edit_plan 用）
+//   input          —— 显式槽位（agent 的 plan_video 用；给了就不再解析 text 的槽位）
+// ==========================================
+function planTurn(sessionId, text, lang, opts = {}) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const last = memory.lastPlan(sessionId);
+  const parsed = planCard.parseUtterance(text);
+  const slotOnly = parsed.totalMinutes === null && parsed.clipCount === null
+    && (parsed.resolution !== null || parsed.clipDurationSec !== null || parsed.model !== null);
+  const follow = o.forceFollow !== undefined
+    ? !!o.forceFollow
+    : (!o.sceneCardsOff && last && (isFollowUp(text) || isRepeat(text) || slotOnly));
+  const hasSlot = slotOnly
+    || parsed.totalMinutes !== null || parsed.clipCount !== null
+    || parsed.resolution !== null || parsed.clipDurationSec !== null
+    || parsed.model !== null || parsed.sceneCards !== null;
+  if (o.intentUnknown && !hasSlot && !follow) {
+    return {
+      reply: replyUnknown(lang, !!last),
+      replyKey: 'assistant.reply.unknown',
+      plan: null, missing: null, actions: null
+    };
+  }
+  let input = o.input ? { ...o.input, text, sessionId } : { text, sessionId };
+  if (!o.input) {
+    if (follow) {
+      input = { ...inputFromLast(last, parsed, text), sessionId };
+    } else {
+      input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;
+      input.clipDurationSec = parsed.clipDurationSec !== null ? parsed.clipDurationSec : undefined;
+      input.clipCount = parsed.clipCount !== null ? parsed.clipCount : undefined;
+      input.resolution = parsed.resolution || undefined;
+      input.model = parsed.model || undefined;
+      // 主题词不进入计划：长片按场景卡库自动抽取不同场景（2026-11-16 用户口径）。
+      input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
+    }
+  }
+  input.sessionId = sessionId;
+  const built = planCard.buildPlan(input);
+  const isEn = lang === 'en';
+  if (!built.ok) {
+    if (built.missing || built.code === 'PLAN_NEED_DURATION') {
+      return {
+        reply: planFailureReply(built, lang, input, parsed),
+        replyKey: 'assistant.question.duration',
+        plan: null,
+        missing: built.missing || ['totalMinutes'],
+        actions: [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }]
+      };
+    }
+    if (o.intentUnknown) {
+      return {
+        reply: replyUnknown(lang, !!last) + (isEn ? '' : '\n（' + built.error + '）'),
+        replyKey: 'assistant.reply.unknown',
+        plan: null, missing: null, actions: null
+      };
+    }
+    return {
+      reply: planFailureReply(built, lang, input, parsed),
+      replyKey: 'assistant.reply.planError',
+      plan: null, missing: null, actions: null
+    };
+  }
+  const plan = built.plan;
+  planCache.set(plan.planId, plan);
+  memory.addPlan(sessionId, plan);
+  return {
+    reply: replyForPlan(plan, lang),
+    replyKey: 'assistant.reply.plan',
+    plan,
+    missing: null,
+    actions: [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }]
+  };
+}
+
 function handleMessage(opts = {}) {
   const text = String(opts.text || '').trim();
   // P3：助手话术语言（默认 zh → 现有中文回复逐字不变；en → 核心链路走英文模板）
@@ -1662,60 +1765,16 @@ function handleMessage(opts = {}) {
     replyKey = 'assistant.reply.last';
   } else {
     // create / unknown 都尝试排计划；听不懂时 buildPlan 会返回明确的追问。
-    const last = memory.lastPlan(sessionId);
-    const parsed = planCard.parseUtterance(text);
-    // 只给了「槽位词」也算续问：例如单独说「1080p」「720p」「15 秒/段」——
-    // 用户直觉是「改上次那个」，不该被当成"没说时长"再问一遍（2026-11-16 用户反馈）。
-    const slotOnly = parsed.totalMinutes === null && parsed.clipCount === null
-      && (parsed.resolution !== null || parsed.clipDurationSec !== null || parsed.model !== null);
-    const follow = !sceneCardsOff && last && (isFollowUp(text) || isRepeat(text) || slotOnly);
-    // 2026-11-18 S0（用户实测：答非所问）：真·听不懂时**先反问一句**，绝不猜成"排计划"。
-    // 判据：intent=unknown 且句子里没有任何可执行槽位（时长/段数/分辨率/每段秒数/模型/场景卡开关）。
-    // 反面例子：「720p」「改成 1080p」「不要场景卡」都带槽位，仍按续问/改设置处理，不许被这条拦掉。
-    const hasSlot = slotOnly
-      || parsed.totalMinutes !== null || parsed.clipCount !== null
-      || parsed.resolution !== null || parsed.clipDurationSec !== null
-      || parsed.model !== null || parsed.sceneCards !== null;
-    if (intent.intent === 'unknown' && !hasSlot && !follow) {
-      reply = replyUnknown(lang, !!last);
-      replyKey = 'assistant.reply.unknown';
-    } else {
-      let input = { text, sessionId };
-      if (follow) input = { ...inputFromLast(last, parsed, text), sessionId };
-      else {
-        input.totalMinutes = parsed.totalMinutes !== null ? parsed.totalMinutes : undefined;
-        input.clipDurationSec = parsed.clipDurationSec !== null ? parsed.clipDurationSec : undefined;
-        input.clipCount = parsed.clipCount !== null ? parsed.clipCount : undefined;
-        input.resolution = parsed.resolution || undefined;
-        input.model = parsed.model || undefined;
-        // 主题词不进入计划：长片按场景卡库自动抽取不同场景（2026-11-16 用户口径）。
-        input.sceneCards = parsed.sceneCards !== null ? parsed.sceneCards : undefined;
-      }
-      const built = planCard.buildPlan(input);
-      const isEn = lang === 'en';
-      if (!built.ok) {
-        if (built.missing || built.code === 'PLAN_NEED_DURATION') {
-          missing = built.missing || ['totalMinutes'];
-          // P3/2026-11-18：英文模式给英文追问/错误；中文模式沿用 planCard 原文（零回归）。
-          reply = planFailureReply(built, lang, input, parsed);
-          replyKey = 'assistant.question.duration';
-          actions = [{ type: 'answer', labelKey: 'assistant.action.giveDuration' }];
-        } else if (intent.intent === 'unknown') {
-          reply = replyUnknown(lang, !!last) + (isEn ? '' : '\n（' + built.error + '）');
-          replyKey = 'assistant.reply.unknown';
-        } else {
-          reply = planFailureReply(built, lang, input, parsed);
-          replyKey = 'assistant.reply.planError';
-        }
-      } else {
-        plan = built.plan;
-        planCache.set(plan.planId, plan);
-        memory.addPlan(sessionId, plan);
-        reply = replyForPlan(plan, lang);
-        replyKey = 'assistant.reply.plan';
-        actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
-      }
-    }
+    // 2026-11-19：这段抽进 planTurn（与 agent 工具门面共用），行为逐字不变。
+    const res = planTurn(sessionId, text, lang, {
+      intentUnknown: intent.intent === 'unknown',
+      sceneCardsOff
+    });
+    reply = res.reply;
+    replyKey = res.replyKey;
+    plan = res.plan;
+    missing = res.missing;
+    actions = res.actions;
   }
 
   memory.appendMessage(sessionId, { role: 'assistant', text: reply, kind: plan ? 'plan' : 'chat' });
@@ -2207,6 +2266,229 @@ function monitorCount() {
   return monitors.size;
 }
 
+// ==========================================
+// 2026-11-19 B 目标第二刀：agent 工具门面（runAgentTool）
+// ------------------------------------------------------------
+// 输入来自 src/assistant/agent.js 校验后的 { tool, args }；执行仍走本文件既有确定性函数。
+// **不提供 execute**：确认执行只能由前端计划卡按钮走 /api/assistant/execute。
+// 返回结构与 handleMessage 对齐（ok/reply/replyKey/plan/actions/...），server 可直接透传。
+// 参数在这里再查一遍：agent.js 已校验一次，这里防"绕过 agent 直接调用"的调用方。
+// ==========================================
+const AGENT_BGM_TEXT = Object.freeze({
+  list: '配乐有哪些',
+  next: '换一首',
+  off: '不要配乐'
+});
+const AGENT_SETTINGS_TEXT = Object.freeze({
+  model: Object.freeze({
+    dashscope: '把默认通道改成百炼',
+    'openai-video': '把默认通道改成 WhaleTV 中转',
+    kling: '把默认通道改成可灵',
+    seedance: '把默认通道改成即梦',
+    mock: '把默认通道改成 mock'
+  }),
+  resolution: Object.freeze({
+    '480p': '把默认分辨率改成 480p',
+    '720p': '把默认分辨率改成 720p',
+    '1080p': '把默认分辨率改成 1080p',
+    '4k': '把默认分辨率改成 4k',
+    '2160p': '把默认分辨率改成 2160p'
+  })
+});
+
+function agentToolFail(code, error) {
+  return {
+    ok: false, code, error, reply: error,
+    replyKey: 'assistant.reply.agentToolError',
+    plan: null, actions: null
+  };
+}
+
+function agentNoPlan(lang) {
+  return agentToolFail('AGENT_NO_PLAN', i18n.normalizeLang(lang) === 'en'
+    ? 'There is no plan card yet. Tell me the total length (for example "30 seconds" or "10 minutes") first.'
+    : '现在还没有计划卡：先说总时长（比如「30 秒」「10 分钟」），我排好计划。');
+}
+
+function agentPlanTurn(sessionId, text, lang, opts) {
+  const res = planTurn(sessionId, text, lang, opts);
+  return {
+    ok: true, reply: res.reply, replyKey: res.replyKey,
+    plan: res.plan, missing: res.missing, actions: res.actions
+  };
+}
+
+const AGENT_TOOL_HANDLERS = {
+  plan_video(sessionId, args, ctx) {
+    const slots = {};
+    for (const k of ['totalMinutes', 'clipDurationSec', 'clipCount', 'resolution', 'model', 'sceneCards']) {
+      if (args[k] !== undefined) slots[k] = args[k];
+    }
+    return agentPlanTurn(sessionId, '', ctx.lang, { input: slots });
+  },
+  edit_plan(sessionId, args, ctx) {
+    const action = String(args.action || '');
+    if (action === 'swap_scene' || action === 'set_prompt' || action === 'swap_all') {
+      if (!memory.lastPlan(sessionId)) return agentNoPlan(ctx.lang);
+      let text;
+      if (action === 'swap_all') {
+        text = '换一组';
+      } else {
+        const n = Number(args.segment);
+        if (!Number.isInteger(n) || n < 1) {
+          return agentToolFail('AGENT_BAD_ARGS', 'edit_plan 需要 segment（第几段，从 1 开始）');
+        }
+        if (action === 'set_prompt' && !args.prompt) {
+          return agentToolFail('AGENT_BAD_ARGS', 'edit_plan set_prompt 需要 prompt');
+        }
+        text = action === 'swap_scene' ? `第 ${n} 段换一个` : `第 ${n} 段提示词改成：${args.prompt}`;
+      }
+      const reply = replyForPlanEdit(sessionId, text, ctx.lang);
+      return {
+        ok: true, reply, replyKey: 'assistant.reply.planEdit',
+        plan: memory.lastPlan(sessionId), actions: null
+      };
+    }
+    if (action === 'set_resolution') {
+      if (!args.resolution) return agentToolFail('AGENT_BAD_ARGS', 'edit_plan set_resolution 需要 resolution');
+      return agentPlanTurn(sessionId, `改成 ${args.resolution}`, ctx.lang, { forceFollow: true });
+    }
+    if (action === 'set_duration') {
+      if (!(Number(args.totalMinutes) > 0)) return agentToolFail('AGENT_BAD_ARGS', 'edit_plan set_duration 需要 totalMinutes');
+      return agentPlanTurn(sessionId, `改成 ${Number(args.totalMinutes)} 分钟`, ctx.lang, { forceFollow: true });
+    }
+    if (action === 'set_clip_duration') {
+      if (!(Number(args.clipDurationSec) > 0)) return agentToolFail('AGENT_BAD_ARGS', 'edit_plan set_clip_duration 需要 clipDurationSec');
+      return agentPlanTurn(sessionId, `每段 ${Number(args.clipDurationSec)} 秒`, ctx.lang, { forceFollow: true });
+    }
+    return agentToolFail('AGENT_BAD_ACTION', 'edit_plan 的 action 不在允许集合里：' + action);
+  },
+  show_plan(sessionId, args, ctx) {
+    const plan = memory.lastPlan(sessionId);
+    if (!plan) return agentNoPlan(ctx.lang);
+    return { ok: true, reply: describeReply(plan, ctx.lang), replyKey: 'assistant.reply.plan', plan, actions: null };
+  },
+  show_scene_cards(sessionId, args, ctx) {
+    return {
+      ok: true, reply: replyForPlanScenes(sessionId, ctx.lang),
+      replyKey: 'assistant.reply.planScenes', plan: null, actions: null
+    };
+  },
+  status(sessionId) {
+    return { ok: true, reply: replyForStatus(sessionId), replyKey: 'assistant.reply.status', plan: null, actions: null };
+  },
+  last_video(sessionId) {
+    const res = retrieveRefs('上一次的视频', 3);
+    return {
+      ok: true, reply: replyForLast('上一次的视频'),
+      replyKey: 'assistant.reply.last', plan: null, refs: res.refs, actions: null
+    };
+  },
+  budget(sessionId, args, ctx) {
+    return {
+      ok: true, reply: replyForContext(sessionId, { userId: ctx.userId }),
+      replyKey: 'assistant.reply.context', plan: null, actions: null
+    };
+  },
+  diagnose(sessionId) {
+    const r = replyForRepair(sessionId);
+    return { ok: true, reply: r.reply, replyKey: 'assistant.reply.repair', plan: null, diagnosis: r.diagnosis, actions: null };
+  },
+  bgm(sessionId, args, ctx) {
+    const action = String(args.action || 'list');
+    if (action === 'pick') {
+      const n = Number(args.index);
+      if (!Number.isInteger(n) || n < 1) {
+        return agentToolFail('AGENT_BAD_ARGS', 'bgm pick 需要 index（第几首，从 1 开始）');
+      }
+      return {
+        ok: true, reply: replyForBgm(sessionId, `用第 ${n} 首`),
+        replyKey: 'assistant.reply.bgm', plan: memory.lastPlan(sessionId), actions: null
+      };
+    }
+    const text = AGENT_BGM_TEXT[action];
+    if (!text) return agentToolFail('AGENT_BAD_ACTION', 'bgm 的 action 只能是 list/pick/next/off');
+    return {
+      ok: true, reply: replyForBgm(sessionId, text),
+      replyKey: 'assistant.reply.bgm', plan: memory.lastPlan(sessionId), actions: null
+    };
+  },
+  settings_change(sessionId, args) {
+    const key = String(args.key || '');
+    const value = args.value === undefined || args.value === null ? '' : String(args.value);
+    let text = null;
+    if (key === 'model') text = AGENT_SETTINGS_TEXT.model[value] || null;
+    else if (key === 'resolution') text = AGENT_SETTINGS_TEXT.resolution[String(value).toLowerCase()] || null;
+    else if (key === 'broadcast') text = /^(true|on|1|开|打开)$/i.test(value) ? '把任务播报打开' : '把任务播报关掉';
+    else if (key === 'clear_prefs') text = '清空偏好';
+    if (!text) return agentToolFail('AGENT_BAD_ARGS', 'settings_change 的 key/value 组合不受支持：' + key + '=' + value);
+    const r = replyForSettings(sessionId, text);
+    return {
+      ok: true, reply: r.reply, replyKey: 'assistant.reply.settings',
+      plan: null, pendingChange: r.pending, actions: null
+    };
+  },
+  prefs(sessionId, args, ctx) {
+    const r = replyForPrefs(sessionId, { userId: ctx.userId });
+    return {
+      ok: true, reply: r.reply, replyKey: 'assistant.reply.prefs',
+      plan: null, preferences: r.preferences, actions: null
+    };
+  },
+  assets(sessionId) {
+    return { ok: true, reply: replyForAssets(sessionId), replyKey: 'assistant.reply.assets', plan: null, actions: null };
+  },
+  confirm_plan(sessionId, args, ctx) {
+    const plan = memory.lastPlan(sessionId);
+    if (!plan) return agentNoPlan(ctx.lang);
+    return {
+      ok: true,
+      reply: replyForConfirm(sessionId, ctx.lang),
+      replyKey: 'assistant.reply.confirm',
+      plan,
+      actions: [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }]
+    };
+  }
+};
+const AGENT_TOOL_NAMES = Object.freeze(Object.keys(AGENT_TOOL_HANDLERS));
+
+/**
+ * 执行 agent 选中的一个工具。**绝不抛异常**；不提供 execute（付费只能走计划卡按钮）。
+ * @param {object} opts { tool, args, sessionId?, userId?, lang? }
+ */
+function runAgentTool(opts = {}) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const tool = String(o.tool || '').trim();
+  const args = o.args && typeof o.args === 'object' && !Array.isArray(o.args) ? o.args : {};
+  const lang = i18n.resolveLang(o.lang);
+  if (!tool) return agentToolFail('AGENT_TOOL_MISSING', 'runAgentTool 需要 tool');
+  if (AGENT_TOOL_NAMES.indexOf(tool) === -1) {
+    return agentToolFail('AGENT_TOOL_UNKNOWN', '未知/不允许的工具：' + tool);
+  }
+  const session = memory.getOrCreate(o.sessionId);
+  const sessionId = session.id;
+  const userId = o.userId ? String(o.userId) : 'local';
+  try {
+    const out = AGENT_TOOL_HANDLERS[tool](sessionId, args, { lang, userId });
+    memory.appendMessage(sessionId, {
+      role: 'assistant', text: out.reply || '', kind: out.plan ? 'plan' : 'chat'
+    });
+    return {
+      ...out,
+      sessionId,
+      tool,
+      lang,
+      plan: out.plan ? briefPlan(out.plan) : null,
+      canExecute: !!out.plan
+    };
+  } catch (e) {
+    return {
+      ...agentToolFail('AGENT_TOOL_ERROR', '工具执行失败：' + (e && e.message ? e.message : e)),
+      sessionId, tool, lang
+    };
+  }
+}
+
 module.exports = {
   SUPERVISOR_VERSION,
   ACTIVE_STATUS,
@@ -2214,6 +2496,10 @@ module.exports = {
   execute,
   stateOf,
   briefPlan,
+  // 2026-11-19 B 目标第二刀：agent 工具门面（无 execute；动作走既有确定性函数）
+  runAgentTool,
+  AGENT_TOOL_NAMES,
+  agentContextOf,
   taskView,
   failedIndices,
   observedRetries,

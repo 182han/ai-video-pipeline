@@ -628,6 +628,120 @@ async function main() {
       bad.length === 0, bad.join(' / '));
   }
 
+  // ================= [3a-5] 2026-11-19 B 目标：agent 工具门面（runAgentTool）=================
+  // agent.js 只做「理解+选工具」；真正执行走 supervisor 既有确定性函数。
+  // 本组锁三件事：① 只读工具只读（不建任务、不改计划）；② 改计划工具真的改；
+  // ③ 没有 execute（确认执行仍只能走计划卡按钮）。
+  console.log('\n[3a-5] B 目标：agent 工具门面（runAgentTool，零计费、不建任务）');
+  {
+    const sidA = 'verify-agent-tools-' + Date.now().toString(36);
+    const toolsBefore = taskManager.getAllTasks().length;
+    const t = (tool, args = {}) => supervisor.runAgentTool({
+      tool, args, sessionId: sidA, userId: 'local', lang: 'zh'
+    });
+
+    ok('工具门面白名单 13 个且**没有** execute',
+      supervisor.AGENT_TOOL_NAMES.length === 13
+      && ['execute', 'delete', 'create_task', 'pay'].every((n) => supervisor.AGENT_TOOL_NAMES.indexOf(n) === -1),
+      supervisor.AGENT_TOOL_NAMES.join(','));
+
+    const created = t('plan_video', { totalMinutes: 0.5, resolution: '1080p' });
+    ok('plan_video(0.5 分钟/1080p) → 3 段计划 + plan 回传',
+      created.ok === true && !!created.plan && created.plan.clipCount === 3
+      && created.plan.resolution === '1080p' && created.replyKey === 'assistant.reply.plan',
+      created.ok ? `${created.plan.clipCount}段/${created.plan.resolution}` : created.code);
+
+    const shown = t('show_plan');
+    ok('show_plan → 只读摘要、planId 不变、不建任务',
+      shown.ok === true && !!shown.plan && shown.plan.planId === created.plan.planId
+      && taskManager.getAllTasks().length === toolsBefore);
+
+    const cards = t('show_scene_cards');
+    ok('show_scene_cards → 只读预览（plan=null）',
+      cards.ok === true && cards.plan === null && /场景卡/.test(cards.reply));
+
+    const swapped = t('edit_plan', { action: 'swap_scene', segment: 2 });
+    ok('edit_plan swap_scene(第 2 段) → 已换第 2 段、planId 不变',
+      swapped.ok === true && /已换第 2 段/.test(swapped.reply) && swapped.plan.planId === created.plan.planId);
+
+    const promptEdit = t('edit_plan', { action: 'set_prompt', segment: 2, prompt: '雪山湖面，冷色调' });
+    ok('edit_plan set_prompt(第 2 段) → 已改第 2 段、promptOverrides 落盘',
+      promptEdit.ok === true && /已改第 2 段/.test(promptEdit.reply)
+      && promptEdit.plan.promptOverrides
+      && promptEdit.plan.promptOverrides['1'] === '雪山湖面，冷色调',
+      promptEdit.plan && promptEdit.plan.promptOverrides
+        ? Object.keys(promptEdit.plan.promptOverrides).join(',') : '无覆盖');
+
+    const batch = t('edit_plan', { action: 'swap_all' });
+    ok('edit_plan swap_all → 整批换卡、planId 不变',
+      batch.ok === true && /已换掉全部/.test(batch.reply) && batch.plan.planId === created.plan.planId);
+
+    const res = t('edit_plan', { action: 'set_resolution', resolution: '720p' });
+    ok('edit_plan set_resolution → 新计划 720p（走既有续问路径）',
+      res.ok === true && !!res.plan && res.plan.resolution === '720p');
+
+    const dur = t('edit_plan', { action: 'set_duration', totalMinutes: 1 });
+    ok('edit_plan set_duration → 1 分钟计划（6 段 × 10 秒）',
+      dur.ok === true && !!dur.plan && dur.plan.clipCount === 6,
+      dur.ok ? `${dur.plan.clipCount}段` : dur.code);
+
+    const clipSec = t('edit_plan', { action: 'set_clip_duration', clipDurationSec: 15 });
+    ok('edit_plan set_clip_duration → 15 秒/段（场景卡合法档位）',
+      clipSec.ok === true && !!clipSec.plan && clipSec.plan.clipDurationSec === 15);
+
+    const noPlanRes = supervisor.runAgentTool({
+      tool: 'edit_plan',
+      args: { action: 'set_resolution', resolution: '480p' },
+      sessionId: 'verify-agent-noplan-' + Date.now().toString(36),
+      lang: 'zh'
+    });
+    ok('无计划时 set_resolution → 问总时长（不瞎建、不报错）',
+      noPlanRes.ok === true && noPlanRes.plan === null && /要做多长|总时长/.test(noPlanRes.reply));
+
+    const budget = t('budget');
+    ok('budget → 简报含剩余/已花（真实 budget.status 口径）',
+      budget.ok === true && /剩余 \$/.test(budget.reply) && /已花 \$/.test(budget.reply));
+    const status = t('status');
+    ok('status → 有回复', status.ok === true && !!status.reply);
+    const assets = t('assets');
+    ok('assets → 有回复', assets.ok === true && !!assets.reply);
+    const prefs = t('prefs');
+    ok('prefs → 有回复', prefs.ok === true && !!prefs.reply);
+
+    const bgmList = t('bgm', { action: 'list' });
+    ok('bgm list → 列素材库', bgmList.ok === true && /首/.test(bgmList.reply));
+    const bgmOff = t('bgm', { action: 'off' });
+    ok('bgm off → 计划配乐关闭',
+      bgmOff.ok === true && !!bgmOff.plan && bgmOff.plan.bgm && bgmOff.plan.bgm.mode === 'off');
+
+    const confirm = t('confirm_plan');
+    ok('confirm_plan → 回传计划 + 确认动作，但**不建任务**',
+      confirm.ok === true && !!confirm.plan
+      && Array.isArray(confirm.actions) && confirm.actions[0].requiresApproval === true
+      && taskManager.getAllTasks().length === toolsBefore);
+
+    const stg = t('settings_change', { key: 'resolution', value: '1080p' });
+    ok('settings_change → 只返回待确认项（requiresConfirm）',
+      stg.ok === true && !!stg.pendingChange && stg.pendingChange.requiresConfirm === true);
+    supervisor._clearPendingChanges();
+
+    const badTool = t('execute', {});
+    ok('不存在 execute 工具 → AGENT_TOOL_UNKNOWN（模型不可能直接花钱）',
+      badTool.ok === false && badTool.code === 'AGENT_TOOL_UNKNOWN');
+    const badArgs = t('edit_plan', { action: 'swap_scene' });
+    ok('swap_scene 缺 segment → AGENT_BAD_ARGS', badArgs.ok === false && badArgs.code === 'AGENT_BAD_ARGS');
+
+    const actx = supervisor.agentContextOf({ sessionId: sidA });
+    ok('agentContextOf → 紧凑只读上下文（有规划/余额）',
+      actx.hasPlan === true && /段/.test(actx.planSummary || '') && typeof actx.budgetUsd === 'number',
+      JSON.stringify(actx).slice(0, 120));
+    const actxEmpty = supervisor.agentContextOf({ sessionId: 'verify-agent-ctx-' + Date.now().toString(36) });
+    ok('agentContextOf → 新会话 hasPlan=false、无计划摘要',
+      actxEmpty.hasPlan === false && actxEmpty.planSummary === null);
+
+    ok('全部工具调用结束：任务数不变', taskManager.getAllTasks().length === toolsBefore);
+  }
+
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================
   console.log('\n[3b] 新意图：问「选了哪些场景卡」/ 要「纯文生视频」（只读，不建计划）');
   ok('意图分类：「哪三个场景」→ plan_scenes（不再当成新计划重问时长）',
