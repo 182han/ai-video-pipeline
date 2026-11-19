@@ -147,35 +147,51 @@ class OpenAICompatibleVideoGenerator extends BaseGenerator {
       image: imagePayload
     };
 
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), Math.min(this.timeoutMs, 120000));
-    let response;
-    try {
-      response = await fetch(`${this.baseUrl}/video/generations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
-        body: JSON.stringify(body),
-        signal: ac.signal
-      });
-    } catch (e) {
-      throw new Error(`提交图生视频任务失败（${this.baseUrl}）: ${e.name === 'AbortError' ? '超时' : e.message}`);
-    } finally {
-      clearTimeout(timer);
-    }
+    // 2026-11-19 事故：10 秒 + 3.2MB dataUrl + 3 并发，中转在 ~64s 返回 504。
+    // 现在：上游已压缩首帧 + 串行提交；这里再对 502/503/504 做**有限次**重试。
+    // 默认重试 1 次（共 2 次提交）；可用 I2V_GATEWAY_RETRIES / I2V_GATEWAY_RETRY_DELAY_MS 调整。
+    const maxRetries = Math.max(0, Math.min(3, Number(process.env.I2V_GATEWAY_RETRIES) || 1));
+    const retryDelayMs = Math.max(0, Number(process.env.I2V_GATEWAY_RETRY_DELAY_MS) || 2000);
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), Math.min(this.timeoutMs, 120000));
+      let response;
+      try {
+        response = await fetch(`${this.baseUrl}/video/generations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+          body: JSON.stringify(body),
+          signal: ac.signal
+        });
+      } catch (e) {
+        throw new Error(`提交图生视频任务失败（${this.baseUrl}）: ${e.name === 'AbortError' ? '超时' : e.message}`);
+      } finally {
+        clearTimeout(timer);
+      }
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      // 2026-11-19：10 秒片段 + 3.2MB 首帧 + 3 并发时，中转在 ~64s 返回 504。
-      // 已在上游压缩首帧并默认串行提交；仍 504 时给出可照做的下一步。
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        const taskId = data.task_id || data.id;
+        if (!taskId) throw new Error('视频接口未返回任务 id: ' + JSON.stringify(data).slice(0, 200));
+        this._taskMode.set(String(taskId), 'newapi');
+        return { taskId, status: 'queued' };
+      }
+
+      const retryable = [502, 503, 504].includes(response.status);
+      if (retryable && attempt < maxRetries) {
+        const wait = retryDelayMs * (attempt + 1);
+        console.warn(`[openai-video] 图生视频网关 ${response.status}（第 ${attempt + 1}/${maxRetries + 1} 次），${wait}ms 后重试`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+
+      // 用户明确不接受「换通道/改秒数」当默认修复；这里只如实说明已做过的自动处理。
       const hint = response.status === 504
-        ? '（中转网关超时：10 秒图生视频更易触发；已压缩首帧并默认串行，仍失败请改用百炼/可灵通道或改 5 秒）'
+        ? `（网关超时：已压缩首帧、串行提交并自动重试 ${attempt + 1} 次；仍失败请稍后补跑，把 504 反馈给中转）`
         : '';
       throw new Error(`图生视频 API 错误 (${response.status})${hint}: ${msgOf(data, '')}`);
     }
-    const taskId = data.task_id || data.id;
-    if (!taskId) throw new Error('视频接口未返回任务 id: ' + JSON.stringify(data).slice(0, 200));
-    this._taskMode.set(String(taskId), 'newapi');
-    return { taskId, status: 'queued' };
+    throw new Error('图生视频提交失败：重试次数用尽');
   }
 
   async getStatus(taskId) {

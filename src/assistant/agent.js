@@ -529,6 +529,9 @@ async function runTurn(opts) {
     };
     if (attempt === 1) {
       // 一次重试：把坏输出塞回去，明确要求只输出合法 JSON。
+      // 2026-11-19：第一次默认关思考（快）；失败重试时自动开思考（质量兜底），
+      // 只在真正需要时多花时间。调用方显式传 thinking 时不覆盖。
+      if (o.thinking === undefined) llmOpts.thinking = { type: 'enabled' };
       messages.push({ role: 'assistant', content: raw.slice(0, 800) });
       messages.push({
         role: 'user',

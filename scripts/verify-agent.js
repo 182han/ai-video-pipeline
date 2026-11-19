@@ -157,16 +157,21 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
   ok('反问路径：ok + clarify', clarifyTurn.ok && clarifyTurn.mode === 'clarify');
 
   let calls = 0;
+  let retryThinking = null;
   const retryTurn = await agent.runTurn({
     text: '来个 30 秒',
     lang: 'zh',
     ctx: CTX,
-    callLLM: async () => {
+    callLLM: async (system, messages, opts) => {
       calls += 1;
+      if (calls === 2) retryThinking = opts && opts.thinking;
       return calls === 1 ? reply('好的我马上安排') : reply({ tool: 'plan_video', args: { totalMinutes: 0.5 } });
     }
   });
   ok('坏 JSON → 一次重试后成功（attempts=2）', retryTurn.ok && retryTurn.attempts === 2 && calls === 2);
+  ok('重试时自动开回思考（质量兜底；正常回合仍关思考保速度）',
+    !!retryThinking && retryThinking.type === 'enabled',
+    JSON.stringify(retryThinking));
 
   calls = 0;
   const badTwice = await agent.runTurn({

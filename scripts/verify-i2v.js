@@ -117,6 +117,34 @@ console.log('================================================================');
       'WhaleTV：无 URL 时发 data URL（阿里云官方格式；2026-11-16 实测出片）', calls[0] && String(calls[0].body.image).slice(0, 40));
     check(oaB64Res.taskId === 'whale_i2v_2', 'WhaleTV：data URL 路径也返回 task_id');
 
+    // 2b) 2026-11-19：504 网关超时 → 同一通道自动重试一次（不换通道/不改秒数）
+    const oldRetries = process.env.I2V_GATEWAY_RETRIES;
+    const oldDelay = process.env.I2V_GATEWAY_RETRY_DELAY_MS;
+    process.env.I2V_GATEWAY_RETRIES = '1';
+    process.env.I2V_GATEWAY_RETRY_DELAY_MS = '1';
+    calls.length = 0;
+    let n504 = 0;
+    stubFetch(() => {
+      n504 += 1;
+      if (n504 === 1) return { ok: false, status: 504, json: async () => ({}), text: async () => '{}' };
+      return jsonResponse({ task_id: 'retry_ok', id: 'retry_ok' });
+    });
+    const oaRetry = new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' });
+    const retryRes = await oaRetry.generate('雪山推近', { duration: 10, image: IMG_W });
+    check(calls.length === 2 && retryRes.taskId === 'retry_ok',
+      'WhaleTV：504 自动重试一次后成功（同一通道 / 10 秒）', 'calls=' + calls.length);
+
+    // 2c) 连续 504 → 抛出带「已自动重试」的明确错误（不再建议换通道/改秒数）
+    calls.length = 0;
+    stubFetch(() => ({ ok: false, status: 504, json: async () => ({}), text: async () => '{}' }));
+    let err504 = null;
+    try { await new OA({ apiKey: 'k', baseUrl: 'https://relay.example/v1', modelId: 'wan3.0-video' }).generate('x', { duration: 10, image: IMG_W }); }
+    catch (e) { err504 = e; }
+    check(err504 && /504/.test(err504.message) && /自动重试/.test(err504.message),
+      'WhaleTV：连续 504 报错且说明已自动重试', err504 && err504.message.slice(0, 80));
+    if (oldRetries === undefined) delete process.env.I2V_GATEWAY_RETRIES; else process.env.I2V_GATEWAY_RETRIES = oldRetries;
+    if (oldDelay === undefined) delete process.env.I2V_GATEWAY_RETRY_DELAY_MS; else process.env.I2V_GATEWAY_RETRY_DELAY_MS = oldDelay;
+
     // 3) 查询：完成态（2026-11-16 实测结构 data.status=SUCCESS + data.result_url）
     calls.length = 0;
     stubFetch(() => jsonResponse({ code: 'success', data: { status: 'SUCCESS', progress: '100%', result_url: 'https://cdn.example/v.mp4' } }));
