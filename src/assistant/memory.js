@@ -404,6 +404,43 @@ function classify(text) {
   return { intent: 'unknown' };
 }
 
+// 2026-11-19 E0（只读诊断，**不改变 classify 行为**）：
+// classify 是"按顺序首个命中就 return"，第一个命中之后的信号被丢弃。
+// 而「我要1个20秒的…把场景卡给我看一下」这种句子其实**同时命中 create 和 plan_scenes**，
+// 被"场景卡"抢先之后 create 信号就消失了。本函数把所有命中的分支都列出来，
+// 用于量化：零命中 / 单命中 / 多命中 各占多少，多命中里现有优先级会不会选错。
+// 与 classify 的一致性由 scripts/analyze-rule-ambiguity.js 断言（首个命中必须等于 classify 结果）。
+function traceMatches(text) {
+  const s = String(text || '').trim();
+  const hits = [];
+  const add = (name, cond) => { if (cond) hits.push(name); };
+  if (!s) return hits;
+  add('greeting', RE_GREETING.test(s));
+  add('status', RE_STATUS.test(s));
+  add('last', RE_LAST.test(s));
+  add('plan_scenes', RE_PLAN_SCENES.test(s));
+  add('no_image', RE_NO_IMAGE.test(s));
+  add('confirm', isConfirmRequest(s));
+  add('plan_edit:promptView', isPromptViewRequest(s));
+  add('plan_edit:promptSet', RE_PROMPT_SET_VERB.test(s));
+  add('plan_edit:segment',
+    (RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s))
+    || (RE_SEGMENT_VAGUE.test(s) && RE_SEGMENT_SWAP_WORD.test(s))
+    || isBatchSceneEdit(s)
+    || isSceneCardEdit(s));
+  add('bgm',
+    (RE_BGM_NOUN.test(s) && RE_BGM_ACTION.test(s))
+    || (RE_BGM_INDEX.test(s) && !RE_TIME_WORD.test(s))
+    || (RE_BGM_SWAP.test(s) && !RE_CREATE.test(s)));
+  add('repair', isRepairQuery(s));
+  add('settings', isSettingsChange(s));
+  add('prefs', isPrefsQuery(s));
+  add('assets', isAssetsQuery(s));
+  add('context', isContextQuery(s));
+  add('create', RE_CREATE.test(s));
+  return hits;
+}
+
 // ==========================================
 // 任务检索
 // ==========================================
@@ -541,6 +578,7 @@ module.exports = {
   listMessages,
   listSessions,
   classify,
+  traceMatches,
   isBatchSceneEdit,
   isPromptViewRequest,
   isSceneCardEdit,
