@@ -232,6 +232,19 @@ Error: spawn EPERM
    ③ 对外副作用（推远端、删产物、动生产数据库、发付费请求）必须先取得用户同意，并在交付说明里记录对象与时间；
    ④ 确需改他人文件时（例如修测试环境的临时目录），改动最小化、单独说明、**不并入自己的提交**。
 
+19. **React prop 类型错误会整块页面崩溃，静态断言证明不了能渲染（2026-11-19 新增）**：
+   事故：设置页开关按钮写成 `style='opacity:.5;...'`（未强制时传空串）。React 生产构建对 `style`
+   只接受对象，直接抛 `Minified React error #62`，SettingsView 被 ErrorBoundary 兜成
+   「This block failed to render」，用户报「重启后设置页没有了」。此前的 `verify-assistant-frontend`
+   只 grep 源码、不执行 React，所以全绿也没抓到。
+   判据：① `style` 只传**对象或 undefined**，禁止字符串；`className` 传字符串、事件名用驼峰、
+      受控值注意 `value/checked`；新增 JSX 属性前先确认 React 类型，不靠猜。
+   ② **静态 grep ≠ 能渲染**。无浏览器/无截图能力时，交付必须标「未验证」，并对易错类型
+      加静态防回归断言（本次已加：设置页不得出现字符串 style）。
+   ③ 看到 `Minified React error #NN` 先查 `https://react.dev/errors/NN` 再改，不要凭感觉改代码。
+   ④ 设置页/向导这类"一崩就空白"的页面，改动后优先找浏览器实测；本机起不了 Chrome
+      时，至少把改动限制在已有模式（参考同文件其它 `style=${{...}}` 写法），并让用户强制刷新复验。
+
 ---
 
 ## 6. 验收口径
