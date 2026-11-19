@@ -57,6 +57,12 @@ const SUITES = [
     desc: '2026-11-18 S1：大脑 C1 理解契约（JSON 提取/输出校验/无 Key·HTTP 错·坏 JSON 三条失败路径/工具白名单/temperature 透传/与规则层比对；全程 stub fetch 不花钱）'
   },
   {
+    name: 'agent',
+    script: 'verify-agent.js',
+    group: 'fast',
+    desc: '2026-11-19 B 目标：工具调用 agent 契约（工具白名单无 execute/JSON 契约/参数校验/一次重试/say 接地/失败回退/总开关默认关；全程 stub 不花钱、未接线）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
