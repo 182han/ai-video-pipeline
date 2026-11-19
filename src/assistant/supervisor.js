@@ -381,25 +381,42 @@ function replyForStatus(sessionId) {
 // ==========================================
 const SCENE_PREVIEW_LIMIT = 8;
 
-function sceneCardLine(entry, i) {
+// 2026-11-19 英文界面零中文：卡名/地貌/取景/调色/章节标签在英文下走 *_en 字段，
+// scene_key 只给中文界面（中文输出逐字不变）。
+function sceneCardLine(entry, i, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const card = (entry && entry.id ? sceneCardLibrary.getCardById(entry.id) : null) || entry || {};
-  const bits = [`#${i + 1}`, card.scene_key || card.sceneKey || card.id || '(未知卡)'];
+  const rawName = card.scene_key || card.sceneKey || card.id;
+  // 卡库读不到时 planSceneEntries 会塞中文占位 '(卡缺失)'，英文界面不能漏中文。
+  const name = isEn
+    ? (card.protagonist_en || (rawName === '(卡缺失)' ? '(missing card)' : rawName) || '(unknown card)')
+    : (rawName || '(未知卡)');
+  const bits = [`#${i + 1}`, name];
   const chapter = Number.isInteger(card.chapter) ? card.chapter : (entry && entry.chapter);
   const sequence = Number.isInteger(card.sequence) ? card.sequence : (entry && entry.sequence);
-  if (Number.isInteger(chapter) && Number.isInteger(sequence)) bits.push(`第 ${chapter} 章-${sequence}`);
-  const biome = [card.biome, card.landform].filter(Boolean).join('/');
+  if (Number.isInteger(chapter) && Number.isInteger(sequence)) {
+    bits.push(isEn ? `ch. ${chapter}-${sequence}` : `第 ${chapter} 章-${sequence}`);
+  }
+  const biome = isEn
+    ? [card.biome_en, card.landform_en].filter(Boolean).join('/')
+    : [card.biome, card.landform].filter(Boolean).join('/');
   if (biome) bits.push(biome);
-  if (card.shot) bits.push(card.shot);
-  if (card.palette) bits.push(card.palette);
-  if (entry && entry.role === 'buffer') bits.push('缓冲卡');
+  const shot = isEn ? card.shot_en : card.shot;
+  if (shot) bits.push(shot);
+  const palette = isEn ? card.palette_en : card.palette;
+  if (palette) bits.push(palette);
+  if (entry && entry.role === 'buffer') bits.push(isEn ? 'buffer card' : '缓冲卡');
   return bits.join(' · ');
 }
 
-function formatSceneEntries(entries) {
+function formatSceneEntries(entries, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const list = Array.isArray(entries) ? entries : [];
-  const shown = list.slice(0, SCENE_PREVIEW_LIMIT).map(sceneCardLine);
+  const shown = list.slice(0, SCENE_PREVIEW_LIMIT).map((e, i) => sceneCardLine(e, i, lang));
   if (list.length > shown.length) {
-    shown.push(`…… 共 ${list.length} 张，这里先列前 ${shown.length} 张。`);
+    shown.push(isEn
+      ? `… ${list.length} cards in total; first ${shown.length} shown here.`
+      : `…… 共 ${list.length} 张，这里先列前 ${shown.length} 张。`);
   }
   return shown.join('\n');
 }
@@ -461,7 +478,7 @@ function replyForPlanScenes(sessionId, lang) {
     const tail = isEn
       ? '\nThese cards are already written into each clip prompt; to change cards, start a new plan.'
       : '\n这些卡已写进各段提示词；要换卡得新开一条计划。';
-    return head + formatSceneEntries(task.sceneCards.used) + tail;
+    return head + formatSceneEntries(task.sceneCards.used, isEn ? 'en' : 'zh') + tail;
   }
   if (plan.sceneCards === false) {
     return isEn
@@ -481,11 +498,11 @@ function replyForPlanScenes(sessionId, lang) {
     }
     if (isEn) {
       return `This plan has ${plan.clipCount} clips; when confirmed it will draw these ${preview.length} scene cards in plan order:\n`
-        + formatSceneEntries(preview)
+        + formatSceneEntries(preview, 'en')
         + '\n(Preview only — no cards are reserved until you press "Confirm and run".)';
     }
     return `这条计划 ${plan.clipCount} 段，确认后会按计划顺序取这 ${preview.length} 张场景卡：\n`
-      + formatSceneEntries(preview)
+      + formatSceneEntries(preview, 'zh')
       + '\n（现在只是预览，还没占卡；真正点「确认执行」时才分配给任务。）';
   } catch (e) {
     return isEn
@@ -1072,7 +1089,7 @@ function resolvePromptTarget(sessionId, plan, text) {
 //   · 用户改过 → 覆盖文本原样返回（与 pipeline 的 promptSource=scene-card-user-edit 一致）；
 //   · 没改过 → 用 promptComposer 按场景卡拼出来，ctx 与 pipeline._composeSceneCardPrompts 完全一致
 //     （只有 theme，没有 userPrompt ——否则显示出来的不是真正会发出去的提示词）。
-function promptTextOfSegment(plan, index) {
+function promptTextOfSegment(plan, index, lang) {
   const override = plan.promptOverrides && plan.promptOverrides[String(index)];
   if (override) return { text: String(override), source: 'user-edit', card: null };
   const ids = Array.isArray(plan.sceneCardIds) ? plan.sceneCardIds : [];
@@ -1083,7 +1100,10 @@ function promptTextOfSegment(plan, index) {
   try {
     const patch = promptComposer.composeClipPatch(card, {
       theme: plan.theme || null,
-      promptOverride: null
+      promptOverride: null,
+      // 2026-11-19 英文界面零中文：英文会话看/改提示词时按同一 *_en 拼出，
+      // 否则「show the prompt」贴出来的仍是中文提示词。lang 缺省行为与原来一致（中文）。
+      lang
     });
     return { text: patch.prompt, source: 'scene-card', card };
   } catch (e) {
@@ -1126,13 +1146,17 @@ function tryReplyPromptView(sessionId, text, lang) {
     const parts = [];
     let missing = 0;
     for (let i = 1; i <= limit; i += 1) {
-      const seg = promptTextOfSegment(plan, i - 1);
+      const seg = promptTextOfSegment(plan, i - 1, lang);
       if (!seg) { missing += 1; continue; }
+      // 英文界面的「来源」也用英文卡名（scene_key 只给中文界面）。
+      const cardName = seg.card
+        ? (isEn ? (seg.card.protagonist_en || seg.card.scene_key) : seg.card.scene_key)
+        : '';
       const from = seg.source === 'user-edit'
         ? (isEn ? 'source: your edited text' : '来源：你手动改过的文本')
         : (isEn
-          ? `source: scene card ${seg.card ? seg.card.scene_key : ''} (composed from the card)`
-          : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`);
+          ? `source: scene card ${cardName} (composed from the card)`
+          : `来源：场景卡 ${cardName}（按卡拼出）`);
       parts.push(isEn
         ? `Clip ${i} (${seg.text.length} chars; ${from}):\n${seg.text}`
         : `第 ${i} 段（${seg.text.length} 字；${from}）：\n${seg.text}`);
@@ -1165,19 +1189,23 @@ function tryReplyPromptView(sessionId, text, lang) {
       ? `This plan only has ${plan.clipCount} clips; there is no clip ${n}.`
       : `这条计划只有 ${plan.clipCount} 段，没有第 ${n} 段。`;
   }
-  const seg = promptTextOfSegment(plan, n - 1);
+  const seg = promptTextOfSegment(plan, n - 1, lang);
   if (!seg) {
     return isEn
       ? `The scene card for clip ${n} cannot be read (the card library may have changed), so this plan needs to be rebuilt. Nothing was changed.`
       : `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
   }
+  // 英文界面的「来源」也用英文卡名（scene_key 只给中文界面）。
+  const cardName = seg.card
+    ? (isEn ? (seg.card.protagonist_en || seg.card.scene_key) : seg.card.scene_key)
+    : '';
   const from = isEn
     ? (seg.source === 'user-edit'
       ? 'source: your edited text'
-      : `source: scene card ${seg.card ? seg.card.scene_key : ''} (composed from the card)`)
+      : `source: scene card ${cardName} (composed from the card)`)
     : (seg.source === 'user-edit'
       ? '来源：你手动改过的文本'
-      : `来源：场景卡 ${seg.card ? seg.card.scene_key : ''}（按卡拼出）`);
+      : `来源：场景卡 ${cardName}（按卡拼出）`);
   if (isEn) {
     return `Prompt for clip ${n} (${seg.text.length} chars; ${from}):\n${seg.text}\n`
       + 'Nothing was changed. To edit, say "change \'A\' to \'B\'", "remove \'C\'", or "use this: ...".';
@@ -1365,12 +1393,22 @@ function replyForPlanEdit(sessionId, text, lang) {
   plan.sceneCardIds = currentIds;
   plan.sceneCardIds[index] = next.id;
   savePlanInPlace(sessionId, plan);
-  const fromKey = oldCard ? oldCard.scene_key : oldId;
-  const toKey = nextCard ? nextCard.scene_key : next.id;
+  const fromKey = oldCard
+    ? (isEn ? (oldCard.protagonist_en || oldCard.scene_key) : oldCard.scene_key)
+    : oldId;
+  const toKey = nextCard
+    ? (isEn ? (nextCard.protagonist_en || nextCard.scene_key) : nextCard.scene_key)
+    : next.id;
   const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
-    ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
+    ? (isEn ? ` (ch. ${nextCard.chapter}-${nextCard.sequence})` : `（第 ${nextCard.chapter} 章-${nextCard.sequence}）`)
+    : '';
+  if (isEn) {
+    return `Swapped clip ${n}: ${fromKey} → ${toKey}${chapterSeq}\n`
+      + `Current ${plan.clipCount} scene cards:\n${formatSceneEntries(planSceneEntries(plan), 'en')}\n`
+      + describeReply(plan, 'en');
+  }
   return `已换第 ${n} 段：${fromKey} → ${toKey}${chapterSeq}\n`
-    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
+    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan), 'zh')}\n`
     + describeReply(plan);
 }
 
@@ -1412,10 +1450,15 @@ function replyForBatchSwap(sessionId, plan, lang) {
     const nextCard = sceneCardLibrary.getCardById(next.id);
     nextIds[i] = next.id;
     used.add(next.id);
-    const fromKey = oldCard ? oldCard.scene_key : oldId;
-    const toKey = nextCard ? nextCard.scene_key : next.id;
+    const fromKey = oldCard
+      ? (isEn ? (oldCard.protagonist_en || oldCard.scene_key) : oldCard.scene_key)
+      : oldId;
+    const toKey = nextCard
+      ? (isEn ? (nextCard.protagonist_en || nextCard.scene_key) : nextCard.scene_key)
+      : next.id;
     const chapterSeq = nextCard && Number.isInteger(nextCard.chapter) && Number.isInteger(nextCard.sequence)
-      ? `（第 ${nextCard.chapter} 章-${nextCard.sequence}）` : '';
+      ? (isEn ? ` (ch. ${nextCard.chapter}-${nextCard.sequence})` : `（第 ${nextCard.chapter} 章-${nextCard.sequence}）`)
+      : '';
     changes.push(isEn
       ? `#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`
       : `#${i + 1} ${fromKey} → ${toKey}${chapterSeq}`);
@@ -1428,11 +1471,11 @@ function replyForBatchSwap(sessionId, plan, lang) {
   }
   if (isEn) {
     return `Swapped all ${nextIds.length} clips:\n${shown.join('\n')}\n`
-      + `Current ${plan.clipCount} scene cards:\n${formatSceneEntries(planSceneEntries(plan))}\n`
+      + `Current ${plan.clipCount} scene cards:\n${formatSceneEntries(planSceneEntries(plan), 'en')}\n`
       + describeReply(plan, 'en');
   }
   return `已换掉全部 ${nextIds.length} 段：\n${shown.join('\n')}\n`
-    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan))}\n`
+    + `当前 ${plan.clipCount} 张场景卡：\n${formatSceneEntries(planSceneEntries(plan), 'zh')}\n`
     + describeReply(plan);
 }
 
