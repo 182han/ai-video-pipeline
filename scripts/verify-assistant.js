@@ -554,6 +554,80 @@ async function main() {
         return first === assistantMemory.classify(t).intent;
       }));
 
+  // ================= [3a-4] 意图金标准语料：防「补一句、抢走另一句」回归 =================
+  // 为什么不是「再补一条 ??? 的断言」：
+  // 历史事故（交接 §16）是打地鼠——classify 是优先级链，新增一条正则会**静默改写**
+  // 别的句子的去向；只测这次修的那句，下一轮漏掉的会是别的句子。
+  // 这张表 = 一句真实原话 + 期望意图。以后用户再报一句，就往表里加一行；
+  // 任何规则改动都必须让整张表继续全绿。成本与单条断言同量级，覆盖面大一个量级。
+  const GOLDEN_INTENTS = [
+    // —— E0 零命中句：D1–D3 已补齐 ——
+    ['1080p', 'plan_edit'],
+    ['720p', 'plan_edit'],
+    ['改成 1080p', 'plan_edit'],
+    ['换成 720p', 'plan_edit'],
+    ['25 seconds', 'create'],
+    ['场景卡', 'plan_scenes'],
+    ['你选的是哪几张卡', 'plan_scenes'],
+    // —— E0 真·垃圾输入：必须保持 unknown（D4 的自动化保险）——
+    ['???', 'unknown'],
+    ['随便说点什么', 'unknown'],
+    ['blah blah whatever', 'unknown'],
+    ['asdfghjkl', 'unknown'],
+    // —— 历史上被新分支抢走过的老句子（新增正则先过这几行）——
+    ['提示词呢', 'plan_edit'],
+    ['场景卡看一下', 'plan_scenes'],
+    ['看一下场景卡', 'plan_scenes'],
+    ['提示词改成：雪山', 'plan_edit'],
+    ['换一组', 'plan_edit'],
+    ['每段 15 秒', 'create'],
+    ['再来一条', 'create'],
+    ['不要场景卡', 'unknown'],
+    ['10 分钟极光', 'create'],
+    ['配乐有哪些', 'bgm'],
+    ['确认生成吗？', 'confirm'],
+    ['上次那条为什么失败', 'repair'],
+    ['预算还剩多少', 'context'],
+    ['你选了哪些场景卡', 'plan_scenes'],
+    // —— E0 多命中长句（时长 vs 看卡）：必须继续走 create ——
+    ['我要1个20秒的每段为10秒，分辨率为720P。然后你写好场景卡之后，把场景卡给我看一下。', 'create']
+  ];
+  {
+    const bad = GOLDEN_INTENTS.filter(([t, want]) => assistantMemory.classify(t).intent !== want);
+    ok('意图金标准语料：' + GOLDEN_INTENTS.length + ' 句全部归位（新增正则先过这张表）',
+      bad.length === 0,
+      bad.map(([t, want]) => JSON.stringify(t) + '→' + assistantMemory.classify(t).intent + '(期望 ' + want + ')').join(' / '));
+  }
+  ok('意图金标准与 traceMatches 一致（首个命中映射后 = 期望意图）',
+    GOLDEN_INTENTS.every(([t, want]) => {
+      const hits = assistantMemory.traceMatches(t);
+      const first = hits.length ? (hits[0].startsWith('plan_edit') ? 'plan_edit' : hits[0]) : 'unknown';
+      return first === want;
+    }), '见上一行');
+  {
+    // 垃圾输入的**行为**不变：只反问、不排计划、不问时长、不背能力菜单。
+    // 这是 S0「答非所问」事故的正面防线；逐句跑 supervisor（零计费、不建任务）。
+    const GARBAGE = ['???', '随便说点什么', 'blah blah whatever', 'asdfghjkl'];
+    const bad = [];
+    GARBAGE.forEach((t, i) => {
+      const r = supervisor.handleMessage({
+        sessionId: 'verify-garbage-' + Date.now().toString(36) + '-' + i,
+        text: t,
+        lang: 'zh'
+      });
+      // 判据要精确：无计划时 replyUnknown 的澄清句里**本来就有**「要排计划就告诉我总时长」，
+      // 那是澄清选项，不是排计划式的「这条视频要做多长？」。所以只禁后者 + replyKey。
+      const good = r.ok === true && r.intent === 'unknown'
+        && r.replyKey === 'assistant.reply.unknown' && r.plan === null
+        && /没接住/.test(r.reply)
+        && !/这条视频要做多长/.test(r.reply)
+        && !/可以做三件事/.test(r.reply);
+      if (!good) bad.push(JSON.stringify(t) + '→' + r.intent + '/' + r.replyKey);
+    });
+    ok('垃圾输入（中文模式）→ 只反问：不排计划、不问时长、不背能力菜单',
+      bad.length === 0, bad.join(' / '));
+  }
+
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================
   console.log('\n[3b] 新意图：问「选了哪些场景卡」/ 要「纯文生视频」（只读，不建计划）');
   ok('意图分类：「哪三个场景」→ plan_scenes（不再当成新计划重问时长）',
