@@ -35,11 +35,17 @@ const FORBIDDEN_TOOL_NAMES = Object.freeze([
 const TOOLS = Object.freeze([
   {
     name: 'plan_video',
-    desc: '创建一条新的视频计划（或按新参数重排一条）',
-    descEn: 'Create a new video plan (or rebuild it with new parameters)',
+    desc: '创建一条新的视频计划（或按新参数重排一条）。totalMinutes=整条总时长（分钟）；clipDurationSec=每段秒数，仅场景卡模式 10/15',
+    descEn: 'Create a new video plan (or rebuild it with new parameters). totalMinutes=total length in minutes; clipDurationSec=seconds per clip (scene-card mode: 10/15 only)',
     params: {
       totalMinutes: 'number?', clipDurationSec: 'number?', clipCount: 'number?',
       resolution: 'string?', model: 'string?', sceneCards: 'boolean?'
+    },
+    // 2026-11-19 live 抓到：模型自创型号 "whaletv-wanx3" → plan_video 执行失败、回复变成报错。
+    // 型号/分辨率限定为真实枚举，让校验层在第一次就拒绝并触发一次重试。
+    enums: {
+      model: ['dashscope', 'openai-video', 'kling', 'seedance', 'mock'],
+      resolution: ['480p', '720p', '1080p', '4k', '2160p']
     }
   },
   {
@@ -199,6 +205,10 @@ function buildSystemPrompt(lang, ctx) {
       '· "swap them all / another batch" -> edit_plan(action=swap_all).',
       '· "confirm / start" -> confirm_plan only (ask the user to press the button); NEVER execute.',
       '· "??? / blah blah whatever" -> clarify (or a short chat line), never a plan.',
+      '· "30 seconds / 2 minutes" = TOTAL length -> plan_video(totalMinutes=0.5/2); "15 seconds per clip" -> clipDurationSec (10 or 15 only).',
+      '· "swap clip 2 / change clip 2" with a plan -> edit_plan(action=swap_scene, segment=2); "15s per clip" with a plan -> edit_plan(action=set_clip_duration, clipDurationSec=15).',
+      '· "set the prompt to: X" with a plan -> edit_plan(action=set_prompt, segment=1, prompt=X); default to clip 1, do not ask back.',
+      '· "change the default channel to Bailian" -> settings_change(key=model, value=dashscope); WhaleTV=openai-video, Kling=kling, Seedance=seedance.',
       '',
       'Current context (read-only):',
       contextBlock(ctx)
@@ -238,6 +248,10 @@ function buildSystemPrompt(lang, ctx) {
     '· 「换一组 / 都换掉」= edit_plan(action=swap_all)；',
     '· 「确认 / 开始吧」只回 confirm_plan（提醒用户点确认），**不要**执行；',
     '· 「??? / 随便说点什么」= clarify 或一句简短聊天，不要排计划。',
+    '· 「30 秒 / 2 分钟」= **整条视频总时长** → plan_video(totalMinutes=0.5/2)；只有「每段 15 秒」才用 clipDurationSec（场景卡模式只支持 10 或 15）。',
+    '· 「第二段换个场景 / 把第二段换成 X」且已有计划 → edit_plan(action=swap_scene, segment=2)；「每段 15 秒」且已有计划 → edit_plan(action=set_clip_duration, clipDurationSec=15)。',
+    '· 「提示词改成：X」且已有计划 → edit_plan(action=set_prompt, segment=1, prompt=X)；用户没指定第几段时默认第 1 段，不要反问。',
+    '· 「把默认通道改成百炼」→ settings_change(key=model, value=dashscope)；WhaleTV 中转=openai-video、可灵=kling、即梦=seedance。',
     '',
     '当前上下文（只读）：',
     contextBlock(ctx)
@@ -434,7 +448,11 @@ async function runTurn(opts) {
     .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.text).slice(0, 2000) }));
   messages.push({ role: 'user', content: text });
 
-  const call = typeof o.callLLM === 'function' ? o.callLLM : llmService.chatMulti;
+  // 2026-11-19：不能把 llmService.chatMulti 直接赋给变量再调用——会丢 this
+  // （chatMulti 内部用 this._resolve），表现为 0ms THROWN、全部回退。
+  // 真机 A/B 第一次跑就是这么全挂的；stub 注入独立函数所以单测没抓到。
+  const injected = typeof o.callLLM === 'function' ? o.callLLM : null;
+  const call = injected || ((system, messages, llmOpts) => llmService.chatMulti(system, messages, llmOpts));
   const llmOpts = {
     apiKey: o.apiKey,
     baseUrl: o.baseUrl,
@@ -496,8 +514,8 @@ async function runTurn(opts) {
       messages.push({
         role: 'user',
         content: lang === 'en'
-          ? 'Your previous answer was not a valid decision. Reply with ONE JSON object only, following the schema. No markdown, no prose.'
-          : '你上一条输出不合法。只输出一个 JSON 对象，严格遵守上面的结构；不要 markdown、不要解释。'
+          ? 'Your previous answer was not a valid decision. Reply with ONE JSON object only, following the schema. No markdown, no prose, no apology.'
+          : '你上一条输出不合法。只输出一个 JSON 对象，严格遵守上面的结构；不要 markdown、不要解释、不要道歉。'
       });
     }
   }

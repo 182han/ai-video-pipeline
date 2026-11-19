@@ -90,6 +90,13 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
   ok('数字字符串被规范化（"2" → 2）',
     agent.validateOutput({ tool: 'plan_video', args: { totalMinutes: '2' } }).args.totalMinutes === 2);
   ok('clipCount=0 被拒', agent.validateOutput({ tool: 'plan_video', args: { clipCount: 0 } }).error === 'BAD_ARG');
+  ok('plan_video 自创型号被拒（枚举外）',
+    (() => {
+      const r = agent.validateOutput({ tool: 'plan_video', args: { model: 'whaletv-wanx3' } });
+      return r.error === 'BAD_ARG' && r.arg === 'model';
+    })());
+  ok('plan_video 合法型号/分辨率通过',
+    agent.validateOutput({ tool: 'plan_video', args: { model: 'openai-video', resolution: '1080p' } }).ok);
   ok('枚举外 action 被拒',
     agent.validateOutput({ tool: 'edit_plan', args: { action: 'nuke_everything' } }).error === 'BAD_ARG');
   ok('edit_plan 缺 action → BAD_ARG',
@@ -222,6 +229,24 @@ const CTX = { hasPlan: true, planSummary: '3 段 × 10 秒 · 720p', budgetUsd: 
   const defaultTurn = await agent.runTurn({ text: '进度', lang: 'zh', ctx: CTX });
   restore();
   ok('默认调用走 llmService.chatMulti', defaultTurn.ok && defaultTurn.tool === 'status');
+
+  // 2026-11-19 真机 A/B 抓到：把 llmService.chatMulti 赋给变量再调用会丢 this
+  // （chatMulti 内部用 this._resolve → 0ms THROWN、46/46 回退）。这里用「检查 this」的
+  // stub 复现该场景：只有通过 llmService.chatMulti(...) 调用，this 才是 llmService。
+  const realChat = llm.chatMulti;
+  llm.chatMulti = async function () {
+    if (this !== llm) throw new Error('unbound this');
+    return reply({ tool: 'status', args: {} });
+  };
+  let boundTurn;
+  try {
+    boundTurn = await agent.runTurn({ text: '进度', lang: 'zh', ctx: CTX });
+  } finally {
+    llm.chatMulti = realChat;
+  }
+  ok('默认调用保留 llmService 绑定（不解构方法，避免丢 this）',
+    boundTurn.ok === true && boundTurn.tool === 'status',
+    boundTurn.failure && boundTurn.failure.kind);
 
   // ================= [6] 开关与接线状态 =================
   group('6. 总开关与接线状态');
