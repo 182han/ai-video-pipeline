@@ -3392,11 +3392,17 @@ app.get('/api/scene-cards/preview', (req, res) => {
         e.code = 'SCENE_CARDS_MISSING_CARD';
         throw e;
       }
-      const patch = promptComposer.composeClipPatch(card, {});
+      // 2026-11-19 英文界面零中文：把本次请求语言透传给 composer（英文时 prompt/imagePrompt/
+      // negativePrompt 走 *_en 字段），卡名同理给英文界面 protagonist_en。
+      const patch = promptComposer.composeClipPatch(card, { lang: req.lang });
       return {
         index: i,
         id: card.id,
-        sceneKey: card.scene_key,
+        sceneKey: req.lang === 'en'
+          ? (card.protagonist_en || card.scene_key)
+          : card.scene_key,
+        // 加法式：保留原中文键，供审计/中文界面与 sceneKey 对照（旧字段语义不变）。
+        sceneKeyZh: card.scene_key,
         chapter: card.chapter,
         sequence: card.sequence,
         role: entry.role || card.role || 'feature',
