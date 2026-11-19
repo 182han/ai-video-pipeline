@@ -38,6 +38,8 @@ const TOOL_INTENT = Object.freeze({
   confirm_plan: 'confirm'
 });
 
+// 2026-11-19 S3：英文下工具/参数错误话术由 supervisor.TOOL_ERROR_EN 统一提供
+
 function normalizeLang(lang) {
   return String(lang || '').toLowerCase().startsWith('en') ? 'en' : 'zh';
 }
@@ -126,7 +128,10 @@ async function handleAgentTurn(opts = {}) {
       lang
     });
     if (!out || out.ok !== true) {
-      const error = (out && out.error) || '工具执行失败';
+      const code = (out && out.code) || 'AGENT_TOOL_FAILED';
+      const error = lang === 'en'
+        ? (supervisor.TOOL_ERROR_EN[code] || 'The tool could not be executed.')
+        : ((out && out.error) || '工具执行失败');
       memory.appendMessage(sessionId, { role: 'assistant', text: error, kind: 'chat' });
       agentAudit.record({
         sessionId,

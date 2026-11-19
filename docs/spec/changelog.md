@@ -3583,3 +3583,55 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - 17:31 左右 3001 服务进程退出，页面出现 `网络异常：Failed to fetch` / `语音上传异常：Failed to fetch`
   （与语音代码无关）；17:32 已用后台进程重启（PID 138100），stdout/stderr 落
   `data/logs/console-2026-11-16-1735*.log`。重启清空内存会话，用户 17:34 重新登录。
+
+## 2026-11-19 深夜：i2v 同配置补跑成功 + 两个落库/质检缺陷修复 + 小智英文工具话术（S3）
+
+### 补跑结果（用户点击，未代跑）
+
+- `task_mwnosz8o_uyl4`（WhaleTV 中转 `wan3.0-video`，3 段 ×10 秒，720p）23:44:32 → 23:51:34 完成，
+  2 次 504 自动重试（23:45:35），3/3 片段 success；每段 10.031s / 1912×1082 / 30fps；
+  成片 28.816s / 1280×720 / h264+aac / 7,767,422 B；完整解码通过；mean -16.2 dB / max -1.5 dB。
+- 提交给网关 5 次（3 成功 + 2 重试）；504 是否计费无法确认，实际以中转账单为准。
+- 事故记录已更新：`docs/交接/2026-11-19-图生视频504事故记录.md` §5–§7。
+
+### 缺陷 1：success 片段 duration 从未落库 → 终检接缝/色彩永远「未执行」
+
+- 根因：`pipeline._finishClipSuccess()` 未写 duration；片段质检里已有 10.03。
+- 修复：写 `qcResult.details.duration.duration`（无则任务配置兜底），并 `error:null` 清掉上次 504 文案。
+- 证据：修复后用真实时长复测该成片，接缝实测失败（缝#1 SSIM 0.957 / MAD 17.15×；缝#2 SSIM 0.885 / MAD 46.5×，
+  阈值 8×；色差 ΔE 48.1 / 49.72，阈值 40）。即：红的原因变成真实测量，而不是「未执行」。
+  多场景是否放宽阈值，需用户决定（本次未改阈值）。
+- 验收：`scripts/verify-pipeline-fixes.js` [5] 组 4 项。
+
+### 缺陷 2：异步落库乱序 + 无连接重试 → DB 停在 mixing
+
+- 根因：`taskManager._saveTask()` 并发 fire-and-forget，较早快照后到会覆盖 completed；
+  写库连接超时只 `console.error` 无重试。
+- 修复：按 taskId 串行落库（`saveChains`）+ `flushSaves()`；`storage/index.js` 对连接级瞬时错误重试一次并
+  重建连接池（`postgres.js resetPool()`）；`_test-cleanup.js` 删除前等待 flush。
+- 数据修复：`task_mwnosz8o_uyl4` 的 DB 记录已写回 completed、3 段 duration=10.031、error=null（未改 finalQC）。
+- 验收：`scripts/verify-pipeline-fixes.js` [6] 组 3 项（第一笔慢/第二笔快 → 断言不并发、最终 completed）。
+
+### 小智 S3：英文工具回复零中文（E1–E5，离线）
+
+- 修复前 live（真实模型 10 轮）：7/10 条中文（status/budget/diagnose/last_video/prefs/bgm/settings_change）；
+  assets/chat/plan_video 英文。→ 失败。
+- 修复：`src/assistant/supervisor.js` 增加英文分支（status / context / assets / diagnose / last_video /
+  prefs / bgm list-pick-next-off / settings_change）；`agentRuntime.js` 错误码→英文映射（`TOOL_ERROR_EN`）；
+  `memory.formatWhenEn`（英文相对时间）；英文 reply 不贴中文任务标题（属内容，E10 待定）。
+- 验收：`verify-assistant` 新增 11 项 EN 断言 → **341/0**（含 1 条中文零回归断言）。
+- live 复测未做（需重启 3001；预计 ¥0.15 左右）→ **未验证**；用户批准额度 ≤¥1，本次实测约 $0.02。
+
+### 本次跑过的门禁（逐个，`verify-all` 仍 EPERM）
+
+`verify-assistant` 341/0、`verify-agent` 60/0、`verify-assistant-followup` 42/0、
+`verify-assistant-frontend` 101/0、`verify-i18n --strict` 12/0、`verify-i2v` 46/0、
+`verify-pipeline-fixes` 35/0。
+`verify-recovery-fixes` 24 passed / 1 failed：样本 `clips/mock_mvgy1dd6_4tbe09.mp4` 不存在
+（环境文件缺失，断言在 `fs.existsSync` 处失败，非本次改动）。
+
+### 未做 / 待用户
+
+- 重启 3001 让后端修复生效；重启后复测英文 live。
+- ETA（小智答「还要多久」）：本次实测 3 段 ×10 秒 i2v 串行 = 7m02s，可作为估算基准；未实现。
+- E6–E8、E10、多场景接缝阈值。

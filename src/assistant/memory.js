@@ -609,6 +609,18 @@ function formatWhen(iso) {
   return `${Math.floor(diff / 86400000)} 天前`;
 }
 
+// 英文相对时间（中文 formatWhen 逐字不变；两套并存，避免中英混排）
+function formatWhenEn(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const diff = Date.now() - t;
+  if (diff < 60 * 1000) return 'just now';
+  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)} min ago`;
+  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} h ago`;
+  return `${Math.floor(diff / 86400000)} d ago`;
+}
+
 module.exports = {
   MEMORY_VERSION,
   BASE_DIR,
@@ -644,5 +656,6 @@ module.exports = {
   isAssetsQuery,
   retrieveTasks,
   taskRef,
-  formatWhen
+  formatWhen,
+  formatWhenEn
 };

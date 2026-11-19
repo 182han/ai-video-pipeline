@@ -2356,6 +2356,47 @@ async function main() {
     && assistantAudit.count() === auditLines.length,
     `${auditLines.length} 条`);
 
+  // ============================================================
+  // [S3] 英文 agent 工具回复零中文（2026-11-19）
+  // ------------------------------------------------------------
+  // 背景：英文界面下小智的 status/budget/diagnose 等**确定性工具回复**仍是中文
+  // （实测 7/10 条中文）。本组逐工具断言 lang='en' 时 reply 不含 CJK；
+  // 同时留一条中文负向断言，防止把中文路径改坏（中文必须逐字仍是中文）。
+  // ============================================================
+  console.log('\n[S3] 英文 agent 工具回复（lang=en → 零 CJK）');
+  const enSid = 'verify_en_' + Date.now();
+  const hasCjk = (s) => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(String(s || ''));
+  const enTools = [
+    ['status', {}], ['budget', {}], ['diagnose', {}], ['last_video', {}],
+    ['assets', {}], ['prefs', {}], ['bgm', { action: 'list' }],
+    ['settings_change', { key: 'resolution', value: '1080p' }]
+  ];
+  for (const [tool, args] of enTools) {
+    const out = supervisor.runAgentTool({
+      tool, args, sessionId: enSid, userId: 'verify_en', lang: 'en'
+    });
+    ok(`EN 工具 ${tool} → 成功且回复无中文`,
+      !!out && out.ok === true && !hasCjk(out.reply),
+      out && String(out.reply || '').slice(0, 70));
+  }
+  for (const [tool, args, code] of [
+    ['no_such_tool', {}, 'AGENT_TOOL_UNKNOWN'],
+    ['bgm', { action: 'pick' }, 'AGENT_BAD_ARGS']
+  ]) {
+    const out = supervisor.runAgentTool({
+      tool, args, sessionId: enSid, userId: 'verify_en', lang: 'en'
+    });
+    ok(`EN 错误话术 ${code} → 失败且无中文`,
+      !!out && out.ok === false && out.code === code && !hasCjk(out.reply),
+      out && String(out.reply || '').slice(0, 70));
+  }
+  const zhStatus = supervisor.runAgentTool({
+    tool: 'status', args: {}, sessionId: enSid + '_zh', userId: 'verify_en', lang: 'zh'
+  });
+  ok('ZH status 仍为中文（英文改动零回归）',
+    !!zhStatus && zhStatus.ok === true && hasCjk(zhStatus.reply),
+    zhStatus && String(zhStatus.reply || '').slice(0, 40));
+
   console.log('\n[清理] 测试任务 / 临时产物');
   const cleaned = await cleanupAll();
   const bad = (cleaned || []).filter((c) => !c.ok);

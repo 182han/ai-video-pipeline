@@ -325,9 +325,17 @@ function retrieveRefs(query, limit = 5) {
   });
 }
 
-function describeRefs(refs) {
+function describeRefs(refs, lang) {
   if (!refs || refs.length === 0) return '';
+  const isEn = i18n.normalizeLang(lang) === 'en';
   return refs.map((r, i) => {
+    if (isEn) {
+      // 2026-11-19 S3：英文下不贴中文提示词标题（属内容，E10 待用户定策略），只给任务 ID + 时间 + 文件。
+      const when = memory.formatWhenEn(r.completedAt || r.createdAt);
+      const kind = r.kind === 'final' ? 'final cut' : (r.status === 'completed' ? 'completed' : `task ${r.status || 'unknown'}`);
+      const file = r.fileName ? `, file ${r.fileName}` : '';
+      return `${i === 0 ? 'Latest' : `#${i + 1} latest`}: ${r.taskId || '(no id)'} (${kind}${when ? ` · ${when}` : ''}${file})`;
+    }
     const when = memory.formatWhen(r.completedAt || r.createdAt);
     const kind = r.kind === 'final' ? '成片' : (r.status === 'completed' ? '任务完成' : `任务 ${r.status || ''}`);
     const file = r.fileName ? `，文件 ${r.fileName}` : '';
@@ -335,16 +343,29 @@ function describeRefs(refs) {
   }).join('\n');
 }
 
-function replyForLast(query) {
+function replyForLast(query, lang) {
   const res = retrieveRefs(query, 3);
+  const isEn = i18n.normalizeLang(lang) === 'en';
   if (!res.refs.length) {
-    return '库里还没有成片记录。说个总时长（比如「10 分钟」），我来做第一条。';
+    return isEn
+      ? 'No final cuts yet. Tell me a total length (for example "10 minutes") and I will lay out the first one.'
+      : '库里还没有成片记录。说个总时长（比如「10 分钟」），我来做第一条。';
   }
-  return `我查到这些相关记录：\n${describeRefs(res.refs)}\n`
-    + '要再来一条类似的，直接说「再来一条」并告诉我时长；要看成片就去「库 · 成片」。';
+  return isEn
+    ? `Here are the most recent records:\n${describeRefs(res.refs, 'en')}\n`
+      + 'To make a similar one, say "one more like that" and tell me the length. To watch a final cut, open Library → Finals.'
+    : `我查到这些相关记录：\n${describeRefs(res.refs)}\n`
+      + '要再来一条类似的，直接说「再来一条」并告诉我时长；要看成片就去「库 · 成片」。';
 }
 
-function replyForStatus(sessionId) {
+// 英文状态标签（中文 stateMachine.LABELS 逐字不变）
+const STATE_LABELS_EN = Object.freeze({
+  planned: 'planned', confirmed: 'confirmed', submitted: 'submitted',
+  running: 'running', done: 'done', failed: 'failed', needs_user: 'needs your input'
+});
+
+function replyForStatus(sessionId, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const state = memory.getState(sessionId);
   if (!state) {
     // 2026-11-17 V2（B1）：「现在跑到哪了？」要能回答**全局**任务，而不只是本会话自己的。
@@ -352,23 +373,45 @@ function replyForStatus(sessionId) {
     let live = [];
     try { live = assistantContext.contextOf(sessionId).tasks.active; } catch (e) { live = []; }
     if (live.length) {
+      if (isEn) {
+        return `[Briefing] ${live.length} task(s) running right now (global):\n`
+          + live.map((t) => `· ${t.taskId}: ${t.successClips}/${t.totalClips} clips (${t.percent}%), status ${t.status || 'running'}`).join('\n')
+          + '\n(Read-only: nothing was created or re-run.)';
+      }
       return `【小智简报】现在有 ${live.length} 个任务在跑（全局）：\n`
         + live.map((t) => `· ${diagnose.taskLabel(t)}（ID ${t.taskId}）：成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
         + '\n（只读播报：不会新建任务、不会重跑。）';
     }
-    return '现在没有正在执行的任务。说个时长，我来排计划。';
+    return isEn
+      ? "Nothing is running right now. Tell me a length and I'll lay out a plan."
+      : '现在没有正在执行的任务。说个时长，我来排计划。';
   }
   const task = state.finalTaskId ? taskManager.getTask(state.finalTaskId) : (state.taskId ? taskManager.getTask(state.taskId) : null);
   if (state.state === stateMachine.STATES.DONE) {
-    const file = task && task.outputPath ? `，成片 ${require('path').basename(task.outputPath)}` : '';
-    return `上一次任务已经完成${file}。可以在「库 · 成片」里看到。`;
+    const file = task && task.outputPath ? `, file ${require('path').basename(task.outputPath)}` : '';
+    if (isEn) return `Your last task is complete${file}. Open Library → Finals to view it.`;
+    const fileZh = task && task.outputPath ? `，成片 ${require('path').basename(task.outputPath)}` : '';
+    return `上一次任务已经完成${fileZh}。可以在「库 · 成片」里看到。`;
   }
   if (state.state === stateMachine.STATES.NEEDS_USER || state.state === stateMachine.STATES.FAILED) {
+    if (isEn) {
+      return `The task stopped (state: ${STATE_LABELS_EN[state.state] || state.state}). `
+        + 'Open Library to review it, or ask me to diagnose the failure.';
+    }
     return `任务停在「${stateMachine.LABELS[state.state]}」：${state.reason || state.lastError || '原因未记录'}。`;
   }
-  if (!task) return `任务状态：${stateMachine.LABELS[state.state] || state.state}。`;
+  if (!task) {
+    return isEn
+      ? `Task state: ${STATE_LABELS_EN[state.state] || state.state}.`
+      : `任务状态：${stateMachine.LABELS[state.state] || state.state}。`;
+  }
+  const ok = (task.clips || []).filter((c) => c.status === 'success').length;
+  if (isEn) {
+    return `Task ${task.taskId} is ${STATE_LABELS_EN[state.state] || state.state}: `
+      + `${ok}/${task.totalClips} clips done.`;
+  }
   return `${diagnose.taskLabel(task)}（ID ${task.taskId}）正在「${stateMachine.LABELS[state.state] || state.state}」：`
-    + `当前 ${task.currentStep || task.status}，成功片段 ${(task.clips || []).filter((c) => c.status === 'success').length}/${task.totalClips}。`;
+    + `当前 ${task.currentStep || task.status}，成功片段 ${ok}/${task.totalClips}。`;
 }
 
 // ==========================================
@@ -623,8 +666,63 @@ function agentContextOf(opts = {}) {
   };
 }
 
+// 2026-11-19 S3：英文 Key 分组名（只映射 label，不扩展 keyPresence 契约「仅 label+present」）
+const KEY_LABELS_EN = Object.freeze({
+  '视频生成·WhaleTV 中转': 'Video · WhaleTV relay',
+  '视频生成·百炼万相': 'Video · Bailian Wanxiang',
+  '视频生成·可灵': 'Video · Kling',
+  '图片生成': 'Image generation',
+  '多模态质检': 'Multimodal QC',
+  '文案 LLM': 'Text LLM'
+});
+
+// 2026-11-19 S3：英文只读汇总（不夹中文标签；任务只报 ID/状态，不贴中文提示词标题）
+function replyForContextEn(ctx) {
+  const lines = [];
+  lines.push(`[Briefing] Read-only environment summary (${ctx.version})`);
+  if (ctx.plan) {
+    const m = planCard.MODELS[ctx.plan.model];
+    const modelLabel = (m && m.labelEn) || ctx.plan.model;
+    lines.push(`Current plan: ${ctx.plan.clipCount} clips × ${ctx.plan.clipDurationSec} s `
+      + `(${modelLabel} · ${ctx.plan.resolution}) · planId ${ctx.plan.planId}`);
+  } else {
+    lines.push('Current plan: no plan card yet.');
+  }
+  lines.push(`Tasks: ${ctx.tasks.total} total`
+    + (ctx.tasks.active.length ? `, ${ctx.tasks.active.length} running` : '')
+    + (ctx.tasks.recent.length
+      ? `; recent: ${ctx.tasks.recent.slice(0, 3).map((t) => `${t.taskId} (${t.status || 'unknown'})`).join(', ')}`
+      : ''));
+  if (ctx.tasks.active.length) {
+    lines.push('Running:\n' + ctx.tasks.active
+      .map((t) => `· ${t.taskId}: ${t.status}, ${t.successClips}/${t.totalClips} clips (${t.percent}%)`)
+      .join('\n'));
+  }
+  if (ctx.tasks.failedRecent.length) {
+    lines.push('Recent failures: ' + ctx.tasks.failedRecent.slice(0, 3)
+      .map((t) => `${t.taskId} (${t.status || 'failed'})`).join(', '));
+  }
+  lines.push(ctx.budget
+    ? `Budget: ${fmtUsd(ctx.budget.balanceUsd)} left (spent ${fmtUsd(ctx.budget.spentUsd)} of ${fmtUsd(ctx.budget.initialUsd)}).`
+    : 'Budget: unavailable.');
+  const p = ctx.assets.photos;
+  lines.push(`Assets: photos ${p.usable} usable / ${p.all} total `
+    + `(${p.pending} pending, ${p.approved} approved, ${p.rejected} rejected); `
+    + `finals ${ctx.assets.library.finals}; clips ${ctx.assets.library.clips}; `
+    + `scene cards ${ctx.assets.sceneCards.features}; BGM ${ctx.assets.bgm.tracks}.`);
+  lines.push(`Settings: default video ${ctx.settings.models.defaults.model} · ${ctx.settings.models.defaults.resolution}; `
+    + `image-to-video: ${ctx.settings.models.i2v.supported.join(' / ')}; `
+    + `preferences: ${ctx.settings.preferences ? 'saved' : 'none'}; `
+    + `broadcast: ${ctx.settings.broadcast.broadcastEnabled ? 'on' : 'off'} (throttle ${ctx.settings.broadcast.throttleSec} s).`);
+  lines.push('Keys (server env, present/absent only): '
+    + ctx.settings.keys.map((k) => `${KEY_LABELS_EN[k.label] || 'API key'} ${k.present ? 'present' : 'absent'}`).join('; ') + '.');
+  lines.push('(Read-only summary: no tasks created, nothing changed; keys are shown only as present/absent.)');
+  return lines.join('\n');
+}
+
 function replyForContext(sessionId, opts = {}) {
   const ctx = contextOf(sessionId, opts);
+  if (i18n.normalizeLang(opts.lang) === 'en') return replyForContextEn(ctx);
   const lines = [];
   lines.push(`【小智简报】环境只读汇总（${ctx.version}）`);
   lines.push(ctx.plan
@@ -666,9 +764,17 @@ function replyForContext(sessionId, opts = {}) {
 }
 
 // B5：素材库存（与 /api/photos 同口径：文件缺失的图片不计入；只读）。
-function replyForAssets(sessionId) {
+function replyForAssets(sessionId, lang) {
   const ctx = contextOf(sessionId);
   const p = ctx.assets.photos;
+  if (i18n.normalizeLang(lang) === 'en') {
+    return [
+      '[Briefing] Asset inventory (read-only):',
+      `Photos: ${p.usable} usable / ${p.all} total (${p.pending} pending, ${p.approved} approved, ${p.rejected} rejected) — same scope as /api/photos (missing files excluded).`,
+      `Finals: ${ctx.assets.library.finals}; clips: ${ctx.assets.library.clips}; scene cards: ${ctx.assets.sceneCards.features}; BGM: ${ctx.assets.bgm.tracks}.`,
+      '(Nothing was deleted or changed; to clean up finals or clips, open Library.)'
+    ].join('\n');
+  }
   return [
     '【小智简报】素材库存（只读）：',
     `图片库：可用 ${p.usable} 张 / 共 ${p.all}（待审 ${p.pending}，通过 ${p.approved}，打回 ${p.rejected}）——与 /api/photos 同口径（文件缺失不计入）。`,
@@ -696,16 +802,68 @@ function pickTaskForDiagnosis(sessionId) {
   return bad[0] || null;
 }
 
-function replyForRepair(sessionId) {
+// 2026-11-19 S3：英文诊断话术（分类/建议按 id 映射，不贴中文任务标题与原始错误）
+const CATEGORY_LABELS_EN = Object.freeze({
+  budget: 'Budget insufficient',
+  key: 'Key / auth',
+  model: 'Model capability mismatch',
+  rate: 'Rate limited',
+  timeout: 'Network / timeout',
+  qc: 'QC failed',
+  media: 'Media processing failed',
+  unknown: 'Unclassified failure'
+});
+
+const SUGGESTION_LABELS_EN = Object.freeze({
+  continue: (n) => (n > 0
+    ? `Retry the ${n} failed clip(s) — completed clips are reused, not regenerated`
+    : 'Re-run this task — completed parts are reused'),
+  switch_model: () => 'Switch to a channel that supports image-to-video (Bailian / Kling / Seedance / WhaleTV relay)',
+  fix_key: () => 'Add the API key under Settings → Video and restart; or turn off per-clip images and use text-to-video',
+  wait: () => 'Retry in a few minutes (rate limits are transient; completed clips are reused)',
+  topup: () => 'Top up or reconcile the budget before retrying',
+  lower_resolution: () => 'Lower the resolution (1080p → 720p) to cut the per-clip cost',
+  review_photos: () => 'Open Library → Photos, approve or reject the frames, then continue',
+  inspect: () => 'Open the task details, check the last failed step, and paste the error back to me'
+});
+
+const SUGGESTION_WHERE_EN = Object.freeze({
+  switch_model: 'Settings → Video',
+  fix_key: 'Settings → Video',
+  topup: 'Settings → Budget',
+  lower_resolution: 'Plan card / Settings',
+  review_photos: 'Library → Photos'
+});
+
+function replyForRepair(sessionId, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
   const task = pickTaskForDiagnosis(sessionId);
   if (!task) {
     return {
-      reply: '现在没有失败的任务可诊断。要我看别的任务，把任务 id 发我；'
-        + '要排新计划就说总时长。这次只做了只读检查，没有建任务。',
+      reply: isEn
+        ? 'There is no failed task to diagnose right now. To inspect another task, send me its task id; '
+          + 'to lay out a new plan, tell me the total length. This was a read-only check: no task was created.'
+        : '现在没有失败的任务可诊断。要我看别的任务，把任务 id 发我；'
+          + '要排新计划就说总时长。这次只做了只读检查，没有建任务。',
       diagnosis: null
     };
   }
   const d = diagnose.diagnose(task);
+  if (isEn) {
+    const lines = ['[Briefing] Failure diagnosis (read-only):'];
+    lines.push(`Task ${d.taskId} (${d.status || 'unknown'})`
+      + (d.failedClips.length ? ` — ${d.failedClips.length} clip(s) failed.` : ' — no final cut was produced.'));
+    lines.push(`Category: ${CATEGORY_LABELS_EN[d.category] || CATEGORY_LABELS_EN.unknown}`);
+    lines.push('Suggested fixes (nothing runs until you confirm; nothing was charged):');
+    d.suggestions.forEach((s, i) => {
+      const label = (SUGGESTION_LABELS_EN[s.id] && SUGGESTION_LABELS_EN[s.id](d.failedClips.length)) || 'Review the task details';
+      const where = SUGGESTION_WHERE_EN[s.id];
+      lines.push(`${i + 1}. ${label}${s.executable ? '' : ' (manual step; not executable in chat)'}`
+        + (where ? ` — ${where}` : ''));
+    });
+    lines.push('This was a read-only check: no task was created, nothing was re-run, no settings were changed.');
+    return { reply: lines.join('\n'), diagnosis: d };
+  }
   const lines = ['【小智简报】失败诊断（只读）：', d.summary, `分类：${d.categoryLabel}`
     + (d.failedClips.length ? `；失败片段 ${d.failedClips.map((f) => '#' + (f.index + 1)).join('、')}` : '')];
   lines.push('修复选项（都要你点确认才执行，未确认不会重跑、不会花钱）：');
@@ -772,14 +930,61 @@ function parsePreferenceChange(text) {
   return null;
 }
 
-function replyForSettings(sessionId, text) {
+// 2026-11-19 S3：英文设置变更（agent 的 settings_change 用；L3 语义与中文一致）
+function settingsLabelEn(key, value) {
+  if (key === 'model') {
+    const m = planCard.MODELS[value];
+    return m ? `Default video model → ${m.labelEn || value}` : null;
+  }
+  if (key === 'resolution') return `Default resolution → ${String(value).toLowerCase()}`;
+  if (key === 'broadcast') return `Task broadcast → ${/^(true|on|1)$/i.test(String(value)) ? 'on' : 'off'}`;
+  if (key === 'clear_prefs' || key === 'clear') return 'Clear cross-session preferences (server-side)';
+  return null;
+}
+
+function replyForSettingsChangeEn(sessionId, key, value) {
+  const label = settingsLabelEn(key, value);
+  if (!label) {
+    return {
+      reply: 'That setting is not supported. I can change: default video model, default resolution, '
+        + 'task broadcast, or clear preferences.',
+      pending: null
+    };
+  }
+  const pending = {
+    changeId: newChangeId(),
+    sessionId,
+    key,
+    value,
+    label,
+    requiresConfirm: true,
+    approved: false,
+    createdAt: new Date().toISOString(),
+    expiresAt: Date.now() + CHANGE_TTL_MS
+  };
+  pendingChanges.set(sessionId, pending);
+  return {
+    reply: '[Briefing] This is a settings change (L3) and needs your confirmation:\n'
+      + `· ${label}\n`
+      + 'Nothing changes until you confirm; after confirmation it is saved server-side and written to the audit log.\n'
+      + `(changeId=${pending.changeId}; valid for 10 minutes.)`,
+    pending
+  };
+}
+
+function replyForSettings(sessionId, text, lang) {
   const change = parsePreferenceChange(text);
   if (!change) {
     return {
-      reply: '要改哪一项设置？可以说：\n'
-        + '· 「把默认通道改成百炼」\n· 「把默认分辨率改成 1080p」\n· 「把默认 BGM 风格改成轻音乐」\n'
-        + '· 「把任务播报关掉」/「把任务播报打开」\n· 「清空偏好」\n'
-        + '这些都会先请你确认（L3），确认前不会写任何东西。',
+      reply: i18n.normalizeLang(lang) === 'en'
+        ? 'Which setting should I change? You can say:\n'
+          + '· "Set the default channel to Bailian"\n· "Set the default resolution to 1080p"\n'
+          + '· "Turn task broadcast off" / "on"\n· "Clear preferences"\n'
+          + 'I will ask you to confirm first (L3); nothing is written before you approve.'
+        : '要改哪一项设置？可以说：\n'
+          + '· 「把默认通道改成百炼」\n· 「把默认分辨率改成 1080p」\n· 「把默认 BGM 风格改成轻音乐」\n'
+          + '· 「把任务播报关掉」/「把任务播报打开」\n· 「清空偏好」\n'
+          + '这些都会先请你确认（L3），确认前不会写任何东西。',
       pending: null
     };
   }
@@ -896,6 +1101,26 @@ function clearPreferences(opts = {}) {
 function replyForPrefs(sessionId, opts = {}) {
   const userId = opts.userId ? String(opts.userId) : 'local';
   const p = preferences.describe(userId);
+  if (i18n.normalizeLang(opts.lang) === 'en') {
+    if (!p) {
+      return {
+        reply: 'No cross-session preferences saved yet. You can say "set the default channel to Bailian" or '
+          + '"set the default resolution to 1080p" — I will show a confirmation first and save only after you approve '
+          + '(server-side, per user; it survives new windows and browsers).',
+        preferences: null
+      };
+    }
+    const m = planCard.MODELS[p.model];
+    const lines = ['[Briefing] Cross-session preferences (server-side, can be cleared):'];
+    if (p.model) lines.push(`· Default video model: ${(m && m.labelEn) || p.model} (${p.model})`);
+    if (p.resolution) lines.push(`· Default resolution: ${p.resolution}`);
+    if (p.clipDurationSec) lines.push(`· Common clip length: ${p.clipDurationSec} s`);
+    if (p.bgmStyle) lines.push(`· Default BGM style: ${p.bgmStyle}`);
+    if (p.updatedAt) lines.push(`(Last updated: ${p.updatedAt})`);
+    lines.push('To clear them, say "clear preferences" (I will ask you to confirm). '
+      + 'The Settings page does not read these yet; in a new chat, say "use my usual settings".');
+    return { reply: lines.join('\n'), preferences: p };
+  }
   if (!p) {
     return {
       reply: '还没有保存过跨会话偏好。可以说「把默认通道改成百炼」「把默认分辨率改成 1080p」——'
@@ -1490,6 +1715,57 @@ function replyForBatchSwap(sessionId, plan, lang) {
 // ==========================================
 const RE_BGM_INDEX = /第\s*(\d+|[零〇一二两三四五六七八九十百]+)\s*首/;
 
+// 2026-11-19 S3：英文配乐工具（list/pick/next/off 行为与中文路径一致，只是话术全英文）
+function replyForBgmEn(sessionId, action, index) {
+  const plan = memory.lastPlan(sessionId);
+  const lib = bgmLibrary();
+  const tracks = lib.tracks;
+  if (!tracks.length) return 'The BGM library is empty. Add a track in Settings / Editor first.';
+  let orderIds = (plan && Array.isArray(plan.bgmChoices) && plan.bgmChoices.length)
+    ? plan.bgmChoices.filter((id) => lib.byId.has(id))
+    : [];
+  if (!orderIds.length) orderIds = tracks.map((t) => t.id);
+  const ordered = orderIds.map((id) => lib.byId.get(id)).filter(Boolean);
+  if (action === 'list') {
+    if (plan) { plan.bgmChoices = orderIds; savePlanInPlace(sessionId, plan); }
+    const head = plan
+      ? `Library has ${ordered.length} tracks (numbers are saved on this plan — say "use track 3"):`
+      : `Library has ${ordered.length} tracks (no plan yet; tell me a total length first, then say "use track 3"):`;
+    const body = ordered.map((t, i) => {
+      const dur = Number(t.durationSec) > 0 ? `${Math.round(Number(t.durationSec))} s` : 'unknown length';
+      return `${i + 1}. ${t.title || t.id} (${t.id}, ${t.category || 'music'}, ${dur})`;
+    }).join('\n');
+    return `${head}\n${body}` + (plan ? `\nCurrent BGM: ${bgmLabelEn(plan)}` : '');
+  }
+  if (action === 'off') {
+    if (!plan) return 'No plan card yet: tell me the total length first, then say "no background music".';
+    plan.bgm = { enabled: false, mode: 'off' };
+    plan.bgmChoices = orderIds;
+    savePlanInPlace(sessionId, plan);
+    return `Background music is off for this plan.\n${describeReply(plan, 'en')}`;
+  }
+  if (!plan) return 'No plan card yet: tell me the total length first, then pick a track.';
+  let track = null;
+  if (action === 'pick') {
+    const n = Number(index);
+    if (!Number.isInteger(n) || n < 1 || n > ordered.length) {
+      return `The library has ${ordered.length} track(s); there is no track ${index}. Say "list BGM" to see the numbers.`;
+    }
+    track = ordered[n - 1];
+  } else {
+    const curId = plan.bgm && plan.bgm.trackId ? plan.bgm.trackId : null;
+    const curIdx = curId ? ordered.findIndex((t) => t.id === curId) : -1;
+    track = ordered[(curIdx + 1) % ordered.length] || null;
+  }
+  if (!track) return 'Could not work out which track you meant. Say "list BGM" to see the numbers.';
+  plan.bgm = { enabled: true, mode: 'manual', trackId: track.id };
+  plan.bgmChoices = orderIds;
+  savePlanInPlace(sessionId, plan);
+  const pos = ordered.indexOf(track) + 1;
+  return `BGM set: #${pos} "${track.title || track.id}" (${track.id}). `
+    + `It will be used when you confirm.\n${describeReply(plan, 'en')}`;
+}
+
 function replyForBgm(sessionId, text) {
   const plan = memory.lastPlan(sessionId);
   const lib = bgmLibrary();
@@ -1736,7 +2012,7 @@ function handleMessage(opts = {}) {
     reply = replyForGreeting(lang);
     replyKey = 'assistant.reply.greeting';
   } else if (intent.intent === 'status') {
-    reply = replyForStatus(sessionId);
+    reply = replyForStatus(sessionId, lang);
     replyKey = 'assistant.reply.status';
   } else if (intent.intent === 'plan_scenes') {
     // 2026-11-16 用户问题 a：问「选了哪几个场景」→ 只读预览，不重排计划、不占卡。
@@ -1755,29 +2031,29 @@ function handleMessage(opts = {}) {
     actions = [{ type: 'confirm', labelKey: 'assistant.action.confirmExecute', requiresApproval: true }];
   } else if (intent.intent === 'repair') {
     // 2026-11-17 V2（B2/B3）：失败诊断 + 修复建议。只读，不自动重跑。
-    const r = replyForRepair(sessionId);
+    const r = replyForRepair(sessionId, lang);
     reply = r.reply;
     replyKey = 'assistant.reply.repair';
     diagnosis = r.diagnosis;
   } else if (intent.intent === 'settings') {
     // 2026-11-17 V2（B6）：设置变更（L3）→ 只返回 pendingChange，确认前什么都不改。
-    const r = replyForSettings(sessionId, text);
+    const r = replyForSettings(sessionId, text, lang);
     reply = r.reply;
     replyKey = 'assistant.reply.settings';
     pendingChange = r.pending;
   } else if (intent.intent === 'prefs') {
     // 2026-11-17 V2（B7）：读跨会话偏好（服务端用户级，换会话仍在）。
-    const r = replyForPrefs(sessionId, { userId });
+    const r = replyForPrefs(sessionId, { userId, lang });
     reply = r.reply;
     replyKey = 'assistant.reply.prefs';
     preferencesView = r.preferences;
   } else if (intent.intent === 'assets') {
     // 2026-11-17 V2（B5）：素材库存（与 /api/photos 同口径）。
-    reply = replyForAssets(sessionId);
+    reply = replyForAssets(sessionId, lang);
     replyKey = 'assistant.reply.assets';
   } else if (intent.intent === 'context') {
     // 2026-11-17 V1（§9.1-7）/ V2（B4）：只读环境问答；不改计划、不回传计划。
-    reply = replyForContext(sessionId, { userId });
+    reply = replyForContext(sessionId, { userId, lang });
     replyKey = 'assistant.reply.context';
   } else if (planEditBranch) {
     // 2026-11-16 P7-A：换单段场景卡 / 改单段提示词 —— 只改计划，不建任务。
@@ -1804,7 +2080,7 @@ function handleMessage(opts = {}) {
   } else if (intent.intent === 'last') {
     const res = retrieveRefs(text, 3);
     refs = res.refs;
-    reply = replyForLast(text);
+    reply = replyForLast(text, lang);
     replyKey = 'assistant.reply.last';
   } else {
     // create / unknown 都尝试排计划；听不懂时 buildPlan 会返回明确的追问。
@@ -2347,6 +2623,22 @@ function agentToolFail(code, error) {
   };
 }
 
+// 2026-11-19 S3：英文错误话术（错误码 → 英文；未知码给通用英文，不回中文原文）
+const TOOL_ERROR_EN = Object.freeze({
+  AGENT_NO_PLAN: 'There is no plan card yet. Tell me the total length first (for example "30 seconds").',
+  AGENT_BAD_ARGS: 'That tool call was missing a required argument or had an invalid value. Tell me again in plain words.',
+  AGENT_BAD_ACTION: 'That action is not supported for this tool.',
+  AGENT_TOOL_UNKNOWN: 'That tool is not available.',
+  AGENT_TOOL_MISSING: 'Internal error: the tool name was missing.',
+  AGENT_TOOL_ERROR: 'The tool failed to run. Please try again.',
+  AGENT_PROMPT_VIEW_FAILED: 'I could not read the prompt (there may be no plan card yet).',
+  AGENT_TOOL_FAILED: 'The tool could not be executed.'
+});
+
+function agentToolFailLang(code, zh, lang) {
+  return agentToolFail(code, i18n.normalizeLang(lang) === 'en' ? (TOOL_ERROR_EN[code] || TOOL_ERROR_EN.AGENT_TOOL_FAILED) : zh);
+}
+
 function agentNoPlan(lang) {
   return agentToolFail('AGENT_NO_PLAN', i18n.normalizeLang(lang) === 'en'
     ? 'There is no plan card yet. Tell me the total length (for example "30 seconds" or "10 minutes") first.'
@@ -2426,48 +2718,62 @@ const AGENT_TOOL_HANDLERS = {
       replyKey: 'assistant.reply.planScenes', plan: null, actions: null
     };
   },
-  status(sessionId) {
-    return { ok: true, reply: replyForStatus(sessionId), replyKey: 'assistant.reply.status', plan: null, actions: null };
+  status(sessionId, args, ctx) {
+    return { ok: true, reply: replyForStatus(sessionId, ctx && ctx.lang), replyKey: 'assistant.reply.status', plan: null, actions: null };
   },
-  last_video(sessionId) {
+  last_video(sessionId, args, ctx) {
+    const lang = (ctx && ctx.lang) || 'zh';
     const res = retrieveRefs('上一次的视频', 3);
     return {
-      ok: true, reply: replyForLast('上一次的视频'),
+      ok: true, reply: replyForLast('上一次的视频', lang),
       replyKey: 'assistant.reply.last', plan: null, refs: res.refs, actions: null
     };
   },
   budget(sessionId, args, ctx) {
     return {
-      ok: true, reply: replyForContext(sessionId, { userId: ctx.userId }),
+      ok: true, reply: replyForContext(sessionId, { userId: ctx.userId, lang: ctx.lang }),
       replyKey: 'assistant.reply.context', plan: null, actions: null
     };
   },
-  diagnose(sessionId) {
-    const r = replyForRepair(sessionId);
+  diagnose(sessionId, args, ctx) {
+    const r = replyForRepair(sessionId, ctx && ctx.lang);
     return { ok: true, reply: r.reply, replyKey: 'assistant.reply.repair', plan: null, diagnosis: r.diagnosis, actions: null };
   },
   bgm(sessionId, args, ctx) {
+    const lang = (ctx && ctx.lang) || 'zh';
     const action = String(args.action || 'list');
+    const isEn = i18n.normalizeLang(lang) === 'en';
     if (action === 'pick') {
       const n = Number(args.index);
       if (!Number.isInteger(n) || n < 1) {
         return agentToolFail('AGENT_BAD_ARGS', 'bgm pick 需要 index（第几首，从 1 开始）');
       }
       return {
-        ok: true, reply: replyForBgm(sessionId, `用第 ${n} 首`),
+        ok: true,
+        reply: isEn ? replyForBgmEn(sessionId, 'pick', n) : replyForBgm(sessionId, `用第 ${n} 首`),
         replyKey: 'assistant.reply.bgm', plan: memory.lastPlan(sessionId), actions: null
       };
     }
-    const text = AGENT_BGM_TEXT[action];
-    if (!text) return agentToolFail('AGENT_BAD_ACTION', 'bgm 的 action 只能是 list/pick/next/off');
+    if (action !== 'list' && action !== 'next' && action !== 'off') {
+      return agentToolFail('AGENT_BAD_ACTION', 'bgm 的 action 只能是 list/pick/next/off');
+    }
     return {
-      ok: true, reply: replyForBgm(sessionId, text),
+      ok: true,
+      reply: isEn ? replyForBgmEn(sessionId, action, null) : replyForBgm(sessionId, AGENT_BGM_TEXT[action]),
       replyKey: 'assistant.reply.bgm', plan: memory.lastPlan(sessionId), actions: null
     };
   },
-  settings_change(sessionId, args) {
+  settings_change(sessionId, args, ctx) {
     const key = String(args.key || '');
     const value = args.value === undefined || args.value === null ? '' : String(args.value);
+    if (i18n.normalizeLang(ctx && ctx.lang) === 'en') {
+      const rEn = replyForSettingsChangeEn(sessionId, key, value);
+      if (!rEn.pending) return agentToolFail('AGENT_BAD_ARGS', 'settings_change 的 key/value 组合不受支持：' + key + '=' + value);
+      return {
+        ok: true, reply: rEn.reply, replyKey: 'assistant.reply.settings',
+        plan: null, pendingChange: rEn.pending, actions: null
+      };
+    }
     let text = null;
     if (key === 'model') text = AGENT_SETTINGS_TEXT.model[value] || null;
     else if (key === 'resolution') text = AGENT_SETTINGS_TEXT.resolution[String(value).toLowerCase()] || null;
@@ -2481,14 +2787,14 @@ const AGENT_TOOL_HANDLERS = {
     };
   },
   prefs(sessionId, args, ctx) {
-    const r = replyForPrefs(sessionId, { userId: ctx.userId });
+    const r = replyForPrefs(sessionId, { userId: ctx.userId, lang: ctx.lang });
     return {
       ok: true, reply: r.reply, replyKey: 'assistant.reply.prefs',
       plan: null, preferences: r.preferences, actions: null
     };
   },
-  assets(sessionId) {
-    return { ok: true, reply: replyForAssets(sessionId), replyKey: 'assistant.reply.assets', plan: null, actions: null };
+  assets(sessionId, args, ctx) {
+    return { ok: true, reply: replyForAssets(sessionId, ctx && ctx.lang), replyKey: 'assistant.reply.assets', plan: null, actions: null };
   },
   confirm_plan(sessionId, args, ctx) {
     const plan = memory.lastPlan(sessionId);
@@ -2513,15 +2819,20 @@ function runAgentTool(opts = {}) {
   const tool = String(o.tool || '').trim();
   const args = o.args && typeof o.args === 'object' && !Array.isArray(o.args) ? o.args : {};
   const lang = i18n.resolveLang(o.lang);
-  if (!tool) return agentToolFail('AGENT_TOOL_MISSING', 'runAgentTool 需要 tool');
+  if (!tool) return agentToolFailLang('AGENT_TOOL_MISSING', 'runAgentTool 需要 tool', lang);
   if (AGENT_TOOL_NAMES.indexOf(tool) === -1) {
-    return agentToolFail('AGENT_TOOL_UNKNOWN', '未知/不允许的工具：' + tool);
+    return agentToolFailLang('AGENT_TOOL_UNKNOWN', '未知/不允许的工具：' + tool, lang);
   }
   const session = memory.getOrCreate(o.sessionId);
   const sessionId = session.id;
   const userId = o.userId ? String(o.userId) : 'local';
   try {
-    const out = AGENT_TOOL_HANDLERS[tool](sessionId, args, { lang, userId });
+    let out = AGENT_TOOL_HANDLERS[tool](sessionId, args, { lang, userId });
+    // 英文下把「工具/参数错误」的中文原文替换为英文（reply 与 error 同步，前端只显示一个）
+    if (out && out.ok === false && lang === 'en') {
+      const en = TOOL_ERROR_EN[out.code] || TOOL_ERROR_EN.AGENT_TOOL_FAILED;
+      out = { ...out, reply: en, error: en };
+    }
     // 2026-11-19：失败（如 AGENT_NO_PLAN / AGENT_BAD_ARGS）不在门面写会话，
     // 由运行时写一条错误回复——否则会「门面写一条 + 运行时再写一条」重复两条。
     if (out.ok !== false) {
@@ -2539,7 +2850,7 @@ function runAgentTool(opts = {}) {
     };
   } catch (e) {
     return {
-      ...agentToolFail('AGENT_TOOL_ERROR', '工具执行失败：' + (e && e.message ? e.message : e)),
+      ...agentToolFailLang('AGENT_TOOL_ERROR', '工具执行失败：' + (e && e.message ? e.message : e), lang),
       sessionId, tool, lang
     };
   }
@@ -2555,6 +2866,7 @@ module.exports = {
   // 2026-11-19 B 目标第二刀：agent 工具门面（无 execute；动作走既有确定性函数）
   runAgentTool,
   AGENT_TOOL_NAMES,
+  TOOL_ERROR_EN,
   agentContextOf,
   taskView,
   failedIndices,
