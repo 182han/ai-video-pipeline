@@ -80,6 +80,8 @@ const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 // 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 / 调度。
 // 说明：这些模块不自己起服务、不直连厂商；付费闸门在 supervisor.execute 内（未确认不发请求）。
 const assistantSupervisor = require('./src/assistant/supervisor');
+const assistantAgent = require('./src/assistant/agent');
+const assistantAgentRuntime = require('./src/assistant/agentRuntime');
 const assistantPlanCard = require('./src/assistant/planCard');
 const assistantAsr = require('./src/assistant/asr');
 const assistantMemory = require('./src/assistant/memory');
@@ -2467,18 +2469,43 @@ app.get('/api/assistant/info', (req, res) => {
 });
 
 // 对话：听懂 → 计划卡 / 上次记录 / 进度。不创建任务、不发付费请求。
-app.post('/api/assistant/message', (req, res) => {
+app.post('/api/assistant/message', async (req, res) => {
   const body = req.body || {};
   const text = String(body.text === undefined || body.text === null ? '' : body.text);
+  // 2026-11-17 V2：跨会话偏好按登录用户隔离；无登录墙/验收环境为 'local'。
+  const userId = (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local';
   try {
+    // P3：助手话术语言 = aiLang（AI 输出语言）→ 界面语言 → zh；
+    // 中文默认逐字保持现有回复（零回归），en 走 src/i18n/templates/assistant.js。
+    const lang = i18n.outputLang(req, body.aiLang);
+    // 2026-11-19 B 目标第三刀：agent 主路径（**默认关**；任何失败都回退规则路径）。
+    // Key 仍由浏览器随请求带（服务端不持久化）；无 Key 时 agent 立即失败 → 走规则。
+    if (assistantAgent.isEnabled() && text.trim()) {
+      const timeoutMs = Math.min(15000, Math.max(2000, Number(body.llmTimeoutMs) || 4000));
+      const turn = await assistantAgentRuntime.handleAgentTurn({
+        text,
+        sessionId: body.sessionId ? String(body.sessionId) : undefined,
+        userId,
+        lang,
+        supervisor: assistantSupervisor,
+        apiKey: body.llmApiKey,
+        baseUrl: body.llmBaseUrl,
+        model: body.llmModel,
+        timeoutMs
+      });
+      if (turn.handled) {
+        if (turn.response && turn.response.ok === false) {
+          console.warn('[assistant] agent 工具失败:', turn.response.code, turn.response.error);
+        }
+        return res.json(turn.response);
+      }
+      console.log('[assistant] agent 不可用，回退规则路径:', (turn.failure && turn.failure.kind) || 'UNKNOWN');
+    }
     const out = assistantSupervisor.handleMessage({
       sessionId: body.sessionId ? String(body.sessionId) : undefined,
       text,
-      // 2026-11-17 V2：跨会话偏好按登录用户隔离；无登录墙/验收环境为 'local'。
-      userId: (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local',
-      // P3：助手话术语言 = aiLang（AI 输出语言）→ 界面语言 → zh；
-      // 中文默认逐字保持现有回复（零回归），en 走 src/i18n/templates/assistant.js。
-      lang: i18n.outputLang(req, body.aiLang)
+      userId,
+      lang
     });
     res.json(out);
   } catch (e) {

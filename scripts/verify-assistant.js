@@ -90,6 +90,7 @@ const assistantMemory = require('../src/assistant/memory');
 const asr = require('../src/assistant/asr');
 const fillLib = require('../src/assistant/fillFromLibrary');
 const supervisor = require('../src/assistant/supervisor');
+const agentRuntime = require('../src/assistant/agentRuntime');
 const taskManager = require('../src/taskManager');
 const library = require('../src/library');
 const pipeline = require('../src/pipeline');
@@ -740,6 +741,103 @@ async function main() {
       actxEmpty.hasPlan === false && actxEmpty.planSummary === null);
 
     ok('全部工具调用结束：任务数不变', taskManager.getAllTasks().length === toolsBefore);
+  }
+
+  // ================= [3a-6] 2026-11-19 B 目标：agent 运行时（路由/落会话/回退）=================
+  // 本组不连模型：callLLM 注入固定 JSON。锁：
+  //   ① 会话落盘 = 1 条 user + 1 条 assistant（不重不丢）；
+  //   ② agent 失败（无 Key/坏 JSON/接地拒绝）→ handled:false 且**不写会话**（server 回退规则路径）；
+  //   ③ 工具失败 → handled:true + ok:false（明确报错，不猜）；
+  //   ④ 前端契约字段（intent=create 弹卡、replyKey、plan、agent meta）。
+  console.log('\n[3a-6] B 目标：agent 运行时（stub 模型，零计费）');
+  {
+    const rt = (sid, text, json, opts = {}) => agentRuntime.handleAgentTurn({
+      text, sessionId: sid, userId: 'local', lang: 'zh', supervisor,
+      callLLM: async () => ({ text: typeof json === 'string' ? json : JSON.stringify(json) }),
+      ...opts
+    });
+
+    const sidSay = 'verify-rt-say-' + Date.now().toString(36);
+    const sayOut = await rt(sidSay, '你能做什么？', { say: '我能陪你排计划、改计划、看进度。' });
+    ok('say 路径：handled + intent=chat + 回复原文',
+      sayOut.handled === true && sayOut.response.ok === true
+      && sayOut.response.intent === 'chat' && /排计划/.test(sayOut.response.reply)
+      && sayOut.response.replyKey === 'assistant.reply.agentChat');
+    ok('say 路径：会话落 1 条 user + 1 条 assistant',
+      assistantMemory.listMessages(sidSay, 10).length === 2
+      && assistantMemory.listMessages(sidSay, 10)[0].role === 'user'
+      && assistantMemory.listMessages(sidSay, 10)[1].role === 'assistant');
+
+    const sidClarify = 'verify-rt-clarify-' + Date.now().toString(36);
+    const clarOut = await rt(sidClarify, '搞一下', { clarify: '想做多长？' });
+    ok('clarify 路径：handled + intent=clarify + 追问原文',
+      clarOut.handled === true && clarOut.response.intent === 'clarify'
+      && clarOut.response.reply === '想做多长？'
+      && clarOut.response.replyKey === 'assistant.reply.agentClarify');
+
+    const sidPlan = 'verify-rt-plan-' + Date.now().toString(36);
+    const beforeTasks = taskManager.getAllTasks().length;
+    const planOut = await rt(sidPlan, '来个 30 秒', { tool: 'plan_video', args: { totalMinutes: 0.5 } });
+    ok('工具路径 plan_video：intent=create + 计划回传（前端会弹卡）',
+      planOut.handled === true && planOut.response.ok === true
+      && planOut.response.intent === 'create' && !!planOut.response.plan
+      && planOut.response.plan.clipCount === 3 && planOut.response.canExecute === true
+      && taskManager.getAllTasks().length === beforeTasks);
+    ok('工具路径：会话仍是 1 user + 1 assistant',
+      assistantMemory.listMessages(sidPlan, 10).length === 2);
+
+    const statusOut = await rt(sidPlan, '进度', { tool: 'status', args: {} });
+    ok('工具路径 status：intent=status', statusOut.handled === true && statusOut.response.intent === 'status');
+
+    const confirmOut = await rt(sidPlan, '确认生成吗', { tool: 'confirm_plan', args: {} });
+    ok('工具路径 confirm_plan：intent=confirm + requiresApproval（仍不建任务）',
+      confirmOut.handled === true && confirmOut.response.intent === 'confirm'
+      && confirmOut.response.plan
+      && Array.isArray(confirmOut.response.actions)
+      && confirmOut.response.actions[0].requiresApproval === true
+      && taskManager.getAllTasks().length === beforeTasks);
+
+    const sidBad = 'verify-rt-badtool-' + Date.now().toString(36);
+    const badToolOut = await rt(sidBad, '换个卡', { tool: 'edit_plan', args: { action: 'swap_all' } });
+    ok('工具执行失败（无计划 swap_all）→ handled + ok:false + AGENT_NO_PLAN（不猜、不回退）',
+      badToolOut.handled === true && badToolOut.response.ok === false
+      && badToolOut.response.code === 'AGENT_NO_PLAN' && /计划卡/.test(badToolOut.response.reply));
+    ok('工具失败也落会话（1 user + 1 assistant，用户能看到报错）',
+      assistantMemory.listMessages(sidBad, 10).length === 2);
+
+    const sidNoKey = 'verify-rt-nokey-' + Date.now().toString(36);
+    const noKeyOut = await agentRuntime.handleAgentTurn({
+      text: '进度', sessionId: sidNoKey, lang: 'zh', supervisor,
+      callLLM: async () => ({ text: '', failure: { kind: 'NO_KEY' } })
+    });
+    ok('无 Key → handled:false / fallback / NO_KEY，且**不写会话**',
+      noKeyOut.handled === false && noKeyOut.fallback === true
+      && noKeyOut.failure.kind === 'NO_KEY'
+      && assistantMemory.listMessages(sidNoKey, 10).length === 0);
+
+    const sidBadJson = 'verify-rt-badjson-' + Date.now().toString(36);
+    const badJsonOut = await agentRuntime.handleAgentTurn({
+      text: '进度', sessionId: sidBadJson, lang: 'zh', supervisor,
+      callLLM: async () => ({ text: '我觉得可以' })
+    });
+    ok('两次坏 JSON → handled:false / BAD_JSON，且不写会话',
+      badJsonOut.handled === false && badJsonOut.failure.kind === 'BAD_JSON'
+      && assistantMemory.listMessages(sidBadJson, 10).length === 0);
+
+    const sidExec = 'verify-rt-exec-' + Date.now().toString(36);
+    const execOut = await agentRuntime.handleAgentTurn({
+      text: '帮我直接生成', sessionId: sidExec, lang: 'zh', supervisor,
+      callLLM: async () => ({ text: JSON.stringify({ tool: 'execute', args: {} }) })
+    });
+    ok('模型妄想调 execute → 校验失败 → handled:false 回退（没有执行权）',
+      execOut.handled === false && execOut.fallback === true
+      && assistantMemory.listMessages(sidExec, 10).length === 0);
+
+    const sidGround = 'verify-rt-ground-' + Date.now().toString(36);
+    const groundOut = await rt(sidGround, '要多少钱', { say: '大概要 $9.99。' });
+    ok('say 幻觉金额 → handled:false（回退），不写会话',
+      groundOut.handled === false && groundOut.failure.kind === 'SAY_UNGROUNDED'
+      && assistantMemory.listMessages(sidGround, 10).length === 0);
   }
 
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================

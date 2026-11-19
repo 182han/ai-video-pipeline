@@ -2470,9 +2470,13 @@ function runAgentTool(opts = {}) {
   const userId = o.userId ? String(o.userId) : 'local';
   try {
     const out = AGENT_TOOL_HANDLERS[tool](sessionId, args, { lang, userId });
-    memory.appendMessage(sessionId, {
-      role: 'assistant', text: out.reply || '', kind: out.plan ? 'plan' : 'chat'
-    });
+    // 2026-11-19：失败（如 AGENT_NO_PLAN / AGENT_BAD_ARGS）不在门面写会话，
+    // 由运行时写一条错误回复——否则会「门面写一条 + 运行时再写一条」重复两条。
+    if (out.ok !== false) {
+      memory.appendMessage(sessionId, {
+        role: 'assistant', text: out.reply || '', kind: out.plan ? 'plan' : 'chat'
+      });
+    }
     return {
       ...out,
       sessionId,

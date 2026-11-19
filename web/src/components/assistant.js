@@ -547,7 +547,16 @@ export function Assistant({ page = false } = {}) {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, text })
+        // 2026-11-19 B 目标：agent 链路需要模型 Key（服务端不持久化 Key，
+        // 与 /api/assistant/chat、建任务同口径，每次请求由浏览器带）。
+        // 规则路径会忽略这三个字段，零回归。
+        body: JSON.stringify({
+          sessionId,
+          text,
+          llmApiKey: cfg.llmApiKey,
+          llmBaseUrl: cfg.llmBaseUrl,
+          llmModel: cfg.llmModel
+        })
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
