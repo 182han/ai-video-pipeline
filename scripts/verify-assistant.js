@@ -92,6 +92,7 @@ const fillLib = require('../src/assistant/fillFromLibrary');
 const supervisor = require('../src/assistant/supervisor');
 const agentRuntime = require('../src/assistant/agentRuntime');
 const agentSwitch = require('../src/assistant/agentSwitch');
+const turnQueue = require('../src/assistant/turnQueue');
 const taskManager = require('../src/taskManager');
 const library = require('../src/library');
 const pipeline = require('../src/pipeline');
@@ -896,6 +897,76 @@ async function main() {
 
     ok('结束状态：默认关（不影响后续套件）', agentSwitch.isEnabled() === false);
     if (envBackup !== undefined) process.env.ASSISTANT_AGENT = envBackup;
+  }
+
+  // ================= [3a-8] 2026-11-19 B 目标：每会话串行队列（防并发双计划）=================
+  // agent 链路是异步的（真实模型 2–4s）。同一会话连发两句若并发跑，会读到同一份"当前计划"，
+  // 可能出两张计划卡 / 乱序覆盖（交接 §10.1 E6）。这里锁队列语义 + server 接线。
+  console.log('\n[3a-8] B 目标：每会话串行队列（FIFO / 跨会话并行 / 错误隔离）');
+  {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const order = [];
+    const p1 = turnQueue.enqueue('q-sess-a', async () => {
+      order.push('a1-start'); await sleep(30); order.push('a1-end'); return 1;
+    });
+    const p2 = turnQueue.enqueue('q-sess-a', async () => {
+      order.push('a2-start'); await sleep(5); order.push('a2-end'); return 2;
+    });
+    const [r1, r2] = await Promise.all([p1, p2]);
+    ok('同会话 FIFO 串行（a1 结束才 a2 开始）',
+      order.join(',') === 'a1-start,a1-end,a2-start,a2-end' && r1 === 1 && r2 === 2,
+      order.join(','));
+
+    const order2 = [];
+    let releaseB = null;
+    const gateB = new Promise((res) => { releaseB = res; });
+    const pb = turnQueue.enqueue('q-sess-b', async () => {
+      order2.push('b-start'); await gateB; order2.push('b-end');
+    });
+    const pc = turnQueue.enqueue('q-sess-c', async () => {
+      order2.push('c-start'); await sleep(10); order2.push('c-end');
+    });
+    await pc; // 若不同会话被串行，这里会被 gateB 卡死
+    ok('不同会话并行（c 完成时 b 仍被 gate 挡住）',
+      order2.join(',') === 'b-start,c-start,c-end', order2.join(','));
+    releaseB();
+    await pb;
+
+    const order3 = [];
+    const bad = turnQueue.enqueue('q-sess-d', async () => {
+      order3.push('bad'); throw new Error('boom');
+    });
+    const good = turnQueue.enqueue('q-sess-d', async () => {
+      order3.push('good'); return 'ok';
+    });
+    let badErr = null;
+    try { await bad; } catch (e) { badErr = e; }
+    const goodRes = await good;
+    ok('前一任务失败不阻塞后一任务（错误只归它自己）',
+      !!badErr && badErr.message === 'boom' && goodRes === 'ok' && order3.join(',') === 'bad,good',
+      order3.join(','));
+
+    let releaseE = null;
+    const gateE = new Promise((res) => { releaseE = res; });
+    const pe1 = turnQueue.enqueue('q-sess-e', async () => { await gateE; });
+    const pe2 = turnQueue.enqueue('q-sess-e', async () => {});
+    await Promise.resolve();
+    ok('pending/isBusy 反映排队数（2）',
+      turnQueue.pending('q-sess-e') === 2 && turnQueue.isBusy('q-sess-e') === true,
+      String(turnQueue.pending('q-sess-e')));
+    releaseE();
+    await Promise.all([pe1, pe2]);
+    await sleep(0);
+    ok('空闲后自动清理（不泄漏 Map）',
+      turnQueue.pending('q-sess-e') === 0 && turnQueue.isBusy('q-sess-e') === false
+      && turnQueue._size().chains === 0 && turnQueue._size().counts === 0,
+      JSON.stringify(turnQueue._size()));
+
+    const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    ok('server：agent 路径走每会话队列（enqueue + queueKey），回退也在队列内',
+      serverSrc.indexOf('assistantTurnQueue.enqueue(') !== -1
+      && /const queueKey = body\.sessionId/.test(serverSrc)
+      && serverSrc.indexOf('return assistantSupervisor.handleMessage(') !== -1);
   }
 
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================

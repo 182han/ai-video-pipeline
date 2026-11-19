@@ -82,6 +82,7 @@ const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 const assistantSupervisor = require('./src/assistant/supervisor');
 const assistantAgentRuntime = require('./src/assistant/agentRuntime');
 const assistantAgentSwitch = require('./src/assistant/agentSwitch');
+const assistantTurnQueue = require('./src/assistant/turnQueue');
 const assistantPlanCard = require('./src/assistant/planCard');
 const assistantAsr = require('./src/assistant/asr');
 const assistantMemory = require('./src/assistant/memory');
@@ -2482,24 +2483,36 @@ app.post('/api/assistant/message', async (req, res) => {
     // Key 仍由浏览器随请求带（服务端不持久化）；无 Key 时 agent 立即失败 → 走规则。
     if (assistantAgentSwitch.isEnabled() && text.trim()) {
       const timeoutMs = Math.min(15000, Math.max(2000, Number(body.llmTimeoutMs) || 4000));
-      const turn = await assistantAgentRuntime.handleAgentTurn({
-        text,
-        sessionId: body.sessionId ? String(body.sessionId) : undefined,
-        userId,
-        lang,
-        supervisor: assistantSupervisor,
-        apiKey: body.llmApiKey,
-        baseUrl: body.llmBaseUrl,
-        model: body.llmModel,
-        timeoutMs
-      });
-      if (turn.handled) {
-        if (turn.response && turn.response.ok === false) {
-          console.warn('[assistant] agent 工具失败:', turn.response.code, turn.response.error);
+      const queueKey = body.sessionId ? String(body.sessionId) : 'anon';
+      // 2026-11-19 第六刀：每会话串行（E6）。同一会话连发两句时，agent 读到的
+      // "当前计划"不会互相覆盖；回退规则路径也放在队列内，整体按会话串行。
+      const response = await assistantTurnQueue.enqueue(queueKey, async () => {
+        const turn = await assistantAgentRuntime.handleAgentTurn({
+          text,
+          sessionId: body.sessionId ? String(body.sessionId) : undefined,
+          userId,
+          lang,
+          supervisor: assistantSupervisor,
+          apiKey: body.llmApiKey,
+          baseUrl: body.llmBaseUrl,
+          model: body.llmModel,
+          timeoutMs
+        });
+        if (turn.handled) {
+          if (turn.response && turn.response.ok === false) {
+            console.warn('[assistant] agent 工具失败:', turn.response.code, turn.response.error);
+          }
+          return turn.response;
         }
-        return res.json(turn.response);
-      }
-      console.log('[assistant] agent 不可用，回退规则路径:', (turn.failure && turn.failure.kind) || 'UNKNOWN');
+        console.log('[assistant] agent 不可用，回退规则路径:', (turn.failure && turn.failure.kind) || 'UNKNOWN');
+        return assistantSupervisor.handleMessage({
+          sessionId: body.sessionId ? String(body.sessionId) : undefined,
+          text,
+          userId,
+          lang
+        });
+      });
+      return res.json(response);
     }
     const out = assistantSupervisor.handleMessage({
       sessionId: body.sessionId ? String(body.sessionId) : undefined,
