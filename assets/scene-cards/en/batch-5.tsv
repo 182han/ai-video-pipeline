@@ -1,0 +1,122 @@
+# 场景卡英译批次 5（卡 161-200）
+# 格式：field|中文|英文；由 scripts/translate-scene-cards-en.js fill 生成
+biome|地热|geothermal
+landform|地热|geothermal field
+feature|地热的熔岩壳、蒸汽与矿物色|geothermal crust, steam, and mineral color
+foreground|泥面|mud surface
+protagonist|泥泉|mud pot
+landform|芦苇荡|reed marsh
+feature|芦苇荡的水面反光、湿岸与流痕|specular reflections in the reed marsh, wet banks, and flow marks
+protagonist|芦苇荡与晨雾|reed marsh and morning mist
+foreground|温泉雾|hot-spring steam
+light|蒸汽侧光|side light on the steam
+protagonist|温泉河|hot-spring river
+landform|盐湖浅水|shallow salt lake
+feature|浅水盐晶与倒影|salt crystals and reflections in shallow water
+light|日落后|after sunset
+protagonist|盐湖|salt lake
+landform|间歇泉|geyser
+feature|间歇泉的水面反光、湿岸与流痕|specular reflections at the geyser, wet banks, and flow marks
+protagonist|间歇泉与硅华|geyser and sinter terraces
+biome|海面|open sea
+landform|海面雨圈|rain rings on the open sea
+feature|雨点圆纹|raindrop rings
+foreground|雨幕|rain curtain
+biome|针叶林|conifer forest
+landform|冻沼|frozen bog
+feature|冰面气泡与针叶|bubbles in the ice and conifer needles
+protagonist|冻沼|frozen bog
+landform|热泉|hot spring
+feature|热泉的水面反光、湿岸与流痕|specular reflections at the hot spring, wet banks, and flow marks
+light|蒸汽被侧光照亮|steam lit by side light
+palette|矿物蓝 + 橙|mineral blue with orange
+protagonist|热泉与钙华|hot spring and travertine
+biome|林间|forest interior
+landform|落叶|fallen leaves
+feature|落叶铺地|a carpet of fallen leaves
+protagonist|林间|forest interior
+biome|树枝|branches
+landform|雾凇|rime ice
+feature|雾凇与冰晶|rime ice and ice crystals
+foreground|枝条|twigs
+weather|寒雾|cold mist
+protagonist|树枝|branches
+landform|天然桥|natural bridge
+feature|天然桥的材质、空气透视与高光层次|natural-bridge textures, aerial perspective, and layered highlights
+protagonist|天然桥与河面|natural bridge and river surface
+landform|石灰岩台地|limestone plateau
+feature|溶沟与石芽|karren and limestone pinnacles
+foreground|石芽|limestone pinnacle
+protagonist|石灰岩台地|limestone plateau
+landform|玄武岩柱|basalt columns
+feature|柱状节理|columnar jointing
+protagonist|玄武岩柱|basalt columns
+protagonist|火山湖|volcanic lake
+feature|多边形裂纹|polygonal cracks
+protagonist|盐壳|salt crust
+feature|极光地面辉光；天文·极地的星点、气辉与地景剪影|aurora ground glow; stars, airglow, and a landscape silhouette in the polar night sky
+foreground|海岸|coast
+protagonist|极光地面辉光|aurora ground glow
+landform|黄土沟壑|loess gully
+feature|沟壑与土柱|gullies and earth pillars
+foreground|土柱|earth pillar
+protagonist|黄土沟|loess gully
+landform|火山|volcano
+feature|火山的熔岩壳、蒸汽与矿物色|lava crust, steam, and mineral color on the volcano
+foreground|熔岩碎石|lava rubble
+protagonist|熔岩隧道|lava tube
+landform|冰斗湖|cirque lake
+feature|冰斗湖的水面反光、湿岸与流痕|specular reflections on the cirque lake, wet banks, and flow marks
+foreground|湖边巨石|lakeside boulders
+protagonist|冰斗湖与倒影|cirque lake and reflections
+protagonist|黑沙滩|black-sand beach
+weather|晴薄霾|clear with haze
+light|狭缝光|light through a slot
+protagonist|赤壁|red cliff
+landform|喀斯特|karst
+feature|喀斯特的层理、裂隙与风化面|strata, fissures, and weathered faces of the karst
+foreground|稻田|rice paddies
+landform|冰裂隙场|crevasse field
+feature|冰裂隙场的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice in the crevasse field
+weather|低太阳|low sun
+protagonist|冰裂隙场与雪桥|crevasse field and snow bridges
+landform|冰川|glacier
+feature|冰川的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice on the glacier
+foreground|雪桥|snow bridge
+foreground|裂纹|cracks
+foreground|盐壳|salt crust
+palette|青蓝 + 单暖云|cyan blue with a single warm cloud
+landform|悬谷|hanging valley
+feature|悬谷的层理、裂隙与风化面|strata, fissures, and weathered faces of the hanging valley
+foreground|瀑布水雾|waterfall spray
+protagonist|悬谷瀑布与雾|hanging-valley waterfall and mist
+protagonist|悬谷瀑布|hanging-valley waterfall
+landform|海蚀柱群|sea stacks
+feature|海蚀柱群的崖壁层理、湿岩与盐雾|sea-stack strata, wet rock, and salt spray
+foreground|海藻与湿岩|seaweed and wet rock
+light|日落后青蓝 + 暖边|blue-teal after sunset with warm rim light
+palette|冷蓝 + 琥珀|cool blue with amber
+protagonist|海蚀柱群与海藻带|sea stacks and a band of seaweed
+foreground|浪花|surf
+protagonist|海蚀柱群|sea stacks
+landform|雅丹垄脊|yardang ridge
+feature|雅丹垄脊的风蚀沟槽、砾石与沙粒反光|wind-scoured grooves on the yardang ridge, gravel, and grain-level glints
+foreground|砾石沟槽|gravel groove
+protagonist|雅丹风蚀垄脊与沟槽|wind-scoured yardang ridge and grooves
+palette|赤 + 青|red with cyan
+protagonist|窄缝|narrow slot
+protagonist|狭缝|slot
+feature|温带雨林的叶面、苔藓与林间光|temperate-rainforest foliage, moss, and forest light
+protagonist|温带雨林与蕨类|temperate rainforest and ferns
+foreground|蕨类|ferns
+protagonist|雨林|rainforest
+palette|淡金 + 青|pale gold with cyan
+protagonist|退潮水道|ebb-tide channel
+feature|极光帘幕；天文·极地的星点、气辉与地景剪影|aurora curtain; stars, airglow, and a landscape silhouette in the polar night sky
+landform|银河倒影|milky way reflection
+feature|银河与无风湖面倒影；银河倒影的星点、气辉与地景剪影|milky way and its reflection on a windless lake; stars, airglow, and a landscape silhouette under the milky way reflection
+protagonist|银河与无风湖面倒影|milky way and its reflection on a windless lake
+landform|天文|astronomical sky
+feature|银河；天文的星点、气辉与地景剪影|milky way; stars, airglow, and a landscape silhouette under the astronomical sky
+light|银河气辉|milky way and airglow
+protagonist|银河|milky way

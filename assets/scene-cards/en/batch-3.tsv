@@ -1,0 +1,157 @@
+# 场景卡英译批次 3（卡 81-120）
+# 格式：field|中文|英文；由 scripts/translate-scene-cards-en.js fill 生成
+landform|峡谷洪水后|canyon after a flood
+feature|洪水痕迹与湿岩|flood marks and wet rock
+protagonist|峡谷|canyon
+landform|高山草甸|alpine meadow
+feature|高山草甸的草浪、土壤与空气透视|grass waves on the alpine meadow, soil, and aerial perspective
+weather|日出|sunrise
+protagonist|高山草甸与野花|alpine meadow and wildflowers
+landform|苔原|tundra
+feature|苔原的叶面、苔藓与林间光|tundra foliage, moss, and open light
+palette|绿 + 锈红|green with rust red
+protagonist|苔原与地衣|tundra and lichen
+landform|角峰|horn peak
+feature|角峰的材质、空气透视与高光层次|horn-peak textures, aerial perspective, and layered highlights
+foreground|冰川裂隙|glacial crevasse
+protagonist|角峰与冰川|horn peak and glacier
+biome|高山|alpine
+landform|星轨同心圆|concentric star trails
+feature|星轨绕天极与冰斗湖；星轨同心圆的星点、气辉与地景剪影|star trails circling the celestial pole above a cirque lake; stars, airglow, and a landscape silhouette under the concentric trails
+foreground|湖边石|lakeside stones
+light|星轨长曝|long-exposure star trails
+palette|暗蓝 + 银|deep blue with silver
+protagonist|星轨绕天极与冰斗湖|star trails around the celestial pole and cirque lake
+landform|砂岩波浪|wave-like sandstone
+feature|波浪状层理|undulating strata
+foreground|砂粒|sand grains
+protagonist|砂岩壁|sandstone wall
+landform|极地|polar
+feature|极地的材质、空气透视与高光层次|polar textures, aerial perspective, and layered highlights
+foreground|冰缘|ice edge
+protagonist|冰间湖|polynya
+avoid|无人物、无营地、无车、无文字|no people, no camps, no vehicles, no text
+landform|高山草甸 + 落叶松|alpine meadow with larch
+feature|初雪峰背景|first-snow peaks in the background
+foreground|草甸与落叶松|meadow and larch
+weather|柔和阴天|soft overcast
+light|阴天散射，云层东侧更亮|overcast diffuse light, brighter on the east side of the cloud deck
+palette|金 + 冷蓝|gold with cool blue
+highlight_control|雪峰不炸白，草甸保留暖色|snow peaks must not clip to white; the meadow keeps its warm tones
+protagonist|落叶松草甸|larch meadow
+avoid|无人物、无木屋、无栈道|no people, no cabins, no boardwalks
+landform|冰碛垄|moraine ridge
+feature|冰碛垄的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice on the moraine ridge
+light|平光|flat light
+palette|灰 + 绿|grey with green
+protagonist|冰碛垄与漂砾|moraine ridge and erratics
+landform|冰架压力脊|ice-shelf pressure ridge
+feature|蓝冰阴影·银河|blue ice shadows under the milky way
+foreground|雪脊|snow ridge
+palette|近单色冷蓝|near-monochrome cool blue
+protagonist|压力脊|pressure ridge
+protagonist|蓝冰|blue ice
+landform|山地·雪|snowy mountains
+feature|山地·雪的材质、空气透视与高光层次|snowy-mountain textures, aerial perspective, and layered highlights
+protagonist|雪檐|snow cornice
+avoid|无人物、无绳索、无营地、无文字|no people, no ropes, no camps, no text
+protagonist|碎石坡|scree slope
+foreground|雪崩堆|avalanche debris
+protagonist|雪崩锥|avalanche cone
+landform|高山杜鹃雪|alpine rhododendron in snow
+feature|花与残雪|flowers and remnant snow
+foreground|花枝|flowering branches
+weather|雪后|after snow
+protagonist|杜鹃灌丛|rhododendron thicket
+landform|悬谷瀑布|hanging-valley waterfall
+feature|苔藓崖壁|mossy cliff wall
+foreground|湿苔石|wet mossy stone
+light|侧逆光，水雾金边|side backlight with golden edges on the water spray
+palette|冷绿 + 金|cool green with gold
+highlight_control|水雾高光不炸，暗部苔藓有细节|spray highlights must not clip; moss detail stays visible in shadow
+protagonist|瀑布水雾|waterfall spray
+avoid|无人物、无栈道、无文字|no people, no boardwalks, no text
+landform|山雪阵|mountain snow showers
+feature|雪幕与风|snow curtain and wind
+foreground|雪粒|snow grains
+weather|雪阵|snow showers
+protagonist|山脊|ridge
+landform|荚状云|lenticular cloud
+feature|荚状云层|lenticular cloud layers
+weather|晴间云|clear with scattered cloud
+protagonist|山峰|peak
+landform|瀑布潭|waterfall plunge pool
+feature|玄武岩柱|basalt columns
+palette|冷蓝 + 白|cool blue with white
+highlight_control|水花不炸白，岩壁有细节|splash highlights must not clip to white; the rock wall keeps detail
+protagonist|瀑布潭水面|plunge-pool surface
+biome|雪原|snowfield
+landform|融雪|snowmelt
+feature|融雪溪与露岩|snowmelt stream and exposed rock
+foreground|露岩|exposed rock
+protagonist|雪原|snowfield
+landform|冰川漂砾|glacial erratic
+feature|漂砾与冰碛|erratics and moraine
+foreground|砾石|gravel
+protagonist|漂砾|erratic boulder
+landform|海烟|sea smoke
+feature|冷空气海烟|sea smoke in cold air
+weather|极冷|extreme cold
+protagonist|海面|sea surface
+landform|冰山巷|iceberg alley
+feature|冰山夹道|icebergs lining a narrow passage
+foreground|浮冰|floating ice
+protagonist|冰山|iceberg
+landform|湖湾|lake inlet
+feature|芦苇 + 倒影|reeds and reflections
+foreground|芦苇剪影|silhouetted reeds
+light|日出前蓝调|blue hour before sunrise
+palette|冷青 + 淡金|cool cyan with pale gold
+highlight_control|水面反光不炸，雾中远山有层次|water highlights must not clip; distant mountains stay layered in mist
+protagonist|芦苇与倒影|reeds and reflections
+avoid|无人物、无船、无木屋|no people, no boats, no cabins
+landform|冰间湖|polynya
+feature|冰面开阔水域|open water within the ice
+landform|冰川崩解|calving glacier
+feature|崩解冰崖|calving ice cliff
+protagonist|冰川|glacier
+foreground|湖边雪|lakeside snow
+protagonist|冰川湖|glacier lake
+landform|湖泊|lake
+feature|湖泊的水面反光、湿岸与流痕|specular reflections on the lake, wet banks, and flow marks
+foreground|火山岩|volcanic rock
+protagonist|火山口湖|crater lake
+palette|绿松石 + 白|turquoise with white
+protagonist|湖泊沙洲|lake sandbar
+foreground|潭边湿石|wet poolside stones
+palette|绿 + 白|green with white
+protagonist|瀑布与深潭|waterfall and deep pool
+biome|湿地|wetland
+landform|湿地|wetland
+feature|湿地的水面反光、湿岸与流痕|specular reflections across the wetland, wet banks, and flow marks
+foreground|苔藓|moss
+palette|深绿 + 灰|deep green with grey
+protagonist|泥炭沼|peat bog
+landform|河流·湿地|river and wetland
+feature|河流·湿地的水面反光、湿岸与流痕|specular reflections on the river wetland, wet banks, and flow marks
+foreground|滩草|bank grass
+palette|绿 + 蓝|green with blue
+protagonist|河漫滩|floodplain
+foreground|水面|water surface
+protagonist|沼泽|marsh
+feature|湖泊与岸石·银河倒影|lake and shoreline rock with a milky way reflection
+palette|蓝|blue
+protagonist|湖泊与岸石|lake and shoreline rock
+palette|绿 + 泥|green with mud
+protagonist|河湾|river bend
+landform|河流|river
+feature|河流的水面反光、湿岸与流痕|specular reflections on the river, wet banks, and flow marks
+protagonist|辫状河|braided river
+protagonist|高山湖|alpine lake
+foreground|洲头|bar head
+protagonist|河心洲|mid-channel bar
+landform|月升|moonrise
+feature|月升与芦苇；月升的星点、气辉与地景剪影|moonrise over reeds; stars, airglow, and a landscape silhouette under the moonrise
+light|月升，低角度|low-angle moonrise light
+palette|冷银 + 暖月|cool silver with a warm moon
+protagonist|月升与芦苇|moonrise and reeds

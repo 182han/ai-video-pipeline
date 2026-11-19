@@ -1,0 +1,155 @@
+1|canyon after a flood
+2|flood marks and wet rock
+3|canyon
+4|alpine meadow
+5|grass waves on the alpine meadow, soil, and aerial perspective
+6|sunrise
+7|alpine meadow and wildflowers
+8|tundra
+9|tundra foliage, moss, and open light
+10|green with rust red
+11|tundra and lichen
+12|horn peak
+13|horn-peak textures, aerial perspective, and layered highlights
+14|glacial crevasse
+15|horn peak and glacier
+16|alpine
+17|concentric star trails
+18|star trails circling the celestial pole above a cirque lake; stars, airglow, and a landscape silhouette under the concentric trails
+19|lakeside stones
+20|long-exposure star trails
+21|deep blue with silver
+22|star trails around the celestial pole and cirque lake
+23|wave-like sandstone
+24|undulating strata
+25|sand grains
+26|sandstone wall
+27|polar
+28|polar textures, aerial perspective, and layered highlights
+29|ice edge
+30|polynya
+31|no people, no camps, no vehicles, no text
+32|alpine meadow with larch
+33|first-snow peaks in the background
+34|meadow and larch
+35|soft overcast
+36|overcast diffuse light, brighter on the east side of the cloud deck
+37|gold with cool blue
+38|snow peaks must not clip to white; the meadow keeps its warm tones
+39|larch meadow
+40|no people, no cabins, no boardwalks
+41|moraine ridge
+42|crevasses, firn, and blue ice on the moraine ridge
+43|flat light
+44|grey with green
+45|moraine ridge and erratics
+46|ice-shelf pressure ridge
+47|blue ice shadows under the milky way
+48|snow ridge
+49|near-monochrome cool blue
+50|pressure ridge
+51|blue ice
+52|snowy mountains
+53|snowy-mountain textures, aerial perspective, and layered highlights
+54|snow cornice
+55|no people, no ropes, no camps, no text
+56|scree slope
+57|avalanche debris
+58|avalanche cone
+59|alpine rhododendron in snow
+60|flowers and remnant snow
+61|flowering branches
+62|after snow
+63|rhododendron thicket
+64|hanging-valley waterfall
+65|mossy cliff wall
+66|wet mossy stone
+67|side backlight with golden edges on the water spray
+68|cool green with gold
+69|spray highlights must not clip; moss detail stays visible in shadow
+70|waterfall spray
+71|no people, no boardwalks, no text
+72|mountain snow showers
+73|snow curtain and wind
+74|snow grains
+75|snow showers
+76|ridge
+77|lenticular cloud
+78|lenticular cloud layers
+79|clear with scattered cloud
+80|peak
+81|waterfall plunge pool
+82|basalt columns
+83|cool blue with white
+84|splash highlights must not clip to white; the rock wall keeps detail
+85|plunge-pool surface
+86|snowfield
+87|snowmelt
+88|snowmelt stream and exposed rock
+89|exposed rock
+90|snowfield
+91|glacial erratic
+92|erratics and moraine
+93|gravel
+94|erratic boulder
+95|sea smoke
+96|sea smoke in cold air
+97|extreme cold
+98|sea surface
+99|iceberg alley
+100|icebergs lining a narrow passage
+101|floating ice
+102|iceberg
+103|lake inlet
+104|reeds and reflections
+105|silhouetted reeds
+106|blue hour before sunrise
+107|cool cyan with pale gold
+108|water highlights must not clip; distant mountains stay layered in mist
+109|reeds and reflections
+110|no people, no boats, no cabins
+111|polynya
+112|open water within the ice
+113|calving glacier
+114|calving ice cliff
+115|glacier
+116|lakeside snow
+117|glacier lake
+118|lake
+119|specular reflections on the lake, wet banks, and flow marks
+120|volcanic rock
+121|crater lake
+122|turquoise with white
+123|lake sandbar
+124|wet poolside stones
+125|green with white
+126|waterfall and deep pool
+127|wetland
+128|wetland
+129|specular reflections across the wetland, wet banks, and flow marks
+130|moss
+131|deep green with grey
+132|peat bog
+133|river and wetland
+134|specular reflections on the river wetland, wet banks, and flow marks
+135|bank grass
+136|green with blue
+137|floodplain
+138|water surface
+139|marsh
+140|lake and shoreline rock with a milky way reflection
+141|blue
+142|lake and shoreline rock
+143|green with mud
+144|river bend
+145|river
+146|specular reflections on the river, wet banks, and flow marks
+147|braided river
+148|alpine lake
+149|bar head
+150|mid-channel bar
+151|moonrise
+152|moonrise over reeds; stars, airglow, and a landscape silhouette under the moonrise
+153|low-angle moonrise light
+154|cool silver with a warm moon
+155|moonrise and reeds

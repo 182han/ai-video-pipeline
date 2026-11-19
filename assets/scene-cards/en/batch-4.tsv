@@ -1,0 +1,175 @@
+# 场景卡英译批次 4（卡 121-160）
+# 格式：field|中文|英文；由 scripts/translate-scene-cards-en.js fill 生成
+biome|溪流|stream
+landform|春溪|spring stream
+feature|融雪水流与卵石|snowmelt flow and pebbles
+foreground|卵石|pebbles
+light|树冠缝隙光|light through canopy gaps
+protagonist|溪流|stream
+biome|山谷|valley
+landform|谷雾|valley fog
+feature|平流雾填谷|low-lying advection fog
+foreground|树梢|treetops
+protagonist|山谷|valley
+landform|海蚀柱 + 黑沙滩|sea stacks and black-sand beach
+feature|玄武岩礁盘|basalt reef flat
+foreground|黑色卵石|black pebbles
+palette|冷灰 + 白浪|cool grey with white surf
+highlight_control|浪花高光不炸，黑沙有纹理|surf highlights must not clip; black sand keeps its texture
+protagonist|海蚀柱|sea stack
+landform|季风雨|monsoon rain
+feature|季风雨幕|monsoon rain curtain
+foreground|湿叶|wet leaves
+weather|季风雨|monsoon rain
+landform|湖面封冻|frozen lake surface
+feature|冰裂纹与雪|ice cracks and snow
+foreground|冰面|ice surface
+landform|潮汐水道|tidal channel
+feature|潮汐水道的水面反光、湿岸与流痕|specular reflections on the tidal channel, wet banks, and flow marks
+foreground|湿沙纹理|wet-sand texture
+highlight_control|水面反光不炸，沙纹清晰|water highlights must not clip; sand ripples stay crisp
+protagonist|树枝状水道|dendritic channels
+landform|雪融溪|snowmelt stream
+feature|雪水与苔石|snowmelt water and mossy stones
+foreground|苔石|mossy stone
+light|树冠光|canopy light
+biome|喀斯特|karst
+landform|天坑|tiankeng sinkhole
+feature|天坑的层理、裂隙与风化面|strata, fissures, and weathered faces of the tiankeng
+protagonist|天坑与坑底森林|tiankeng and the forest on its floor
+foreground|水雾|water mist
+protagonist|森林瀑布|forest waterfall
+biome|草原|grassland
+landform|草原|grassland
+feature|草原的草浪、土壤与空气透视|grass waves on the grassland, soil, and aerial perspective
+foreground|孤树|lone tree
+weather|日落|sunset
+palette|金 + 蓝|gold with blue
+protagonist|稀树草原|savanna
+foreground|枯草|dry grass
+palette|暖土 + 灰绿|warm earth with grey-green
+protagonist|荒原|wilderness
+landform|海蚀拱桥|sea arch
+feature|浪花 + 潮池|surf and tide pools
+light|日落后青蓝 + 暖地平线|blue-teal after sunset with a warm horizon
+highlight_control|浪花不炸白，拱桥暗部有细节|surf must not clip to white; the sea arch keeps shadow detail
+protagonist|海蚀拱桥|sea arch
+foreground|溪石|stream stones
+protagonist|森林溪|forest stream
+landform|落叶松雪|larch in snow
+feature|雪压枝头|snow-laden branches
+foreground|雪枝|snowy branches
+protagonist|落叶松|larch
+landform|针叶林|conifer forest
+feature|针叶林的叶面、苔藓与林间光|conifer foliage, moss, and forest light
+protagonist|针叶林与积雪|conifer forest under snow
+avoid|无人物、无小径、无建筑|no people, no trails, no buildings
+biome|雨林|rainforest
+landform|雨林树冠雾|rainforest canopy mist
+feature|雾在树冠间流动|mist drifting through the canopy
+foreground|藤蔓|vines
+protagonist|雨林树冠|rainforest canopy
+landform|秋日溪流|autumn stream
+feature|落叶与溪石|fallen leaves and brook stones
+foreground|落叶|fallen leaves
+landform|连岛沙洲|tombolo
+feature|连岛沙洲的湿沙分汊、风纹与水面反光|braided wet channels across the tombolo, wind ripples, and specular reflections on standing water
+foreground|浅水沙脊|shallow-water sand ridge
+weather|晴间薄云|clear with thin cloud
+protagonist|沙洲连接两座海蚀柱|sandbar linking two sea stacks
+biome|云雾林|cloud forest
+landform|云雾林脊|cloud-forest ridge
+feature|云雾越过林脊|cloud spilling over the treeline
+weather|云雾|cloud and mist
+biome|桦林|birch forest
+landform|秋色桦林|autumn birch forest
+feature|金黄叶与白干|golden leaves and white trunks
+protagonist|桦林|birch forest
+landform|森林|forest
+feature|森林的叶面、苔藓与林间光|foliage, moss, and forest light
+protagonist|落叶松林|larch forest
+biome|竹林|bamboo grove
+landform|竹林雾|misty bamboo grove
+feature|雾中竹影|bamboo silhouettes in mist
+foreground|竹叶|bamboo leaves
+protagonist|竹林|bamboo grove
+landform|风暴云影|storm-cloud shadows
+feature|云影掠过草浪|cloud shadows sweeping the grass
+foreground|草穗|grass seed heads
+protagonist|草原|grassland
+landform|温带雨林|temperate rainforest
+feature|蕨类 + 倒木|ferns and fallen logs
+light|散射，树冠缝隙光|diffuse light through canopy gaps
+highlight_control|叶面高光不炸，雾中有层次|leaf highlights must not clip; mist keeps its layers
+protagonist|蕨叶|fern fronds
+landform|草原花海|flowering grassland
+feature|野花带|bands of wildflowers
+foreground|花穗|flower spikes
+landform|云雾林|cloud forest
+feature|云雾林的叶面、苔藓与林间光|cloud-forest foliage, moss, and filtered light
+protagonist|云雾林与苔藓|cloud forest and moss
+landform|白桦林缘|birch forest edge
+feature|金黄林缘与草地|golden forest edge and meadow
+foreground|草地|meadow
+protagonist|白桦林缘|birch forest edge
+foreground|湖岸|lakeshore
+protagonist|森林湖|forest lake
+biome|天文|astronomical
+landform|天文·极地|polar night sky
+feature|极光冠冕；天文·极地的星点、气辉与地景剪影|aurora corona; stars, airglow, and a landscape silhouette in the polar night sky
+foreground|雪原|snowfield
+weather|无月夜晴|clear moonless night
+lens|11mm|11mm
+protagonist|极光冠冕|aurora corona
+landform|锥形孤峰|conical peak
+feature|峰林 + 田埂曲线|peak forest and curving field ridges
+foreground|稻田水面反光|reflections on flooded rice paddies
+weather|蓝调薄雾|blue hour with thin mist
+season|初夏|early summer
+light|日落后青蓝，单一暖点|blue-teal after sunset with a single warm point
+palette|冷青 + 一点暖|cool cyan with a touch of warmth
+highlight_control|天空无死白，水田反光不炸|no blown-out white in the sky; paddy reflections must not clip
+protagonist|锥形孤峰群|cluster of conical peaks
+avoid|无房屋、无道路、无人物|no houses, no roads, no people
+landform|曲流|meander
+feature|曲流的材质、空气透视与高光层次|meander textures, aerial perspective, and layered highlights
+weather|日落后|after sunset
+palette|蓝 + 金|blue with gold
+protagonist|曲流与沙洲|meander and sandbars
+biome|盐湖|salt lake
+landform|盐壳多边形|salt-polygon crust
+feature|天空之镜|mirror-like sky reflection
+weather|雨后无风|calm after rain
+season|雨季|rainy season
+palette|青蓝 + 单一暖云|cyan blue with a single warm cloud
+highlight_control|天空不过曝，倒影保留层次|sky must not overexpose; the reflection keeps its tonal layers
+protagonist|盐壳裂纹|salt-crust cracks
+landform|三角洲|delta
+feature|三角洲的材质、空气透视与高光层次|delta textures, aerial perspective, and layered highlights
+protagonist|三角洲水道与泥滩|delta channels and mudflats
+landform|钙华池|travertine pool
+feature|钙华池的熔岩壳、蒸汽与矿物色|travertine crust, steam, and mineral color
+protagonist|钙华池与浅水|travertine pools and shallow water
+landform|叠瀑|cascading waterfall
+feature|叠瀑的水面反光、湿岸与流痕|specular reflections on the cascading waterfall, wet banks, and flow marks
+weather|侧逆光|side backlight
+light|金色侧逆光|golden side backlight
+protagonist|叠瀑与苔藓|cascading waterfall and moss
+landform|溶洞|karst cave
+feature|溶洞的层理、裂隙与风化面|strata, fissures, and weathered faces of the karst cave
+weather|洞内|cave interior
+palette|暗 + 暖|dark with warm tones
+protagonist|溶洞与石钟乳|karst cave and stalactites
+biome|黄土高原|loess plateau
+landform|黄土梯田|loess terraces
+feature|田埂曲线|curving field ridges
+foreground|田埂|field ridge
+highlight_control|天空不过曝，田埂有层次|sky must not overexpose; the field ridges keep their layers
+protagonist|梯田曲线|terrace curves
+avoid|无人物、无农舍、无道路|no people, no farmhouses, no roads
+landform|牛轭湖|oxbow lake
+feature|牛轭湖的水面反光、湿岸与流痕|specular reflections on the oxbow lake, wet banks, and flow marks
+protagonist|牛轭湖与芦苇|oxbow lake and reeds
+landform|潮汐滩|tidal flat
+feature|潮汐滩的水面反光、湿岸与流痕|specular reflections on the tidal flat, wet banks, and flow marks
+protagonist|潮汐滩树枝状水道|dendritic channels on the tidal flat

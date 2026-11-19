@@ -1,0 +1,173 @@
+1|stream
+2|spring stream
+3|snowmelt flow and pebbles
+4|pebbles
+5|light through canopy gaps
+6|stream
+7|valley
+8|valley fog
+9|low-lying advection fog
+10|treetops
+11|valley
+12|sea stacks and black-sand beach
+13|basalt reef flat
+14|black pebbles
+15|cool grey with white surf
+16|surf highlights must not clip; black sand keeps its texture
+17|sea stack
+18|monsoon rain
+19|monsoon rain curtain
+20|wet leaves
+21|monsoon rain
+22|frozen lake surface
+23|ice cracks and snow
+24|ice surface
+25|tidal channel
+26|specular reflections on the tidal channel, wet banks, and flow marks
+27|wet-sand texture
+28|water highlights must not clip; sand ripples stay crisp
+29|dendritic channels
+30|snowmelt stream
+31|snowmelt water and mossy stones
+32|mossy stone
+33|canopy light
+34|karst
+35|tiankeng sinkhole
+36|strata, fissures, and weathered faces of the tiankeng
+37|tiankeng and the forest on its floor
+38|water mist
+39|forest waterfall
+40|grassland
+41|grassland
+42|grass waves on the grassland, soil, and aerial perspective
+43|lone tree
+44|sunset
+45|gold with blue
+46|savanna
+47|dry grass
+48|warm earth with grey-green
+49|wilderness
+50|sea arch
+51|surf and tide pools
+52|blue-teal after sunset with a warm horizon
+53|surf must not clip to white; the sea arch keeps shadow detail
+54|sea arch
+55|stream stones
+56|forest stream
+57|larch in snow
+58|snow-laden branches
+59|snowy branches
+60|larch
+61|conifer forest
+62|conifer foliage, moss, and forest light
+63|conifer forest under snow
+64|no people, no trails, no buildings
+65|rainforest
+66|rainforest canopy mist
+67|mist drifting through the canopy
+68|vines
+69|rainforest canopy
+70|autumn stream
+71|fallen leaves and brook stones
+72|fallen leaves
+73|tombolo
+74|braided wet channels across the tombolo, wind ripples, and specular reflections on standing water
+75|shallow-water sand ridge
+76|clear with thin cloud
+77|sandbar linking two sea stacks
+78|cloud forest
+79|cloud-forest ridge
+80|cloud spilling over the treeline
+81|cloud and mist
+82|birch forest
+83|autumn birch forest
+84|golden leaves and white trunks
+85|birch forest
+86|forest
+87|foliage, moss, and forest light
+88|larch forest
+89|bamboo grove
+90|misty bamboo grove
+91|bamboo silhouettes in mist
+92|bamboo leaves
+93|bamboo grove
+94|storm-cloud shadows
+95|cloud shadows sweeping the grass
+96|grass seed heads
+97|grassland
+98|temperate rainforest
+99|ferns and fallen logs
+100|diffuse light through canopy gaps
+101|leaf highlights must not clip; mist keeps its layers
+102|fern fronds
+103|flowering grassland
+104|bands of wildflowers
+105|flower spikes
+106|cloud forest
+107|cloud-forest foliage, moss, and filtered light
+108|cloud forest and moss
+109|birch forest edge
+110|golden forest edge and meadow
+111|meadow
+112|birch forest edge
+113|lakeshore
+114|forest lake
+115|astronomical
+116|polar night sky
+117|aurora corona; stars, airglow, and a landscape silhouette in the polar night sky
+118|snowfield
+119|clear moonless night
+120|11mm
+121|aurora corona
+122|conical peak
+123|peak forest and curving field ridges
+124|reflections on flooded rice paddies
+125|blue hour with thin mist
+126|early summer
+127|blue-teal after sunset with a single warm point
+128|cool cyan with a touch of warmth
+129|no blown-out white in the sky; paddy reflections must not clip
+130|cluster of conical peaks
+131|no houses, no roads, no people
+132|meander
+133|meander textures, aerial perspective, and layered highlights
+134|after sunset
+135|blue with gold
+136|meander and sandbars
+137|salt lake
+138|salt-polygon crust
+139|mirror-like sky reflection
+140|calm after rain
+141|rainy season
+142|cyan blue with a single warm cloud
+143|sky must not overexpose; the reflection keeps its tonal layers
+144|salt-crust cracks
+145|delta
+146|delta textures, aerial perspective, and layered highlights
+147|delta channels and mudflats
+148|travertine pool
+149|travertine crust, steam, and mineral color
+150|travertine pools and shallow water
+151|cascading waterfall
+152|specular reflections on the cascading waterfall, wet banks, and flow marks
+153|side backlight
+154|golden side backlight
+155|cascading waterfall and moss
+156|karst cave
+157|strata, fissures, and weathered faces of the karst cave
+158|cave interior
+159|dark with warm tones
+160|karst cave and stalactites
+161|loess plateau
+162|loess terraces
+163|curving field ridges
+164|field ridge
+165|sky must not overexpose; the field ridges keep their layers
+166|terrace curves
+167|no people, no farmhouses, no roads
+168|oxbow lake
+169|specular reflections on the oxbow lake, wet banks, and flow marks
+170|oxbow lake and reeds
+171|tidal flat
+172|specular reflections on the tidal flat, wet banks, and flow marks
+173|dendritic channels on the tidal flat
