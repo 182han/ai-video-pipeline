@@ -1,0 +1,176 @@
+# 场景卡英译批次 2（卡 41-80）
+# 格式：field|中文|英文；由 scripts/translate-scene-cards-en.js fill 生成
+landform|晨潮池|morning tide pool
+feature|晨光与水面|morning light and water surface
+foreground|池边岩|pool-rim rock
+landform|蘑菇石|mushroom rock
+feature|蘑菇石的层理、裂隙与风化面|strata, fissures, and weathered faces of the mushroom rock
+weather|风暴光|storm light
+palette|红 + 灰|red with grey
+protagonist|风蚀蘑菇石与倒石堆|wind-carved mushroom rock and talus
+landform|破火山口|caldera
+feature|破火山口的熔岩壳、蒸汽与矿物色|caldera lava crust, steam, and mineral color
+palette|蓝 + 暗红|blue with dark red
+protagonist|破火山口边缘与云|caldera rim and clouds
+landform|星形沙丘|star dune
+feature|星形沙丘的风纹、滑落面与沙粒反光|wind ripples on the star dune, the slip face, and grain-level specular glints
+foreground|脊线阴影|crest-line shadow
+light|日落侧光|sunset side light
+cameraAngle|高位斜俯航拍|high oblique aerial
+palette|橙 + 棕|orange with brown
+protagonist|星形沙丘的交叉脊线|intersecting crests of the star dune
+landform|熔岩塞|lava plug
+feature|熔岩塞的熔岩壳、蒸汽与矿物色|lava-plug crust, steam, and mineral color
+palette|深灰 + 绿|dark grey with green
+protagonist|熔岩塞与熔岩碎石|lava plug and lava rubble
+landform|银河拱桥|milky way arch
+feature|银河拱桥；雅丹土丘前景|milky way arch; yardang mounds in the foreground
+foreground|土丘剪影|silhouetted mounds
+light|银河 + 气辉|milky way and airglow
+lens|20mm|20mm
+palette|暗底 + 暖星云|dark base with warm nebula
+highlight_control|银河核心不过曝，地景有轮廓|the galactic core must not overexpose; the land keeps a clear silhouette
+protagonist|银河拱桥|milky way arch
+avoid|无人物、无车灯、无光污染|no people, no headlights, no light pollution
+landform|盐地|salt flat
+feature|盐地的盐晶、裂纹与薄水|salt crystals, cracks, and a film of water on the salt flat
+light|低太阳|low sun
+protagonist|盐沼|salt marsh
+avoid|无人物、无车辙、无建筑、无文字|no people, no tire tracks, no buildings, no text
+landform|沙丘|sand dune
+feature|沙丘的风纹、滑落面与沙粒反光|wind ripples on the dune, the slip face, and grain-level specular glints
+foreground|湖面|lake surface
+protagonist|沙丘湖|dune lake
+weather|干燥无云|dry and cloudless
+palette|暖赭 + 深棕|warm ochre with deep brown
+protagonist|风蚀坑|deflation hollow
+landform|岛山|inselberg
+feature|荒漠岛山与干草·极光|desert inselberg with dry grass under aurora
+palette|暖岩 + 冷天|warm rock with cold sky
+protagonist|荒漠岛山与干草|desert inselberg and dry grass
+landform|沙丘脊线|dune crestline
+feature|迎风坡风纹 + 背风滑落面|wind ripples on the windward slope and the lee slip face
+season|初秋|early autumn
+light|日出侧光，低角度长影|sunrise side light, low angle with long shadows
+highlight_control|沙脊高光不炸白，阴影保留风纹|dune-crest highlights must not clip to white; shadows keep the ripple pattern
+protagonist|沙丘脊线|dune crestline
+avoid|无骆驼、无脚印、无人物|no camels, no footprints, no people
+foreground|雪面|snow surface
+palette|金 + 灰|gold with grey
+protagonist|沙丘雪|snowy dune
+foreground|沙草|dune grass
+protagonist|沙丘草|dune grass
+landform|熔岩场|lava field
+feature|龟裂熔岩场·月升|cracked lava field under moonrise
+weather|风暴|storm
+palette|黑 + 灰|black with grey
+protagonist|龟裂熔岩场|cracked lava field
+landform|新月形沙丘|barchan dune
+feature|新月形沙丘的风纹、滑落面与沙粒反光|wind ripples on the barchan dune, the slip face, and grain-level specular glints
+foreground|滑落面阴影|slip-face shadow
+protagonist|新月沙丘的滑落面|slip face of the barchan dune
+landform|雅丹|yardang
+feature|雅丹的风蚀沟槽、砾石与沙粒反光|wind-scoured grooves on the yardang, gravel, and grain-level glints
+weather|薄霾|thin haze
+palette|灰 + 土黄|grey with ochre
+protagonist|风蚀沟槽|wind-scoured groove
+palette|黑褐 + 橙|dark brown with orange
+protagonist|土丘群|cluster of mounds
+landform|气辉银河|airglow and milky way
+feature|气辉与雅丹土丘；气辉银河的星点、气辉与地景剪影|airglow and yardang mounds; stars, airglow, and a landscape silhouette in the airglow-lit milky way
+palette|暗底 + 橄榄绿|dark base with olive green
+protagonist|气辉与雅丹土丘|airglow and yardang mounds
+landform|沙漠漆岩|desert-varnished rock
+feature|沙漠漆岩的层理、裂隙与风化面|strata, fissures, and weathered faces of desert-varnished rock
+foreground|岩面纹理|rock-face texture
+protagonist|黑色沙漠漆岩面|black desert-varnished rock face
+protagonist|风蚀柱|wind-eroded pillar
+landform|戈壁|gobi gravel plain
+feature|戈壁的风蚀沟槽、砾石与沙粒反光|wind-scoured grooves on the gobi, gravel, and grain-level glints
+foreground|黑砾|black gravel
+weather|风|windy
+protagonist|黑戈壁|black gobi
+landform|丹霞|danxia landform
+feature|丹霞的层理、裂隙与风化面|strata, fissures, and weathered faces of the danxia landform
+palette|红 + 金|red with gold
+protagonist|峰林|peak forest
+protagonist|砾石滩|gravel beach
+landform|瀑布|waterfall
+feature|瀑布的水面反光、湿岸与流痕|specular reflections at the waterfall, wet banks, and flow marks
+foreground|岩壁|rock wall
+palette|绿 + 金|green with gold
+protagonist|峡谷瀑布|canyon waterfall
+biome|山地|mountainous
+landform|冰斗|cirque
+feature|冰斗的材质、空气透视与高光层次|cirque textures, aerial perspective, and layered highlights
+foreground|湖边砾石|lakeside gravel
+palette|蓝 + 灰|blue with grey
+protagonist|冰斗与冰斗湖|cirque and cirque lake
+avoid|无人物、无绳索、无营地|no people, no ropes, no camps
+foreground|干沙|dry sand
+protagonist|干河床|dry riverbed
+landform|刃脊|arete
+feature|刃脊的材质、空气透视与高光层次|arete textures, aerial perspective, and layered highlights
+palette|冷白 + 暖边|cool white with warm rim light
+protagonist|刃脊与雪檐|arete and snow cornice
+foreground|盐晶|salt crystals
+weather|薄云|thin cloud
+protagonist|干盐湖|dry salt lake
+landform|U 型谷|U-shaped valley
+feature|U 型谷的层理、裂隙与风化面|strata, fissures, and weathered faces of the U-shaped valley
+palette|绿 + 灰|green with grey
+protagonist|U 型谷与谷底河|U-shaped valley and its valley-floor river
+protagonist|风蚀洼地|deflation basin
+landform|峡谷|canyon
+feature|峡谷的层理、裂隙与风化面|strata, fissures, and weathered faces of the canyon
+foreground|河面|river surface
+protagonist|天然拱|natural arch
+landform|冰瀑|icefall
+feature|冰瀑的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice in the icefall
+palette|蓝 + 白|blue with white
+protagonist|冰瀑与冰柱|icefall and ice pillars
+landform|蛇形丘|esker
+feature|蛇形丘的材质、空气透视与高光层次|esker textures, aerial perspective, and layered highlights
+palette|绿 + 棕|green with brown
+protagonist|蛇形丘与砾石|esker and gravel
+foreground|碎石|scree
+palette|赭红 + 黑|ochre red with black
+protagonist|方山|mesa
+biome|极地|polar
+landform|极光帘幕|aurora curtain
+feature|极光帘幕；雪林剪影|aurora curtain; snow-forest silhouette
+foreground|雪林|snow forest
+weather|无月夜，晴|clear moonless night
+light|氧绿极光，洋红边缘|oxygen-green aurora with magenta fringes
+palette|暗底 + 氧绿 + 洋红|dark base with oxygen green and magenta
+highlight_control|极光不过曝，雪地保留暗部|aurora must not overexpose; the snow keeps its shadow detail
+protagonist|极光帘幕|aurora curtain
+avoid|无人物、无木屋、无紫雾|no people, no cabins, no purple haze
+landform|沙漠雨后|desert after rain
+feature|湿沙与临时水洼|wet sand and temporary puddles
+foreground|水洼|puddle
+light|冷灰散射|cool grey diffuse light
+protagonist|沙丘|dune
+landform|冰山|iceberg
+feature|冰山的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice on the iceberg
+season|极昼|polar day
+protagonist|冰山与海面|iceberg and sea surface
+landform|冰架|ice shelf
+feature|冰架的冰裂隙、粒雪与蓝冰|crevasses, firn, and blue ice on the ice shelf
+palette|白 + 蓝|white with blue
+protagonist|冰架压力脊与蓝冰|ice-shelf pressure ridges and blue ice
+biome|冰川|glacial
+landform|冰川舌|glacier tongue
+feature|冰裂隙 + 冰碛砾石|crevasses and morainal gravel
+foreground|砾石地表|gravel ground
+season|盛夏|midsummer
+light|云层后方均匀散射|even diffuse light from behind the cloud deck
+palette|冰蓝 + 灰|ice blue with grey
+highlight_control|冰面保留裂纹，雪面不炸白|ice keeps its crack pattern; snow surfaces must not clip to white
+protagonist|冰裂隙|crevasse
+landform|极光弧|aurora arc
+feature|氧绿极光弧与雪林；极光弧的星点、气辉与地景剪影|oxygen-green aurora arc over a snow forest; stars, airglow, and a landscape silhouette under the arc
+foreground|雪林剪影|snow-forest silhouette
+light|极光弧，洋红外缘|aurora arc with a magenta outer edge
+protagonist|氧绿极光弧与雪林|oxygen-green aurora arc and snow forest
+avoid|无人物、无营地、无车|no people, no camps, no vehicles

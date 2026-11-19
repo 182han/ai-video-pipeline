@@ -1,0 +1,174 @@
+1|morning tide pool
+2|morning light and water surface
+3|pool-rim rock
+4|mushroom rock
+5|strata, fissures, and weathered faces of the mushroom rock
+6|storm light
+7|red with grey
+8|wind-carved mushroom rock and talus
+9|caldera
+10|caldera lava crust, steam, and mineral color
+11|blue with dark red
+12|caldera rim and clouds
+13|star dune
+14|wind ripples on the star dune, the slip face, and grain-level specular glints
+15|crest-line shadow
+16|sunset side light
+17|high oblique aerial
+18|orange with brown
+19|intersecting crests of the star dune
+20|lava plug
+21|lava-plug crust, steam, and mineral color
+22|dark grey with green
+23|lava plug and lava rubble
+24|milky way arch
+25|milky way arch; yardang mounds in the foreground
+26|silhouetted mounds
+27|milky way and airglow
+28|20mm
+29|dark base with warm nebula
+30|the galactic core must not overexpose; the land keeps a clear silhouette
+31|milky way arch
+32|no people, no headlights, no light pollution
+33|salt flat
+34|salt crystals, cracks, and a film of water on the salt flat
+35|low sun
+36|salt marsh
+37|no people, no tire tracks, no buildings, no text
+38|sand dune
+39|wind ripples on the dune, the slip face, and grain-level specular glints
+40|lake surface
+41|dune lake
+42|dry and cloudless
+43|warm ochre with deep brown
+44|deflation hollow
+45|inselberg
+46|desert inselberg with dry grass under aurora
+47|warm rock with cold sky
+48|desert inselberg and dry grass
+49|dune crestline
+50|wind ripples on the windward slope and the lee slip face
+51|early autumn
+52|sunrise side light, low angle with long shadows
+53|dune-crest highlights must not clip to white; shadows keep the ripple pattern
+54|dune crestline
+55|no camels, no footprints, no people
+56|snow surface
+57|gold with grey
+58|snowy dune
+59|dune grass
+60|dune grass
+61|lava field
+62|cracked lava field under moonrise
+63|storm
+64|black with grey
+65|cracked lava field
+66|barchan dune
+67|wind ripples on the barchan dune, the slip face, and grain-level specular glints
+68|slip-face shadow
+69|slip face of the barchan dune
+70|yardang
+71|wind-scoured grooves on the yardang, gravel, and grain-level glints
+72|thin haze
+73|grey with ochre
+74|wind-scoured groove
+75|dark brown with orange
+76|cluster of mounds
+77|airglow and milky way
+78|airglow and yardang mounds; stars, airglow, and a landscape silhouette in the airglow-lit milky way
+79|dark base with olive green
+80|airglow and yardang mounds
+81|desert-varnished rock
+82|strata, fissures, and weathered faces of desert-varnished rock
+83|rock-face texture
+84|black desert-varnished rock face
+85|wind-eroded pillar
+86|gobi gravel plain
+87|wind-scoured grooves on the gobi, gravel, and grain-level glints
+88|black gravel
+89|windy
+90|black gobi
+91|danxia landform
+92|strata, fissures, and weathered faces of the danxia landform
+93|red with gold
+94|peak forest
+95|gravel beach
+96|waterfall
+97|specular reflections at the waterfall, wet banks, and flow marks
+98|rock wall
+99|green with gold
+100|canyon waterfall
+101|mountainous
+102|cirque
+103|cirque textures, aerial perspective, and layered highlights
+104|lakeside gravel
+105|blue with grey
+106|cirque and cirque lake
+107|no people, no ropes, no camps
+108|dry sand
+109|dry riverbed
+110|arete
+111|arete textures, aerial perspective, and layered highlights
+112|cool white with warm rim light
+113|arete and snow cornice
+114|salt crystals
+115|thin cloud
+116|dry salt lake
+117|U-shaped valley
+118|strata, fissures, and weathered faces of the U-shaped valley
+119|green with grey
+120|U-shaped valley and its valley-floor river
+121|deflation basin
+122|canyon
+123|strata, fissures, and weathered faces of the canyon
+124|river surface
+125|natural arch
+126|icefall
+127|crevasses, firn, and blue ice in the icefall
+128|blue with white
+129|icefall and ice pillars
+130|esker
+131|esker textures, aerial perspective, and layered highlights
+132|green with brown
+133|esker and gravel
+134|scree
+135|ochre red with black
+136|mesa
+137|polar
+138|aurora curtain
+139|aurora curtain; snow-forest silhouette
+140|snow forest
+141|clear moonless night
+142|oxygen-green aurora with magenta fringes
+143|dark base with oxygen green and magenta
+144|aurora must not overexpose; the snow keeps its shadow detail
+145|aurora curtain
+146|no people, no cabins, no purple haze
+147|desert after rain
+148|wet sand and temporary puddles
+149|puddle
+150|cool grey diffuse light
+151|dune
+152|iceberg
+153|crevasses, firn, and blue ice on the iceberg
+154|polar day
+155|iceberg and sea surface
+156|ice shelf
+157|crevasses, firn, and blue ice on the ice shelf
+158|white with blue
+159|ice-shelf pressure ridges and blue ice
+160|glacial
+161|glacier tongue
+162|crevasses and morainal gravel
+163|gravel ground
+164|midsummer
+165|even diffuse light from behind the cloud deck
+166|ice blue with grey
+167|ice keeps its crack pattern; snow surfaces must not clip to white
+168|crevasse
+169|aurora arc
+170|oxygen-green aurora arc over a snow forest; stars, airglow, and a landscape silhouette under the arc
+171|snow-forest silhouette
+172|aurora arc with a magenta outer edge
+173|oxygen-green aurora arc and snow forest
+174|no people, no camps, no vehicles

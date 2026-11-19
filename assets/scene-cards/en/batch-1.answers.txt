@@ -1,0 +1,254 @@
+1|coastal
+2|sandbar
+3|braided wet channels across the sandbar, wind ripples, and specular reflections on standing water
+4|sandbar grass
+5|post-storm clearing
+6|autumn
+7|cool grey light
+8|extreme wide shot
+9|ground-level wide angle
+10|28mm
+11|static, locked-off
+12|cool blue with warm rim light
+13|highlights on water and ice must not clip to white; shadows keep tonal separation
+14|bay-mouth bar
+15|no people, no boats, no buildings, no text
+16|frame locks off; nothing new enters
+17|wet sand
+18|thin mist
+19|winter
+20|overcast diffuse light
+21|teal green with pale sand
+22|tidal delta
+23|tide pool
+24|specular reflections on the tide pool, rocks, and salt spray
+25|tide-pool rim
+26|overcast diffuse
+27|summer
+28|even diffuse light through cloud
+29|texture close-up
+30|ground-hugging
+31|85mm
+32|cool grey with green
+33|tide-pool surface and rock texture
+34|no people, no boats, no buildings
+35|cliff
+36|cliff-face strata, wet rock, and salt spray
+37|granite blocks
+38|clear
+39|spring
+40|side light
+41|low-angle wide
+42|white with green and grey
+43|highlights stay unclipped; shadows keep texture
+44|granite cliff
+45|rain-rippled tide pool
+46|raindrop rings and reflections
+47|wet rock
+48|passing showers
+49|cool grey with natural tones
+50|sky highlights must not clip; shadows keep tonal separation
+51|tide pool
+52|no people, no buildings, no text
+53|chalk cliff
+54|chalk-cliff strata, wet rock, and salt spray
+55|dark silhouette
+56|pre-storm
+57|cold grey storm light
+58|medium shot
+59|ground-level eye height
+60|50mm
+61|extremely slow lateral truck
+62|chalk cliff and meadow edge
+63|estuary
+64|misty estuary
+65|mist band where fresh and salt water meet
+66|mudflat
+67|morning mist
+68|blue hour light
+69|estuary mouth
+70|reef flat
+71|rock grooves across the reef flat, seaweed, and salt spray
+72|reef rock
+73|reef flat
+74|sea cliff of columnar basalt
+75|tide pools and black pebbles
+76|silhouetted wet basalt columns at the frame corner
+77|sea fog rolling in from the right
+78|late autumn
+79|overcast diffuse light, brighter on the right side of the cloud deck
+80|cool grey with seaweed green
+81|sea-surface highlights must not clip to white; tonal layers retained in fog
+82|columnar-jointed cliff wall
+83|no buildings, no people, no boats
+84|intertidal flat
+85|zodiacal light
+86|zodiacal light and tidal flats; star points, airglow, and a landscape silhouette under the zodiacal light
+87|moonless night
+88|zodiacal light cone
+89|sky-dominant frame
+90|fixed-position wide angle
+91|14mm
+92|deep cyan with pale gold
+93|star points and aurora must not overexpose; shadows keep tonal separation
+94|zodiacal light and tidal flats
+95|sea-fog coast
+96|sea fog spilling over the cliff top
+97|wet grass
+98|sea fog
+99|diffuse light
+100|sea cliff
+101|wet rock gully
+102|diffuse light through sea fog
+103|wave-cut gully
+104|sea cave
+105|sea-cave strata, wet rock, and salt spray
+106|overcast diffuse light, brighter on the right side of the cave mouth
+107|sea-cave entrance and wet pebbles
+108|fjord wall
+109|fjord wall with a thin waterfall; star trails
+110|waterfall stream
+111|clear moonless night
+112|deep blue with green
+113|star points must not overexpose; the land keeps its shadows
+114|fjord wall and thin waterfall
+115|forest
+116|forest and water
+117|foliage, moss, and forest light
+118|wetland grass
+119|gold with green
+120|leaf and meadow highlights must not clip; layered tones in mist
+121|forest wetland
+122|no people, no trails, no buildings, no text
+123|columnar jointing
+124|basalt cliff
+125|blowhole
+126|blowhole strata, wet rock, and salt spray
+127|black reef rocks
+128|storm swell
+129|backlight; water spray is lit
+130|cool grey with white
+131|storm swell bursting from the blowhole
+132|water body
+133|estuary bay
+134|estuary bay and mudflats under airglow
+135|blue hour
+136|grey with blue
+137|estuary bay and mudflats
+138|lake
+139|melting lake ice
+140|ice-water boundary and cracks
+141|residual ice
+142|clear and cold
+143|low-sun side light
+144|lake surface
+145|tidal creek
+146|blue-teal after sunset
+147|dot-in-landscape (subject tiny in frame)
+148|wide angle
+149|35mm
+150|spit
+151|intertidal flat
+152|specular reflections across the intertidal flat, wet banks, and flow marks
+153|overcast
+154|even diffuse light
+155|grey-brown with silver
+156|sand ridge
+157|sea cliff
+158|sea-cliff strata, wet rock, and salt spray
+159|wave-cut notch
+160|sea window and zodiacal light
+161|sea fog
+162|sea window
+163|river
+164|braided river channels
+165|bifurcating channels across sandbars
+166|gravel bar
+167|braided channels
+168|cool blue light
+169|kelp forest
+170|volcanic
+171|volcano and water
+172|lava crust, steam, and mineral color at the volcano-water boundary
+173|yellow with grey
+174|lava coast
+175|calm
+176|cyan blue with grey
+177|wave-formed ripple marks
+178|wave-cut platform under star trails
+179|tide pool
+180|wave-cut platform
+181|waterfall
+182|waterfall spray
+183|rainbow in the spray
+184|wet stone
+185|clear with mist
+186|side backlight
+187|waterfall
+188|morning light
+189|low-angle side light
+190|silver with brown
+191|tidal creek
+192|danxia (red-bed landform)
+193|danxia red cliff
+194|stratified red sandstone and conglomerate
+195|narrow slot wall
+196|clear with thin haze
+197|late summer
+198|light leaking through the slot, a single shaft of sky light
+199|warm red with cool grey
+200|rock-wall highlights stay unclipped; shadowed strata remain legible
+201|red-cliff strata
+202|no boardwalks, no people, no text
+203|arid wasteland
+204|yardang mound
+205|wind-scoured grooves on the yardang, gravel, and grain-level glints
+206|wind-scoured groove
+207|dry and windy
+208|low-angle side light cutting across the strata
+209|ochre with grey
+210|mound highlights stay unclipped; shadows keep their strata
+211|wind-eroded ridge
+212|no tire tracks, no people, no buildings
+213|salt pan
+214|salt crystals, cracks, and a film of water on the salt pan
+215|salt-crust cracks
+216|white with grey
+217|cracks and shallow water on the salt pan
+218|no people, no tire tracks, no buildings
+219|canyon
+220|slot canyon
+221|undulating sandstone walls
+222|curving rock wall
+223|dry
+224|a single shaft of top light
+225|red-orange with black
+226|highlights stay unclipped; shadow areas retain texture
+227|wave-like rock wall
+228|no people, no ropes, no text
+229|mesa
+230|strata, fissures, and weathered faces of the mesa
+231|sunrise side light
+232|red with orange
+233|mesa edge and talus slope
+234|fumarole
+235|fumarole lava crust, steam, and mineral color
+236|fumarole and sulfur crystals
+237|isolated peak
+238|strata, fissures, and weathered faces of the isolated peak
+239|cool blue with red rock
+240|isolated peak and sagebrush
+241|coastal rainbow
+242|rainbow after rain
+243|after rain
+244|desert
+245|dome dune
+246|wind ripples on the dome dune, the slip face, and grain-level specular glints
+247|ripple foreground
+248|cool blue after sunset
+249|cool sand with slate blue
+250|dome dune and its ripple field
+251|cinder cone
+252|cinder-cone lava crust, steam, and mineral color
+253|red with black
+254|cinder cone and volcanic ash

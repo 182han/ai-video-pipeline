@@ -1,0 +1,11 @@
+# 跨卡共享的英译补充字段（不占 16 个展示字段）
+# 用途：英文负向提示词（promptComposer._negative 的英文替代路径）
+# 格式：field|中文|英文
+negative|人物, 文字, 水印, 建筑, 过量 HDR, 过度锐化, 塑料感, 死白高光|people, text, watermark, buildings, excessive HDR, over-sharpening, plastic look, clipped highlights
+science.forbidden|人物、建筑、文字、HDR、过度锐化|people, buildings, text, HDR, over-sharpening
+science.forbidden|大海带、海藻林、巨型盐晶、白花状盐花、过大藤壶|giant kelp, kelp forest, oversized salt crystals, salt flowers, oversized barnacles
+science.forbidden|大块盐晶、白花状盐花、无风死水|large salt crystals, salt flowers, dead calm water
+science.forbidden|星形几何脊线、完美对称、航拍俯视、塑料沙面|star-shaped geometric ridges, perfect symmetry, aerial top-down view, plastic-looking sand
+science.forbidden|霓虹极光、大面积帘幕、洋红爆发、绿色发光边、紫雾、月亮|neon aurora, large curtain displays, magenta outbursts, green glowing edges, purple haze, moon
+science.forbidden|冰洞、蜂窝孔洞、海绵状冰、发光蓝冰、完美重复裂隙|ice caves, honeycomb holes, spongy ice, glowing blue ice, perfectly repeating crevasses
+science.forbidden|热带巨叶、粗大藤蔓、密集垂藤、完美光柱、小径|giant tropical leaves, thick vines, dense hanging vines, perfect god rays, trails

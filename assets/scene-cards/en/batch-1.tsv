@@ -1,0 +1,256 @@
+# 场景卡英译批次 1（卡 1-40）
+# 格式：field|中文|英文；由 scripts/translate-scene-cards-en.js fill 生成
+biome|海岸|coastal
+landform|沙洲|sandbar
+feature|沙洲的湿沙分汊、风纹与水面反光|braided wet channels across the sandbar, wind ripples, and specular reflections on standing water
+foreground|沙洲草|sandbar grass
+weather|风暴后|post-storm clearing
+season|秋|autumn
+light|冷灰|cool grey light
+shot|大全景|extreme wide shot
+cameraAngle|地面广角|ground-level wide angle
+lens|28mm|28mm
+motion|静态|static, locked-off
+palette|冷蓝 + 暖边|cool blue with warm rim light
+highlight_control|水面/冰面反光不炸白，暗部保留层次|highlights on water and ice must not clip to white; shadows keep tonal separation
+protagonist|湾口沙坝|bay-mouth bar
+avoid|无人物、无船、无建筑、无文字|no people, no boats, no buildings, no text
+end_lock|画面锁死，没有新元素进入|frame locks off; nothing new enters
+foreground|湿沙|wet sand
+weather|薄雾|thin mist
+season|冬|winter
+light|阴天散射|overcast diffuse light
+palette|青绿 + 浅沙|teal green with pale sand
+protagonist|潮汐三角洲|tidal delta
+landform|潮池|tide pool
+feature|潮池的水面反光、礁石与盐雾|specular reflections on the tide pool, rocks, and salt spray
+foreground|潮池边缘|tide-pool rim
+weather|阴天散射|overcast diffuse
+season|夏|summer
+light|云层均匀散射|even diffuse light through cloud
+shot|纹理特写|texture close-up
+cameraAngle|静态贴面|ground-hugging
+lens|85mm|85mm
+palette|冷灰 + 绿|cool grey with green
+protagonist|潮池水面与礁石纹理|tide-pool surface and rock texture
+avoid|无人物、无船、无建筑|no people, no boats, no buildings
+landform|悬崖|cliff
+feature|悬崖的崖壁层理、湿岩与盐雾|cliff-face strata, wet rock, and salt spray
+foreground|花岗岩块|granite blocks
+weather|晴|clear
+season|春|spring
+light|侧光|side light
+cameraAngle|低机位广角|low-angle wide
+palette|白 + 绿 + 灰|white with green and grey
+highlight_control|亮部不过曝，阴影保留纹理|highlights stay unclipped; shadows keep texture
+protagonist|花岗岩崖|granite cliff
+landform|雨纹潮池|rain-rippled tide pool
+feature|雨点波纹与倒影|raindrop rings and reflections
+foreground|湿岩|wet rock
+weather|阵雨|passing showers
+palette|冷灰 + 自然色|cool grey with natural tones
+highlight_control|天空不过曝，暗部保留层次|sky highlights must not clip; shadows keep tonal separation
+protagonist|潮池|tide pool
+avoid|无人物、无建筑、无文字|no people, no buildings, no text
+landform|白垩崖|chalk cliff
+feature|白垩崖的崖壁层理、湿岩与盐雾|chalk-cliff strata, wet rock, and salt spray
+foreground|前景：暗部剪影|dark silhouette
+weather|风暴前|pre-storm
+light|冷灰风暴光|cold grey storm light
+shot|中景|medium shot
+cameraAngle|地面平视|ground-level eye height
+lens|50mm|50mm
+motion|极慢横移|extremely slow lateral truck
+protagonist|白垩崖与草甸边缘|chalk cliff and meadow edge
+biome|河口|estuary
+landform|河口雾|misty estuary
+feature|咸淡水交汇雾带|mist band where fresh and salt water meet
+foreground|泥滩|mudflat
+weather|晨雾|morning mist
+light|蓝调|blue hour light
+protagonist|河口|estuary mouth
+landform|礁盘|reef flat
+feature|礁盘的礁石沟槽、海藻与盐雾|rock grooves across the reef flat, seaweed, and salt spray
+foreground|礁石|reef rock
+protagonist|礁盘|reef flat
+landform|玄武岩柱状节理海崖|sea cliff of columnar basalt
+feature|潮池与黑色卵石|tide pools and black pebbles
+foreground|湿玄武岩柱剪影压角|silhouetted wet basalt columns at the frame corner
+weather|海雾从右侧涌入|sea fog rolling in from the right
+season|深秋|late autumn
+light|阴天散射，云层右侧更亮|overcast diffuse light, brighter on the right side of the cloud deck
+palette|冷灰 + 海藻绿|cool grey with seaweed green
+highlight_control|海面反光不炸白，雾中保留层次|sea-surface highlights must not clip to white; tonal layers retained in fog
+protagonist|柱状节理崖壁|columnar-jointed cliff wall
+avoid|无建筑、无人物、无船|no buildings, no people, no boats
+biome|潮间带|intertidal flat
+landform|黄道光|zodiacal light
+feature|黄道光与潮汐滩；黄道光的星点、气辉与地景剪影|zodiacal light and tidal flats; star points, airglow, and a landscape silhouette under the zodiacal light
+weather|无月夜|moonless night
+light|黄道光锥|zodiacal light cone
+shot|天文|sky-dominant frame
+cameraAngle|固定机位广角|fixed-position wide angle
+lens|14mm|14mm
+palette|暗青 + 淡金|deep cyan with pale gold
+highlight_control|星点/极光不过曝，暗部保留层次|star points and aurora must not overexpose; shadows keep tonal separation
+protagonist|黄道光与潮汐滩|zodiacal light and tidal flats
+landform|海岸海雾|sea-fog coast
+feature|海雾漫过崖顶|sea fog spilling over the cliff top
+foreground|湿草|wet grass
+weather|海雾|sea fog
+light|散射|diffuse light
+protagonist|海崖|sea cliff
+foreground|湿岩沟|wet rock gully
+light|海雾散射|diffuse light through sea fog
+protagonist|浪蚀沟|wave-cut gully
+landform|海蚀洞|sea cave
+feature|海蚀洞的崖壁层理、湿岩与盐雾|sea-cave strata, wet rock, and salt spray
+light|阴天散射，洞口右侧更亮|overcast diffuse light, brighter on the right side of the cave mouth
+protagonist|海蚀洞入口与湿卵石|sea-cave entrance and wet pebbles
+landform|峡湾崖壁|fjord wall
+feature|峡湾崖壁与细瀑·星轨|fjord wall with a thin waterfall; star trails
+foreground|瀑布水线|waterfall stream
+light|无月夜晴|clear moonless night
+palette|深蓝 + 绿|deep blue with green
+highlight_control|星点不过曝，地景保留暗部|star points must not overexpose; the land keeps its shadows
+protagonist|峡湾崖壁与细瀑|fjord wall and thin waterfall
+biome|森林|forest
+landform|森林·水|forest and water
+feature|森林·水的叶面、苔藓与林间光|foliage, moss, and forest light
+foreground|湿地草|wetland grass
+palette|金 + 绿|gold with green
+highlight_control|叶面/草甸高光不炸，雾中有层次|leaf and meadow highlights must not clip; layered tones in mist
+protagonist|森林湿地|forest wetland
+avoid|无人物、无小径、无建筑、无文字|no people, no trails, no buildings, no text
+foreground|柱状节理|columnar jointing
+protagonist|玄武岩崖|basalt cliff
+landform|喷水洞|blowhole
+feature|喷水洞的崖壁层理、湿岩与盐雾|blowhole strata, wet rock, and salt spray
+foreground|黑色礁石|black reef rocks
+weather|风暴涌浪|storm swell
+light|逆光，水雾被点亮|backlight; water spray is lit
+palette|冷灰 + 白|cool grey with white
+protagonist|风暴涌浪从喷水洞喷出|storm swell bursting from the blowhole
+biome|水体|water body
+landform|河口湾|estuary bay
+feature|河口湾与泥滩·气辉|estuary bay and mudflats under airglow
+weather|蓝调|blue hour
+palette|灰 + 蓝|grey with blue
+protagonist|河口湾与泥滩|estuary bay and mudflats
+biome|湖泊|lake
+landform|湖面融冰|melting lake ice
+feature|冰水交界与裂纹|ice-water boundary and cracks
+foreground|残冰|residual ice
+weather|晴冷|clear and cold
+light|低太阳侧光|low-sun side light
+protagonist|湖面|lake surface
+foreground|潮沟|tidal creek
+light|日落后青蓝|blue-teal after sunset
+shot|点景|dot-in-landscape (subject tiny in frame)
+cameraAngle|广角点景|wide angle
+lens|35mm|35mm
+protagonist|沙嘴|spit
+landform|潮间带|intertidal flat
+feature|潮间带的水面反光、湿岸与流痕|specular reflections across the intertidal flat, wet banks, and flow marks
+weather|阴天|overcast
+light|均匀散射|even diffuse light
+palette|灰褐 + 银|grey-brown with silver
+protagonist|沙脊|sand ridge
+landform|海蚀崖|sea cliff
+feature|海蚀崖的崖壁层理、湿岩与盐雾|sea-cliff strata, wet rock, and salt spray
+protagonist|海蚀龛|wave-cut notch
+feature|海蚀窗·黄道光|sea window and zodiacal light
+foreground|海雾|sea fog
+protagonist|海蚀窗|sea window
+biome|河流|river
+landform|辫状河道|braided river channels
+feature|沙洲分汊|bifurcating channels across sandbars
+foreground|砾石洲|gravel bar
+protagonist|辫状水道|braided channels
+light|冷蓝|cool blue light
+protagonist|海藻林|kelp forest
+biome|火山|volcanic
+landform|火山·水|volcano and water
+feature|火山·水的熔岩壳、蒸汽与矿物色|lava crust, steam, and mineral color at the volcano-water boundary
+palette|黄 + 灰|yellow with grey
+protagonist|熔岩海岸|lava coast
+weather|无风|calm
+palette|青蓝 + 灰|cyan blue with grey
+protagonist|波痕|wave-formed ripple marks
+feature|海蚀平台·星轨|wave-cut platform under star trails
+foreground|潮池|tide pool
+protagonist|海蚀平台|wave-cut platform
+biome|瀑布|waterfall
+landform|瀑布水雾|waterfall spray
+feature|水雾中的彩虹|rainbow in the spray
+foreground|湿石|wet stone
+weather|晴间水雾|clear with mist
+light|侧逆光|side backlight
+protagonist|瀑布|waterfall
+weather|晨光|morning light
+light|低角度侧光|low-angle side light
+palette|银 + 棕|silver with brown
+protagonist|潮沟|tidal creek
+biome|丹霞|danxia (red-bed landform)
+landform|丹霞赤壁|danxia red cliff
+feature|层理状红色砂砾岩|stratified red sandstone and conglomerate
+foreground|窄缝岩壁|narrow slot wall
+weather|晴，薄霾|clear with thin haze
+season|夏末|late summer
+light|狭缝漏光，单束天光|light leaking through the slot, a single shaft of sky light
+palette|暖红 + 冷灰|warm red with cool grey
+highlight_control|岩壁亮部不过曝，暗部有层理|rock-wall highlights stay unclipped; shadowed strata remain legible
+protagonist|赤壁层理|red-cliff strata
+avoid|无栈道、无人物、无文字|no boardwalks, no people, no text
+biome|荒漠|arid wasteland
+landform|雅丹土丘|yardang mound
+feature|雅丹土丘的风蚀沟槽、砾石与沙粒反光|wind-scoured grooves on the yardang, gravel, and grain-level glints
+foreground|风蚀沟槽|wind-scoured groove
+weather|干燥大风|dry and windy
+light|低角度侧光切层理|low-angle side light cutting across the strata
+palette|土黄 + 灰|ochre with grey
+highlight_control|土丘亮部不过曝，阴影有层理|mound highlights stay unclipped; shadows keep their strata
+protagonist|风蚀垄脊|wind-eroded ridge
+avoid|无车辙、无人物、无建筑|no tire tracks, no people, no buildings
+landform|盐盘|salt pan
+feature|盐盘的盐晶、裂纹与薄水|salt crystals, cracks, and a film of water on the salt pan
+foreground|盐壳裂纹|salt-crust cracks
+palette|白 + 灰|white with grey
+protagonist|盐盘裂纹与薄水|cracks and shallow water on the salt pan
+avoid|无人物、无车辙、无建筑|no people, no tire tracks, no buildings
+biome|峡谷|canyon
+landform|狭缝峡谷|slot canyon
+feature|波浪状砂岩壁|undulating sandstone walls
+foreground|岩壁曲线|curving rock wall
+weather|干燥|dry
+light|单束顶光|a single shaft of top light
+palette|红橙 + 黑|red-orange with black
+highlight_control|亮部不过曝，暗部有纹理|highlights stay unclipped; shadow areas retain texture
+protagonist|波浪岩壁|wave-like rock wall
+avoid|无人物、无绳索、无文字|no people, no ropes, no text
+landform|台地|mesa
+feature|台地的层理、裂隙与风化面|strata, fissures, and weathered faces of the mesa
+light|日出侧光|sunrise side light
+palette|红 + 橙|red with orange
+protagonist|台地边缘与碎石坡|mesa edge and talus slope
+landform|喷气孔|fumarole
+feature|喷气孔的熔岩壳、蒸汽与矿物色|fumarole lava crust, steam, and mineral color
+protagonist|喷气孔与硫磺结晶|fumarole and sulfur crystals
+landform|孤山|isolated peak
+feature|孤山的层理、裂隙与风化面|strata, fissures, and weathered faces of the isolated peak
+palette|冷蓝 + 红岩|cool blue with red rock
+protagonist|孤山与鼠尾草|isolated peak and sagebrush
+landform|海岸彩虹|coastal rainbow
+feature|雨后彩虹|rainbow after rain
+weather|雨后|after rain
+biome|沙漠|desert
+landform|穹状沙丘|dome dune
+feature|穹状沙丘的风纹、滑落面与沙粒反光|wind ripples on the dome dune, the slip face, and grain-level specular glints
+foreground|风纹前景|ripple foreground
+light|日落后冷蓝|cool blue after sunset
+palette|冷沙 + 灰蓝|cool sand with slate blue
+protagonist|穹状沙丘与风纹|dome dune and its ripple field
+landform|火山渣锥|cinder cone
+feature|火山渣锥的熔岩壳、蒸汽与矿物色|cinder-cone lava crust, steam, and mineral color
+palette|红 + 黑|red with black
+protagonist|火山渣锥与火山灰|cinder cone and volcanic ash
