@@ -267,7 +267,7 @@ function composeClipPatch(card, ctx = {}) {
   _assertCard(card);
   const videoPrompt = composeVideoPrompt(card, ctx);
   const imagePrompt = composeImagePrompt(card, ctx);
-  const negativePrompt = _negative(card);
+  const negativePrompt = _isEn(ctx.lang) ? sceneTemplates.negativeEn(card) : _negative(card);
   const override = _clean(ctx.promptOverride, MAX_PROMPT_OVERRIDE_CHARS);
   const patch = {
     prompt: videoPrompt,
