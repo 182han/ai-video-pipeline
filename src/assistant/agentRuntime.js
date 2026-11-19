@@ -16,6 +16,7 @@
 
 const agent = require('./agent');
 const memory = require('./memory');
+const agentAudit = require('./agentAudit');
 
 const AGENT_RUNTIME_VERSION = 'assistant-agent-runtime.v1.0.0';
 
@@ -83,6 +84,17 @@ async function handleAgentTurn(opts = {}) {
 
   if (!decision.ok) {
     // 不写会话：交给 server 走规则路径（handleMessage 会自己写 user + assistant）。
+    agentAudit.record({
+      sessionId,
+      lang,
+      model: o.model || null,
+      mode: 'fallback',
+      tool: null,
+      latencyMs: decision.latencyMs,
+      attempts: decision.attempts,
+      failureKind: (decision.failure && decision.failure.kind) || 'AGENT_FAILED',
+      text
+    });
     return {
       handled: false,
       fallback: true,
@@ -115,6 +127,19 @@ async function handleAgentTurn(opts = {}) {
     if (!out || out.ok !== true) {
       const error = (out && out.error) || '工具执行失败';
       memory.appendMessage(sessionId, { role: 'assistant', text: error, kind: 'chat' });
+      agentAudit.record({
+        sessionId,
+        lang,
+        model: o.model || null,
+        mode: 'tool',
+        tool: decision.tool,
+        intent: 'clarify',
+        ok: false,
+        code: (out && out.code) || 'AGENT_TOOL_FAILED',
+        latencyMs: decision.latencyMs,
+        attempts: decision.attempts,
+        text
+      });
       return {
         handled: true,
         latencyMs: decision.latencyMs,
@@ -137,12 +162,25 @@ async function handleAgentTurn(opts = {}) {
         }
       };
     }
+    const intent = TOOL_INTENT[decision.tool] || 'plan_edit';
+    agentAudit.record({
+      sessionId,
+      lang,
+      model: o.model || null,
+      mode: 'tool',
+      tool: decision.tool,
+      intent,
+      ok: true,
+      latencyMs: decision.latencyMs,
+      attempts: decision.attempts,
+      text
+    });
     return {
       handled: true,
       latencyMs: decision.latencyMs,
       response: {
         ...out,
-        intent: TOOL_INTENT[decision.tool] || 'plan_edit',
+        intent,
         lang,
         agent: agentMeta
       }
@@ -151,6 +189,18 @@ async function handleAgentTurn(opts = {}) {
 
   const replyText = decision.mode === 'say' ? decision.say : decision.clarify;
   memory.appendMessage(sessionId, { role: 'assistant', text: replyText, kind: 'chat' });
+  agentAudit.record({
+    sessionId,
+    lang,
+    model: o.model || null,
+    mode: decision.mode,
+    tool: null,
+    intent: decision.mode === 'say' ? 'chat' : 'clarify',
+    ok: true,
+    latencyMs: decision.latencyMs,
+    attempts: decision.attempts,
+    text
+  });
   return {
     handled: true,
     latencyMs: decision.latencyMs,

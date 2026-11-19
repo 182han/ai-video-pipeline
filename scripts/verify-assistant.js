@@ -61,6 +61,8 @@ process.env.SCENE_CARDS_COOLING_FILE = path.join(TMP, 'scene-card-cooling.json')
 // 2026-11-17 V2：跨会话偏好 / 审计落盘同样隔离（默认在 data/assistant，属运行期数据）。
 process.env.ASSISTANT_PREFS_FILE = path.join(TMP, 'assistant-preferences.json');
 process.env.ASSISTANT_AUDIT_FILE = path.join(TMP, 'assistant-audit.jsonl');
+// 2026-11-19 B 目标：agent 回合审计（与上面的「偏好审计」是两份文件，别混）
+process.env.ASSISTANT_AGENT_AUDIT_FILE = path.join(TMP, 'agent-audit.jsonl');
 process.env.DATABASE_TYPE = 'json';
 process.env.BUDGET_USD = '196';
 
@@ -93,6 +95,7 @@ const supervisor = require('../src/assistant/supervisor');
 const agentRuntime = require('../src/assistant/agentRuntime');
 const agentSwitch = require('../src/assistant/agentSwitch');
 const turnQueue = require('../src/assistant/turnQueue');
+const agentAudit = require('../src/assistant/agentAudit');
 const taskManager = require('../src/taskManager');
 const library = require('../src/library');
 const pipeline = require('../src/pipeline');
@@ -967,6 +970,53 @@ async function main() {
       serverSrc.indexOf('assistantTurnQueue.enqueue(') !== -1
       && /const queueKey = body\.sessionId/.test(serverSrc)
       && serverSrc.indexOf('return assistantSupervisor.handleMessage(') !== -1);
+  }
+
+  // ================= [3a-9] 2026-11-19 B 目标：agent 回合审计（可回放/校准）=================
+  // 真实模型接入后必须能回答「哪一轮、什么模式、选了哪个工具、多慢、为什么回退」。
+  // 约束：不落 Key/凭据；用户话只存 120 字预览；任何写失败不影响主链路。
+  console.log('\n[3a-9] B 目标：agent 回合审计（say/tool/fallback，不落 Key）');
+  {
+    ok('审计文件在隔离目录', agentAudit.AUDIT_FILE.indexOf(TMP) === 0,
+      agentAudit.AUDIT_FILE);
+    const before = agentAudit.list(500).length;
+
+    await agentRuntime.handleAgentTurn({
+      text: '你能做什么', sessionId: 'audit-say-' + Date.now().toString(36), lang: 'zh', supervisor,
+      callLLM: async () => ({ text: JSON.stringify({ say: '我能帮你看计划、查进度。' }) })
+    });
+    await agentRuntime.handleAgentTurn({
+      text: '来个 30 秒', sessionId: 'audit-tool-' + Date.now().toString(36), lang: 'zh', supervisor,
+      callLLM: async () => ({ text: JSON.stringify({ tool: 'plan_video', args: { totalMinutes: 0.5 } }) })
+    });
+    await agentRuntime.handleAgentTurn({
+      text: '进度', sessionId: 'audit-fallback-' + Date.now().toString(36), lang: 'zh', supervisor,
+      callLLM: async () => ({ text: '', failure: { kind: 'NO_KEY' } })
+    });
+
+    const rows = agentAudit.list(500);
+    ok('审计多出 3 条（say / tool / fallback 各一条）', rows.length === before + 3,
+      `${before} → ${rows.length}`);
+    const last3 = rows.slice(-3);
+    ok('say 回合：mode=say / intent=chat / 有 latencyMs+version',
+      last3[0].mode === 'say' && last3[0].intent === 'chat'
+      && typeof last3[0].latencyMs === 'number' && last3[0].version === agentAudit.AUDIT_VERSION);
+    ok('tool 回合：tool=plan_video / intent=create / ok=true',
+      last3[1].mode === 'tool' && last3[1].tool === 'plan_video'
+      && last3[1].intent === 'create' && last3[1].ok === true);
+    ok('fallback 回合：mode=fallback / failureKind=NO_KEY / tool=null',
+      last3[2].mode === 'fallback' && last3[2].failureKind === 'NO_KEY' && last3[2].tool === null);
+
+    const raw = fs.readFileSync(agentAudit.AUDIT_FILE, 'utf8');
+    ok('审计不落 Key/凭据（无 sk- / apiKey / baseUrl）',
+      !/sk-[A-Za-z0-9]/.test(raw) && raw.indexOf('apiKey') === -1 && raw.indexOf('baseUrl') === -1);
+    ok('JSONL 每行可解析且 textPreview ≤120 字',
+      raw.trim().split(/\r?\n/).filter(Boolean).every((line) => {
+        try {
+          const j = JSON.parse(line);
+          return typeof j.textPreview === 'string' && j.textPreview.length <= 120;
+        } catch (e) { return false; }
+      }));
   }
 
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================

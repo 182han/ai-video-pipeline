@@ -160,6 +160,7 @@ function normDecision(turn) {
 }
 
 async function runChannel(ch) {
+  const agent = require('../src/assistant/agent');
   const agentRuntime = require('../src/assistant/agentRuntime');
   const supervisor = require('../src/assistant/supervisor');
   const memory = require('../src/assistant/memory');
@@ -263,6 +264,7 @@ async function runChannel(ch) {
     name: ch.name,
     model: ch.model,
     baseUrl: ch.baseUrl,
+    agentVersion: agent.AGENT_VERSION,
     knownNewHit: hit,
     knownNewTotal: scored.length,
     accuracy: scored.length ? +(hit / scored.length * 100).toFixed(1) : null,
