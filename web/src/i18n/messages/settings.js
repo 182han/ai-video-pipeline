@@ -53,7 +53,17 @@ export default {
         clearDone: '已清空服务端跨会话偏好。',
         clearNothing: '之前没有保存过偏好，无需清空。',
         clearFailed: '清空失败：{error}',
-        loadFailed: '读取偏好失败：{error}'
+        loadFailed: '读取偏好失败：{error}',
+        agentTitle: '小智 AI 对话（实验）',
+        agentDesc: '打开后，聊天先由大模型理解并选择工具；任何失败/超时会自动退回规则路径（不会执行付费动作）。模型 Key 仍从「LLM」分组读取，随请求发送、服务端不保存。',
+        agentOn: '已开启',
+        agentOff: '已关闭',
+        agentEnable: '开启',
+        agentDisable: '关闭',
+        agentSaved: '已保存，下一条消息生效。',
+        agentFailed: '保存失败：{error}',
+        agentEnvForced: '当前由环境变量 ASSISTANT_AGENT 强制指定，设置页开关不生效。',
+        agentLoadFailed: '读取开关失败：{error}'
       },
       keys: {
         title: 'API Key',
@@ -176,7 +186,17 @@ export default {
         clearDone: 'Cleared the server-side cross-session preferences.',
         clearNothing: 'No preferences were saved, so nothing was cleared.',
         clearFailed: 'Clear failed: {error}',
-        loadFailed: 'Could not read preferences: {error}'
+        loadFailed: 'Could not read preferences: {error}',
+        agentTitle: 'Xiaozhi AI chat (experimental)',
+        agentDesc: 'When on, the LLM reads your message and picks a tool first; any failure/timeout falls back to the rule-based path automatically (paid actions are never executed). The model key still comes from the "LLM" group, is sent with each request, and is never stored on the server.',
+        agentOn: 'On',
+        agentOff: 'Off',
+        agentEnable: 'Enable',
+        agentDisable: 'Disable',
+        agentSaved: 'Saved; takes effect on the next message.',
+        agentFailed: 'Save failed: {error}',
+        agentEnvForced: 'Currently forced by the ASSISTANT_AGENT environment variable; this switch has no effect.',
+        agentLoadFailed: 'Could not read the switch: {error}'
       },
       keys: {
         title: 'API Keys',

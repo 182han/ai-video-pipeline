@@ -91,6 +91,7 @@ const asr = require('../src/assistant/asr');
 const fillLib = require('../src/assistant/fillFromLibrary');
 const supervisor = require('../src/assistant/supervisor');
 const agentRuntime = require('../src/assistant/agentRuntime');
+const agentSwitch = require('../src/assistant/agentSwitch');
 const taskManager = require('../src/taskManager');
 const library = require('../src/library');
 const pipeline = require('../src/pipeline');
@@ -838,6 +839,63 @@ async function main() {
     ok('say 幻觉金额 → handled:false（回退），不写会话',
       groundOut.handled === false && groundOut.failure.kind === 'SAY_UNGROUNDED'
       && assistantMemory.listMessages(sidGround, 10).length === 0);
+  }
+
+  // ================= [3a-7] 2026-11-19 B 目标：agent 总开关（一键关回规则路径）=================
+  // 目标里明确要求「可一键关回规则路径」：设置页开关 → 下一条消息生效，不需要重启。
+  // 优先级写死：环境变量 on/off 强制覆盖 > 持久化开关（默认关）。
+  console.log('\n[3a-7] B 目标：agent 总开关（持久化 + 环境变量覆盖 + 接线）');
+  {
+    const envBackup = process.env.ASSISTANT_AGENT;
+    delete process.env.ASSISTANT_AGENT;
+    const s0 = agentSwitch.reload();
+    ok('默认关：未设置环境变量、无开关文件时 enabled=false',
+      s0.enabled === false && s0.persisted === false && s0.envForced === false);
+    ok('开关文件在隔离目录内（ASSISTANT_DIR/agent-switch.json）',
+      agentSwitch.SWITCH_FILE.indexOf(process.env.ASSISTANT_DIR) === 0,
+      agentSwitch.SWITCH_FILE);
+
+    const on = agentSwitch.setEnabled(true, { by: 'verify_s4' });
+    ok('setEnabled(true) → ok + enabled + 落盘文件存在',
+      on.ok === true && on.enabled === true && on.persisted === true
+      && fs.existsSync(agentSwitch.SWITCH_FILE));
+    const onFile = JSON.parse(fs.readFileSync(agentSwitch.SWITCH_FILE, 'utf8'));
+    ok('落盘内容可解析且 enabled=true、记录 updatedBy',
+      onFile.enabled === true && onFile.updatedBy === 'verify_s4' && !!onFile.updatedAt);
+    ok('reload 后仍是开（持久化生效）', agentSwitch.reload().enabled === true);
+
+    process.env.ASSISTANT_AGENT = 'off';
+    const forcedOff = agentSwitch.getState();
+    ok('环境变量 off 强制覆盖持久化开 → enabled=false、envForced=true',
+      forcedOff.enabled === false && forcedOff.envForced === true && forcedOff.envValue === 'off');
+    process.env.ASSISTANT_AGENT = 'on';
+    const forcedOn = agentSwitch.getState();
+    ok('环境变量 on 强制覆盖持久化关 → enabled=true', forcedOn.enabled === true);
+    delete process.env.ASSISTANT_AGENT;
+
+    const off = agentSwitch.setEnabled(false, { by: 'verify_s4' });
+    ok('setEnabled(false) → 关；reload 仍关',
+      off.ok === true && off.enabled === false && agentSwitch.reload().enabled === false);
+
+    const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    ok('server：暴露 GET/POST /api/assistant/agent，且 message 路由用开关（不是只看 env）',
+      serverSrc.indexOf("app.get('/api/assistant/agent'") !== -1
+      && serverSrc.indexOf("app.post('/api/assistant/agent'") !== -1
+      && serverSrc.indexOf('assistantAgentSwitch.isEnabled()') !== -1
+      && /AGENT_SWITCH_BAD_BODY/.test(serverSrc));
+    const settingsSrc = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'screens', 'settingsPage.js'), 'utf8');
+    ok('前端设置页：开关读取/保存走 /api/assistant/agent，带 toggleAgent 处理',
+      settingsSrc.indexOf("fetchJson('/api/assistant/agent')") !== -1
+      && /function toggleAgent|async function toggleAgent/.test(settingsSrc)
+      && settingsSrc.indexOf('agentTitle') !== -1);
+    const msgs = fs.readFileSync(path.join(__dirname, '..', 'web', 'src', 'i18n', 'messages', 'settings.js'), 'utf8');
+    ok('i18n：开关文案中英都齐（agentTitle/agentDesc/agentSaved）',
+      (msgs.match(/agentTitle:/g) || []).length === 2
+      && (msgs.match(/agentDesc:/g) || []).length === 2
+      && (msgs.match(/agentSaved:/g) || []).length === 2);
+
+    ok('结束状态：默认关（不影响后续套件）', agentSwitch.isEnabled() === false);
+    if (envBackup !== undefined) process.env.ASSISTANT_AGENT = envBackup;
   }
 
   // ================= [3b] 新意图：查场景卡 / 纯文生视频（2026-11-16 用户反馈）=================

@@ -80,8 +80,8 @@ const { getI2VInfo, listI2VModels } = require('./src/generators/i2vSupport');
 // 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 / 调度。
 // 说明：这些模块不自己起服务、不直连厂商；付费闸门在 supervisor.execute 内（未确认不发请求）。
 const assistantSupervisor = require('./src/assistant/supervisor');
-const assistantAgent = require('./src/assistant/agent');
 const assistantAgentRuntime = require('./src/assistant/agentRuntime');
+const assistantAgentSwitch = require('./src/assistant/agentSwitch');
 const assistantPlanCard = require('./src/assistant/planCard');
 const assistantAsr = require('./src/assistant/asr');
 const assistantMemory = require('./src/assistant/memory');
@@ -2480,7 +2480,7 @@ app.post('/api/assistant/message', async (req, res) => {
     const lang = i18n.outputLang(req, body.aiLang);
     // 2026-11-19 B 目标第三刀：agent 主路径（**默认关**；任何失败都回退规则路径）。
     // Key 仍由浏览器随请求带（服务端不持久化）；无 Key 时 agent 立即失败 → 走规则。
-    if (assistantAgent.isEnabled() && text.trim()) {
+    if (assistantAgentSwitch.isEnabled() && text.trim()) {
       const timeoutMs = Math.min(15000, Math.max(2000, Number(body.llmTimeoutMs) || 4000));
       const turn = await assistantAgentRuntime.handleAgentTurn({
         text,
@@ -2517,6 +2517,34 @@ app.post('/api/assistant/message', async (req, res) => {
       ...i18n.err(req.lang, 'api.assistant.handleFailed')
     });
   }
+});
+
+// 2026-11-19 B 目标：小智 agent 总开关（设置页「一键关回规则路径」）。
+// 不花钱、不建任务；保存后**下一条消息生效**（无需重启）。环境变量 on/off 可强制覆盖。
+app.get('/api/assistant/agent', (req, res) => {
+  res.json({ ok: true, ...assistantAgentSwitch.getState() });
+});
+
+app.post('/api/assistant/agent', (req, res) => {
+  const body = req.body || {};
+  if (typeof body.enabled !== 'boolean') {
+    return res.status(400).json({ ok: false, code: 'AGENT_SWITCH_BAD_BODY', error: 'enabled 必须是布尔值' });
+  }
+  const userId = (req.auth && req.auth.userId) ? String(req.auth.userId) : 'local';
+  const out = assistantAgentSwitch.setEnabled(body.enabled, { by: userId });
+  try {
+    assistantAudit.record({
+      actor: userId,
+      kind: 'settings',
+      action: body.enabled ? 'agent_on' : 'agent_off',
+      target: { key: 'agent' },
+      before: null,
+      after: { enabled: body.enabled },
+      note: '小智 agent 总开关'
+    });
+  } catch (e) { /* 审计失败不阻塞开关 */ }
+  if (!out.ok) return res.status(500).json(out);
+  res.json(out);
 });
 
 // 确认执行计划卡。approved=true 才允许真实计费模型；mock 不需要。

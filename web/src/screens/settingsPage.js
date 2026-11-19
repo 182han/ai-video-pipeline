@@ -88,6 +88,8 @@ export function SettingsView() {
   const [imgStatus, setImgStatus] = useState(null);
   const [openGroups, setOpenGroups] = useState({});
   const [showKeys, setShowKeys] = useState({});
+  // 2026-11-19 B 目标：小智 agent 总开关（一键关回规则路径；保存后下一条消息生效）
+  const [agentSwitch, setAgentSwitch] = useState(null);
 
   useEffect(() => {
     fetchJson('/api/users')
@@ -100,6 +102,28 @@ export function SettingsView() {
       .then(setImgStatus)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchJson('/api/assistant/agent')
+      .then((j) => setAgentSwitch(j))
+      .catch((e) => setErr(t('settings.xiaozhi.agentLoadFailed', { error: e.message })));
+  }, []);
+
+  async function toggleAgent(next) {
+    setErr('');
+    setMsg('');
+    try {
+      const j = await fetchJson('/api/assistant/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !!next })
+      });
+      setAgentSwitch(j);
+      setMsg(t('settings.xiaozhi.agentSaved'));
+    } catch (e) {
+      setErr(t('settings.xiaozhi.agentFailed', { error: e.message }));
+    }
+  }
 
   const saveKey = (patch) => setKeys(writeJson(KEY_STORE, patch));
   const saveWeb = (patch) => setWeb(writeJson(WEB_STORE, patch));
@@ -285,6 +309,23 @@ export function SettingsView() {
       <div className=${sec}>
         <b className="block text-[12.5px] font-medium text-ink mb-2">${t('settings.xiaozhi.title')}</b>
         <${AssistantPreferencesSection} />
+        <div className="mt-3 pt-3 border-t border-white/[.06]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <b className="text-[12px] text-ink">${t('settings.xiaozhi.agentTitle')}</b>
+            <span className="text-[10px] text-ink3">
+              ${agentSwitch && agentSwitch.enabled ? t('settings.xiaozhi.agentOn') : t('settings.xiaozhi.agentOff')}
+            </span>
+            <span className="flex-1"></span>
+            <button onClick=${() => toggleAgent(!(agentSwitch && agentSwitch.enabled))}
+              className="h-8 px-3 rounded-[5px] border border-white/[.09] bg-s2 text-[12px] text-ink hover:bg-white/[.06]">
+              ${agentSwitch && agentSwitch.enabled ? t('settings.xiaozhi.agentDisable') : t('settings.xiaozhi.agentEnable')}
+            </button>
+          </div>
+          <p className="text-[11px] leading-[1.7] text-ink3 mt-1 mb-0">${t('settings.xiaozhi.agentDesc')}</p>
+          ${agentSwitch && agentSwitch.envForced && html`
+            <p className="text-[11px] text-danger mt-1 mb-0">${t('settings.xiaozhi.agentEnvForced')}</p>
+          `}
+        </div>
       </div>
 
       <div className=${sec}>
