@@ -14,7 +14,7 @@
 // 后续：F03 素材面板、F04 时间线、F05 每段调节、F08 导出。
 // ============================================================
 import { navigate } from '../router.js';
-import { t as tr } from '../i18n/index.js';
+import { t as tr, getLocale } from '../i18n/index.js';
 import { PreviewEngine } from '../preview/engine.js';
 import { AudioPanel } from '../components/audioPanel.js';
 import { HslPanel, CurvePanel, WheelPanel } from '../components/advancedAdjust.js';
@@ -27,6 +27,18 @@ const LAST_KEY = 'dsh.editor.lastProject';
 const SAVE_DEBOUNCE = 700;
 const PPS_MIN = 8;
 const PPS_MAX = 80;
+
+const CJK_RE = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+
+// E11：素材卡上显示的提示词。英文界面只用后端解析的 promptEn；没有英文就显式占位，不回退中文。
+function mediaPrompt(item) {
+  const it = item && typeof item === 'object' ? item : {};
+  const source = String(it.prompt || it.imagePrompt || '');
+  if (getLocale() !== 'en') return source;
+  if (it.promptEn) return String(it.promptEn);
+  if (source && !CJK_RE.test(source)) return source;
+  return source ? tr('common.promptEnMissing') : '';
+}
 
 const ADJUST_GROUPS = [
   {
@@ -176,6 +188,7 @@ export function EditorView() {
     const q = libQuery.trim().toLowerCase();
     if (!q) return true;
     return String(it.prompt || '').toLowerCase().includes(q) ||
+      String(it.promptEn || '').toLowerCase().includes(q) ||
       String(it.resolution || '').toLowerCase().includes(q) ||
       String(it.model || '').toLowerCase().includes(q) ||
       String(it.origin || '').toLowerCase().includes(q) ||
@@ -189,6 +202,7 @@ export function EditorView() {
     const q = libQuery.trim().toLowerCase();
     if (!q) return list;
     return list.filter((p) => String(p.prompt || p.imagePrompt || '').toLowerCase().includes(q) ||
+      String(p.promptEn || '').toLowerCase().includes(q) ||
       String(p.id || '').toLowerCase().includes(q));
   }, [photos, libQuery]);
 
@@ -514,7 +528,7 @@ export function EditorView() {
     };
     commitSegments([...segmentsRef.current, seg]);
     setSelectedId(seg.id);
-    setToast((whole ? tr('studio.toasts.loadedWhole') : tr('studio.toasts.addedTimeline')) + (item.prompt || item.id).slice(0, 24));
+    setToast((whole ? tr('studio.toasts.loadedWhole') : tr('studio.toasts.addedTimeline')) + (mediaPrompt(item) || item.id).slice(0, 24));
   }
 
   function splitSelected() {
@@ -1012,7 +1026,7 @@ export function EditorView() {
                             key=${p.id}
                             data-photo-id=${p.id}
                             className="ed-card ed-card-photo"
-                            title=${(p.prompt || p.id) + tr('studio.panel.photoTitleSuffix')}
+                            title=${(mediaPrompt(p) || p.id) + tr('studio.panel.photoTitleSuffix')}
                           >
                             <span className="ed-card-thumb">
                               <img
@@ -1025,7 +1039,7 @@ export function EditorView() {
                               <span className="ed-card-dur">${PHOTO_STATUS_TEXT[p.status] ? tr(PHOTO_STATUS_TEXT[p.status]) : tr('studio.photoStatus.pending')}</span>
                               <span className="ed-card-badge ghost">${tr('studio.panel.photoBadge')}</span>
                             </span>
-                            <span className="ed-card-prompt">${p.prompt || p.imagePrompt || p.id}</span>
+                            <span className="ed-card-prompt">${mediaPrompt(p) || p.id}</span>
                             <span className="ed-card-meta">${tr('studio.panel.photoMeta', { model: p.model || '-' })}</span>
                           </div>
                         `)}
@@ -1045,7 +1059,7 @@ export function EditorView() {
                             draggable=${true}
                             onDragStart=${(e) => { try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }}
                             onClick=${() => addClip(it)}
-                            title=${(it.prompt || it.id) + (it.kind === 'final' ? tr('studio.panel.cardTitleFinal') : tr('studio.panel.cardTitleClip'))}
+                            title=${(mediaPrompt(it) || it.id) + (it.kind === 'final' ? tr('studio.panel.cardTitleFinal') : tr('studio.panel.cardTitleClip'))}
                           >
                             <span className="ed-card-thumb">
                               <img
@@ -1059,7 +1073,7 @@ export function EditorView() {
                               ${it.kind === 'final' && html`<span className="ed-card-badge">${tr('studio.panel.finalBadge')}</span>`}
                               <span className="ed-card-plus">＋</span>
                             </span>
-                            <span className="ed-card-prompt">${it.prompt || it.id}</span>
+                            <span className="ed-card-prompt">${mediaPrompt(it) || it.id}</span>
                             <span className="ed-card-meta">${it.kind === 'final'
                               ? tr(ORIGIN_TEXT[it.origin] || 'studio.sources.orphan') + ' · ' + (it.resolution || '-')
                               : (it.resolution || '-') + ' · ' + (it.model || '-')}</span>
@@ -1335,7 +1349,7 @@ export function EditorView() {
                   disabled=${rebuilding === f.taskId}
                   onClick=${() => rebuildFromTask(f.taskId)}
                 >
-                  <span>${(f.prompt || f.taskId).slice(0, 40)}</span>
+                  <span>${(mediaPrompt(f) || f.taskId).slice(0, 40)}</span>
                   <span className="ed-sub">${tr('studio.projects.filmMeta', { n: f.totalClips || 0, time: fmtTime(f.totalDuration || 0) })}${f.status === 'partial' ? tr('studio.projects.partial') : ''}</span>
                 </button>
               `)}

@@ -9,7 +9,9 @@
 // 面向用户的次要位置只显示短 ID（task_mwiu…z01l），完整 ID 放在 title tooltip。
 // 预算/花费/状态等语义不变，本模块只改展示。
 // ============================================================
-import { t as tr, fmtDateTime } from '../i18n/index.js';
+import { t as tr, fmtDateTime, getLocale } from '../i18n/index.js';
+
+const CJK_RE = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
 
 const SUMMARY_MAX = 26;
 const SHORT_HEAD = 9;
@@ -28,7 +30,11 @@ export function taskShortId(taskId) {
   return id.slice(0, SHORT_HEAD) + '…' + id.slice(-SHORT_TAIL);
 }
 
-/** prompt 摘要：多行压成一行；优先 prompt，再 optimizedPrompt / prompts[] / theme。 */
+/**
+ * prompt 摘要：多行压成一行；优先 prompt，再 optimizedPrompt / prompts[] / theme。
+ * 英文界面（E11）：优先后端解析的 promptEn；没有英文就只接受无 CJK 的原文，
+ * 否则返回英文占位 —— 历史中文任务名不再回退中文。
+ */
 export function taskPromptSummary(task, maxChars) {
   if (!task || typeof task !== 'object') return '';
   const limit = Number(maxChars) > 0 ? Math.max(4, Math.floor(Number(maxChars))) : SUMMARY_MAX;
@@ -36,10 +42,22 @@ export function taskPromptSummary(task, maxChars) {
   if (Array.isArray(task.prompts)) {
     for (const p of task.prompts) candidates.push(typeof p === 'string' ? p : (p && p.text));
   }
+  const fit = (text) => (text.length > limit ? text.slice(0, limit) + '…' : text);
+  if (getLocale() === 'en') {
+    const en = cleanText(task.promptEn);
+    if (en) return fit(en);
+    for (const raw of candidates) {
+      const text = cleanText(raw);
+      if (!text || CJK_RE.test(text)) continue;
+      return fit(text);
+    }
+    const hasSource = candidates.some((raw) => !!cleanText(raw));
+    return hasSource ? tr('common.promptEnMissing') : '';
+  }
   for (const raw of candidates) {
     const text = cleanText(raw);
     if (!text) continue;
-    return text.length > limit ? text.slice(0, limit) + '…' : text;
+    return fit(text);
   }
   return '';
 }

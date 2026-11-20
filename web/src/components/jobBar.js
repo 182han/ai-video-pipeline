@@ -9,8 +9,20 @@ const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
 
 import { navigate } from '../router.js';
-import { t as tr } from '../i18n/index.js';
+import { t as tr, getLocale } from '../i18n/index.js';
 import { statusMeta, PauseButton, isRunningTask, callPause } from './pauseControl.js';
+
+const CJK_RE = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+
+// E11：英文界面不显示中文任务名（有 promptEn 用 promptEn，否则英文占位）。
+function jobPromptText(task) {
+  const t = task || {};
+  if (getLocale() !== 'en') return t.prompt || '';
+  if (t.promptEn) return String(t.promptEn);
+  const raw = String(t.prompt || '');
+  if (!raw) return '';
+  return CJK_RE.test(raw) ? tr('common.promptEnMissing') : raw;
+}
 
 export function useTasksPoll() {
   const [tasks, setTasks] = useState([]);
@@ -52,7 +64,7 @@ export function JobBar({ tasks, onChanged }) {
       <span className=${'w-[6px] h-[6px] rounded-full ' + st.dot}></span>
       <span className=${'text-[12px] shrink-0 ' + st.cls}>${st.text}</span>
       <span className="text-[12px] text-ink truncate max-w-[560px]">
-        ${(t.prompt || tr('tasks.job.noPrompt')).slice(0, 60)}
+        ${(jobPromptText(t) || tr('tasks.job.noPrompt')).slice(0, 60)}
       </span>
       <span className="flex-1"></span>
       <${PauseButton} taskId=${t.taskId} status=${t.status} compact=${true} onChanged=${onChanged} />

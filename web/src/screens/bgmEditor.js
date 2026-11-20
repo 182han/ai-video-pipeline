@@ -24,6 +24,7 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { t as tr } from '../i18n/index.js';
+import { taskPromptSummary } from '../components/taskName.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -697,7 +698,7 @@ function TaskPicker({ list, onPick, onReload }) {
   const filtered = useMemo(() => {
     const key = q.trim().toLowerCase();
     if (!key) return tasks;
-    return tasks.filter((t) => (((t.prompt || '') + ' ' + t.taskId).toLowerCase().includes(key)));
+    return tasks.filter((t) => (((t.prompt || '') + ' ' + (t.promptEn || '') + ' ' + t.taskId).toLowerCase().includes(key)));
   }, [tasks, q]);
 
   return html`
@@ -736,7 +737,7 @@ function TaskPicker({ list, onPick, onReload }) {
         <div className="bgm-task-grid">
           ${filtered.map((t) => html`
             <button key=${t.taskId} className="bgm-task" onClick=${() => onPick(t.taskId)} title=${tr('bgm.openEditor')}>
-              <span className="bgm-task-title">${t.prompt || tr('bgm.noPrompt')}</span>
+              <span className="bgm-task-title">${taskPromptSummary(t, 120) || tr('bgm.noPrompt')}</span>
               <span className="bgm-task-meta">
                 <span>${t.totalDuration ? fmtClock(t.totalDuration) : tr('bgm.unknownDuration')}</span>
                 <span>${t.resolution || '-'}</span>
@@ -1206,7 +1207,7 @@ export function BgmEditorView({ route }) {
   // ---------- 渲染：编辑器 ----------
   const videoBase = task && task.videoUrl ? task.videoUrl : null;
   const videoSrc = preview.url || withBust(videoBase, videoBust);
-  const prompt = (summaryTask && summaryTask.prompt) || '';
+  const prompt = taskPromptSummary(summaryTask, 300) || '';
   const resultError = task && task.result && task.result.error ? task.result.error : '';
 
   let body = null;

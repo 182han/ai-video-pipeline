@@ -3635,3 +3635,25 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - 重启 3001 让后端修复生效；重启后复测英文 live。
 - ETA（小智答「还要多久」）：本次实测 3 段 ×10 秒 i2v 串行 = 7m02s，可作为估算基准；未实现。
 - E6–E8、E10、多场景接缝阈值。
+
+## E11 · 英文界面库存数据零中文（2026-11-20）
+
+用户反馈：英文界面下库存历史记录仍有中文名称，片段库/图片库仍显示中文提示词。
+
+- 根因：E10 只给 Library 的 clip/final 条目写了 `promptEn`；`/api/tasks`、`/api/photos` 根本没有该字段，
+  而库存「未完成 / 任务回收站」与图片卡片直接渲染原始 `prompt/imagePrompt`。
+- 修复：新增 `src/taskEn.js`、`src/photoEn.js`（离线解析：英文原文 → 场景卡英文模板（覆盖段保护）→
+  人工词表 → `null` 占位，绝不回退中文）与 `assets/library/tasks-en.json`、`photos-en.json`；
+  `server.js` 在 tasks / tasks/:id / tasks/completed / photos / photos/:id / trash / recycle 增加 `promptEn`，
+  `/api/library` 对缺字段条目兜底解析并让搜索匹配英文。
+- 前端：库存（未完成卡片/任务回收站/回收站/图片卡片/图片只读提示词）、统一任务名、任务抽屉、顶栏任务条、
+  剪辑台素材卡、配乐/调色任务列表均改为英文优先；解析不到显示 `common.promptEnMissing`。
+- 刻意不改：图片库详情中**可编辑**的 imagePrompt/videoPrompt 文本框仍显示原始数据，避免英文界面保存时覆盖中文原文。
+- 负向口径：历史数据存在 `????????????` 这类损坏/占位文本，按「无字母 / 问号占比 >20%」判为非英文，
+  回退词表或英文占位，不显示乱码；词表（byTaskId）优先于「任务里某一段恰好是英文」，避免整条标题张冠李戴。
+- 验收：新增 `scripts/verify-en-data.js`（50/0，已注册 `en-data`/fast）；`verify-library-en` 27/0、
+  `verify-i18n --strict` 12/0、`verify-photo-adjust-ui` 73/0、`verify-p6-offline` 41/0、
+  `verify-assistant-frontend` 101/0、`verify-frontend-contract` 49/0、`verify-editor-media` 21/0、`verify-library` 36/0。
+- live 未验证：运行中的 3001 启动于改动前，后端新字段需重启生效；重启前英文界面显示英文占位（不再中文）。
+- 说明：`verify-clip-library-detail` 12/6 为**改动前即存在**的陈旧断言（找硬编码中文标签，源码已 i18n 化），
+  本次未改。详见 `docs/交接/2026-11-20-E11-英文库存数据.md`。

@@ -9,7 +9,7 @@
 //   测不到 / 无结果             → 未执行
 // ============================================================
 import { statusMeta, PauseButton } from './pauseControl.js';
-import { t as tr, has, fmtDateTime } from '../i18n/index.js';
+import { t as tr, has, fmtDateTime, getLocale } from '../i18n/index.js';
 // 2026-11-18 用户反馈：抽屉标题直接显示原始 task_mwiugoxq_z01l（像报错）。
 // 面向用户统一用 taskDisplayName；完整 taskId 保留在详情行 tasks.drawer.taskId。
 import { taskDisplayName, taskShortId } from './taskName.js';
@@ -17,6 +17,26 @@ import { taskDisplayName, taskShortId } from './taskName.js';
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useState } = React;
+
+const CJK_RE = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+
+// E11：详情里的提示词。英文界面只用后端解析的 promptEn；解析不到显示英文占位，绝不回退中文。
+function promptDisplay(task) {
+  if (!task) return tr('tasks.drawer.noPrompt');
+  if (getLocale() !== 'en') return task.optimizedPrompt || task.prompt || tr('tasks.drawer.noPrompt');
+  if (task.promptEn) return String(task.promptEn);
+  const raw = String(task.optimizedPrompt || task.prompt || '');
+  if (!raw) return tr('tasks.drawer.noPrompt');
+  return CJK_RE.test(raw) ? tr('common.promptEnMissing') : raw;
+}
+
+// 多段提示词展开：英文界面只展示本身不含中文的行（不伪造英文，也不贴中文）。
+function promptLinesFor(task) {
+  const list = Array.isArray(task && task.prompts) ? task.prompts : [];
+  return list
+    .map((p) => (typeof p === 'string' ? p : (p && p.text) || JSON.stringify(p)))
+    .filter((line) => getLocale() !== 'en' || !CJK_RE.test(String(line || '')));
+}
 
 const ADJ_LABELS = {
   temperature: 'tasks.adjust.temperature', tone: 'tasks.adjust.tone', saturation: 'tasks.adjust.saturation',
@@ -255,6 +275,8 @@ export function TaskDrawer({ taskId, onClose }) {
   const st = statusStyle(t && t.status, t);
   const videoUrl = t ? toOutputUrl(t.outputPath) : null;
   const steps = t && t.steps ? STEP_ORDER.filter((k) => t.steps[k]) : [];
+  const promptText = promptDisplay(t);
+  const promptLines = promptLinesFor(t);
 
   return html`
     <div className="fixed inset-0 z-40">
@@ -302,15 +324,13 @@ export function TaskDrawer({ taskId, onClose }) {
           ${t && html`
             <div>
               <p className="text-[13px] leading-[1.75] text-ink">
-                ${(t.optimizedPrompt || t.prompt || tr('tasks.drawer.noPrompt'))}
+                ${promptText}
               </p>
-              ${t.isMultiPrompt && t.prompts && t.prompts.length > 1 && html`
+              ${t.isMultiPrompt && promptLines.length > 1 && html`
                 <details className="mt-2">
-                  <summary className="text-[11px] text-ink3 cursor-pointer">${tr('tasks.drawer.expandPrompts', { n: t.prompts.length })}</summary>
+                  <summary className="text-[11px] text-ink3 cursor-pointer">${tr('tasks.drawer.expandPrompts', { n: promptLines.length })}</summary>
                   <ol className="mt-1 pl-4 list-decimal text-[11px] text-ink2 leading-[1.7]">
-                    ${t.prompts.map((p, i) =>
-                      html`<li key=${i}>${typeof p === 'string' ? p : (p && p.text) || JSON.stringify(p)}</li>`
-                    )}
+                    ${promptLines.map((line, i) => html`<li key=${i}>${line}</li>`)}
                   </ol>
                 </details>
               `}

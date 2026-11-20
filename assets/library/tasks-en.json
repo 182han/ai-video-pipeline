@@ -1,0 +1,27 @@
+{
+  "_comment": "任务英文显示名词表（E11, 2026-11-20）。byTaskId 优先，其次 byPrompt（规范化空白后精确匹配）。只存人工撰写的英文摘要，不做机翻；不在表里的历史中文任务前端显示英文占位，绝不回退中文。场景卡任务优先由 composeVideoPromptEn 解析，无需登记。",
+  "version": 1,
+  "byTaskId": {
+    "task_muknu3kq_tp5r": "Dense woods at dusk, lush forest, a fawn in the near foreground, midsummer.",
+    "task_mukptvrj_xbjn": "Blue lake with two white swans drifting, midday, early winter; distant snow mountains with golden light on the snow.",
+    "task_mumdyfst_3x52": "A vulture stands on a dry low branch in a barren desert, yellow sand drifting through the air; desolate, lonely mood.",
+    "task_mv4v7qp2_m8r0": "A serene high-altitude lake at blue hour, thin mist drifting over the still water, distant mountain silhouettes.",
+    "task_mvglb06f_aubj": "A high-altitude lake at blue hour.",
+    "task_mvgw4hbo_ajuc": "Panorama of rolling grassland hills at dusk, tall grass swaying in the wind, broad cloud shadows drifting across the slopes.",
+    "task_mvhlusmo_hs2w": "A massive glacier stands on the open plain, pale-blue ice walls laced with natural crevasse patterns, thin clouds drifting slowly between the peaks.",
+    "task_mvhlxnm7_1mch": "Six-scene montage: deep-space nebula, misty forest valley, glacier wall, polar ice field, alpine lake at blue hour, swans on a blue lake.",
+    "task_mvhmjcbv_512n": "Desert dune ridge: fine wind ripples drifting slowly, extremely slow push-in, telephoto compression.",
+    "task_mvhrynuu_ehtn": "Karst pinnacles: pale-grey limestone cones and steep walls covered in deep green vegetation, morning advection fog creeping across the midslope.",
+    "task_mw1utlim_synm": "Editor · untitled project",
+    "task_mwityi47_zhr9": "Bay-mouth sandbar: wet sand channels, wind ripples and water reflections; dune grass in the foreground; wide ground-level 28mm static shot.",
+    "task_mwiugoxq_z01l": "Bay-mouth sandbar: wet sand channels, wind ripples and water reflections; dune grass in the foreground; wide ground-level 28mm static shot."
+  },
+  "byPrompt": {
+    "极光下的雪山与冰川": "Snow mountains and glaciers under the aurora",
+    "接缝验收-转场开关": "Seam test · transition on/off",
+    "图片优先全链路测试": "Image-first end-to-end test",
+    "剪辑台 · 未命名工程": "Editor · untitled project",
+    "30 秒（快速试）": "30 s (quick trial)",
+    "Deep space astrophotography, the Milky Way": "Deep-space astrophotography: the Milky Way"
+  }
+}

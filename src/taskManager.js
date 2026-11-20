@@ -16,6 +16,8 @@ const sceneCards = require('./sceneCards');
 const promptComposer = require('./promptComposer');
 // P2：i18n 只用于「反查 messageKey」与任务语言归一化，不改变任何中文展示文案。
 const i18n = require('./i18n');
+// E11（2026-11-20）：英文界面的任务英文名。只读离线解析，不调用模型。
+const taskEn = require('./taskEn');
 
 const DATA_DIR = config.STORAGE.dataDir;
 const TRASH_DIR = path.join(__dirname, '..', 'data', 'trash');
@@ -1183,6 +1185,8 @@ class TaskManager {
         items.push({
           taskId: data.taskId,
           prompt: data.prompt,
+          // E11：英文界面显示用（场景卡 / 词表 / 英文原文；解析不到为 null）
+          promptEn: taskEn.promptEnFor(data),
           promptLines,
           status: data.status,
           model: data.model,

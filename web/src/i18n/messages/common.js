@@ -22,6 +22,8 @@ export default {
       copy: '复制',
       copied: '已复制',
       unknownError: '未知错误',
+      // 英文界面下，历史任务/图片只有中文原文、且无法离线生成英文时的统一占位（绝不回退中文）
+      promptEnMissing: '（中文原文 · 暂无英文版本）',
       followUi: '跟随界面',
       notSet: '未设置',
       none: '无',
@@ -55,6 +57,7 @@ export default {
       copy: 'Copy',
       copied: 'Copied',
       unknownError: 'Unknown error',
+      promptEnMissing: '(Chinese original · no English version)',
       followUi: 'Follow interface',
       notSet: 'Not set',
       none: 'None',

@@ -14,6 +14,7 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { t as tr } from '../i18n/index.js';
+import { taskPromptSummary } from '../components/taskName.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
@@ -303,7 +304,7 @@ export function AdjustEditorView() {
           onChange=${(e) => { if (e.target.value) selectTask(e.target.value); }}>
           ${tasks.map((t) => html`
             <option key=${t.taskId} value=${t.taskId}>
-              ${(t.prompt || tr('editor.adjust.noPrompt')).slice(0, 36)}${t.adjust ? tr('editor.adjust.adjustedSuffix') : ''}
+              ${(taskPromptSummary(t, 36) || tr('editor.adjust.noPrompt'))}${t.adjust ? tr('editor.adjust.adjustedSuffix') : ''}
             </option>
           `)}
         </select>
@@ -326,7 +327,7 @@ export function AdjustEditorView() {
               <div className="adj-list">
                 ${tasks.map((t) => html`
                   <button key=${t.taskId} className="adj-card" onClick=${() => selectTask(t.taskId)}>
-                    <span className="adj-card-title">${(t.prompt || tr('editor.adjust.noPrompt')).slice(0, 80)}</span>
+                    <span className="adj-card-title">${taskPromptSummary(t, 80) || tr('editor.adjust.noPrompt')}</span>
                     <span className="adj-card-meta">
                       <span>${t.resolution || '-'}</span>
                       <span>${t.totalDuration ? t.totalDuration + 's' : '-'}</span>

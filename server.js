@@ -71,6 +71,11 @@ const budget = require('./src/budget');
 const submitGuard = require('./src/submitGuard');
 const library = require('./src/library');
 const photoLibrary = require('./src/photoLibrary');
+// E10/E11（2026-11-20）：英文界面的库/任务英文标题离线解析（零模型调用）。
+// 三处都是「有则用、无则前端显示英文占位」，绝不回退中文。
+const libraryEn = require('./src/libraryEn');
+const taskEn = require('./src/taskEn');
+const photoEn = require('./src/photoEn');
 const recycle = require('./src/recycle');
 const security = require('./src/utils/security');
 // 后端 i18n（P2）：请求语言解析 + 加法式文案契约。不引入依赖、不改变中文默认行为。
@@ -653,6 +658,8 @@ app.get('/api/tasks/completed', (req, res) => {
     .map(t => ({
       taskId: t.taskId,
       prompt: t.prompt,
+      // E11：英文界面显示的任务名/提示词（离线解析；null = 前端显示英文占位）
+      promptEn: taskEn.promptEnFor(t),
       status: t.status,
       model: t.model,
       totalClips: t.totalClips,
@@ -1062,6 +1069,19 @@ app.post('/api/images/generate-batch', async (req, res) => {
 // ===== 图片库（照片）=====
 // 用户 2026-11-11 口径：所有生成的图片都要入库，并且保留对应提示词。
 // 审核三态：pending（待审）/ approved（通过，可拿去图生视频）/ rejected（打回）。
+
+// E11：图片库条目的英文提示词（只影响英文界面显示；原中文/用户数据一字不改）。
+// 历史图所属任务可能已删，resolver 接受 task=null 并回退词表/英文原文，最后给 null。
+function photoPromptEnOf(photo) {
+  if (!photo || typeof photo !== 'object') return null;
+  if (photo.promptEn) return photo.promptEn;
+  let task = null;
+  try {
+    task = photo.taskId ? taskManager.getTask(photo.taskId) : null;
+  } catch (e) { task = null; }
+  return photoEn.promptEnFor(photo, task);
+}
+
 app.get('/api/photos', (req, res) => {
   const status = String(req.query.status || '').trim();
   const finalOnly = String(req.query.final || '') === '1';
@@ -1076,7 +1096,19 @@ app.get('/api/photos', (req, res) => {
   // 默认隐藏、数据一条不删；文件找回后自动重新出现。排查/对账用 ?includeMissing=1 取全量。
   const includeMissing = String(req.query.includeMissing || '') === '1';
   const withFileState = (p) => ({ ...p, fileMissing: !(p.filePath && fs.existsSync(p.filePath)) });
-  const queried = photoLibrary.query({ status, q: req.query.q, finalOnly }).map(withFileState);
+  // E11：搜索同时匹配中文原文与英文显示文本（英文界面搜英文提示词也要能命中）。
+  // 因此这里不用 photoLibrary.query 的 q 过滤，改为先解析 promptEn 再过滤。
+  const kw = String(req.query.q || '').trim().toLowerCase();
+  const queried = photoLibrary.query({ status, finalOnly })
+    .map((p) => ({ ...withFileState(p), promptEn: photoPromptEnOf(p) }))
+    .filter((p) => {
+      if (!kw) return true;
+      return String(p.prompt || '').toLowerCase().includes(kw)
+        || String(p.promptEn || '').toLowerCase().includes(kw)
+        || String(p.imagePrompt || '').toLowerCase().includes(kw)
+        || String(p.model || '').toLowerCase().includes(kw)
+        || String(p.id || '').toLowerCase().includes(kw);
+    });
   const photos = includeMissing ? queried : queried.filter((p) => !p.fileMissing);
   // totals 是跨状态的汇总，与列表用同一可见性口径，避免“顶部 17 张、列表 0 张”
   const allVisible = photoLibrary.listAll()
@@ -1101,8 +1133,9 @@ app.get('/api/photos/:id', (req, res) => {
   }
   res.json({
     ...photo,
+    promptEn: photoPromptEnOf(photo),
     fileMissing: !(photo.filePath && fs.existsSync(photo.filePath)),
-    versions: photoLibrary.versions(photo.versionGroupId)
+    versions: photoLibrary.versions(photo.versionGroupId).map((v) => ({ ...v, promptEn: photoPromptEnOf(v) }))
   });
 });
 
@@ -3452,6 +3485,8 @@ app.get('/api/tasks', (req, res) => {
     return {
       taskId: t.taskId,
       prompt: t.prompt,
+      // E11：英文界面用；离线解析（场景卡英文模板 / 词表 / 英文原文），解析不到为 null。
+      promptEn: taskEn.promptEnFor(t),
       promptLines,
       isMultiPrompt: t.isMultiPrompt || false,
       status: t.status,
@@ -3496,6 +3531,13 @@ app.get('/api/tasks/:id', (req, res) => {
   const out = storage.annotateTaskQC(task);
   // 加法式 i18n 字段（P2）：旧任务没有 lang 字段 → 视为 zh；errorKey 由 taskManager 在失败时反查得到。
   if (!out.lang) out.lang = i18n.DEFAULT_LANG;
+  // E11：英文界面显示用（整条任务 + 每段）。只加字段，不改任何原有数据。
+  out.promptEn = taskEn.promptEnFor(task);
+  if (Array.isArray(out.clips)) {
+    out.clips = out.clips.map((c) => (c && typeof c === 'object'
+      ? { ...c, promptEn: taskEn.promptEnFor(task, Number.isInteger(c.index) ? c.index : null) }
+      : c));
+  }
   res.json(out);
 });
 
@@ -3707,8 +3749,18 @@ app.get('/api/library', (req, res) => {
     // 2026-11-15 用户口径：**文件缺失的条目不显示**（数据不删，文件找回后自动出现）。
     // 排查/对账用 ?includeMissing=1 取全量；hiddenMissing 报告被隐藏的条数。
     const includeMissing = String(req.query.includeMissing || '') === '1';
-    const withFileState = (it) => ({ ...it, fileMissing: !(it.filePath && fs.existsSync(it.filePath)) });
-    const everything = library.listAll().map(withFileState);
+    // E10/E11：库条目的英文标题。历史条目若没有持久化的 promptEn（旧服务进程入库 / 回填遗漏），
+    // 这里按同一套离线规则补算，保证片段库在英文界面不因数据缺口回退中文。
+    const withEnglish = (it) => {
+      let task = null;
+      try { task = it && it.taskId ? taskManager.getTask(it.taskId) : null; } catch (e) { task = null; }
+      return {
+        ...it,
+        fileMissing: !(it.filePath && fs.existsSync(it.filePath)),
+        promptEn: it.promptEn || libraryEn.promptEnFor(it, task)
+      };
+    };
+    const everything = library.listAll().map(withEnglish);
     const all = includeMissing ? everything : everything.filter((it) => !it.fileMissing);
     const hiddenMissing = everything.length - all.length;
     let items = all;
@@ -3718,7 +3770,8 @@ app.get('/api/library', (req, res) => {
     if (favorite === '1') items = items.filter(i => i.favorite);
     if (q) {
       const s = String(q).toLowerCase();
-      items = items.filter(i => String(i.prompt || '').toLowerCase().includes(s));
+      items = items.filter(i => String(i.prompt || '').toLowerCase().includes(s)
+        || String(i.promptEn || '').toLowerCase().includes(s));
     }
     const grouped = library.grouped(items);
     const uniq = arr => Array.from(new Set(arr.filter(Boolean)));
@@ -4133,7 +4186,22 @@ const RECYCLE_RESTORE = {
 
 app.get('/api/recycle', (req, res) => {
   try {
-    res.json({ items: recycle.list(req.query.type || null) });
+    // E11：回收站里也要显示英文标题；条目快照里没有 promptEn 的历史数据在这里补算。
+    const items = recycle.list(req.query.type || null).map((it) => {
+      let promptEn = null;
+      const entry = it && it.entry;
+      if (entry) {
+        if (it.type === 'photo') {
+          promptEn = photoPromptEnOf(entry);
+        } else if (it.type === 'clip' || it.type === 'final') {
+          let task = null;
+          try { task = entry.taskId ? taskManager.getTask(entry.taskId) : null; } catch (e) { task = null; }
+          promptEn = entry.promptEn || libraryEn.promptEnFor(entry, task);
+        }
+      }
+      return { ...it, promptEn };
+    });
+    res.json({ items });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -4186,6 +4254,8 @@ app.get('/api/trash/:id', (req, res) => {
       taskId: data.taskId,
       status: data.status,
       prompt: data.prompt,
+      // E11：英文界面显示用（整条任务）
+      promptEn: taskEn.promptEnFor(data),
       optimizedPrompt: data.optimizedPrompt,
       prompts: data.prompts || null,
       isMultiPrompt: data.isMultiPrompt || false,

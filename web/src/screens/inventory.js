@@ -32,14 +32,29 @@ function shortTaskId(id) {
 // E10（2026-11-20）：Library 标题/提示词的英文版本。
 // 后端在入库/回填时解析 promptEn（场景卡英文模板 / 词表 / 英文原文）；
 // 英文界面只用 promptEn，解析不到就显示英文占位 —— 绝不回退中文（E10 验收口径）。
+const CJK_RE = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+
 function entryPromptText(it) {
   const e = it && typeof it === 'object' ? it : {};
   const zh = String(e.prompt || e.originalPrompt || '');
   if (getLocale() !== 'en') return zh;
   if (e.promptEn) return String(e.promptEn);
   const plain = String(e.prompt || '');
-  if (plain && !/[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(plain)) return plain;
+  if (plain && !CJK_RE.test(plain)) return plain;
   return tr('library.common.promptEnMissing');
+}
+
+// E11（2026-11-20）：任务显示文本。英文界面只用后端解析的 promptEn，
+// 解析不到就显示英文占位 —— 历史中文任务名不再回退中文。
+function taskLabelText(t) {
+  const task = t && typeof t === 'object' ? t : {};
+  const clean = (v) => String(v === undefined || v === null ? '' : v).replace(/\s+/g, ' ').trim();
+  if (getLocale() !== 'en') return clean(task.prompt || task.optimizedPrompt || task.theme);
+  const en = clean(task.promptEn);
+  if (en) return en;
+  const source = clean(task.prompt || task.optimizedPrompt || task.theme);
+  if (!source) return '';
+  return CJK_RE.test(source) ? tr('library.common.promptEnMissing') : source;
 }
 
 // 2026-11-18 S0（A13）：未完成列表此前只显示半句 prompt，与其它页的「统一任务名」不一致。
@@ -47,7 +62,7 @@ function entryPromptText(it) {
 // 摘要（prompt/optimizedPrompt/theme）+ 模型 + 短 ID；都没有才显示「无提示词」。
 function unfinishedName(t) {
   const task = t && typeof t === 'object' ? t : {};
-  const raw = String(task.prompt || task.optimizedPrompt || task.theme || '').replace(/\s+/g, ' ').trim();
+  const raw = taskLabelText(task);
   const parts = [];
   if (raw) parts.push(raw.length > 56 ? raw.slice(0, 56) + '…' : raw);
   if (task.model) parts.push(String(task.model));
@@ -672,7 +687,17 @@ export function PhotosPanel({ onChanged }) {
     } catch (e) { setErr(tr('library.photos.useFailed') + e.message); }
   }
 
-  const promptText = (p) => ((p.imagePrompt || p.prompt) || (p.promptAvailable === false ? tr('library.photos.promptMissingHistory') : tr('library.photos.promptMissing')));
+  // E11：英文界面只显示后端解析的英文提示词；没有英文就显式占位，不回退中文。
+  const promptText = (p) => {
+    const photo = p && typeof p === 'object' ? p : {};
+    const source = String(photo.imagePrompt || photo.prompt || '');
+    if (getLocale() === 'en') {
+      if (photo.promptEn) return String(photo.promptEn);
+      if (source && !CJK_RE.test(source)) return source;
+      return photo.promptAvailable === false ? tr('library.photos.promptMissingHistory') : tr('library.common.promptEnMissing');
+    }
+    return source || (photo.promptAvailable === false ? tr('library.photos.promptMissingHistory') : tr('library.photos.promptMissing'));
+  };
 
   // 2026-11-14 用户要求：调色前/后是同一张图的两个版本，列表里并列成一张卡，
   // 不再拆成两个独立卡片；同时显示生成费与使用状态。
@@ -702,10 +727,16 @@ export function PhotosPanel({ onChanged }) {
     }
   }
   const usedText = (p) => (Array.isArray(p.usedIn) && p.usedIn.length ? tr('library.photos.used') : tr('library.photos.unused'));
-  const cleanPrompt = (p) => promptText(p).replace(/^【(调色前|调色后)】/, ''); // i18n-allow: backend photo label prefix
+  const cleanPrompt = (p) => String(promptText(p) || '').replace(/^【(调色前|调色后)】/, ''); // i18n-allow: backend photo label prefix
   const detailPair = detail
     ? photoGroups.find((g) => g.key === pairKey(detail) && g.before && g.after)
     : null;
+  // E11：详情里的「生成提示词」只读行。英文界面不贴中文原文（编辑框仍保留原始数据，避免保存时被覆盖）。
+  const generationText = detail
+    ? (getLocale() === 'en'
+      ? (detail.promptEn || ((detail.generationPrompt || detail.prompt) ? tr('common.promptEnMissing') : tr('library.photos.notRecorded')))
+      : (detail.generationPrompt || tr('library.photos.notRecorded')))
+    : '';
 
   // 手动调色的渲染派生值：滑杆值 - 服务端当前已生效值 = 预览增量（避免把已调色重复叠加两遍）。
   // 有增量才加 CSS filter；应用成功 / 恢复原图后参数与服务端一致，增量归 0，预览自动清掉。
@@ -926,7 +957,7 @@ export function PhotosPanel({ onChanged }) {
                   rows="3" placeholder=${tr('library.photos.imagePromptPh')}
                   style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
-                  ${tr('library.photos.generationPrompt', { value: detail.generationPrompt || tr('library.photos.notRecorded') })}
+                  ${tr('library.photos.generationPrompt', { value: generationText })}
                 </span>
               </div>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.photos.videoPrompt')}</span>
@@ -1052,7 +1083,7 @@ function UnfinishedPanel({ tasks, finals, onChanged }) {
         files = (Array.isArray(task.clips) ? task.clips : []).filter((c) => c && c.videoPath).length;
       } catch (e) { files = null; }
     }
-    const label = String(t.prompt || tr('library.common.noPrompt')).slice(0, 42);
+    const label = (taskLabelText(t) || tr('library.common.noPrompt')).slice(0, 42);
     const first = (files === null)
       ? tr('library.unfinished.confirmUnknown', { label })
       : (files > 0
@@ -1180,7 +1211,7 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
           ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${tr('library.taskTrash.empty')}</p>`}
           ${list.map((it) => html`
             <div key=${it.taskId} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
-              <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${it.prompt || tr('library.common.noPrompt')}</div>
+              <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${taskLabelText(it) || tr('library.common.noPrompt')}</div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
                 <span title=${tr('tasks.taskIdTooltip', { id: it.taskId || '' })}>${tr('tasks.shortId', { id: shortTaskId(it.taskId) })}</span>
                 · ${it.model || '-'}${tr('library.taskTrash.clipsUnit', { n: it.totalClips || 0 })}${tr('library.taskTrash.deletedAt', { time: String(it.deletedAt || '').slice(0, 19).replace('T', ' ') })}
@@ -1277,6 +1308,19 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
 
 // ---------------- 回收站抽屉 ----------------
 // 删除只进这里；彻底删除必须在这里再确认一次（两次确认的口径见交接 §7）。
+// E11：回收站条目标题。英文界面优先用后端补算的 promptEn；没有就用文件名，绝不回退中文原文。
+function recycleItemLabel(it) {
+  const item = it && typeof it === 'object' ? it : {};
+  const entry = item.entry && typeof item.entry === 'object' ? item.entry : {};
+  if (getLocale() !== 'en') return entry.fileName || entry.prompt || item.id;
+  if (item.promptEn) return item.promptEn;
+  if (entry.promptEn) return entry.promptEn;
+  if (entry.fileName) return entry.fileName;
+  const source = String(entry.prompt || '');
+  if (source && !CJK_RE.test(source)) return source;
+  return tr('library.common.promptEnMissing');
+}
+
 const RECYCLE_TYPE_KEYS = { clip: 'library.recycle.types.clip', final: 'library.recycle.types.final', photo: 'library.recycle.types.photo', bgm: 'library.recycle.types.bgm' };
 const RECYCLE_TABS = [
   { key: 'all', labelKey: 'library.recycle.tabs.all' },
@@ -1375,7 +1419,7 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
             <div key=${it.type + '/' + it.id} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style=${{ fontSize: '10px', color: 'var(--onaccent)', background: 'var(--accent)', borderRadius: '3px', padding: '1px 6px', flex: '0 0 auto' }}>${RECYCLE_TYPE_KEYS[it.type] ? tr(RECYCLE_TYPE_KEYS[it.type]) : it.type}</span>
-                <span style=${{ fontSize: '11.5px', color: 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${(it.entry && (it.entry.fileName || it.entry.prompt)) || it.id}</span>
+                <span style=${{ fontSize: '11.5px', color: 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${recycleItemLabel(it)}</span>
               </div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
                 ${it.id} · ${String(it.trashedAt || '').slice(0, 19).replace('T', ' ')} · ${tr('library.recycle.fileCount', { n: it.fileCount || 0 })} · ${((it.sizeBytes || 0) / 1048576).toFixed(2)} MB

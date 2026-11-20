@@ -260,6 +260,12 @@ const SUITES = [
     desc: '片段库英文标题（E10）：场景卡英文模板/词表/零中文占位，不联网不花钱'
   },
   {
+    name: 'en-data',
+    script: 'verify-en-data.js',
+    group: 'fast',
+    desc: '英文界面数据零中文（E11）：任务名/图片库提示词离线解析 + 英文占位，不联网不花钱'
+  },
+  {
     name: 'recycle',
     script: 'verify-recycle.js',
     group: 'fast',
