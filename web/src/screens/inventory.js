@@ -18,7 +18,7 @@ import { navigate } from '../router.js';
 import { setSeedPhoto } from '../createDraft.js';
 import { TaskDrawer } from '../components/taskDrawer.js';
 import { statusMeta } from '../components/pauseControl.js';
-import { t as tr, tp, fmtDateTime } from '../i18n/index.js';
+import { t as tr, tp, fmtDateTime, getLocale } from '../i18n/index.js';
 
 // 2026-11-18：任务回收站不再露原始 taskId（与 components/taskName.js 的 taskShortId 同一规则）。
 // 说明：本文件 import 行数被 verify-photo-adjust-ui / verify-p6-offline 的静态断言锁定，
@@ -27,6 +27,19 @@ function shortTaskId(id) {
   const s = String(id === undefined || id === null ? '' : id).replace(/\s+/g, ' ').trim();
   if (!s) return '';
   return s.length <= 14 ? s : s.slice(0, 9) + '…' + s.slice(-4);
+}
+
+// E10（2026-11-20）：Library 标题/提示词的英文版本。
+// 后端在入库/回填时解析 promptEn（场景卡英文模板 / 词表 / 英文原文）；
+// 英文界面只用 promptEn，解析不到就显示英文占位 —— 绝不回退中文（E10 验收口径）。
+function entryPromptText(it) {
+  const e = it && typeof it === 'object' ? it : {};
+  const zh = String(e.prompt || e.originalPrompt || '');
+  if (getLocale() !== 'en') return zh;
+  if (e.promptEn) return String(e.promptEn);
+  const plain = String(e.prompt || '');
+  if (plain && !/[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(plain)) return plain;
+  return tr('library.common.promptEnMissing');
 }
 
 // 2026-11-18 S0（A13）：未完成列表此前只显示半句 prompt，与其它页的「统一任务名」不一致。
@@ -270,7 +283,7 @@ export function ClipsPanel({ onChanged }) {
                   preload="metadata" muted playsInline controls></video>
                 <div className="px-2 py-1.5">
                   <p className="text-[11px] leading-[1.5] text-ink2 line-clamp-2 min-h-[32px]">
-                    ${(it.prompt || '').slice(0, 80)}
+                    ${entryPromptText(it).slice(0, 80)}
                   </p>
                   <p className="text-[10px] text-ink3 font-num flex items-center gap-1.5 flex-wrap">
                     <span>${fmtDurSec(it.durationSec)}</span>
@@ -314,7 +327,7 @@ export function ClipsPanel({ onChanged }) {
             <video src=${detail.url} controls playsInline style=${{ width: '100%', maxHeight: '340px', background: '#000', borderRadius: '6px' }}></video>
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.prompt')}</span>
-              <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${detail.prompt || '-'}</span>
+              <span style=${{ color: 'var(--ink2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${entryPromptText(detail) || '-'}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.model')}</span>
               <span style=${{ color: 'var(--ink2)' }}>${detail.model || '-'}</span>
               <span style=${{ color: 'var(--ink3)' }}>${tr('library.clips.spec')}</span>
@@ -1218,7 +1231,7 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
             <${Thumb} id=${it.id} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[12.5px] text-ink truncate">${it.prompt || it.fileName || it.id}</span>
+                <span className="text-[12.5px] text-ink truncate">${entryPromptText(it) || it.fileName || it.id}</span>
                 ${it.suspectedDamage ? html`<span className="text-[10px] text-warn">${tr('library.finals.suspect')}</span>` : null}
               </div>
               <p className="text-[10px] text-ink3 font-num flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -1255,7 +1268,7 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
             </div>
             <video src=${play.url} controls autoPlay playsInline
               style=${{ width: '100%', maxHeight: '68vh', background: '#000', borderRadius: '6px' }}></video>
-            <p style=${{ marginTop: '8px', fontSize: '11px', lineHeight: 1.7, color: 'var(--ink3)', whiteSpace: 'pre-wrap' }}>${play.prompt || tr('library.finals.noPrompt')}</p>
+            <p style=${{ marginTop: '8px', fontSize: '11px', lineHeight: 1.7, color: 'var(--ink3)', whiteSpace: 'pre-wrap' }}>${entryPromptText(play) || tr('library.finals.noPrompt')}</p>
           </div>
         </div>`}
     </div>

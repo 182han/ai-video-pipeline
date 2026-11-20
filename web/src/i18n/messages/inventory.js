@@ -87,7 +87,9 @@ export default {
         loadFailed: '读取失败',
         file: '文件',
         attempts: ' · {n} 次',
-        finalVersion: '最终'
+        finalVersion: '最终',
+        // E10（2026-11-20）：英文界面下没有英文标题的历史中文条目，显示这句占位，不显示中文
+        promptEnMissing: '(Chinese original · no English version)'
       },
       origin: { task: '任务', library: '片段库', editor: '剪辑导出', orphan: '孤儿' },
       qc: {
@@ -408,7 +410,9 @@ export default {
         loadFailed: 'Failed to load',
         file: 'File',
         attempts: ' · {n} attempts',
-        finalVersion: 'Final'
+        finalVersion: 'Final',
+        // E10: placeholder shown in English UI when no English title could be resolved
+        promptEnMissing: '(Chinese original · no English version)'
       },
       origin: { task: 'Task', library: 'Library', editor: 'Editor export', orphan: 'Orphan' },
       qc: {

@@ -1,0 +1,30 @@
+{
+  "_comment": "片段库英文标题词表（E10, 2026-11-20）。byId 优先，其次 byPrompt（规范化空白后匹配）。只存人工撰写的英文，不做机翻；不在表里的历史中文条目前端显示英文占位，绝不回退中文。",
+  "version": 1,
+  "byPrompt": {
+    "剪辑台导出": "Editor export",
+    "30 秒（快速试）": "30 s (quick trial)",
+    "(任务记录已丢失)": "(task record lost)"
+  },
+  "byId": {
+    "proj_mw1umy7m2o3t_edit_mw1uthxv_final": "Editor export",
+    "proj_mw1umy7m2o3t_edit_mw1vazxi_final": "Editor export",
+    "real_test_2026-11-13T10-22-35-173Z_c1": "Snow mountains and glacier at sunrise, wide angle, cool tone; cloud sea drifting slowly through the valley; cinematic natural light, clean frame.",
+    "task_muknu3kq_tp5r_final": "Dense woods at dusk, lush forest, a fawn in the near foreground, midsummer.",
+    "task_mukptvrj_xbjn_c1": "Blue lake in the center, two white swans drifting, midday, early winter; snow mountains in the distance with golden light on the snow, a striking contrast against the blue water.",
+    "task_mukptvrj_xbjn_c2": "Blue lake in the center, two white swans drifting, midday, early winter; snow mountains in the distance with golden light on the snow, a striking contrast against the blue water.",
+    "task_mukptvrj_xbjn_final": "Blue lake in the center, two white swans drifting, midday, early winter; snow mountains in the distance with golden light on the snow, a striking contrast against the blue water.",
+    "task_mv4rbjm7_gfcr_final": "(task record lost)",
+    "task_mv4v7qp2_m8r0_c4": "Vast polar ice field with towering glaciers, clouds drifting slowly past the peaks, fine natural texture on the ice. Static locked-off time-lapse with an extremely slow, smooth push-in and minimal movement. Cool soft light, restrained realistic color, natural earth tones, no oversaturation. Vast, pure, serene.",
+    "task_mv4v7qp2_m8r0_c5": "A massive glacier stands on the open plain, pale blue ice walls laced with natural crevasse patterns, thin clouds drifting slowly between the peaks. Realistic photography, high dynamic range, rich texture detail, cinematic documentary quality, National Geographic style. Cool soft daylight, restrained realistic color, natural earth tones, vast, pure, serene and majestic.",
+    "task_mv4v7qp2_m8r0_final": "1. A serene high-altitude lake at blue hour, thin mist drifting slowly over the still water, distant mountain silhouettes.",
+    "task_mvgw4hbo_ajuc_c1": "Panorama of rolling grassland hills at dusk, tall grass swaying in the wind, broad cloud shadows drifting across the slopes, faint mist in the distance, clouds and light changing gradually. Very slow steady forward drift, minimal movement, stable frame, soft fade transitions. Warm low golden sunlight sweeping the ground, natural light, soft film grain, high dynamic range, rich texture detail, restrained natural color, realistic documentary style, National Geographic cinematic quality, time-lapse, calm and peaceful.",
+    "task_mvgw4hbo_ajuc_c2": "Karst pinnacles: pale grey limestone cones and steep walls covered in deep green vegetation, morning advection fog creeping across the midslope and hugging the peaks, extremely slow push-in, telephoto compression, camera almost static, early light entering low from the rear right, cool cyan base tone with a faint warm white at the fog edge, humid air, layered fog, distant peaks reduced to silhouettes, realistic photography, high dynamic range, rich texture detail, cinematic documentary quality, low-saturation cool tone, film grain, soft low contrast, a small dark shrub silhouette in the near corner, a conical peak in the midground, negative space for fog and sky, horizon in the lower third, controlled highlights, sky not clipping, the frame settling on the boundary between the peak silhouette and the fog, nothing new entering, clean frame, no text, no subtitles, no watermark, no logo, no narration, no dialogue, no buildings, no roads, no boats, no people.",
+    "task_mvgw4hbo_ajuc_final": "Panorama of rolling grassland hills at dusk, tall grass swaying in the wind, broad cloud shadows drifting across the slopes, faint mist in the distance, clouds and light changing gradually. Very slow steady forward drift, minimal movement, stable frame, soft fade transitions. Warm low golden sunlight sweeping the ground, natural light, soft film grain, high dynamic range, rich texture detail, restrained natural color, realistic documentary style, National Geographic cinematic quality, time-lapse, calm and peaceful.",
+    "task_mvhlxnm7_1mch_final": "Six-scene montage: deep-space nebula, misty forest valley, glacier wall, polar ice field, alpine lake at blue hour, swans on a blue lake.",
+    "task_mwnosz8o_uyl4_c1": "Subject: cluster of mounds; wind-scoured grooves on the yardang, gravel and grain-level glints. Foreground: dark silhouette. Camera: medium shot, ground-level eye height, 50mm, static. Sunset side light; weather: clear; season: summer. Palette: dark brown with orange; cinematic calm tone. Highlights stay unclipped; shadows keep texture. Ending: frame locks off; nothing new enters.",
+    "task_mwnosz8o_uyl4_c2": "Subject: isolated peak with sagebrush; strata, fissures and weathered faces. Foreground: dark silhouette. Camera: texture close-up, 85mm, static. Blue-hour light after sunset; palette: cool blue with red rock; dramatic high-contrast lighting. Sky not clipping; shadows keep detail. Ending: frame locks off; nothing new enters.",
+    "task_mwnosz8o_uyl4_c3": "Subject: glacier lake; mountain and snow texture, aerial perspective and highlight layering. Foreground: snow at the lakeshore. Camera: wide establishing shot, 35mm, static. Warm golden light; weather: clear; season: spring. Palette: warm gold with brown; cinematic calm tone. Water and ice reflections stay unclipped; shadows keep detail. Ending: frame locks off; nothing new enters.",
+    "task_mwnosz8o_uyl4_final": "Scenes: cluster of mounds · isolated peak · glacier lake"
+  }
+}

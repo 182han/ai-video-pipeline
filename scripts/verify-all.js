@@ -254,6 +254,12 @@ const SUITES = [
     desc: '片段库：价目表/费用口径/分组/跨规格拼接归一化'
   },
   {
+    name: 'library-en',
+    script: 'verify-library-en.js',
+    group: 'fast',
+    desc: '片段库英文标题（E10）：场景卡英文模板/词表/零中文占位，不联网不花钱'
+  },
+  {
     name: 'recycle',
     script: 'verify-recycle.js',
     group: 'fast',

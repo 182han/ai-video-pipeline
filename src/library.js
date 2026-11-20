@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const pricing = require('./pricing');
 const recycle = require('./recycle');
+const libraryEn = require('./libraryEn');
 
 const APP_DIR = path.join(__dirname, '..');
 // 允许验收脚本用 LIBRARY_DIR / CLIPS_DIR 指向临时目录，避免污染真实库（与 photoLibrary 同一做法）
@@ -250,6 +251,9 @@ function buildEntry(task, clip, filePath, probe) {
     origin: task.source === 'regenerate' ? 'regenerate' : 'task',
     prompt: clip.prompt || originalPrompt || '',
     originalPrompt: originalPrompt || '',
+    // E10（2026-11-20）：英文界面的标题/提示词。来源=场景卡英文模板/词表/英文原文，
+    // 解析不到就是 null（前端显示英文占位，**绝不回退中文**）。
+    promptEn: libraryEn.fromTask(task, clip.index),
     // 图生视频：记录这条视频用的是图片库里哪张图（追溯用，不复制文件）
     // 图片优先链路是“每片段一张图”，必须优先取 clip.photoId，不能只看 task.sourcePhotoId。
     sourcePhotoId: clip.sourcePhotoId || clip.photoId || task.sourcePhotoId || null,
@@ -328,6 +332,8 @@ function ingestClip(task, clip, probeOverride) {
       entry.replacedBy = existing.replacedBy || null;
       entry.lastRegenerate = existing.lastRegenerate || null;
       entry.addedAt = existing.addedAt || entry.addedAt;
+      // E10：重新入库时保留已解析好的英文标题（场景卡数据可能已不在任务里）
+      if (!entry.promptEn && existing.promptEn) entry.promptEn = existing.promptEn;
     }
     entry.updatedAt = new Date().toISOString();
     saveEntry(entry);
@@ -387,6 +393,8 @@ function ingestFinal(task, finalPath, probeOverride) {
       clipIndex: null,
       prompt: task.prompt || '',
       originalPrompt: task.prompt || '',
+      // E10：成片英文标题（多场景 → "Scenes: a · b · c"；否则词表/英文原文）
+      promptEn: libraryEn.fromFinal(task) || (existing && existing.promptEn) || null,
       sourcePhotoId: task.sourcePhotoId || null,
       model: task.model || 'unknown',
       resolution: task.resolution || (info ? resolutionLabel(info.width, info.height) : null),
