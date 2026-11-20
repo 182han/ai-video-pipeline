@@ -308,6 +308,13 @@ module.exports = {
     seamDe76Max: seamNum('QC_SEAM_DE76_MAX', 25, 0, 200),
     seamDyMax: seamNum('QC_SEAM_DY_MAX', 30, 0, 219),
     seamMadRatioMax: seamNum('QC_SEAM_MAD_RATIO_MAX', 8, 1, 1000),
+    // 多场景模式（场景卡 / 多提示词）的接缝口径（2026-11-20 用户决定「多场景要放宽」）：
+    //   多场景成片的「缝」是刻意的场景切换，两侧画面本来就不同：
+    //   实测 task_mwnosz8o_uyl4（3 段不同地貌 + 0.4s 淡化）：MAD 17.15× / 46.5×、SSIM 0.957 / 0.885；
+    //   同素材硬切对照：MAD 32.98× / 134.32×、SSIM 0.392 / 0.429（<0.75）。
+    //   两者 MAD 区间有重叠 → MAD 不能单独当硬切判据；SSIM 才是硬切的判别器。
+    //   因此多场景下只放宽 MAD 倍数（8 → 60，拦极端跳变），SSIM/ΔE/ΔY 维持单场景口径。
+    seamMultiSceneMadRatioMax: seamNum('QC_SEAM_MULTI_MAD_RATIO_MAX', 60, 1, 1000),
     // 单次检测最多测多少道缝（超出则均匀抽样，并在结果里标注 sampled=true）。
     // 每道缝约 1~1.5s，8 道 ≈ 10s；长片缝多时避免质检本身拖垮流水线。
     seamMaxSeams: Math.max(1, parseInt(env('QC_SEAM_MAX_SEAMS', '8'), 10) || 8),
@@ -321,6 +328,10 @@ module.exports = {
     // 中间留 warn 档是因为「日落→蓝调」这类冷暖对比可能是刻意创作，不能一刀切。
     colorDe76Warn: seamNum('QC_COLOR_DE76_WARN', 15, 0, 200),
     colorDe76Max: seamNum('QC_COLOR_DE76_MAX', 40, 0, 200),
+    // 多场景模式下的色彩连续性口径（2026-11-20 用户决定「多场景要放宽」）：
+    //   多场景的任务就是「换景」，镜头间色差是刻意的（实测 48.1 / 49.72；单场景合格组 1.4~3.6）。
+    //   默认只记 warn、不判失败；设 QC_SCENE_MULTI_COLOR_MODE=strict 可恢复「>max 判失败」。
+    sceneMultiColorMode: /^strict$/i.test(String(env('QC_SCENE_MULTI_COLOR_MODE', 'warn')).trim()) ? 'strict' : 'warn',
 
     // ===== 拼接时自动校色（默认关，批次 2 接入）=====
     // 只在「转场开启」的重编码路径生效，避免为校色多编码一次；

@@ -88,12 +88,18 @@ class QualityChecker {
       seamDe76Max: config.QC && Number.isFinite(config.QC.seamDe76Max) ? config.QC.seamDe76Max : 25,
       seamDyMax: config.QC && Number.isFinite(config.QC.seamDyMax) ? config.QC.seamDyMax : 30,
       seamMadRatioMax: config.QC && Number.isFinite(config.QC.seamMadRatioMax) ? config.QC.seamMadRatioMax : 8,
+      // 多场景口径（2026-11-20）：只放宽 MAD 倍数；SSIM/ΔE/ΔY 不变（硬切仍由 SSIM 抓）
+      seamMultiSceneMadRatioMax: config.QC && Number.isFinite(config.QC.seamMultiSceneMadRatioMax)
+        ? config.QC.seamMultiSceneMadRatioMax
+        : 60,
       seamMaxSeams: config.QC && Number.isFinite(config.QC.seamMaxSeams) ? config.QC.seamMaxSeams : 8,
       // ===== 镜头级色彩连续性阈值（详见 docs/spec/re-jianying/seam-experiment.md）=====
       // 实验：合格组镜头级 ΔE76 1.4~3.6，明显不连贯组 25~48。
       // 三档：≤warn 通过 / warn~max 记 warn（不判失败）/ >max 判失败。
       colorDe76Warn: config.QC && Number.isFinite(config.QC.colorDe76Warn) ? config.QC.colorDe76Warn : 15,
       colorDe76Max: config.QC && Number.isFinite(config.QC.colorDe76Max) ? config.QC.colorDe76Max : 40,
+      // 多场景：镜头间色差是刻意的场景切换 → 默认只记 warn 不判失败（strict 可回原口径）
+      sceneMultiColorMode: config.QC && config.QC.sceneMultiColorMode === 'strict' ? 'strict' : 'warn',
       ...options
     };
     this.qcItems = QC_ITEMS;
@@ -473,11 +479,18 @@ class QualityChecker {
       ...extra
     });
     const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    // 场景模式（2026-11-20）：'multi' = 场景卡/多提示词成片，缝两侧是刻意的场景切换。
+    // 只放宽 MAD 倍数（8 → 60）；SSIM/ΔE/ΔY 维持原口径 —— 实测硬切 SSIM 0.39~0.43 仍会被判 fail。
+    const sceneMode = options.sceneMode === 'multi' ? 'multi' : 'single';
+    const madRatioFallback = sceneMode === 'multi'
+      ? this.options.seamMultiSceneMadRatioMax
+      : this.options.seamMadRatioMax;
     const th = {
       ssimMin: numOr(options.ssimMin, this.options.seamSsimMin),
       de76Max: numOr(options.de76Max, this.options.seamDe76Max),
       dyMax: numOr(options.dyMax, this.options.seamDyMax),
-      madRatioMax: numOr(options.madRatioMax, this.options.seamMadRatioMax)
+      madRatioMax: numOr(options.madRatioMax, madRatioFallback),
+      sceneMode
     };
 
     if (!this._hasFFmpeg()) {
@@ -656,7 +669,8 @@ class QualityChecker {
       undeterminedSeams: undeterminedCount,
       worstSsim: worstSsim === null ? null : Number(worstSsim.toFixed(4)),
       worstDe76: worstDe.length ? Number(Math.max(...worstDe).toFixed(2)) : null,
-      fadeDuration: fade
+      fadeDuration: fade,
+      sceneMode
     };
 
     // 覆盖面说明：抽样时必须写进结论（不能只留在 details 里）
@@ -664,12 +678,16 @@ class QualityChecker {
       ? `；本次仅检测 ${picked.length}/${inRange.length} 道缝（均匀抽样），`
         + `未检测的 ${unscanned} 道不计入结论`
       : '';
+    // 多场景口径必须写进结论：不能让人以为这里用的是单场景阈值
+    const sceneNote = sceneMode === 'multi'
+      ? `；多场景口径：MAD 上限 ${th.madRatioMax}×（SSIM/ΔE/ΔY 仍按单场景阈值）`
+      : '';
 
     let reason;
     if (passed) {
       reason = `接缝质量通过：${measured.length} 道缝全部达标`
         + `（最差 SSIM ${summary.worstSsim}，最大 ΔE76 ${summary.worstDe76 ?? '—'}`
-        + `${coverageNote}）`;
+        + `${coverageNote}${sceneNote}）`;
     } else {
       const detail = failedSeams.slice(0, 3).map(s =>
         s.undetermined
@@ -677,7 +695,7 @@ class QualityChecker {
           : `缝#${s.index + 1}@${s.t}s 不通过（${s.reasons.join('、')}）`
       );
       const more = failedSeams.length > 3 ? ` 等 ${failedSeams.length} 道` : '';
-      reason = `接缝质量不通过：${detail.join('；')}${more}${coverageNote}`;
+      reason = `接缝质量不通过：${detail.join('；')}${more}${coverageNote}${sceneNote}`;
     }
 
     return {
@@ -714,6 +732,10 @@ class QualityChecker {
     const cmState = options.colorMatchState || 'disabled';
     const cmReason = options.colorMatchReason || '';
     const cmMeta = { colorMatchState: cmState, colorMatchReason: cmReason };
+    // 多场景（2026-11-20）：镜头间色差是刻意的场景切换 → 默认只记 warn、不判失败。
+    // 依据：task_mwnosz8o_uyl4 实测 48.1 / 49.72；单场景合格组 1.4~3.6（seam-experiment.md）。
+    const sceneMode = options.sceneMode === 'multi' ? 'multi' : 'single';
+    const multiSceneWarn = sceneMode === 'multi' && this.options.sceneMultiColorMode !== 'strict';
     const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
     const fail = (reason, extra = {}) => ({
       passed: false,
@@ -798,7 +820,9 @@ class QualityChecker {
 
     const th = {
       warn: numOr(options.warn, this.options.colorDe76Warn),
-      max: numOr(options.max, this.options.colorDe76Max)
+      max: numOr(options.max, this.options.colorDe76Max),
+      sceneMode,
+      multiSceneLevel: multiSceneWarn ? 'warn' : 'strict'
     };
 
     const maxSeams = Math.max(1, parseInt(options.maxSeams, 10) || this.options.seamMaxSeams || 8);
@@ -847,8 +871,13 @@ class QualityChecker {
         level = 'fail';
         reasons.push('色差计算失败（数值缺失）');
       } else if (de76 > th.max) {
-        level = 'fail';
-        reasons.push(`镜头色差 ΔE76 ${de76} > ${th.max}`);
+        if (multiSceneWarn) {
+          level = 'warn';
+          reasons.push(`多场景换景：镜头色差 ΔE76 ${de76} 超过单场景上限 ${th.max}，属刻意场景切换，仅提示`);
+        } else {
+          level = 'fail';
+          reasons.push(`镜头色差 ΔE76 ${de76} > ${th.max}`);
+        }
       } else if (de76 > th.warn) {
         level = 'warn';
         reasons.push(`镜头色差 ΔE76 ${de76} 超过提示阈值 ${th.warn}（色调跳变，但可能是刻意对比）`);
@@ -881,7 +910,8 @@ class QualityChecker {
       scanned: picked.length,
       sampled,
       unscanned,
-      warnSeams: warnSeams.length
+      warnSeams: warnSeams.length,
+      sceneMode
     };
 
     const cmNote = cmState === 'disabled'
@@ -890,12 +920,15 @@ class QualityChecker {
     const coverageNote = sampled
       ? `（本次仅检测 ${picked.length}/${inRange.length} 道缝（均匀抽样），未检测的 ${unscanned} 道不计入结论）`
       : '';
+    const sceneNote = multiSceneWarn
+      ? '；多场景口径：换景为刻意创作，镜头色差只提示不判失败（QC_SCENE_MULTI_COLOR_MODE=strict 可恢复）'
+      : '';
 
     let reason;
     if (passed) {
       reason = warnSeams.length
-        ? `镜头色彩连续性：${warnSeams.length} 道缝色调跳变超过提示阈值（最差 ΔE76 ${worst && worst.de76}，warn ${th.warn} / fail ${th.max}），不判失败${coverageNote}${cmNote}`
-        : `镜头色彩连续性通过（最差 ΔE76 ${worst && worst.de76} ≤ ${th.warn}）${coverageNote}${cmNote}`;
+        ? `镜头色彩连续性：${warnSeams.length} 道缝色调跳变超过提示阈值（最差 ΔE76 ${worst && worst.de76}，warn ${th.warn} / fail ${th.max}），不判失败${coverageNote}${cmNote}${sceneNote}`
+        : `镜头色彩连续性通过（最差 ΔE76 ${worst && worst.de76} ≤ ${th.warn}）${coverageNote}${cmNote}${sceneNote}`;
     } else {
       const detail = failedSeams.slice(0, 3).map(x => (x.undetermined
         ? `缝#${x.index + 1}@${x.t}s 未测到（${x.reason}）`

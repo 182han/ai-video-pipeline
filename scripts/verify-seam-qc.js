@@ -340,6 +340,66 @@ function concatCopy(files, outName) {
   }
 
   // ---------------------------------------------------------
+  section('[9] 多场景口径（2026-11-20 用户决定）：只放宽 MAD，硬切仍判 fail');
+  // ---------------------------------------------------------
+  // 背景：多场景成片的「缝」是刻意的场景切换，两侧内容本来就不同。
+  // 实测 task_mwnosz8o_uyl4：淡化成片 MAD 17.15×/46.5×、SSIM 0.957/0.885；
+  // 同素材硬切 MAD 32.98×/134.32×、SSIM 0.392/0.429 → MAD 区间重叠，SSIM 才是硬切判据。
+  ok(config.QC.seamMadRatioMax === 8, '单场景 MAD 阈值仍为 8×（没有被全局放宽）', String(config.QC.seamMadRatioMax));
+  ok(config.QC.seamMultiSceneMadRatioMax === 60, '多场景 MAD 阈值 60×（实测 46.5× 留余量，硬切 134× 仍拦）',
+    String(config.QC.seamMultiSceneMadRatioMax));
+  ok(config.QC.sceneMultiColorMode === 'warn', '多场景色彩连续性默认只记 warn', String(config.QC.sceneMultiColorMode));
+
+  ok(pipeline._sceneModeFor({
+    sceneCards: { enabled: true, used: [{ id: 'sc-1', scene_key: '土丘群' }, { id: 'sc-2', scene_key: '孤山' }] }
+  }) === 'multi', '场景卡用到 2 张不同场景 → multi');
+  ok(pipeline._sceneModeFor({
+    sceneCards: { enabled: true, used: [{ id: 'sc-1', scene_key: '土丘群' }, { id: 'sc-2', scene_key: '土丘群' }] }
+  }) === 'single', '两张卡同一 scene_key → 仍算 single（不误放宽）');
+  ok(pipeline._sceneModeFor({ isMultiPrompt: true, prompts: ['a', 'b'] }) === 'multi', '显式多提示词 ≥2 段 → multi');
+  ok(pipeline._sceneModeFor({ prompt: '单场景' }) === 'single', '普通单提示词任务 → single');
+
+  // 负向核心：多场景口径下，硬切仍必须 fail（放宽 ≠ 放行）
+  const rHardMulti = await qualityChecker.checkSeam(hardcut, [3, 3], { sceneMode: 'multi' });
+  ok(rHardMulti.passed === false, '多场景口径下硬切仍判 fail（负向核心用例）', rHardMulti.reason);
+  ok(rHardMulti.details.seams[0].ssim < 0.75, '多场景口径下 SSIM 判据不变', `ssim=${rHardMulti.details.seams[0].ssim}`);
+  ok(rHardMulti.details.thresholds.madRatioMax === 60, '硬切用例确实跑在多场景阈值下',
+    `madRatioMax=${rHardMulti.details.thresholds.madRatioMax}`);
+
+  // 正向：真转场在多场景口径下仍 pass
+  const rFadeMulti = await qualityChecker.checkSeam(xfadeOut, [3, 3], { fadeDuration: 0.4, sceneMode: 'multi' });
+  ok(rFadeMulti.passed === true, '多场景口径下真转场仍判通过', rFadeMulti.reason);
+
+  // 真实多场景成片（只读 output/；--fast 跳过）
+  const realMulti = path.join(APP_ROOT, 'output', 'task_mwnosz8o_uyl4_final.mp4');
+  const realMultiTask = path.join(APP_ROOT, 'data', 'tasks', 'task_mwnosz8o_uyl4.json');
+  if (FAST) {
+    skip('真实多场景成片口径对照', '--fast');
+  } else if (!fs.existsSync(realMulti) || !fs.existsSync(realMultiTask)) {
+    skip('真实多场景成片口径对照', 'output/data 下没有该成片（可能是新环境）');
+  } else {
+    const rt = JSON.parse(fs.readFileSync(realMultiTask, 'utf8'));
+    const durs = (rt.clips || []).map(c => Number(c.duration)).filter(n => Number.isFinite(n) && n > 0);
+    const mtimeBefore = fs.statSync(realMulti).mtimeMs;
+    const rM = await qualityChecker.checkSeam(realMulti, durs, { fadeDuration: 0.4, sceneMode: 'multi' });
+    const rS = await qualityChecker.checkSeam(realMulti, durs, { fadeDuration: 0.4 });
+    ok(rM.passed === true, '真实多场景成片按多场景口径通过', rM.reason);
+    ok(rS.passed === false, '同一成片按单场景口径不通过（证明口径真的切换了）', rS.reason.slice(0, 100));
+    ok(rM.details.thresholds.madRatioMax === 60 && rS.details.thresholds.madRatioMax === 8,
+      '两种口径的阈值分别是 60× / 8×');
+    ok(/多场景口径/.test(String(rM.reason)), '通过时的结论写明「多场景口径」');
+    ok(fs.statSync(realMulti).mtimeMs === mtimeBefore, '多场景检测未修改源成片（§4.7 只读）');
+
+    const ccM = await qualityChecker.checkColorContinuity(realMulti, durs, { fadeDuration: 0.4, sceneMode: 'multi' });
+    const ccS = await qualityChecker.checkColorContinuity(realMulti, durs, { fadeDuration: 0.4 });
+    ok(ccM.passed === true && ccM.level === 'warn', '多场景色彩连续性只记 warn、不判失败',
+      `level=${ccM.level}, reason=${String(ccM.reason).slice(0, 80)}`);
+    ok(ccS.passed === false && ccS.level === 'fail', '单场景色彩连续性仍判 fail（没有被放宽）');
+    ok(ccM.details.summary.sceneMode === 'multi' && ccS.details.summary.sceneMode === 'single',
+      '色彩明细里记录了 sceneMode');
+  }
+
+  // ---------------------------------------------------------
   // 汇总
   // ---------------------------------------------------------
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}

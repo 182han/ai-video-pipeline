@@ -1286,6 +1286,24 @@ class Pipeline {
     };
   }
 
+  // 多场景判定（2026-11-20 用户决定「多场景成片的接缝/色彩阈值要放宽」）：
+  //   场景卡模式用到 ≥2 张**不同**场景卡，或显式多提示词 ≥2 段 → 'multi'；否则 'single'。
+  // 为什么不看「每段提示词是否不同」：单场景任务的分镜提示词也会逐段不同，会误判成多场景，
+  // 那等于把单场景的接缝质检整体放宽 —— 这里必须用「用户明确选了多张卡/多段提示词」这个事实。
+  _sceneModeFor(task) {
+    if (!task) return 'single';
+    const sc = task.sceneCards;
+    if (sc && sc.enabled === true && Array.isArray(sc.used)) {
+      const keys = sc.used
+        .map(u => String((u && (u.scene_key || u.id)) || '').trim())
+        .filter(Boolean);
+      if (new Set(keys).size >= 2) return 'multi';
+    }
+    const prompts = Array.isArray(task.prompts) ? task.prompts : [];
+    if (task.isMultiPrompt === true && prompts.filter(Boolean).length >= 2) return 'multi';
+    return 'single';
+  }
+
   // 组装接缝质检所需输入：各成功片段的时长（缝位置）+ 实际使用的淡化时长。
   //
   // 两个容易搞错的地方：
@@ -1320,7 +1338,7 @@ class Pipeline {
       const t = this._transitionOptions(task);
       fadeDuration = t.enabled ? t.duration : 0;
     }
-    return { clipDurations, fadeDuration };
+    return { clipDurations, fadeDuration, sceneMode: this._sceneModeFor(task) };
   }
 
   // 镜头级色彩连续性（checkColorContinuity）的输入：与接缝共用「缝在哪」，
@@ -1380,7 +1398,7 @@ class Pipeline {
         : '校色已请求但未执行：拼接步骤没有留下校色记录（可能复用了旧产物）';
     }
 
-    return { clipDurations, fadeDuration, colorMatchState, colorMatchReason };
+    return { clipDurations, fadeDuration, colorMatchState, colorMatchReason, sceneMode: this._sceneModeFor(task) };
   }
 
   // ===== 启动自检：回收「僵尸任务」 =====
