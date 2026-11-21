@@ -3766,3 +3766,67 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - 运行中的 3001（旧进程）浏览器端未复验：登录后用只读接口实测 `/api/scene-cards/preview`
   「`?lang=en` 仍返回中文、`?seed=` 不生效」= 旧后端，需用户重启后复验（前端部分刷新即生效）。
 - 真实出图/出视频链路未跑（计费），本次只验接口与渲染。
+
+## E14 · 单片段等待超时阈值 + 「超时 ≠ 生成失败」三态（2026-11-21 夜）
+
+**背景（事件 `task_mwp70yzl_lh54`，2026-11-21 00:28~00:55）**
+
+9 段 10s/720p 图生视频（`wan3.0-video`、i2v、首帧压缩后 174~274KB）里，片段 #7 首轮被判「超时」；
+`autoRetry=false` → 不重试、不拼接，整任务 `failed`。用户手动补跑该段，**249.3s 就成功**，
+最终 9/9、成片 86.6s（1280×720/30fps，h264+aac）。即：那一段**本来能出片**。
+
+**根因（实测数值，非推测）**
+
+- `_waitForCompletion` 的 `maxWait` 默认值是**硬编码 `300000`**，而唯一调用处（`_processSingleClip`）
+  **不传第二个参数**，所以永远是 300s 上限。
+- 本任务 9 次成功出片耗时：228.3 / 230.2 / 233.3 / 254.0 / 240.9 / 228.7 / 279.9 / 285.1 / 249.3 s，
+  平均 247.7s；**最长成功样本距 300s 只剩 14.9s（5%）**。首轮就有 3 段 ≥250s。
+  → 300s 与真实分布贴死，**超时是概率性必然，不是偶发**。
+- 错误文案只有一个裸字符串 `'超时'`，既不能区分「本地等超了」与「上游判失败」，也让日志把
+  「等待超时」写成了「生成失败」，容易误导成模型拒绝/内容违规。
+
+**改动**
+
+| 文件 | 内容 |
+|---|---|
+| `config.js` | `GENERATION.clipWaitTimeoutMs` ← `GEN_CLIP_WAIT_TIMEOUT_MS`，默认 **600000** |
+| `src/pipeline.js` | `_waitForCompletion` 的 `maxWait` 缺省读 config（显式传参仍优先），不再硬编码 300s |
+| `src/pipeline.js` | 超时返回 `{ status:'failed', waitTimeout:true, error:'等待超时：已等 Ns 仍未完成（本地等待上限，不代表模型生成失败；上游可能仍在生成）' }` |
+| `src/pipeline.js` | `_processSingleClip` 抛错时保留 `waitTimeout` 标记；日志按标记分口径——超时**不再**写「生成失败」 |
+| `.env.example` | 补 `GEN_CLIP_WAIT_TIMEOUT_MS=600000` 及取值依据 |
+| `scripts/doctor.js` | 新增 `runCapture()`：`execFileSync` 捕获 stdout 遇 `EPERM` 时降级为「stdout 落临时文件再读」；ERROR 附带错误码 |
+
+**澄清（本次核实，纠正一次先前误判）**
+
+单片段失败**不会**中止其余片段——这是既有行为，不是本次新增：
+
+- worker 循环失败后 `continue`；`_finishClipFailure` 只改片段记录，**从不**改 `task.status`；
+- 本任务日志时间线：片段 #7 于 16:47:13 判失败后，**片段 8（16:47:25）、片段 9（16:47:58）仍成功**，
+  汇总发生在 16:47:58。所谓「不拼接」只表示**不进入下一阶段（拼接）**，不是丢弃在跑/未跑的片段。
+
+**刻意未改**
+
+`BaseGenerator.canRetry` 仍不把「等待超时」判为可重试（它只匹配英文 `timeout` 等）。
+理由：超时时上游可能**仍在正常生成**，自动重试有重复计费风险；保持「只报失败、由用户决定补跑」。
+
+**验收（全部实跑）**
+
+- 临时脚本（仓库外，跑完即删）**15/0**：含「不传 maxWait 也读 config」「`GEN_CLIP_WAIT_TIMEOUT_MS=1300`
+  时真在 ~2.0s 返回（不是 300s）」「上游真判失败（`内容违规`）原样透传且**不带** `waitTimeout`」
+  「成功结果不带 `waitTimeout`」。
+- 回归：`verify-qc-report-mode` 14/0、`verify-i2v` 46/0、`verify-openai-video` 24/0、
+  `verify-stage-pipeline` 37/0、`verify-pause` 71/0。
+- `node scripts/doctor.js`：**0 个必须修复 / 7 个提醒**（改前是 2 个 ❌：ffmpeg/ffprobe「无法执行」）。
+  该项为**环境限制**，已用同一份二进制实测三态：`encoding:'utf8'` → `EPERM`；`stdio:'ignore'` → 正常；
+  重定向到文件 → 读到 `ffmpeg version 8.1-full_build`。
+- doctor 负向：`FFMPEG_PATH=C:\nope\ffmpeg.exe` → `❌ 无法执行: …（ENOENT）`、退出码 1（不假绿）。
+
+**副作用 / 可调**
+
+失败感知最多比原来晚 5 分钟（300s→600s）。要回旧行为：`.env` 写 `GEN_CLIP_WAIT_TIMEOUT_MS=300000`。
+
+**未验证**
+
+- 600s 阈值下**未**用真实付费任务复跑（按 §4.9 需用户先同意计费）；数值依据仅来自
+  `task_mwp70yzl_lh54` 的 10 次真实出片样本（n=9 成功 + 1 超时）。
+- doctor 的降级分支只在**本机沙箱**触发过；无 EPERM 的机器上不会走到，属未覆盖路径。
