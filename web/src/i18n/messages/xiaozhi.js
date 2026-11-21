@@ -47,6 +47,16 @@ export default {
         mockNote: 'Mock：不产生费用'
       },
       state: {
+        draft: '草稿',
+        planned: '计划已生成',
+        confirmed: '已确认',
+        submitted: '已提交',
+        running: '生成中',
+        retrying: '质检重试中',
+        filling: '片段补位中',
+        done: '已完成',
+        failed: '失败',
+        needs_user: '需要你决定',
         retry: '重试 {n}/{max}',
         fill: '补位 {n}/{max}',
         clips: '片段 {n}/{max}',
@@ -205,6 +215,16 @@ export default {
         mockNote: 'Mock: no charge'
       },
       state: {
+        draft: 'Draft',
+        planned: 'Plan ready',
+        confirmed: 'Confirmed',
+        submitted: 'Submitted',
+        running: 'Generating',
+        retrying: 'Retrying (QC)',
+        filling: 'Filling failed clips',
+        done: 'Completed',
+        failed: 'Failed',
+        needs_user: 'Needs your decision',
         retry: 'Retry {n}/{max}',
         fill: 'Fill {n}/{max}',
         clips: 'Clips {n}/{max}',

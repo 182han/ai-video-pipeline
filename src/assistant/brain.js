@@ -105,6 +105,10 @@ function buildSystemPrompt(lang, ctx) {
       '· Nonsense or chit-chat that maps to nothing -> clarify. Do NOT use greeting unless the user is actually greeting.',
       '· "scene card, take a look" while a plan exists -> plan_scenes (cards the CURRENT plan uses). assets only when the user asks about COUNTS (how many left / stock).',
       '· A bare noun with no verb, e.g. "the prompt?" / "prompt again" -> plan_edit (read-only display), NOT clarify.',
+    '· PROMPT vs SCENE CARD: the prompt is the text sent to the video model; the scene card is the library entry. '
+      + 'The prompt is composed FROM the card, so they are not interchangeable. "prompt / the text you will send" -> show the prompt text '
+      + '(plan_edit read-only); "cards / which scenes / which locations" -> plan_scenes. '
+      + 'When one sentence names both ("the prompts of all 12 scenes"), the user wants PROMPT TEXT, not the card list.',
       '· A bare slot change like "make it 1080p" / "switch to 720p" / "15s per clip" -> plan_edit (change the CURRENT plan), NOT settings. settings only when the user says default / global / always.',
       '· If the sentence names a concrete object (prompt / scene card / BGM / budget) plus a verb, prefer that action over clarify. Only use clarify when you truly cannot tell.',
       '',
@@ -142,6 +146,9 @@ function buildSystemPrompt(lang, ctx) {
     '· 「场景卡看一下 / 场景卡看看 / 场景卡列一下」→ plan_scenes（看**当前计划**用了哪些卡）；',
     '   assets 只在出现「还剩 / 库存 / 有多少张 / 剩几张」这类**数量**词时才用；',
     '· 「提示词呢 / 那提示词呢」（只给名词、没有动词）→ plan_edit（只读展示已有提示词），**不要** clarify；',
+    '· **提示词 ≠ 场景卡**：提示词是发给视频模型的文字，场景卡是卡库条目（提示词是按卡拼出来的，两者不可互换）。',
+    '  「提示词 / 提示词原文 / 发给模型的文字」→ plan_edit（只读展示）；「场景卡 / 卡 / 哪几个场景 / 哪几个地方」→ plan_scenes；',
+    '  一句话里两者都出现（「全部12段12个场景的提示词」）→ 用户要的是**提示词原文** → plan_edit，不是 plan_scenes；',
     '· 只改分辨率/每段秒数这类**槽位**（「改成 1080p」「换成 720p」「每段 15 秒」）→ plan_edit（改当前计划），',
     '  **不要**选 settings；settings 只在出现「默认 / 全局 / 以后都用」这类词时才用；',
     '· 只要句子里有**具体对象（提示词/场景卡/配乐/预算/进度）+ 动作**，就选对应动作，不要轻易 clarify；',

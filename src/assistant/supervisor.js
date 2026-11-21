@@ -1344,12 +1344,27 @@ function promptTextOfSegment(plan, index, lang) {
 //   · 有当前计划、无段号 → 直接展示全部（最多 5 段），不问时长、不新建计划；
 //   · 无计划 → 明确说明还没有计划卡（负向用例）。
 const PROMPT_VIEW_LIMIT = 5;
+// 2026-11-21 用户反馈：「我问的是提示词，它给的是场景卡的内容」。
+// 根因不在「拿错数据」——提示词本来就是按场景卡拼出来的，而是**展示层误导**：
+//   ① 每段前面写着「来源：场景卡 X（按卡拼出）」，读起来像在列卡；
+//   ② 没有提示底部还附了一整张计划摘要（含「场景：场景卡库随机抽取 N 个不同场景」），
+//      于是 12 段计划看起来像「给我看了场景卡」。
+// 修法：标题写清「这是第 k 段的**提示词原文**」（与场景卡清单区分），卡名只作括注；
+// 并且**不在提示词视图后追加计划摘要**（要摘要说「计划里有什么」）。
+const PROMPT_COUNT_ALL_LIMIT = 20;
+const RE_ALL_PROMPTS = /全部|所有|每段|每一条|每一段|都\s*(?:要|给|看|贴|发)|完整|全文|\ball\b|\bevery\b|\beach\b/i;
 
 function tryReplyPromptView(sessionId, text, lang) {
   const s = String(text || '');
   const isEn = i18n.normalizeLang(lang) === 'en';
-  if (!RE_PROMPT_VIEW.test(s)) return null;
-  if (RE_PROMPT_SET_VERB.test(s)) return null; // 「…提示词改成：X」走既有整段替换
+  // 2026-11-21：判定改用 memory.isPromptViewRequest（与 classify 同源）。
+  // 旧版只认本文件里那份窄词表（提示词 + 给我看/看一下…），
+  // 「我要查看完整的全部12段12个场景的提示词」「提示词呢」全被判非查看 → 落到编辑反问。
+  // 两道拦截保留：改提示词（改成/换成/：）不算查看；带「用这个：」正文的走替换。
+  if (RE_PROMPT_SET_VERB.test(s)) return null;
+  const isView = memory.isPromptViewRequest(s) || RE_PROMPT_VIEW.test(s);
+  if (!isView) return null;
+  if (extractUseThisText(s)) return null;
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
     return isEn
@@ -1364,10 +1379,13 @@ function tryReplyPromptView(sessionId, text, lang) {
   }
 
   // 只有显式「第 N 段」才贴单段；否则展示全部/前 N 段（用户真实原话没有段号）。
+  // 2026-11-21：用户说「全部 / 每段 / 都贴」时放宽到 20 段（12 段计划能一次全看到），
+  // 否则维持既有 5 段（旧行为零回归；长片仍靠段号逐段看）。
   const explicit = matchSegmentIndex(s);
   if (!explicit) {
     const total = Number(plan.clipCount) || 0;
-    const limit = Math.min(total, PROMPT_VIEW_LIMIT);
+    const wantAll = RE_ALL_PROMPTS.test(s);
+    const limit = Math.min(total, wantAll ? PROMPT_COUNT_ALL_LIMIT : PROMPT_VIEW_LIMIT);
     const parts = [];
     let missing = 0;
     for (let i = 1; i <= limit; i += 1) {
@@ -1377,27 +1395,30 @@ function tryReplyPromptView(sessionId, text, lang) {
       const cardName = seg.card
         ? (isEn ? (seg.card.protagonist_en || seg.card.scene_key) : seg.card.scene_key)
         : '';
+      // 2026-11-21：卡名降为**括注**，主角是「提示词原文」，避免被读成「列了一堆场景卡」。
       const from = seg.source === 'user-edit'
-        ? (isEn ? 'source: your edited text' : '来源：你手动改过的文本')
-        : (isEn
-          ? `source: scene card ${cardName} (composed from the card)`
-          : `来源：场景卡 ${cardName}（按卡拼出）`);
+        ? '你手动改过'
+        : `按场景卡「${cardName}」拼出`;
       parts.push(isEn
-        ? `Clip ${i} (${seg.text.length} chars; ${from}):\n${seg.text}`
-        : `第 ${i} 段（${seg.text.length} 字；${from}）：\n${seg.text}`);
+        ? `Clip ${i} prompt (${seg.text.length} chars${seg.source === 'user-edit' ? '; your edited text' : `; composed from card "${cardName}"`}):\n${seg.text}`
+        : `第 ${i} 段提示词（${seg.text.length} 字；${from}）：\n${seg.text}`);
     }
     if (!parts.length) {
       return isEn
         ? 'The scene cards for this plan cannot be read (the card library may have changed), so the prompts cannot be shown. Nothing was changed.'
         : '这条计划的场景卡读不到（卡库可能被替换），提示词暂时贴不出来；计划没有改动。';
     }
+    // 标题必须点名「提示词原文」，并说明「这不是场景卡清单」——
+    // 场景卡清单的标题是「这条计划用了哪些场景卡」（show_scene_cards），两者别混。
     const header = isEn
-      ? `This plan has ${total} clips; here are the first ${limit} prompts (read-only, nothing changed):`
-      : `这条计划共 ${total} 段，先贴前 ${limit} 段提示词（只读，没有改动）：`;
+      ? `Prompt text of this plan (${total} clips; showing ${limit}). This is the full text sent to the video model — `
+        + 'not the scene-card list (for the list of cards, ask "which scene cards"). Read-only, nothing changed:'
+      : `这是这条计划（共 ${total} 段）的**提示词原文**，也就是真正发给模型的文字（本次贴 ${limit} 段）；`
+        + '不是场景卡清单（要看用了哪些卡，说「场景卡」）。只读，没有改动：';
     const more = total > limit
       ? (isEn
-        ? `\n…… ${total - limit} more clips. Say "show the prompt for clip N" to see one.`
-        : `\n…… 其余 ${total - limit} 段：说「第 N 段的提示词」单独看。`)
+        ? `\n…… ${total - limit} more clips. Say "show the prompt for clip N" to see one, or "all prompts".`
+        : `\n…… 其余 ${total - limit} 段：说「第 N 段的提示词」单独看，或说「全部提示词」。`)
       : '';
     const missingLine = missing
       ? (isEn ? `\n(${missing} clip prompt(s) could not be read.)` : `\n（有 ${missing} 段提示词读不到。）`)
@@ -1421,21 +1442,19 @@ function tryReplyPromptView(sessionId, text, lang) {
       : `第 ${n} 段的场景卡读不到（卡库可能被替换），这条计划得重排；现在什么都没改。`;
   }
   // 英文界面的「来源」也用英文卡名（scene_key 只给中文界面）。
+  // 2026-11-21：卡名降为括注（同 tryReplyPromptView 的多段视图），主角是提示词原文。
   const cardName = seg.card
     ? (isEn ? (seg.card.protagonist_en || seg.card.scene_key) : seg.card.scene_key)
     : '';
-  const from = isEn
-    ? (seg.source === 'user-edit'
-      ? 'source: your edited text'
-      : `source: scene card ${cardName} (composed from the card)`)
-    : (seg.source === 'user-edit'
-      ? '来源：你手动改过的文本'
-      : `来源：场景卡 ${cardName}（按卡拼出）`);
   if (isEn) {
-    return `Prompt for clip ${n} (${seg.text.length} chars; ${from}):\n${seg.text}\n`
+    const from = seg.source === 'user-edit'
+      ? 'your edited text'
+      : `composed from card "${cardName}"`;
+    return `Prompt text of clip ${n} (${seg.text.length} chars; ${from}):\n${seg.text}\n`
       + 'Nothing was changed. To edit, say "change \'A\' to \'B\'", "remove \'C\'", or "use this: ...".';
   }
-  return `第 ${n} 段提示词（${seg.text.length} 字；${from}）：\n${seg.text}\n`
+  const from = seg.source === 'user-edit' ? '你手动改过' : `按场景卡「${cardName}」拼出`;
+  return `第 ${n} 段提示词原文（${seg.text.length} 字；${from}）：\n${seg.text}\n`
     + '这条计划没有改动。要改就说「把『…』改成『…』」「去掉『…』」或「用这个：……」。';
 }
 
@@ -1538,6 +1557,15 @@ function applyDiffs(sessionId, plan, text, diffs) {
 
 function replyForPlanEdit(sessionId, text, lang) {
   const isEn = i18n.normalizeLang(lang) === 'en';
+  // 2026-11-21（用户报「我说看一下提示词，它给的是场景卡的内容」）：
+  // 纯查看句（「看一下提示词 / 我要查看完整的全部12段12个场景的提示词」）在 classify 里是 plan_edit，
+  // 但入口原来直接进本函数 → 落到「要换第几段？」的编辑反问，提示词一句没贴。
+  // 这里先走只读视图（与 handleMessage 同一入口 tryReplyPromptView，幂等只读，
+  // 内含「改成/换成」拦截，不会抢编辑动作）。
+  try {
+    const viewed = tryReplyPromptView(sessionId, text, lang);
+    if (viewed) return viewed;
+  } catch (e) { /* 视图失败继续走编辑路径（行为不倒退） */ }
   const plan = memory.lastPlan(sessionId);
   if (!plan) {
     return isEn
@@ -2158,7 +2186,7 @@ function execute(opts = {}) {
     return {
       ok: true,
       alreadyDone: true,
-      state: stateMachine.summary(state),
+      state: stateMachine.summary(state, lang),
       reply: isEn ? 'This plan is already done.' : '这条计划已经完成了。',
       replyKey: 'assistant.reply.alreadyDone',
       lang
@@ -2171,7 +2199,7 @@ function execute(opts = {}) {
       code: 'ASSISTANT_ALREADY_RUNNING',
       error: `这条计划已经在执行中（${stateMachine.LABELS[state.state] || state.state}），不会重复创建任务`,
       ...i18n.mark('api.assistant.alreadyRunning'),
-      state: stateMachine.summary(state),
+      state: stateMachine.summary(state, lang),
       lang
     };
   }
@@ -2183,7 +2211,7 @@ function execute(opts = {}) {
       code: 'PAYMENT_NOT_APPROVED',
       error: `这是付费任务（预估 ¥${plan.estimate.totalCny.toFixed(2)}），需要你明确确认后才会开始`,
       ...i18n.mark('api.assistant.executeNotApproved'),
-      state: stateMachine.summary(state),
+      state: stateMachine.summary(state, lang),
       lang
     };
   }
@@ -2199,7 +2227,7 @@ function execute(opts = {}) {
         code: 'INSUFFICIENT_BUDGET',
         error: `余额不足：本次预计 $${estimateUsd.toFixed(2)}，剩余 $${st.balanceUsd.toFixed(2)}`,
         ...i18n.mark('api.tasks.insufficientBudget'),
-        state: stateMachine.summary(state),
+        state: stateMachine.summary(state, lang),
         lang
       };
     }
@@ -2211,7 +2239,7 @@ function execute(opts = {}) {
           ok: false, code: 'DUPLICATE_TASK',
           error: `重复提交已拦截：${Math.ceil(submitGuard.WINDOW_MS / 60000)} 分钟内已创建过相同任务（${dup.taskId || '未知'}）`,
           ...i18n.mark('api.tasks.duplicate'),
-          state: stateMachine.summary(state),
+          state: stateMachine.summary(state, lang),
           lang
         };
       }
@@ -2261,7 +2289,7 @@ function execute(opts = {}) {
     // 场景卡耗尽等错误回滚到 planned，并把原因记清楚
     state = stateMachine.transition(stateMachine.transition(state, 'RESET'), 'PLAN', { reason: code });
     memory.setState(sessionId, state);
-    return { ok: false, code, error: '创建任务失败：' + (e && e.message ? e.message : String(e)), state: stateMachine.summary(state) };
+    return { ok: false, code, error: '创建任务失败：' + (e && e.message ? e.message : String(e)), state: stateMachine.summary(state, lang) };
   }
 
   if (realModel && estimateUsd > 0) {
@@ -2289,14 +2317,14 @@ function execute(opts = {}) {
     }, '任务已创建但流水线启动失败：' + started.error);
     return { ok: false, code: 'ASSISTANT_START_FAILED', error: '流水线启动失败：' + started.error, taskId: task.taskId };
   }
-  startMonitor(state);
+  startMonitor(state, lang);
 
   return {
     ok: true,
     version: SUPERVISOR_VERSION,
     sessionId,
     taskId: task.taskId,
-    state: stateMachine.summary(state),
+    state: stateMachine.summary(state, lang),
     replyKey: 'assistant.reply.started',
     lang,
     reply: isEn
@@ -2310,7 +2338,7 @@ function execute(opts = {}) {
 // ==========================================
 // 监控：单定时器 / 每计划一个，幂等，可停止
 // ==========================================
-function startMonitor(state) {
+function startMonitor(state, lang) {
   const sessionId = state.sessionId;
   const planId = state.planId;
   const k = keyOf(sessionId, planId);
@@ -2325,7 +2353,10 @@ function startMonitor(state) {
     busy: false,
     stopped: false,
     ticks: 0,
-    timer: null
+    timer: null,
+    // 2026-11-21：监控消息（「还有 N 段没成功…要不要我再跑一次？」）以前写死中文，
+    // 英文界面下用户在失败环节看到的却是中文。记下令牌用户的输出语言，消息按它渲染。
+    lang: i18n.resolveLang(lang, state.lang, 'zh')
   };
   m.timer = setInterval(() => { tick(m).catch((e) => console.error('[assistant] 监控异常:', e && e.message)); }, 1000);
   if (m.timer && typeof m.timer.unref === 'function') m.timer.unref();
@@ -2352,7 +2383,7 @@ function saveState(state) {
   return state;
 }
 
-function finish(m, state, type, payload, reply) {
+function finish(m, state, type, payload, reply, replyEn) {
   let next;
   try {
     next = stateMachine.transition(state, type, payload);
@@ -2364,7 +2395,10 @@ function finish(m, state, type, payload, reply) {
   }
   saveState(next);
   stopMonitor(m.sessionId, m.planId);
-  memory.appendMessage(m.sessionId, { role: 'assistant', text: reply, kind: 'state' });
+  // 2026-11-21：英文会话用 replyEn（未提供时如实回退中文，不静默机翻）。
+  const isEn = i18n.normalizeLang(m && m.lang) === 'en';
+  const text = isEn && replyEn ? replyEn : reply;
+  memory.appendMessage(m.sessionId, { role: 'assistant', text, kind: 'state' });
   return next;
 }
 
@@ -2467,20 +2501,23 @@ async function tick(m) {
         saveState(done);
         finish(m, { ...done, state: stateMachine.STATES.FILLING }, 'COMPLETE', {
           finalTaskId: ft.taskId, reason: '补位成片完成'
-        }, `成片做好了（补位版）：${require('path').basename(String(ft.outputPath || '')) || ft.taskId}。已归入「库 · 成片」。`);
+        }, `成片做好了（补位版）：${require('path').basename(String(ft.outputPath || '')) || ft.taskId}。已归入「库 · 成片」。`,
+        `Final cut ready (with fill-in clips): ${require('path').basename(String(ft.outputPath || '')) || ft.taskId}. It is now in Library -> Finals.`);
         return;
       }
       // 补位成片 partial/failed
       finish(m, state, 'NEED_USER', {
         reason: `补位后出片${ft.status === 'completed' ? '' : '未完全成功'}（${ft.status}）：${ft.error || '见任务详情'}`,
         error: ft.error || null
-      }, `补位后还是没出成片（${ft.status}）：${ft.error || '原因见任务详情'}。需要你决定：重跑/删掉这条计划。`);
+      }, `补位后还是没出成片（${ft.status}）：${ft.error || '原因见任务详情'}。需要你决定：重跑/删掉这条计划。`,
+      `The fill-in run still produced no final cut (${ft.status}): ${ft.error || 'see the task details'}. Your call: rerun or delete this plan.`);
       return;
     }
 
     const task = taskManager.getTask(m.taskId);
     if (!task) {
-      finish(m, state, 'NEED_USER', { reason: '任务不存在（可能被删除）' }, '任务不见了（可能被删除），我停下来了。');
+      finish(m, state, 'NEED_USER', { reason: '任务不存在（可能被删除）' }, '任务不见了（可能被删除），我停下来了。',
+        'The task is gone (possibly deleted); I stopped watching it.');
       return;
     }
 
@@ -2500,7 +2537,9 @@ async function tick(m) {
           memory.appendMessage(m.sessionId, {
             role: 'assistant',
             kind: 'state',
-            text: `图出好了（${n} 张）。到「库 · 图片」抽看/通过/打回，然后点「继续生成」我再开始生成视频。`
+            text: i18n.normalizeLang(m.lang) === 'en'
+              ? `${n} images are ready. Open Library -> Photos to sample / approve / reject, then click "Continue" and I will start generating the videos.`
+              : `图出好了（${n} 张）。到「库 · 图片」抽看/通过/打回，然后点「继续生成」我再开始生成视频。`
           });
         } catch (e) {
           console.error('[assistant] 审图提醒写入失败:', e && e.message ? e.message : e);
@@ -2519,7 +2558,8 @@ async function tick(m) {
       saveState(cur);
       const file = task.outputPath ? require('path').basename(String(task.outputPath)) : '';
       finish(m, cur, 'COMPLETE', { reason: '全部片段成功，成片完成' },
-        `做好了！${task.totalClips} 段全部通过，成片 ${file || `（${task.taskId}）`}。已归入「库 · 成片」。`);
+        `做好了！${task.totalClips} 段全部通过，成片 ${file || `（${task.taskId}）`}。已归入「库 · 成片」。`,
+        `Done! All ${task.totalClips} clips passed; final cut ${file || `(${task.taskId})`}. It is now in Library -> Finals.`);
       return;
     }
 
@@ -2538,7 +2578,9 @@ async function tick(m) {
         reason: `${failed.length} 段失败：重试与补位都不可用（${f.error || '未知原因'}）`,
         error: f.error || null
       }, `还有 ${failed.length} 段没成功（#${failed.map((i) => i + 1).join('、')}）。`
-        + `重试机会用完，补位也用不了：${f.error || '没有可用素材'}。要不要我再跑一次？`);
+        + `重试机会用完，补位也用不了：${f.error || '没有可用素材'}。要不要我再跑一次？`,
+      `${failed.length} clip(s) still failed (#${failed.map((i) => i + 1).join(', ')}). `
+        + `The retries are used up and fill-ins are not available: ${f.error || 'no reusable material'}. Run it again?`);
       return;
     }
 
@@ -2547,7 +2589,8 @@ async function tick(m) {
       finish(m, cur, 'FAIL', {
         reason: `任务失败：${task.error || '上游步骤失败'}`,
         error: task.error || null
-      }, `任务失败了：${task.error || '原因见任务详情'}。`);
+      }, `任务失败了：${task.error || '原因见任务详情'}。`,
+      `The task failed: ${task.error || 'see the task details'}.`);
       return;
     }
   } finally {
@@ -2555,7 +2598,7 @@ async function tick(m) {
   }
 }
 
-function stateOf(sessionId, planId) {
+function stateOf(sessionId, planId, lang) {
   const state = memory.getState(sessionId, planId);
   if (!state) return { ok: false, code: 'ASSISTANT_NO_STATE', error: '没有这个会话的任务状态' };
   const task = state.finalTaskId ? taskManager.getTask(state.finalTaskId) : (state.taskId ? taskManager.getTask(state.taskId) : null);
@@ -2564,7 +2607,7 @@ function stateOf(sessionId, planId) {
     version: SUPERVISOR_VERSION,
     sessionId,
     planId: state.planId,
-    state: stateMachine.summary(state),
+    state: stateMachine.summary(state, lang),
     plan: briefPlan(state.plan),
     task: taskView(task),
     finalTask: state.finalTaskId ? taskView(taskManager.getTask(state.finalTaskId)) : null

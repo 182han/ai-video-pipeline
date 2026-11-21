@@ -428,6 +428,18 @@ const SUITES = [
     desc: '小智答非所问修复（无段号提示词查看/换一组整批换卡/英文 PLAN_* / 人类可读任务名；真实原话中英 + 负向 + 不建任务，零计费）'
   },
   {
+    name: 'broadcast-i18n',
+    script: 'verify-broadcast-i18n.js',
+    group: 'fast',
+    desc: '小智简报按连接语言渲染（中文逐字不变 / 英文 [Briefing]）+ 提示词≠场景卡槽位区分（真实原话 + 负向，零计费）'
+  },
+  {
+    name: 'create-page',
+    script: 'verify-create-page.js',
+    group: 'fast',
+    desc: '创作页：逐步渲染 1–5 不崩（i2vUnsupported）/ 英文提示词 / Show all 折叠口径 / 换一批（seed）/ 失败提醒与状态条英文（零计费）'
+  },
+  {
     name: 'budget-uncertain',
     script: 'verify-budget-uncertain.js',
     group: 'fast',

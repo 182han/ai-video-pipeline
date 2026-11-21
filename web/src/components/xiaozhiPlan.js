@@ -16,7 +16,7 @@
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useEffect, useRef, useState } = React;
-import { t as tr } from '../i18n/index.js';
+import { t as tr, getLocale } from '../i18n/index.js';
 
 const money = (n) => (Number(n) > 0 ? `¥${Number(n).toFixed(2)}` : '¥0');
 
@@ -163,6 +163,21 @@ export function StateStrip({ state, task, onOpenTask }) {
   // 也不能让它跟普通暂停（failureCode=pause_*）混在一起。
   const awaiting = !!(task && task.awaitingImageReview === true);
   const tone = awaiting ? 'text-warn' : (STATE_TONE[state.state] || 'text-ink2');
+  // 2026-11-21：状态名按界面语言本地化。服务端现在给 labelKey（xiaozhi.state.<state>）
+  // 并按连接语言给 label；这里优先 labelKey（前端 catalog），其次服务端 label，最后原 state。
+  // 注意用 tr() 的返回值而不是 has()：tr 缺词条会回退**中文**，英文界面就会看到「需要你决定」。
+  // 所以校验「当前语言」是否有该词条：用 getLocale 判断，缺失就直接用服务端已本地化的 label。
+  const stateLabel = (() => {
+    const key = state.labelKey || ('xiaozhi.state.' + state.state);
+    const localized = tr(key);
+    const serverHasEn = state.label && /[A-Za-z]/.test(String(state.label));
+    if (localized === key) {
+      // 前端 catalog 没有这个状态：用服务端的 label（已按连接语言给），但英文界面下若服务端仍给中文则保持原文（不静默）
+      return state.label || state.state;
+    }
+    if (String(getLocale()).startsWith('en') && /[\u4e00-\u9fff]/.test(String(localized)) && serverHasEn) return state.label;
+    return localized;
+  })();
   const parts = [];
   if (state.retryAllowed !== undefined) parts.push(tr('xiaozhi.state.retry', { n: state.retries || 0, max: state.retryAllowed }));
   if (state.fillAllowed !== undefined) parts.push(tr('xiaozhi.state.fill', { n: state.fills || 0, max: state.fillAllowed }));
@@ -170,7 +185,7 @@ export function StateStrip({ state, task, onOpenTask }) {
   return html`
     <div className="rounded-[8px] border border-white/[.08] bg-white/[.03] px-2.5 py-2">
       <div className="flex items-center gap-2">
-        <span className=${'text-[11px] font-medium ' + tone}>${awaiting ? tr('xiaozhi.state.awaiting') : (state.label || state.state)}</span>
+        <span className=${'text-[11px] font-medium ' + tone}>${awaiting ? tr('xiaozhi.state.awaiting') : stateLabel}</span>
         ${task && task.currentStep && html`<span className="text-[10px] text-ink3 truncate">${task.currentStep}</span>`}
         <span className="flex-1"></span>
         ${task && task.taskId && onOpenTask && html`

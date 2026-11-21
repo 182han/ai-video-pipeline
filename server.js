@@ -2690,7 +2690,7 @@ app.get('/api/assistant/state', (req, res) => {
     });
   }
   try {
-    res.json(assistantSupervisor.stateOf(sessionId, req.query.planId ? String(req.query.planId) : null));
+    res.json(assistantSupervisor.stateOf(sessionId, req.query.planId ? String(req.query.planId) : null, req.lang));
   } catch (e) {
     res.json({ ok: false, code: 'ASSISTANT_ERROR', error: e.message });
   }
@@ -3412,12 +3412,21 @@ app.get('/api/scene-cards', (req, res) => {
 // 返回每段的视频提示词 / 图片提示词 / 参数化调色，供「① 时长+场景卡 ② 提示词 ③ 出图」使用。
 app.get('/api/scene-cards/preview', (req, res) => {
   const count = Math.max(1, Math.min(180, parseInt(req.query.count, 10) || 10));
+  // 2026-11-21 用户报「英文模式下创作页场景卡提示词仍是中文」：
+  // 语言原来只从 cookie/Accept-Language 推断，cookie 丢了（或切换语言后 v1 cookie 尚未写回）就静默回中文。
+  // 现在显式参数 ?lang=en 优先（值可以是 en / 中文 / zh-CN，走 i18n.normalizeLang），
+  // 缺省时与原口径完全一致（cookie → Accept-Language → zh）。
+  const lang = i18n.normalizeLang(req.query.lang) || req.lang;
   try {
     const promptComposer = require('./src/promptComposer');
     // 2026-11-17 V1 遗留 ②：本接口注释写着「只读、不持久化」，但 allocate() 默认
     // recordCooling=true，点一次「看场景卡」就消耗一次最近 3 个计划的冷却窗口。
     // 预览不是真实排计划，必须显式关闭冷却写入。
-    const plan = sceneCardLibrary.allocate(count, { recordCooling: false });
+    // 2026-11-21：同一按钮可「换一批」——传 ?seed=xxx 时用固定序列（可复现），不传则每次随机。
+    const seed = req.query.seed !== undefined && String(req.query.seed).trim() !== ''
+      ? String(req.query.seed).trim().slice(0, 64)
+      : undefined;
+    const plan = sceneCardLibrary.allocate(count, { recordCooling: false, seed });
     const cards = plan.used.map((entry, i) => {
       const card = sceneCardLibrary.getCardById(entry.id);
       if (!card) {
@@ -3427,11 +3436,11 @@ app.get('/api/scene-cards/preview', (req, res) => {
       }
       // 2026-11-19 英文界面零中文：把本次请求语言透传给 composer（英文时 prompt/imagePrompt/
       // negativePrompt 走 *_en 字段），卡名同理给英文界面 protagonist_en。
-      const patch = promptComposer.composeClipPatch(card, { lang: req.lang });
+      const patch = promptComposer.composeClipPatch(card, { lang });
       return {
         index: i,
         id: card.id,
-        sceneKey: req.lang === 'en'
+        sceneKey: lang === 'en'
           ? (card.protagonist_en || card.scene_key)
           : card.scene_key,
         // 加法式：保留原中文键，供审计/中文界面与 sceneKey 对照（旧字段语义不变）。
@@ -3443,10 +3452,12 @@ app.get('/api/scene-cards/preview', (req, res) => {
         paletteId: card.palette_id || null,
         prompt: patch.prompt,
         imagePrompt: patch.imagePrompt,
-        adjust: patch.adjust || null
+        adjust: patch.adjust || null,
+        // 加法式：本次提示词实际语言，便于前端/排查确认「英文界面拿到的确实是英文」
+        promptLanguage: patch.promptLanguage || (lang === 'en' ? 'en' : 'zh')
       };
     });
-    res.json({ ok: true, count: cards.length, cards });
+    res.json({ ok: true, count: cards.length, lang, cards });
   } catch (e) {
     res.status(e && e.code === 'SCENE_CARDS_EXHAUSTED' ? 400 : 503).json({
       ok: false,

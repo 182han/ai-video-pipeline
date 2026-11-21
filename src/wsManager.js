@@ -5,6 +5,16 @@
 const { WebSocketServer } = require('ws');
 // P2：连接级语言从握手 cookie 解析；事件只新增可选 lang / key / params，既有字段不变。
 const i18n = require('./i18n');
+// 2026-11-21：简报按连接语言渲染（broadcast.render 是纯函数）。
+// **必须延迟 require**：taskManager → wsManager → broadcast → taskManager 是一条已存在的环，
+// 在模块顶层 require broadcast 会让 broadcast 在环里先拿到**未完成**的 taskManager
+// （verify-assistant 实测报 `taskManager.getAllTasks is not a function`）。
+// 改成首次使用时再取，环解开。
+let _assistantBroadcastModule = null;
+function assistantBroadcastModule() {
+  if (!_assistantBroadcastModule) _assistantBroadcastModule = require('./assistant/broadcast');
+  return _assistantBroadcastModule;
+}
 
 class WebSocketManager {
   constructor() {
@@ -143,16 +153,22 @@ class WebSocketManager {
   // 因此不查 taskSubscriptions，直接推给全部 OPEN 连接。
   // 前端 WS 客户端在 i18n 提交后接入（本轮未集成，属未验证路径）。
   // ==========================================
+  // 2026-11-21：简报按**连接语言**渲染（英文连接收 textEn，中文连接原样）。
+  // 以前只有一份中文 text 广播给所有人 → 英文界面必然看到中文简报（用户反馈）。
+  // render 是纯函数；payload 结构/去重/节流均不变，只多做一次逐连接文本渲染。
   broadcastAssistant(payload) {
     if (!payload || typeof payload !== 'object') return 0;
     let count = 0;
     for (const [clientId, ws] of this.clients) {
       if (ws && ws.readyState === 1) { // OPEN
         try {
+          const lang = this.clientLang.get(clientId) || i18n.DEFAULT_LANG;
+          let out = payload;
+          try { out = assistantBroadcastModule().render(payload, lang); } catch (e) { out = payload; }
           ws.send(JSON.stringify({
-            ...payload,
-            type: payload.type || 'assistantBroadcast',
-            lang: this.clientLang.get(clientId) || i18n.DEFAULT_LANG
+            ...out,
+            type: out.type || 'assistantBroadcast',
+            lang
           }));
           count += 1;
         } catch (e) { /* 单个客户端失败不影响其它人 */ }

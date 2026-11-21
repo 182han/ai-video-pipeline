@@ -202,8 +202,15 @@ async function main() {
   const serverSrc = fs.readFileSync(path.join(APP_DIR, 'server.js'), 'utf8');
   const prevStart = serverSrc.indexOf("app.get('/api/scene-cards/preview'");
   const prevBlock = prevStart === -1 ? '' : serverSrc.slice(prevStart, prevStart + 2000);
+  // ② 预览不写冷却。2026-11-21：新增 seed（「换一批」）后调用形态是
+  //    allocate(count, { recordCooling: false, seed })，断言改为「同一对象参数里含 recordCooling:false」，
+  //    并新增负向断言：任何 allocate 调用都不得出现 recordCooling: true。
+  const allocCalls = (prevBlock.match(/sceneCardLibrary\.allocate\([^)]*\)/g) || []);
   ok('② /api/scene-cards/preview 的 allocate 显式 recordCooling:false（点一次预览不再消耗冷却窗口）',
-    /sceneCardLibrary\.allocate\(count,\s*\{\s*recordCooling:\s*false\s*\}\)/.test(prevBlock));
+    allocCalls.length > 0 && allocCalls.every((c) => /recordCooling:\s*false/.test(c) && !/recordCooling:\s*true/.test(c)),
+    allocCalls.join(' | '));
+  ok('②b /api/scene-cards/preview 支持 ?seed=（换一批）且 lang 走显式参数',
+    /req\.query\.seed/.test(prevBlock) && /i18n\.normalizeLang\(req\.query\.lang\)/.test(prevBlock));
 
   // ③ Key 口径：必须说明是「服务端环境变量」，并提示设置页 Key 小智看不到
   const keyLegacy = supervisor.handleMessage({ sessionId: 's_v2_legacy_key', text: 'WhaleTV 的 Key 配了吗' });

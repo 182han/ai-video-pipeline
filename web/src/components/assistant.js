@@ -14,12 +14,12 @@ import { promptBus, readLLMConfig, readRuntimeConfig } from '../store.js';
 import { navigate, currentRoute } from '../router.js';
 import { createOrb } from './assistantOrb.js';
 import { PlanCard, StateStrip, GreetingBubble, VoiceButton, ImageReviewCard } from './xiaozhiPlan.js';
-import { t as tr } from '../i18n/index.js';
+import { t as tr, getLocale } from '../i18n/index.js';
 // 小智 2.0 V2 前端集成（2026-11-17）：
 //   · assistantBroadcast：任务播报 WS 客户端（eventId 去重 / 退避重连 / 卸载关闭）；
 //   · assistantContext：GET /api/assistant/context 只读环境小卡片（页面上报 + Key 只报有/无）；
 //   · assistantRepair：失败诊断「一键修复」与 B6「设置变更确认」（确认门都在组件内）。
-import { connectAssistantBroadcast } from './assistantBroadcast.js';
+import { connectAssistantBroadcast, briefText } from './assistantBroadcast.js';
 import { AssistantContextCard, fetchAssistantContext, contextPageParam } from './assistantContext.js';
 import { RepairCard, PendingChangeCard, executableRepairs } from './assistantRepair.js';
 
@@ -274,9 +274,13 @@ export function Assistant({ page = false } = {}) {
   // 同时刷新环境卡片；组件卸载时 close()（清定时器 + 断开连接）。
   useEffect(() => {
     if (!page || !backend.ok) return undefined;
+    // 2026-11-21：英文界面用小智简报的英文版（服务端按连接语言给 textEn；
+    // 这里再按前端当前语言兜一次，切换语言后无需重连也能出英文）。
     const client = connectAssistantBroadcast({
       onBrief: (brief) => {
-        const text = brief && typeof brief.text === 'string' ? brief.text.trim() : '';
+        let text = '';
+        try { text = briefText(brief, getLocale()) || ''; } catch (e) { text = ''; }
+        text = String(text || '').trim();
         if (!text) return;
         setMsgs((m) => [...m, { role: 'system', content: text }]);
         if (refreshContextRef.current) refreshContextRef.current();

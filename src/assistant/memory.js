@@ -301,12 +301,51 @@ const RE_PROMPT_VIEW_VERB = /给我看|看一下|看下|看看|贴一下|贴出�
 const RE_PROMPT_BARE_VIEW = /^(?:那|还有|这个|那个|然后)?\s*(?:提示词|画面内容)\s*(?:呢|啊|呀|嘛|吧)?\s*[？?]?$/;
 const RE_PROMPT_SET_VERB = /(?:提示词|画面内容)\s*(?:改成|换成|改为|写成|[:：])/;
 
+// 2026-11-21 用户反馈：「我说看一下提示词，它给的是场景卡的内容」。
+// 实测根因（本机 node 复现）：用户真实原话
+//   「我要查看完整的全部12段12个场景的提示词」「我要查看完整的全部12段12个场景的场景卡」
+// 里都有「场景」但不带疑问词，RE_PLAN_SCENES 全不命中；
+//   · 带「提示词」的那句因为没有任何查看动词（查看/全部 不在词表）直接掉到 unknown；
+//   · **两句都被 RE_CREATE 的「段」抢成 create**（`12 段` 命中 `(?:分钟|小时|秒|段)`），
+//     于是小智把「我要看提示词」当成「重新排一条 12 段的计划」→ 回了一张新计划卡
+//     （计划卡的「场景：场景卡库随机抽取 12 个不同场景」看起来就像在讲场景卡）。
+// 修法（两条，都只作用于**查看**形态，改动句/排计划句不受影响）：
+//   ① 查看动词词表补上「查看 / 看 / 全部 / 完整 / 所有 / 发一下 / 给我」等真实说法；
+//   ② **「提示词」+ 任意查看形态** 先于 create/plan_scenes 归入 plan_edit（supervisor 的
+//      tryReplyPromptView 会接住并贴原文）；只带「场景」不带「提示词」的查看句
+//      （「全部12段…的场景卡」）归入 plan_scenes。
+const RE_PROMPT_VIEW_STRONG = /提示词|画面内容|\bprompts?\b/i;
+// 仅「改动动词」（不含「提示词」本身，否则「第 2 段的提示词」会被误判成编辑）。
+const RE_SEGMENT_CHANGE_VERB = /改成|换成|改为|写成|换掉|换一|换张|换一个|换一张|重换|替换|不想要|不满意|不要按卡|调整|change|replace|rewrite|\bset\b/i;
+const RE_VIEW_ANY = /查看|看一下|看下|看看|看一|瞧一眼|给我|发我|发一下|贴一下|贴出来|贴出|显示|念一下|读一下|是什么|是啥|全部|所有|完整|每一?段|每一条?|\ball\b|\bshow\b|\bsee\b|\bdisplay\b|\blist\b|\bgive me\b|\bwhat(?:'s| is)\b/i;
+
 function isPromptViewRequest(text) {
   const s = String(text || '');
   if (RE_PROMPT_BARE_VIEW.test(s.trim())) return true;
+  if (RE_PROMPT_SET_VERB.test(s)) return false; // 改提示词不是查看
+  // ① 「提示词」+ 任意查看形态（2026-11-21 补；旧词表漏掉了「查看/全部/完整/所有」与英文说法）
+  if (RE_PROMPT_VIEW_STRONG.test(s) && RE_VIEW_ANY.test(s)) return true;
+  // ② 「第 N 段的提示词」：带段号的裸名词，没有**改动动词** = 只读查看（用户真实说法）。
+  //    注意不能用 RE_SEGMENT_EDIT：它含「提示词」本身（那是编辑宾语），这里只看动词。
+  if (RE_SEGMENT_REF.test(s) && /提示词|画面内容/i.test(s) && !RE_SEGMENT_CHANGE_VERB.test(s)) return true;
   if (!RE_PROMPT_VIEW_NOUN.test(s)) return false;
   if (!RE_PROMPT_VIEW_VERB.test(s)) return false;
-  if (RE_PROMPT_SET_VERB.test(s)) return false;
+  return true;
+}
+
+// 「场景」宾语 + 查看形态、且没有疑问词（疑问词的走 RE_PLAN_SCENES 的 plan_scenes 路径）。
+// 用于「我要查看完整的全部12段12个场景的场景卡」这类被 create 抢走的句子。
+// 注意：RE_SCENE_ACTION 在这里**不用**——它的「换/改」会误伤「我要查看…」里的「要」，
+// 编辑动作单独用 RE_SCENE_EDIT_VERB 判。
+const RE_SCENE_EDIT_VERB = /不满意|换一个|换一张|换个|换掉|换成|重抽|重新抽|要求?改/;
+function isSceneTableViewRequest(text) {
+  const s = String(text || '');
+  if (!/场景|\bscenes?\b|\bcards?\b/i.test(s)) return false;
+  if (!RE_VIEW_ANY.test(s)) return false;
+  if (/swap|change|replace|not happy|unsatisfied/i.test(s)) return false;
+  if (RE_SCENE_EDIT_VERB.test(s)) return false;              // 换卡/改场景是编辑，不是查看
+  if (RE_TOTAL_DURATION.test(s)) return false;               // 带总时长 = 排计划
+  if (/\d+\s*(?:minutes?|mins?|hours?|hrs?)/i.test(s)) return false;
   return true;
 }
 // 2026-11-17 小智 2.0 V1（设计定稿 §9.1-1）：plan_edit 的**第 4 个入口**。
@@ -411,7 +450,13 @@ function classify(text) {
   // 且句子**同时给出总时长**时先排计划（create）——否则「20 秒的…把场景卡给我看一下」
   // 会被「场景卡」抢成只读预览，时长信号被静默丢弃（E0 唯一一条真有信号损失的多命中）。
   if (isPlanScenesQuery(s) && RE_TOTAL_DURATION.test(s)) return { intent: 'create' };
+  // 2026-11-21：带「提示词」的查看句先于「查场景」——用户要的是提示词原文，不是卡清单。
+  // （「场景卡…的提示词」这种混说归提示词；supervisor 贴原文时已注明来源卡。）
+  if (isPromptViewRequest(s) && !RE_PROMPT_SET_VERB.test(s)) return { intent: 'plan_edit' };
   if (isPlanScenesQuery(s)) return { intent: 'plan_scenes' };
+  // 2026-11-21：「我要查看完整的全部12段12个场景的场景卡」这类没有疑问词的查看句，
+  // 旧逻辑会被 create（12 段）抢走 → 回一张新计划卡。这里先归 plan_scenes（只读列卡）。
+  if (isSceneTableViewRequest(s)) return { intent: 'plan_scenes' };
   if (RE_NO_IMAGE.test(s)) return { intent: 'no_image' };
   // 2026-11-17 V1（§9.1-6）：确认问句必须排在最前（RE_CREATE 的「生成」会把它抢成排计划）。
   // 注意顺序：放在 plan_edit/bgm/create 之前，但仍在「查场景 / 不要出图」之后。
@@ -469,10 +514,12 @@ function traceMatches(text) {
   add('last', RE_LAST.test(s));
   // 2026-11-19 D2：时长信号优先于「看场景卡」（与 classify 的分支顺序一致）。
   add('create', isPlanScenesQuery(s) && RE_TOTAL_DURATION.test(s));
+  // 2026-11-21：与 classify 同序——提示词查看句 / 场景查看句都排在 plan_scenes 与 create 之前。
+  add('plan_edit:promptView', isPromptViewRequest(s) && !RE_PROMPT_SET_VERB.test(s));
   add('plan_scenes', isPlanScenesQuery(s));
+  add('plan_scenes:view', isSceneTableViewRequest(s));
   add('no_image', RE_NO_IMAGE.test(s));
   add('confirm', isConfirmRequest(s));
-  add('plan_edit:promptView', isPromptViewRequest(s));
   add('plan_edit:promptSet', RE_PROMPT_SET_VERB.test(s));
   add('plan_edit:segment',
     (RE_SEGMENT_REF.test(s) && RE_SEGMENT_EDIT.test(s))

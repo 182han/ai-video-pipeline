@@ -14,11 +14,20 @@
 // ============================================================
 import { navigate } from '../router.js';
 import { readRuntimeConfig } from '../store.js';
-import { t as tr } from '../i18n/index.js';
+import { t as tr, getLocale, subscribe as subscribeLocale } from '../i18n/index.js';
 
 const { React } = window;
 const html = window.htm.bind(React.createElement);
 const { useState, useEffect } = React;
+
+// 2026-11-21：把界面语言显式带给服务端（?lang=en）。
+// 以前只靠 cookie/Accept-Language 推断，英文界面下拿到中文提示词时无从排查；
+// 现在请求带参数、响应回显 lang + 每段 promptLanguage，链路是确定的。
+function uiLang() { try { return String(getLocale() || 'zh').slice(0, 2); } catch (e) { return 'zh'; } }
+// 随机种子（「换一批」用）：服务端 allocate(seed) 是确定序列，同一 seed 可复现。
+function makeSeed() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+// 判提示词是否含中文（CJK）。英文界面下若服务端给了中文提示词，就在这里兜底重新取。
+const CJK_RE = /[\u4e00-\u9fff]/;
 
 const RES = [
   { key: '480p', label: '480P', rate: 0.3 },
@@ -97,12 +106,35 @@ export function CreateSmartWizard() {
   const [libPhotos, setLibPhotos] = useState([]);
   const [libBusy, setLibBusy] = useState('');
   const [showAll, setShowAll] = useState(false);
+  // 2026-11-21：「换一批」= 起一个新种子重新抽卡（只读预览，不占卡、不建任务、不花钱）。
+  const [seed, setSeed] = useState(() => (draft0 && draft0.seed ? draft0.seed : ''));
 
   // 真的动过才落盘（避免一进来就写空草稿，害得下次永远显示「已恢复」）
   useEffect(() => {
     if (step <= 1 && prompts.length === 0 && photos.length === 0) return;
-    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, at: new Date().toISOString() });
-  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model]);
+    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed, at: new Date().toISOString() });
+  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed]);
+
+  // 2026-11-21 用户报「英文模式下提示词仍是中文」：草稿里的提示词是**上一语言**时留下的
+  // （切换语言后草稿照旧恢复中文文案）。语言变了就把提示词按当前语言重新取一遍——
+  // 只重算提示词，不重新抽卡（卡里已排除的被排除项会被重置，可接受：提示词跟着卡走）。
+  useEffect(() => {
+    return subscribeLocale(() => {
+      if (!Array.isArray(cards) || !cards.length) return;
+      const ids = cards.map((c) => c.id);
+      fetch('/api/scene-cards/preview?count=' + ids.length + '&lang=' + encodeURIComponent(uiLang()), { credentials: 'same-origin' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (!j || j.ok !== true || !Array.isArray(j.cards)) return;
+          const fresh = j.cards.filter((c) => ids.includes(c.id));
+          if (!fresh.length) return;
+          setCards(j.cards);
+          setPrompts(j.cards.map((c) => c.prompt));
+          setImagePrompts(j.cards.map((c) => c.imagePrompt));
+        })
+        .catch(() => { /* 失败保持原样，不打断编辑 */ });
+    });
+  }, [cards]);
 
   function restart() {
     if (!window.confirm(tr('createSmart.restartConfirm'))) return;
@@ -110,6 +142,7 @@ export function CreateSmartWizard() {
     setStep(1); setMinutes('5'); setClipDur(10); setCards(null);
     setPrompts([]); setImagePrompts([]); setPhotos([]); setRes('720p');
     setTransition(true); setBgm(true); setRestored(false); setErr(''); setInfo(''); setShowAll(false);
+    setSeed('');
   }
 
   const totalSec = Math.max(1, Math.round((parseFloat(minutes) || 0) * 60));
@@ -126,6 +159,22 @@ export function CreateSmartWizard() {
   const effectiveModel = model;
   const MODEL_LABEL = { 'openai-video': 'settings.group.whaletv', dashscope: 'settings.group.dashscope' };
   const modelLabel = (k) => (MODEL_LABEL[k] ? tr(MODEL_LABEL[k]) : k);
+
+  // i2vUnsupported：2026-11-21 用户报「创作页整块崩：i2vUnsupported is not defined」。
+  // 根因：步骤④/⑤ 的按钮直接引用了一个从未声明的变量（React 渲染时抛 ReferenceError，
+  // 被 ErrorBoundary 兜成「This block failed to render」），**整页创作向导都打不开**。
+  // 语义（不得静默降级）：只有「要用图生视频」且当前通道**不在服务端 i2v 能力表里**时才禁用并说明原因；
+  // 纯文生视频（没选图 / 选了图但不用）永远不禁用。能力表来自 /api/image-gen/status 的 i2vModels。
+  const [i2vModels, setI2vModels] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/image-gen/status', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j && Array.isArray(j.i2vModels)) setI2vModels(j.i2vModels.map(String)); })
+      .catch(() => { /* 读不到就不禁用，提交时由服务端再校验（服务端有硬校验） */ });
+    return () => { alive = false; };
+  }, []);
+  const i2vUnsupported = !!(useImages && i2vModels.length && !i2vModels.includes(effectiveModel));
 
   // 从图片库按段选图（2026-11-16 用户要求）：复用已付费的图，不重新出图、不重复计费
   async function openPicker() {
@@ -154,19 +203,49 @@ export function CreateSmartWizard() {
     setPhotos((ps) => [...ps, { id: p.id, url: p.url, status: 'approved', paid: false, label: p.label || '' }]);
   }
 
-  async function loadCards() {
+  // 取一批场景卡（只读预览：不占卡、不建任务、不花钱）。
+  // mode: 'new'     第一次进①点「看场景卡」→ 新种子（每次不同）
+  //       'reshuffle' 已有一批 → 「换一批」（新种子）
+  //       'refresh'   已有卡、只重算提示词（换语言）→ 沿用当前种子
+  async function loadCards(mode = 'new') {
     if (tooMany) { setErr(tr('createSmart.errors.tooMany', { n: clips })); return; }
-    setErr(''); setBusy('cards');
+    const nextSeed = mode === 'refresh' ? (seed || '') : makeSeed();
+    setErr(''); setBusy(mode === 'reshuffle' ? 'reshuffle' : 'cards');
     try {
-      const r = await fetch('/api/scene-cards/preview?count=' + clips, { credentials: 'same-origin' });
+      const qs = '/api/scene-cards/preview?count=' + clips
+        + '&lang=' + encodeURIComponent(uiLang())
+        + (nextSeed ? '&seed=' + encodeURIComponent(nextSeed) : '');
+      const r = await fetch(qs, { credentials: 'same-origin' });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
         throw new Error((j && (j.error || j.code)) || ('HTTP ' + r.status)
           + tr('createSmart.errors.card404'));
       }
-      setCards(j.cards || []);
-      setPrompts((j.cards || []).map((c) => c.prompt));
-      setImagePrompts((j.cards || []).map((c) => c.imagePrompt));
+      let cards = j.cards || [];
+      let promptList = cards.map((c) => c.prompt);
+      let imageList = cards.map((c) => c.imagePrompt);
+      // 2026-11-21 兜底：英文界面却拿到中文提示词（服务端旧版本 / cookie 丢）→ 用返回的 id 重新取一次。
+      // 只做一次，失败就如实显示（不静默冒充英文）。
+      if (uiLang() === 'en' && promptList.length && promptList.some((p) => CJK_RE.test(String(p || '')))) {
+        try {
+          const r2 = await fetch('/api/scene-cards/preview?count=' + cards.length
+            + '&lang=en&seed=' + encodeURIComponent(nextSeed || 'en-fallback'), { credentials: 'same-origin' });
+          const j2 = await r2.json().catch(() => null);
+          if (j2 && j2.ok === true && Array.isArray(j2.cards)) {
+            const byId = new Map(j2.cards.map((c) => [c.id, c]));
+            const remapped = cards.map((c) => byId.get(c.id)).filter(Boolean);
+            if (remapped.length === cards.length) {
+              cards = remapped;
+              promptList = cards.map((c) => c.prompt);
+              imageList = cards.map((c) => c.imagePrompt);
+            }
+          }
+        } catch (e) { /* 兜底失败：保留服务端原样 */ }
+      }
+      setSeed(nextSeed);
+      setCards(cards);
+      setPrompts(promptList);
+      setImagePrompts(imageList);
       setStep(2);
     } catch (e) { setErr(tr('createSmart.errors.readCards') + e.message); }
     finally { setBusy(''); }
@@ -305,7 +384,7 @@ export function CreateSmartWizard() {
             ${tr('createSmart.step1.resNote', { res })}
           </p>
           <div className="mt-4 flex gap-2">
-            <${Btn} primary=${true} disabled=${busy === 'cards' || tooMany} onClick=${loadCards}>
+            <${Btn} primary=${true} disabled=${busy === 'cards' || tooMany} onClick=${() => loadCards('new')}>
               ${busy === 'cards' ? tr('createSmart.step1.reading') : tr('createSmart.step1.viewCards', { n: clips })}
             </${Btn}>
           </div>
@@ -313,12 +392,19 @@ export function CreateSmartWizard() {
 
       ${step === 2 && html`
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="text-[12px] text-ink2">${tr('createSmart.step2.promptTitle')}</span>
             <span className="text-[10px] text-ink3">${tr('createSmart.step2.totalClips', { n: prompts.length })}</span>
             <span className="flex-1"></span>
-            <${Btn} onClick=${() => setShowAll(!showAll)}>${showAll ? tr('createSmart.step2.collapse') : tr('createSmart.step2.showAll')}</${Btn}>
+            ${cards && cards.length ? html`<span className="text-[10px] text-ink3" title=${tr('createSmart.step2.seedTitle')}>${tr('createSmart.step2.seedLabel', { seed: seed ? seed.slice(-4) : '—' })}</span>` : ''}
+            <${Btn} disabled=${busy === 'reshuffle'} onClick=${() => loadCards('reshuffle')}>
+              ${busy === 'reshuffle' ? tr('createSmart.step2.reshuffling') : tr('createSmart.step2.reshuffle')}
+            </${Btn}>
+            ${prompts.length > 12 && html`<${Btn} onClick=${() => setShowAll(!showAll)}>
+              ${showAll ? tr('createSmart.step2.collapse') : tr('createSmart.step2.showAll', { n: prompts.length })}
+            </${Btn}>`}
           </div>
+          ${prompts.length > 12 && html`<p className="text-[10px] text-ink3 mb-2">${tr('createSmart.step2.showAllHint', { shown: 12, total: prompts.length })}</p>`}
           ${list.map((p, i) => html`
             <div key=${i} className="border-t border-white/[.05] py-2">
               <div className="flex items-center gap-2 mb-1">
@@ -330,7 +416,11 @@ export function CreateSmartWizard() {
                 onInput=${(e) => { const v = e.target.value; setPrompts((arr) => arr.map((x, k) => (k === i ? v : x))); }}
                 className="w-full resize-y rounded-[5px] bg-s2 text-[12px] text-ink border border-white/[.12] px-2 py-1.5 outline-none leading-[1.7]"></textarea>
             </div>`)}
-          ${!showAll && prompts.length > 12 && html`<p className="mt-2 text-[11px] text-ink3">${tr('createSmart.step2.hidden', { n: prompts.length - 12 })}</p>`}
+          ${!showAll && prompts.length > 12 && html`
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[11px] text-ink3">${tr('createSmart.step2.hidden', { n: prompts.length - 12 })}</span>
+              <button onClick=${() => setShowAll(true)} className="h-6 px-2 rounded-[4px] text-[11px] text-accent border border-accent/40 hover:bg-accent/[.08]">${tr('createSmart.step2.showAll', { n: prompts.length })}</button>
+            </div>`}
           <div className="mt-4 flex gap-2">
             <${Btn} onClick=${() => setStep(1)}>${tr('createSmart.step2.prev')}</${Btn}>
             <${Btn} primary=${true} onClick=${() => setStep(3)}>${tr('createSmart.step2.next')}</${Btn}>
@@ -389,6 +479,9 @@ export function CreateSmartWizard() {
             ${effectiveModel === 'openai-video'
               ? html`${tr('createSmart.step4.i2vWhalePrefix')}<b className="text-ink2">${tr('createSmart.step4.i2vWhaleBold')}</b>${tr('createSmart.step4.i2vWhaleSuffix')}`
               : html`${tr('createSmart.step4.i2vBailianPrefix')}<b className="text-ink2">${tr('createSmart.step4.i2vBailianBold')}</b>${tr('createSmart.step4.i2vBailianSuffix')}`}
+          </p>`}
+          ${useImages && i2vUnsupported && html`<p className="text-[11px] text-danger mb-3">
+            ${tr('createSmart.errors.i2vUnsupported', { model: modelLabel(effectiveModel), models: i2vModels.join(' / ') || tr('createSmart.errors.noModels') })}
           </p>`}
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="text-[12px] text-ink3">${tr('createSmart.step4.resolution')}</label>

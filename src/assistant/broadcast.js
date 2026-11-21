@@ -26,13 +26,31 @@ const taskManager = require('../taskManager');
 const preferences = require('./preferences');
 const diagnose = require('./diagnose');
 const { redactText } = require('./redact');
+const i18n = require('../i18n');
 
 const BROADCAST_VERSION = 'assistant-broadcast.v1';
 const BRIEF_PREFIX = '【小智简报】';
+// 2026-11-21 用户反馈：英文界面下简报仍是中文（「【小智简报】新建：task_…」）。
+// 根因：简报以前在**服务端生成一份中文 text**再广播给所有人，只有一个版本。
+// 修法：事件照旧只收集一次（去重/节流不变），**按连接语言渲染**（render(payload, lang)），
+// 英文连接拿英文 textEn，中文连接拿原中文 text（中文逐字不变）。
+const BRIEF_PREFIX_EN = '[Briefing]';
 const MAX_ITEMS = 8;
 const RING_CAP = 200;
 const BUFFER_CAP = 50;
 const SEEN_CAP = 2000;
+
+// 下一步（失败简报的「建议」）英文：只翻译系统建议，不翻用户内容与错误原文。
+const ADVICE_EN = Object.freeze({
+  continue: 'Continue from the failed clips (done clips are reused, not regenerated)',
+  switch_model: 'Switch to a channel that supports image-to-video',
+  fix_key: 'Fill in the API key under Settings -> Video generation',
+  wait: 'Retry in a few minutes (the rate limit is not bad data)',
+  topup: 'Top up / reconcile the budget first',
+  lower_resolution: 'Lower the resolution (1080p -> 720p)',
+  review_photos: 'Review the photos in Library -> Photos, then press "Continue"',
+  inspect: 'Open the task details and check the last failed step'
+});
 
 const ACTIVE_STATUS = new Set([
   'pending', 'generating', 'concatenating', 'looping', 'transcoding',
@@ -112,15 +130,25 @@ function pushEvent(events, node, task) {
   events.push({ eventId, node, taskId: task.taskId, status: task.status || null, task, at: new Date().toISOString() });
 }
 
+// 节点 → 中文标签 / 英文标签（中文词表逐字不变）。
+const NODE_LABELS = Object.freeze({
+  task_created: '新建',
+  task_started: '开始',
+  task_failed: '失败',
+  task_completed: '完成'
+});
+const NODE_LABELS_EN = Object.freeze({
+  task_created: 'created',
+  task_started: 'started',
+  task_failed: 'failed',
+  task_completed: 'completed'
+});
+
 function nodeLabel(node) {
-  return ({
-    task_created: '新建',
-    task_started: '开始',
-    task_failed: '失败',
-    task_completed: '完成'
-  })[node] || node;
+  return NODE_LABELS[node] || node;
 }
 
+// 中文条目（逐字保持 2026-11-17 起的原样）。
 function itemLine(evt) {
   const t = evt.task || {};
   if (evt.node === 'task_failed') {
@@ -140,16 +168,78 @@ function itemLine(evt) {
   return `· 新建：${t.taskId}（${t.model || '未知模型'} · ${t.totalClips || 0} 段）`;
 }
 
-function buildPayload(events) {
-  // events 顺序 = taskManager.getAllTasks() 顺序（新的在前）；简报先列最新节点。
-  const items = events.slice(0, MAX_ITEMS).map((e) => ({
+// 英文条目：taskId / 模型 id / 文件名 / 错误原文属「内容」，原样保留；
+// 只翻译包裹文字、状态步骤名（有 i18n key 时）与系统建议。
+function itemLineEn(evt, seen) {
+  const t = evt.task || {};
+  const step = (s) => {
+    const key = s ? i18n.keyForText(String(s)) : null;
+    return key ? i18n.t('en', key) : (s || 'running');
+  };
+  if (evt.node === 'task_failed') {
+    let d = null;
+    try { d = diagnose.diagnose(t); } catch (e) { d = null; }
+    const reason = d && d.reasons && d.reasons.length ? d.reasons[0] : (t.error || 'reason not recorded');
+    const sug = d && d.suggestions && d.suggestions.length ? d.suggestions[0] : null;
+    // 用 diagnoses 的类别（同一条消息里第二次出现就省略，避免重复贴整段分类）
+    const catEn = d && d.category && !seen.cat.has(d.category) ? ` [${categoryLabelEn(d.category)}]` : '';
+    if (d && d.category) seen.cat.add(d.category);
+    const advice = sug ? (ADVICE_EN[sug.id] || 'Open the task details for the failed step') : 'Open the task details for the failed step';
+    return `· Failed: ${t.taskId}${catEn} — ${redactText(String(reason))}. Suggested: ${advice}. `
+      + '(Nothing is executed until you say yes.)';
+  }
+  if (evt.node === 'task_completed') {
+    const file = t.outputPath ? String(t.outputPath).split(/[\\/]/).pop() : '';
+    return `· Completed: ${t.taskId}${file ? ` (final ${redactText(file)})` : ''}`;
+  }
+  if (evt.node === 'task_started') {
+    return `· Started: ${t.taskId} (${step(t.currentStep || t.status)})`;
+  }
+  return `· Created: ${t.taskId} (${t.model || 'unknown model'} · ${t.totalClips || 0} clips)`;
+}
+
+function fallbackLineEn(it) {
+  const node = it && it.node;
+  const taskId = (it && it.taskId) || '…';
+  const label = NODE_LABELS_EN[node] || (node ? String(node) : 'update');
+  const cap = label.charAt(0).toUpperCase() + label.slice(1);
+  return `· ${cap}: ${taskId}`;
+}
+
+function categoryLabelEn(category) {  return ({
+    budget: 'budget',
+    key: 'API key / auth',
+    model: 'model capability',
+    rate: 'rate limit',
+    timeout: 'network / timeout',
+    qc: 'QC not passed',
+    media: 'media processing',
+    unknown: 'unclassified failure'
+  })[category] || String(category || 'failure');
+}
+
+function isEnLang(lang) {
+  return i18n.normalizeLang(lang) === 'en';
+}
+
+// items 只存结构化数据 + 中文文案；英文文案在 render 时按 lang 生成。
+function buildItems(events) {
+  return events.slice(0, MAX_ITEMS).map((e) => ({
     eventId: e.eventId,
     node: e.node,
     taskId: e.taskId,
     status: e.status,
     at: e.at,
-    text: itemLine(e)
+    text: itemLine(e),
+    // 2026-11-21：供英文渲染用（英文失败原因走 diagnose 的类别 + 英文建议）；
+    // 与事件里的同一份内存对象，不额外序列化、不写入任何持久层。
+    task: e.task || null
   }));
+}
+
+function buildPayload(events) {
+  // events 顺序 = taskManager.getAllTasks() 顺序（新的在前）；简报先列最新节点。
+  const items = buildItems(events);
   const omitted = Math.max(0, events.length - items.length);
   const head = `${BRIEF_PREFIX}${events.length > 1 ? ` ${events.length} 个任务节点（合并播报）` : ' 任务更新'}：`;
   const note = `（任务播报可在设置里关闭；同一节点只播一次${omitted ? `；本次另有 ${omitted} 条未列出` : ''}。）`;
@@ -162,8 +252,43 @@ function buildPayload(events) {
     merged: events.length > 1,
     count: events.length,
     items,
+    omitted,
     text: [head, ...items.map((i) => i.text), note].join('\n')
   };
+}
+
+/**
+ * 按语言渲染一份简报（纯函数，不改状态）。
+ * zh：返回原中文 text（逐字不变）；en：textEn / items[].textEn。
+ * 任何缺字段都回退中文原文，绝不返回空串。
+ */
+function render(payload, lang) {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (!isEnLang(lang)) return payload;
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const seen = { cat: new Set() };
+  const itemsEn = items.map((it) => {
+    if (it && typeof it.textEn === 'string' && it.textEn) return it;
+    const evt = { node: it && it.node, task: it && it.task };
+    let text = String((it && it.text) || '');
+    if (it && it.task) {
+      try { text = itemLineEn(evt, seen); } catch (e) { text = String(it.text || ''); }
+    } else {
+      // 无 task 对象（例如 ring 里已保存的条目）：用条目自带的 node/taskId 拼英文，
+      // 不用中文 text 兜底，避免英文界面漏中文。
+      text = fallbackLineEn(it);
+    }
+    return { ...it, textEn: text };
+  });
+  const count = Number(payload.count) || items.length;
+  const head = count > 1
+    ? `${BRIEF_PREFIX_EN} ${count} task updates (merged):`
+    : `${BRIEF_PREFIX_EN} Task update:`;
+  const omitted = Number(payload.omitted) || 0;
+  const note = `(Task briefs can be turned off in Settings; each event is announced only once`
+    + `${omitted ? `; ${omitted} more were not listed here` : ''}.)`;
+  const text = [head, ...itemsEn.map((i) => i.textEn || i.text), note].join('\n');
+  return { ...payload, lang: 'en', items: itemsEn, textEn: text, text };
 }
 
 function notify(payload) {
@@ -268,6 +393,7 @@ module.exports = {
   BUFFER_CAP,
   subscribe,
   scan,
+  render,
   reset,
   status,
   ring,

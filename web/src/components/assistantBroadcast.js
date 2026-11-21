@@ -50,13 +50,22 @@ export function parseBroadcast(raw) {
   return msg;
 }
 
-/** 简报正文：优先服务端 text（含失败原因/建议），缺失时拼 items[].text。 */
-export function briefText(msg) {
+/** 简报正文：优先服务端 text（含失败原因/建议），缺失时拼 items[].text。
+ *  lang='en' 时优先 textEn（服务端按连接语言已给出；中文连接没有 textEn 时回退 text）。
+ *  2026-11-21：英文界面下方小智简报此前仍是中文——服务端以前只生成一份中文 text。 */
+export function briefText(msg, lang) {
+  const isEn = String(lang || '').toLowerCase().startsWith('en');
+  const en = msg && typeof msg.textEn === 'string' ? msg.textEn.trim() : '';
+  if (isEn && en) return en;
   const text = msg && typeof msg.text === 'string' ? msg.text.trim() : '';
   if (text) return text;
   const items = msg && Array.isArray(msg.items) ? msg.items : [];
   return items
-    .map((item) => (item && typeof item.text === 'string' ? item.text : ''))
+    .map((item) => {
+      if (!item) return '';
+      if (isEn && typeof item.textEn === 'string' && item.textEn.trim()) return item.textEn.trim();
+      return typeof item.text === 'string' ? item.text : '';
+    })
     .filter(Boolean)
     .join('\n');
 }

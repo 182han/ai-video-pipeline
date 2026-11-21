@@ -43,6 +43,26 @@ const LABELS = Object.freeze({
   needs_user: '需要你决定'
 });
 
+// 2026-11-21：状态条标签的英文（中文逐字不变；未覆盖的状态原样回退中文）。
+const LABELS_EN = Object.freeze({
+  draft: 'Draft',
+  planned: 'Plan ready',
+  confirmed: 'Confirmed',
+  submitted: 'Submitted',
+  running: 'Generating',
+  retrying: 'Retrying (QC)',
+  filling: 'Filling failed clips',
+  done: 'Completed',
+  failed: 'Failed',
+  needs_user: 'Needs your decision'
+});
+
+function labelFor(stateName, lang) {
+  const zh = LABELS[stateName] || stateName;
+  if (String(lang || '').toLowerCase().startsWith('en')) return LABELS_EN[stateName] || zh;
+  return zh;
+}
+
 // 允许的转移表：from → { event: to }
 const TRANSITIONS = Object.freeze({
   draft: { PLAN: 'planned' },
@@ -230,13 +250,22 @@ function observe(state, snapshot = {}) {
 }
 
 // 给 UI 的简要快照（不含计划卡全文，避免响应体膨胀）。
-function summary(state) {
+// 2026-11-21 用户报「英文界面下状态条还是中文『需要你决定』」：
+// label 是中文，前端以前直接显示它。现在额外给 labelKey（xiaozhi.state.<state>），
+// 前端优先用它本地化；label 保留原中文（旧调用方/日志零回归）。
+function labelKeyOf(stateName) {
+  return stateName ? `xiaozhi.state.${stateName}` : null;
+}
+
+function summary(state, lang) {
   if (!state) return null;
   return {
     version: state.version,
     planId: state.planId,
     state: state.state,
-    label: LABELS[state.state] || state.state,
+    label: labelFor(state.state, lang),
+    labelZh: LABELS[state.state] || state.state,
+    labelKey: labelKeyOf(state.state),
     terminal: TERMINAL.has(state.state),
     taskId: state.taskId,
     finalTaskId: state.finalTaskId,
@@ -260,6 +289,9 @@ module.exports = {
   STATES,
   TERMINAL,
   LABELS,
+  LABELS_EN,
+  labelFor,
+  labelKeyOf,
   TRANSITIONS,
   create,
   transition,

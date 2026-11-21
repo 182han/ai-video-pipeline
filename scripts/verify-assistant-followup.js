@@ -119,11 +119,14 @@ try {
   const tasksBefore = taskCount();
 
   // 3a 中文：查看提示词（无段号）→ 展示前 N 段
+  // 2026-11-21：标题改成「提示词原文 + 本次贴 N 段」（旧文案「先贴前 3 段提示词」）。
+  // 断言同时钉住新的「这不是场景卡清单」措辞——用户报过「要提示词却给了场景卡」。
   let out = msg('提示词看一下', 'zh', sid);
   ok('「提示词看一下」（zh）→ 只读展示前几段，不问时长、不建任务、planId 不变',
     out.ok === true && out.intent === 'plan_edit'
-    && /先贴前 3 段提示词/.test(out.reply)
-    && /第 1 段/.test(out.reply) && /第 3 段/.test(out.reply)
+    && /提示词原文/.test(out.reply) && /本次贴 3 段/.test(out.reply)
+    && /不是场景卡清单/.test(out.reply)
+    && /第 1 段提示词/.test(out.reply) && /第 3 段提示词/.test(out.reply)
     && !hasAskDuration(out.reply) && planSame() && taskCount() === tasksBefore,
     out.reply && out.reply.split('\n')[0]);
   ok('查看提示词返回 replyKey=assistant.reply.promptView', out.replyKey === 'assistant.reply.promptView');
@@ -131,8 +134,8 @@ try {
   // 3b 英文：看一下提示词 → 英文展示
   out = msg('看一下提示词', 'en', sid);
   ok('「看一下提示词」（en）→ 英文展示（无中文模板句），planId 不变',
-    /here are the first 3 prompts/i.test(out.reply)
-    && /Clip 1/.test(out.reply)
+    /showing 3/i.test(out.reply) && /Prompt text of this plan/i.test(out.reply)
+    && /Clip 1 prompt/.test(out.reply)
     && !/这条视频要做多长|这条计划共/.test(out.reply)
     && !hasAskDuration(out.reply) && planSame() && taskCount() === tasksBefore,
     out.reply && out.reply.split('\n')[0]);
@@ -170,12 +173,12 @@ try {
   // 3e 显式段号查看保持既有行为
   out = msg('把第 2 段的提示词给我看一下', 'zh', sid);
   ok('显式「第 2 段」查看仍逐段贴原文（既有行为不回归）',
-    /第 2 段提示词（\d+ 字；/.test(out.reply)
-    && !/先贴前/.test(out.reply)
+    /第 2 段提示词原文（\d+ 字；/.test(out.reply)
+    && !/本次贴 \d+ 段/.test(out.reply)
     && planSame() && taskCount() === tasksBefore,
     out.reply && out.reply.split('\n')[0]);
   out = msg('把第 2 段的提示词给我看一下', 'en', sid);
-  ok('英文交互下显式第 2 段查看：Clip 2 英文标签', /Prompt for clip 2/.test(out.reply), out.reply && out.reply.split('\n')[0]);
+  ok('英文交互下显式第 2 段查看：Clip 2 英文标签', /Prompt text of clip 2/.test(out.reply), out.reply && out.reply.split('\n')[0]);
 
   // 3f 改了提示词后，查看能看到用户文本
   const editOut = msg('第 2 段的提示词改成：雪山湖面，缓慢推近，冷色调。', 'zh', sid);
@@ -185,6 +188,29 @@ try {
     && /雪山湖面，缓慢推近，冷色调/.test(viewAfterEdit.reply)
     && planSame() && taskCount() === tasksBefore,
     viewAfterEdit.reply && viewAfterEdit.reply.split('\n')[0]);
+
+  // 3g 2026-11-21 用户原话回归（截图为证）：
+  //   「我要查看完整的全部12段12个场景的提示词」——旧版被 create 抢走（「12 段」）→ 回了一张新计划卡。
+  //   现在必须：plan_scenes ≠ 提示词；含「提示词」→ 贴原文；只含「场景卡」→ 列卡。
+  // 独立会话：以上 3a–3f 会换卡/改提示词（同一会话里卡池会变），这里用干净会话 + 12 段计划。
+  const realSid = 'followup-real-12';
+  const realPlanOut = msg('2 分钟', 'zh', realSid);
+  ok('用户原话回归前置：独立会话排出一条 12 段计划',
+    realPlanOut.plan && realPlanOut.plan.clipCount === 12, realPlanOut.reply && realPlanOut.reply.split('\n')[0]);
+  const realPlan = msg('我要查看完整的全部12段12个场景的提示词', 'zh', realSid);
+  ok('用户原话「全部12段12个场景的提示词」→ 贴提示词原文（不重排计划、不列卡）',
+    realPlan.intent === 'plan_edit'
+    && realPlan.replyKey === 'assistant.reply.promptView'
+    && /提示词原文/.test(realPlan.reply) && /第 1 段提示词/.test(realPlan.reply)
+    && !/确认后会按计划顺序取/.test(realPlan.reply) && !realPlan.plan,
+    realPlan.reply && realPlan.reply.split('\n')[0]);
+  const realCards = msg('我要查看完整的全部12段12个场景的场景卡。', 'zh', realSid);
+  ok('用户原话「…12个场景的场景卡」→ 列卡（plan_scenes），不是新计划',
+    realCards.intent === 'plan_scenes' && realCards.replyKey === 'assistant.reply.planScenes'
+    && /#1/.test(realCards.reply) && !realCards.plan,
+    realCards.reply && realCards.reply.split('\n')[0]);
+  ok('「全部」放宽到 12 段：12 段计划一次全看到',
+    /本次贴 12 段/.test(realPlan.reply), realPlan.reply && realPlan.reply.split('\n')[0].slice(0, 80));
 
   // ================= [4] 语言：PLAN_* 错误 =================
   group('4. 语言：场景卡时长错误中英各跑');
@@ -235,7 +261,14 @@ try {
   ok('memory：批量换卡词表含「一组/换一组/重新来一组」',
     /一组/.test(memSrc) && /换一组/.test(memSrc) && /重新来一组/.test(memSrc));
   ok('supervisor：无段号查看走「展示前 N 段」（PROMPT_VIEW_LIMIT）',
-    /PROMPT_VIEW_LIMIT/.test(supSrc) && /先贴前 \$\{limit\} 段提示词/.test(supSrc));
+    /PROMPT_VIEW_LIMIT/.test(supSrc) && /本次贴 \$\{limit\} 段/.test(supSrc));
+  // 2026-11-21 用户报「我说看提示词，它给的是场景卡的内容」：钉住两条接线
+  //   ①「全部/每段」放宽到 PROMPT_COUNT_ALL_LIMIT；
+  //   ② replyForPlanEdit（plan_edit 分支的直接入口）也必须先走只读视图。
+  ok('supervisor：全部/每段查看放宽到 PROMPT_COUNT_ALL_LIMIT',
+    /PROMPT_COUNT_ALL_LIMIT/.test(supSrc) && /wantAll \? PROMPT_COUNT_ALL_LIMIT : PROMPT_VIEW_LIMIT/.test(supSrc));
+  ok('supervisor：replyForPlanEdit 先调 tryReplyPromptView（查看不被当成编辑）',
+    /function replyForPlanEdit[\s\S]{0,900}?tryReplyPromptView\(sessionId, text, lang\)/.test(supSrc));
   ok('supervisor：planEditBranch 调用 tryReplyPromptView(sessionId, text, lang)',
     /tryReplyPromptView\(sessionId, text, lang\)/.test(supSrc));
   ok('supervisor：PLAN_* 英文映射走 planCard.describeErrorEn',
