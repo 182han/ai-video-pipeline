@@ -3316,17 +3316,17 @@ class Pipeline {
 
   // 轮询等待生成完成
   //
-  // maxWait 未传时取 config.GENERATION.clipWaitTimeoutMs（默认 600s，.env 可用
+  // maxWait 未传时取 config.GENERATION.clipWaitTimeoutMs（默认 450s，.env 可用
   // GEN_CLIP_WAIT_TIMEOUT_MS 覆盖）。2026-11-21 前这里是硬编码 300000：
-  // 实测 wan3.0-video（10s/720p 图生视频）成功出片 228.3~285.1s、平均 247.7s，
-  // 最长成功样本距 300s 只剩 14.9s，task_mwp70yzl_lh54 的片段 #7 因此被误判超时
-  // （补跑只用 249.3s 就成功，证明上游本来就正常）。
+  // 实测 wan3.0-video（10s/720p 图生视频）成功出片 228.3~285.1s（均值 247.7s、σ 21.7s），
+  // 旧 300s 只比最长样本高 14.9s，task_mwp70yzl_lh54 的片段 #7 因此被误判超时
+  // （补跑只用 249.3s 就成功，证明上游本来就正常）。450s 保留 58% 余量。
   async _waitForCompletion(generator, genTaskId, maxWait) {
     const waitMs = Number(maxWait) > 0
       ? Number(maxWait)
       : (Number(config.GENERATION && config.GENERATION.clipWaitTimeoutMs) > 0
         ? Number(config.GENERATION.clipWaitTimeoutMs)
-        : 600000);
+        : 450000);
     const startTime = Date.now();
     const pollInterval = 2000;
 
