@@ -3657,3 +3657,112 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 - live 未验证：运行中的 3001 启动于改动前，后端新字段需重启生效；重启前英文界面显示英文占位（不再中文）。
 - 说明：`verify-clip-library-detail` 12/6 为**改动前即存在**的陈旧断言（找硬编码中文标签，源码已 i18n 化），
   本次未改。详见 `docs/交接/2026-11-20-E11-英文库存数据.md`。
+
+## E12 · 小智「提示词 ≠ 场景卡」+ 英文简报本地化（2026-11-21）
+
+用户反馈（两张截图）：①「我说看一下提示词，它给的是场景卡的内容」；② 英文界面下【小智简报】仍是中文。
+
+**① 提示词 / 场景卡混淆 —— 根因（本机 node 复现，非猜测）**
+
+- 用户真实原话「我要查看完整的全部12段12个场景的提示词」：`memory.classify` 里
+  「提示词」+ 查看动词词表不含「查看/全部/完整/所有」→ 查看分支不命中；
+  「场景」不带疑问词 → `RE_PLAN_SCENES` 不命中；最后被 `RE_CREATE` 的「12 段」抢成 **create**
+  → 小智把"我要看提示词"当成"重排一条 12 段计划"，回了一张新计划卡
+  （卡上「场景：场景卡库随机抽取 12 个不同场景」读起来就像在讲场景卡）。
+- 第二层：即使 classify 判成 plan_edit，`replyForPlanEdit` 入口也不调 `tryReplyPromptView`，
+  纯查看句会落到「要换第几段？」的编辑反问；且 `tryReplyPromptView` 自己仍用旧窄正则过滤。
+
+修复：
+
+- `src/assistant/memory.js`：查看词表补「查看/全部/完整/所有/发一下」及英文 show/display/list；
+  「提示词 + 查看形态」先于 plan_scenes/create 归 plan_edit；「第 N 段的提示词」（无改动动词）算查看；
+  只带「场景」的查看句（「…12个场景的场景卡」）归 plan_scenes。`traceMatches` 同步同序。
+- `src/assistant/supervisor.js`：`tryReplyPromptView` 判定改用 memory.isPromptViewRequest（与 classify 同源）；
+  `replyForPlanEdit` 开头先走只读视图；文案改为「**提示词原文**…不是场景卡清单（要看卡说"场景卡"）」，
+  卡名降为括注（旧文案「来源：场景卡 X」会被读成在列卡）；「全部/每段」放宽到 20 段（12 段一次全看到）。
+- `agent.js` / `brain.js` 提示词加显式「槽位区分：提示词 = 发给模型的文字；场景卡 = 库条目；
+  两者同现时用户要的是提示词」。
+
+**② 英文简报中文 —— 根因**
+
+简报以前在服务端只生成**一份中文 text**，广播给所有连接（WS 带的 lang 只是标注）。
+
+修复：
+
+- `src/assistant/broadcast.js` 新增纯函数 `render(payload, lang)`：zh 原样返回同一对象（零回归）；
+  en 生成 `textEn` + `items[].textEn`（`[Briefing]` 前缀、Created/Started/Failed/Completed、
+  诊断类别 + 英文建议；taskId / 模型 id / 文件名 / 错误原文属内容，保留）。
+- `src/wsManager.js` 的 `broadcastAssistant` 按**连接语言**逐连接渲染。**注意**：
+  taskManager → wsManager → broadcast → taskManager 是已存在的环，broadcast 必须**延迟 require**，
+  顶层 require 会让 broadcast 拿到未完成的 taskManager（`getAllTasks is not a function`，已实测踩到）。
+- 前端 `assistantBroadcast.briefText(msg, lang)` 在 en 下优先 `textEn`（切换语言无需重连）。
+
+**验收（全部实跑）**
+
+- 新增 `scripts/verify-broadcast-i18n.js`（42/0，已注册 `broadcast-i18n`/fast）；
+  `verify-assistant` 341/0、`verify-assistant-followup` 48/0（新增用户原话 3 条，并把旧文案断言改为新文案）、
+  `verify-agent` 60/0、`verify-agent-scenarios` 25/0、`verify-brain` 30/0、
+  `verify-assistant-diagnostics` 103/0、`verify-assistant-frontend` 101/0、
+  `verify-i18n` 11/0、`verify-i18n-backend` 104/0/1 跳过、`verify-i18n-runtime` 29/0。
+- 负向对照：把 `render` 改成永远返回中文 → 3 项红；删掉 classify 的提示词查看分支 → 3 项红（恢复后 42/0）。
+- **未验证**：运行中的 3001（PID 90612，启动于 2026-11-20 23:55）是改动前的旧进程，
+  且本会话无权结束它（taskkill Access denied），所以**浏览器/WS 实时链路未复验**；
+  请在你自己终端里结束该进程（Ctrl+C 或任务管理器结束 PID 90612）后运行 node server.js 再复验。
+- `node scripts/doctor.js`：ffmpeg/ffprobe 两项 ❌ 为**改动前即存在**（实测 ffmpeg -version 可执行，exit 0），与本次无关。
+## E13 · 创作页四项 + 失败提醒英文（2026-11-21 晚）
+
+用户反馈（p1–p4 截图）：① 英文模式创作页提示词仍是中文；② Show all / Collapse 看不出区别；
+③ 每次进创作页场景卡都一样（想要「抽卡」按钮 + 每次不同）；④ 创作模块整块崩；⑤ 生视频失败后小智回复/提醒仍是中文。
+
+**④ 崩溃（最高优先级）：`i2vUnsupported is not defined`**
+
+- 根因：`web/src/screens/createSmart.js` 第 4/5 步的按钮引用了一个**从未声明**的变量。
+  该引用在 `${step === 4 && html`...`}` 里，只有第 4/5 步渲染才求值，所以第 1 步与静态 grep 都测不到；
+  实测把声明删掉后第 4/5 步必抛 `ReferenceError`（已做成负向回归用例）。
+- 修复：按 `/api/image-gen/status` 的 `i2vModels` 推导（仅「要图生视频且通道不在能力表」时禁用），
+  并在页面上写明原因；纯文生视频永不禁用。
+- 新增 `scripts/lib-render-probe.js`：把浏览器 ESM 改写成脚本、用「立即求值的 htm 桩」在 vm 里
+  **逐步渲染 1–5 步**。以后任何一步的未声明变量都会在门禁里现形。
+
+**① 英文创作页提示词中文**
+
+- `/api/scene-cards/preview` 新增显式 `?lang=`（缺省仍按 cookie → Accept-Language → zh），
+  响应回显 `lang` 与每段 `promptLanguage`；前端请求带 `&lang=`。
+- 前端兜底：英文界面若仍拿到含中文的提示词，按卡 id 重取一次（有上限）；切换语言后自动重算提示词，
+  草稿里的旧语言文案不再锁死。
+- 实测（本机 composer）：`lang=en` 时提示词为 `Subject: … / Camera: …` 纯英文；`lang=zh` 时不变。
+
+**② Show all / Collapse**
+
+- 只在 >12 段时出现（否则它本来什么都不做）；按钮带段数（显示全部 N 段 / 收起）；
+  折叠时显示「还有 N 段未展开（会自动提交自动合成的提示词）」并给一键展开。
+
+**③ 换一批场景卡**
+
+- 服务端 `allocate(count, { seed })` 已支持确定性序列；预览接口新增 `?seed=`。
+  「换一批场景卡」= 新种子；每次进①也是新种子（不再每次同样几张）。
+- **注意**：实测运行中的 3001 是旧进程，`?seed=` 被忽略（两次同 seed 结果不同），重启后生效。
+- 预览仍 `recordCooling:false`：不占卡、不写冷却、不收费。
+
+**⑤ 失败后的中文提醒**
+
+- 状态机 `summary()` 增加 `labelKey` / `labelZh`，并按连接语言给 `label`（英文 = Needs your decision 等）；
+  前端状态条按 `labelKey` 本地化（注意 `tr()` 缺词条会回退中文，故还需校验当前语言）。
+- 小智监控消息（审图提醒 / 完成 / 失败 / 「还有 N 段没成功…要不要我再跑一次」/ 任务不见 / 补位）
+  全部补英文；`finish()` 按 `monitor.lang` 选 `replyEn`，缺英文时如实回退中文。
+
+**验收（全部实跑）**
+
+- 新增 `scripts/verify-create-page.js`（31/0，已注册 `create-page`/fast）：含「逐步渲染 1–5 步」与
+  「删掉声明 → 第 4/5 步必红」的负向对照（实测 28/3）。
+- `verify-broadcast-i18n` 42/0、`verify-assistant` 342/0、`verify-assistant-followup` 48/0、
+  `verify-assistant-diagnostics` 103/0、`verify-assistant-frontend` 101/0、`verify-agent` 60/0、
+  `verify-agent-scenarios` 25/0、`verify-brain` 30/0、`verify-i18n` 11/0、`verify-i18n-backend` 104/0/1 跳过、
+  `verify-i18n-runtime` 29/0、`verify-editor-final-source` 43/0。
+- 提交：`78e812c`（只含本次文件；工作区里 `.env.example` / `config.js` / `src/pipeline.js` 的改动属**另一会话**，未触碰）。
+
+**未验证**
+
+- 运行中的 3001（旧进程）浏览器端未复验：登录后用只读接口实测 `/api/scene-cards/preview`
+  「`?lang=en` 仍返回中文、`?seed=` 不生效」= 旧后端，需用户重启后复验（前端部分刷新即生效）。
+- 真实出图/出视频链路未跑（计费），本次只验接口与渲染。
