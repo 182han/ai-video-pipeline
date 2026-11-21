@@ -104,14 +104,47 @@ for (const [name, cmd] of Object.entries(pkg.scripts || {})) {
 // ---------- 5. ffmpeg / ffprobe ----------
 let cfg = {};
 try { cfg = require(path.join(ROOT, 'config.js')); } catch (e) { rec('ERROR', 'config.js', '加载失败: ' + e.message); }
+// 读子进程 stdout 的通用封装。
+//
+// 为什么需要降级：本沙箱里「捕获 stdout」的调用（`execFileSync(..., {encoding:'utf8'})`）
+// 会直接 EPERM，而二进制本身是好的——实测同一份 ffmpeg：
+//   · encoding:'utf8'  → EPERM: spawnSync …ffmpeg.exe EPERM
+//   · stdio:'ignore'   → 正常
+//   · stdout 重定向到文件 → 正常读到 `ffmpeg version 8.1-full_build`
+// 旧版 doctor 把这种环境限制误报成「ffmpeg 无法执行 → 必须修复」（2026-11-21 修）。
+// 降级方案：把 stdout 落临时文件再读，语义与捕获 stdout 一致。
+function runCapture(bin, args, timeout = 10000) {
+  try {
+    return execFileSync(bin, args, { encoding: 'utf8', timeout });
+  } catch (e) {
+    if (!e || e.code !== 'EPERM') throw e;
+    const osMod = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(osMod.tmpdir(), 'doctor-cap-'));
+    const outFile = path.join(tmpDir, 'stdout.txt');
+    const fd = fs.openSync(outFile, 'w');
+    try {
+      execFileSync(bin, args, { stdio: ['ignore', fd, 'ignore'], timeout });
+    } finally {
+      fs.closeSync(fd);
+    }
+    const text = fs.readFileSync(outFile, 'utf8');
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e2) {}
+    return text;
+  }
+}
 function probeBin(bin, label) {
   if (!bin) return rec('ERROR', label, '未解析到路径', '在 .env 写 FFMPEG_PATH，或把 ffmpeg 放进 tools/ffmpeg/bin，或装到 PATH');
   try {
-    const out = execFileSync(bin, ['-version'], { encoding: 'utf8', timeout: 10000 });
+    const out = runCapture(bin, ['-version']);
     const ver = (out.split('\n')[0] || '').trim();
+    if (!ver) {
+      return rec('WARN', label, `可执行但没读到版本号: ${bin}`,
+        '多半是输出被截断/权限问题：手动跑一次 `ffmpeg -version` 看有没有输出');
+    }
     rec('OK', label, `${bin}\n      ${ver}`);
   } catch (e) {
-    rec('ERROR', label, `无法执行: ${bin}`, '检查二进制是否完整/可执行');
+    rec('ERROR', label, `无法执行: ${bin}（${(e && (e.code || e.message)) || '未知错误'}）`,
+      '检查二进制是否完整/可执行');
   }
 }
 if (cfg) {
