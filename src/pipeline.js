@@ -3003,7 +3003,10 @@ class Pipeline {
         const result = await this._waitForCompletion(generator, genTaskId);
 
         if (result.status !== 'completed') {
-          throw new Error(result.error || '生成失败');
+          // 保留 waitTimeout 标记：日志与任务记录都要能区分「本地等超了」和「上游判失败」。
+          const waitErr = new Error(result.error || '生成失败');
+          if (result.waitTimeout) waitErr.waitTimeout = true;
+          throw waitErr;
         }
 
         let videoPath = result.videoUrl;
@@ -3173,7 +3176,14 @@ class Pipeline {
         }
 
       } catch (error) {
-        console.log(`[${taskId}] 片段 ${index + 1} 生成失败 (第${attempt}次): ${error.message}`);
+        // 等待超时不是模型生成失败：日志里不能一律写「生成失败」，否则用户会以为是
+        // 模型拒绝/内容违规。error.waitTimeout 由 _waitForCompletion 的返回值带上来。
+        const isWaitTimeout = !!(error && error.waitTimeout);
+        console.log(
+          isWaitTimeout
+            ? `[${taskId}] 片段 ${index + 1} (第${attempt}次) ${error.message}`
+            : `[${taskId}] 片段 ${index + 1} 生成失败 (第${attempt}次): ${error.message}`
+        );
 
         // 无剩余尝试次数，或错误不可重试（402 余额不足/401 鉴权失败）→ 直接判失败
         if (attempt >= maxAttempts || !generator.canRetry(error)) {
@@ -3305,11 +3315,22 @@ class Pipeline {
   }
 
   // 轮询等待生成完成
-  async _waitForCompletion(generator, genTaskId, maxWait = 300000) {
+  //
+  // maxWait 未传时取 config.GENERATION.clipWaitTimeoutMs（默认 600s，.env 可用
+  // GEN_CLIP_WAIT_TIMEOUT_MS 覆盖）。2026-11-21 前这里是硬编码 300000：
+  // 实测 wan3.0-video（10s/720p 图生视频）成功出片 228.3~285.1s、平均 247.7s，
+  // 最长成功样本距 300s 只剩 14.9s，task_mwp70yzl_lh54 的片段 #7 因此被误判超时
+  // （补跑只用 249.3s 就成功，证明上游本来就正常）。
+  async _waitForCompletion(generator, genTaskId, maxWait) {
+    const waitMs = Number(maxWait) > 0
+      ? Number(maxWait)
+      : (Number(config.GENERATION && config.GENERATION.clipWaitTimeoutMs) > 0
+        ? Number(config.GENERATION.clipWaitTimeoutMs)
+        : 600000);
     const startTime = Date.now();
     const pollInterval = 2000;
 
-    while (Date.now() - startTime < maxWait) {
+    while (Date.now() - startTime < waitMs) {
       const status = await generator.getStatus(genTaskId);
 
       if (status.status === 'completed' || status.status === 'failed') {
@@ -3319,7 +3340,14 @@ class Pipeline {
       await this._sleep(pollInterval);
     }
 
-    return { status: 'failed', error: '超时' };
+    // 三态必须分清：这里是「本地等待上限到了」，不是上游判失败。
+    // 上游任务往往仍在正常生成，稍后查询或补跑仍可能拿到成片，
+    // 所以措辞不能写成「生成失败」，并带 waitTimeout 标记供上层区分日志口径。
+    return {
+      status: 'failed',
+      waitTimeout: true,
+      error: `等待超时：已等 ${Math.round(waitMs / 1000)}s 仍未完成（本地等待上限，不代表模型生成失败；上游可能仍在生成）`
+    };
   }
 
   _sleep(ms) {
