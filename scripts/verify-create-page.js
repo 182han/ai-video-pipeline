@@ -68,6 +68,12 @@ try {
   ok('服务端 /api/scene-cards/preview 接受显式 ?lang= 并回显 lang + promptLanguage',
     /i18n\.normalizeLang\(req\.query\.lang\)/.test(serverSrc) && /res\.json\(\{ ok: true, count: cards\.length, lang, cards \}\)/.test(serverSrc)
     && /promptLanguage: patch\.promptLanguage/.test(serverSrc));
+  ok('服务端 ?ids=（换语言不换卡）：planFromIds 取同一批，坏 id 直接 400',
+    /planFromIds\(ids, \{ recordCooling: false \}\)/.test(serverSrc) && /SCENE_CARDS_MISSING_CARD/.test(serverSrc)
+    && /idsParam/.test(serverSrc));
+  ok('前端「换语言」用 ?ids= 原样重拼（不重新抽卡）', /'&ids=' \+ encodeURIComponent\(ids\.join\(','\)\)/.test(createSrc));
+  ok('前端草稿记 draftLang，挂载时语言不同即重算（「重启+刷新仍中文」的根因）',
+    /draftLang: uiLang\(\)/.test(createSrc) && /draftLang !== uiLang\(\)\) relocalizePrompts/.test(createSrc));
   ok('前端请求带 &lang=（不再只靠 cookie 推断）', /'&lang=' \+ encodeURIComponent\(uiLang\(\)\)/.test(createSrc));
   ok('前端英文界面兜底：提示词仍含中文 → 按 id 重新取一次（有上限，一次）', /CJK_RE\.test/.test(createSrc) && /lang=en&seed=/.test(createSrc));
   ok('切换语言后按当前语言重算提示词（草稿里的旧语言文案不吃香）', /subscribeLocale/.test(createSrc) && /loadCards\('refresh'\)|mode === 'refresh'/.test(createSrc));

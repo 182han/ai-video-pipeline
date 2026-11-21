@@ -110,31 +110,47 @@ export function CreateSmartWizard() {
   const [seed, setSeed] = useState(() => (draft0 && draft0.seed ? draft0.seed : ''));
 
   // 真的动过才落盘（避免一进来就写空草稿，害得下次永远显示「已恢复」）
+  // 2026-11-21 用户报「重启 + 刷新后英文界面提示词仍是中文」：
+  // 草稿里存着**上一语言**的提示词，恢复后照旧显示，语言切换监听只在切换时触发、挂载时不触发。
+  // 现在草稿记下自己的语言（draftLang），挂载时若与本页语言不同就先按本页语言重算一遍。
   useEffect(() => {
     if (step <= 1 && prompts.length === 0 && photos.length === 0) return;
-    saveDraft({ v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed, at: new Date().toISOString() });
+    saveDraft({
+      v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed,
+      draftLang: uiLang(), at: new Date().toISOString()
+    });
   }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed]);
 
   // 2026-11-21 用户报「英文模式下提示词仍是中文」：草稿里的提示词是**上一语言**时留下的
   // （切换语言后草稿照旧恢复中文文案）。语言变了就把提示词按当前语言重新取一遍——
-  // 只重算提示词，不重新抽卡（卡里已排除的被排除项会被重置，可接受：提示词跟着卡走）。
+  // 只重算提示词，不重新抽卡。**挂载时也要跑一次**（重启 + 刷新 ≠ 切换语言，监听不会触发）。
+  function relocalizePrompts(cardList) {
+    const list = Array.isArray(cardList) ? cardList : cards;
+    if (!Array.isArray(list) || !list.length) return;
+    const ids = list.map((c) => c.id);
+    fetch('/api/scene-cards/preview?count=' + list.length
+      + '&lang=' + encodeURIComponent(uiLang())
+      + (seed ? '&seed=' + encodeURIComponent(seed) : '')
+      + '&ids=' + encodeURIComponent(ids.join(',')),
+    { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j || j.ok !== true || !Array.isArray(j.cards) || !j.cards.length) return;
+        // 服务端按 ids 原样取卡：顺序/卡不变，只把提示词换成当前语言。
+        setCards(j.cards);
+        setPrompts(j.cards.map((c) => c.prompt));
+        setImagePrompts(j.cards.map((c) => c.imagePrompt));
+      })
+      .catch(() => { /* 失败保持原样，不打断编辑 */ });
+  }
+
   useEffect(() => {
-    return subscribeLocale(() => {
-      if (!Array.isArray(cards) || !cards.length) return;
-      const ids = cards.map((c) => c.id);
-      fetch('/api/scene-cards/preview?count=' + ids.length + '&lang=' + encodeURIComponent(uiLang()), { credentials: 'same-origin' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (!j || j.ok !== true || !Array.isArray(j.cards)) return;
-          const fresh = j.cards.filter((c) => ids.includes(c.id));
-          if (!fresh.length) return;
-          setCards(j.cards);
-          setPrompts(j.cards.map((c) => c.prompt));
-          setImagePrompts(j.cards.map((c) => c.imagePrompt));
-        })
-        .catch(() => { /* 失败保持原样，不打断编辑 */ });
-    });
-  }, [cards]);
+    // 挂载时：草稿语言与当前不同 → 立即按当前语言重算（覆盖「重启+刷新还是中文」）
+    const draftLang = draft0 && draft0.draftLang ? String(draft0.draftLang).slice(0, 2) : null;
+    if (draftLang && draftLang !== uiLang()) relocalizePrompts(draft0.cards);
+    return subscribeLocale(() => relocalizePrompts());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function restart() {
     if (!window.confirm(tr('createSmart.restartConfirm'))) return;

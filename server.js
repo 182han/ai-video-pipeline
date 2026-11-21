@@ -3411,7 +3411,7 @@ app.get('/api/scene-cards', (req, res) => {
 // allocate() 只产出内存计划（不写卡库、不占卡），因此可安全用于「先看看抽到哪些场景」。
 // 返回每段的视频提示词 / 图片提示词 / 参数化调色，供「① 时长+场景卡 ② 提示词 ③ 出图」使用。
 app.get('/api/scene-cards/preview', (req, res) => {
-  const count = Math.max(1, Math.min(180, parseInt(req.query.count, 10) || 10));
+  let count = Math.max(1, Math.min(180, parseInt(req.query.count, 10) || 10));
   // 2026-11-21 用户报「英文模式下创作页场景卡提示词仍是中文」：
   // 语言原来只从 cookie/Accept-Language 推断，cookie 丢了（或切换语言后 v1 cookie 尚未写回）就静默回中文。
   // 现在显式参数 ?lang=en 优先（值可以是 en / 中文 / zh-CN，走 i18n.normalizeLang），
@@ -3426,7 +3426,26 @@ app.get('/api/scene-cards/preview', (req, res) => {
     const seed = req.query.seed !== undefined && String(req.query.seed).trim() !== ''
       ? String(req.query.seed).trim().slice(0, 64)
       : undefined;
-    const plan = sceneCardLibrary.allocate(count, { recordCooling: false, seed });
+    // 2026-11-21：?ids=a,b,c = 按这批 id **原样**重新拼提示词（换语言用）。
+    // 不重新抽卡（同一批场景不变），只是把 prompt/imagePrompt 换成当前语言；
+    // 任何 id 不存在就直接 400，绝不静默换成别的卡。
+    const idsParam = req.query.ids !== undefined ? String(req.query.ids).trim() : '';
+    let plan;
+    if (idsParam) {
+      const ids = idsParam.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 180);
+      if (!ids.length) return res.status(400).json({ ok: false, code: 'SCENE_CARDS_BAD_IDS', error: 'ids 为空' });
+      const missing = ids.filter((id) => !sceneCardLibrary.getCardById(id));
+      if (missing.length) {
+        return res.status(400).json({
+          ok: false, code: 'SCENE_CARDS_MISSING_CARD',
+          error: `场景卡缺失：${missing.slice(0, 3).join(', ')}（卡库可能被替换）`
+        });
+      }
+      plan = sceneCardLibrary.planFromIds(ids, { recordCooling: false });
+      count = ids.length;
+    } else {
+      plan = sceneCardLibrary.allocate(count, { recordCooling: false, seed });
+    }
     const cards = plan.used.map((entry, i) => {
       const card = sceneCardLibrary.getCardById(entry.id);
       if (!card) {
