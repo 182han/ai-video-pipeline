@@ -269,13 +269,13 @@ module.exports = {
     // 最大重试次数
     maxRetries: parseInt(env('GEN_MAX_RETRIES', '1'), 10),
     // 单片段「等待上游出片」的上限（毫秒）：超过即判该片段等待超时（不是模型失败）。
-    // 2026-11-21 由硬编码 300000 提到 450000。实测依据 task_mwp70yzl_lh54：
+    // 2026-11-21 由硬编码 300000 提到 400000（用户拍板）。实测依据 task_mwp70yzl_lh54：
     // wan3.0-video 10s/720p 图生视频成功出片 228.3~285.1s（均值 247.7s、标准差 21.7s），
     // 旧 300s 只比最长样本高 14.9s（5%），片段 #7 因此在 300s 被误判为超时。
-    // 450s = 均值 + 9.3σ、比最长样本高 58%；同时把「真失败」的感知延迟控制在 7.5 分钟内。
+    // 400s = 均值 + 7.0σ、比最长样本高 40%；真失败的感知延迟约 6.7 分钟（300s 时约 5 分钟）。
     // 注意：这是上限而非等待——正常片段一完成就立即返回，不会拖慢成功任务。
     // .env 用 GEN_CLIP_WAIT_TIMEOUT_MS 覆盖。
-    clipWaitTimeoutMs: parseInt(env('GEN_CLIP_WAIT_TIMEOUT_MS', '450000'), 10),
+    clipWaitTimeoutMs: parseInt(env('GEN_CLIP_WAIT_TIMEOUT_MS', '400000'), 10),
     // 每段视频默认时长（秒）—— 对齐 Kling 15s 档位（决策 D2）
     defaultClipDuration: parseInt(env('GEN_CLIP_DURATION', '15'), 10),
     // 默认分辨率（决策 D4）
