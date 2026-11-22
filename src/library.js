@@ -383,7 +383,12 @@ function ingestFinal(task, finalPath, probeOverride) {
       id,
       kind: 'final',
       // 成片状态：completed / partial / failed；孤儿成片由回填脚本标 orphan
-      status: task.status || 'completed',
+      //
+      // 2026-11-21 修：这里原写 `task.status || 'completed'`。但 ingestFinal 的调用点发生在
+      // 流水线仍处于 mixing / transcoding 等**中间态**时，于是成片条目被写成 status='mixing'
+      // （实测：task_mwp70yzl_lh54_final、task_mwnosz8o_uyl4_final 两条）。
+      // 中间态对「已经出片的成片」没有意义，只保留有意义的终态，其余一律 completed。
+      status: ['completed', 'partial', 'failed'].includes(task.status) ? task.status : 'completed',
       // 来源：task=正常任务；library=片段库成片；editor=剪辑台导出；orphan=任务已丢失
       origin: task.__origin || (task.model === 'editor' ? 'editor' : (task.source === 'library' ? 'library' : 'task')),
       fileName: path.basename(finalPath),

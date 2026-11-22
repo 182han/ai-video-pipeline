@@ -61,6 +61,18 @@ ok('1280×720 -> 720p', library.resolutionLabel(1280, 720) === '720p');
 ok('1920×1080 -> 1080p', library.resolutionLabel(1920, 1080) === '1080p');
 ok('3840×2160 -> 4K', library.resolutionLabel(3840, 2160) === '4K');
 
+console.log('\n[2.1] 成片入库只写终态（回归 2026-11-21：曾写成 mixing）');
+{
+  // 背景：ingestFinal 在流水线还处于 mixing/transcoding 时被调用，
+  // 旧写法 `task.status || 'completed'` 把成片条目写成了 status='mixing'
+  // （实例：task_mwp70yzl_lh54_final、task_mwnosz8o_uyl4_final）。
+  const libSrc = fs.readFileSync(path.join(APP_DIR, 'src', 'library.js'), 'utf8');
+  ok("成片 status 只保留 completed/partial/failed，其余归 completed",
+    /status: \['completed', 'partial', 'failed'\]\.includes\(task\.status\)/.test(libSrc));
+  ok('不再直接透传 task.status（中间态会污染成片条目）',
+    !/status:\s*task\.status\s*\|\|\s*'completed'/.test(libSrc));
+}
+
 console.log('\n[3] 库条目构建');
 const sampleClip = path.join(CLIPS_DIR, 'task_mv4v7qp2_m8r0_clip_1.mp4');
 if (!fs.existsSync(sampleClip)) {
