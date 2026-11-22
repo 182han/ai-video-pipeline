@@ -391,6 +391,14 @@ export function EditorView() {
       music: toPlan(((project.audio && project.audio.music) || [])[0]),
       ambient: toPlan(((project.audio && project.audio.ambient) || [])[0])
     }, 0);
+    // 2026-11-22：成片自带音频（工程里 audio.keepOriginal 默认 true）。
+    // 打开时预览能听到原声，导出也会保留；关掉则预览/导出都只有配乐。
+    const keepOriginal = !(project.audio && project.audio.keepOriginal === false);
+    const ovRaw = Number(project.audio && project.audio.originalVolume);
+    e.setSourceAudio({
+      enabled: keepOriginal,
+      volume: Number.isFinite(ovRaw) ? ovRaw : 1
+    });
   }, [project && project.audio, bgm]);
 
   useEffect(() => {

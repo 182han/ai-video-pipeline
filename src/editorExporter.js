@@ -145,11 +145,19 @@ async function runJob(job, project) {
     job.status = 'running';
     job.progress = 0;
     const t = project.transition || {};
+    // 2026-11-22：保留原声（默认开）。
+    // 旧实现无条件 ignoreAudio:true —— 拼接阶段就产出无声视频，等于把成片自带的音频整条丢掉，
+    // 而且界面上没有任何提示（用户反馈「自带的音频被取消了？」）。
+    // 现在：工程里 audio.keepOriginal !== false 时，让 transitionMixer 保留源音轨，
+    // 再把配乐叠上去（音量见 audio.originalVolume）。
+    const keepOriginal = !(project.audio && project.audio.keepOriginal === false);
+    const rawVol = Number(project.audio && project.audio.originalVolume);
+    const originalVolume = Number.isFinite(rawVol) ? Math.max(0, Math.min(1.5, rawVol)) : 1;
     const res = await transitionMixer.concatWithTransitions(clips, silentPath, {
       enabled: t.enabled !== false,
       duration: t.duration,
       type: t.type,
-      ignoreAudio: true,
+      ignoreAudio: !keepOriginal,
       signal: job.controller.signal,
       onProgress: (p) => { job.progress = typeof p.percent === 'number' ? p.percent : job.progress; }
     });
@@ -166,12 +174,14 @@ async function runJob(job, project) {
       return;
     }
 
-    // 音频：音乐/环境音两轨；没有计划时直接改名为最终产物
+    // 音频：音乐/环境音两轨 + （可选）输入自带音轨
     const plan = buildAudioPlan(project, res.actualDuration);
-    let audioInfo = { music: 0, ambient: 0, meanVolumeDb: null };
+    let audioInfo = { music: 0, ambient: 0, meanVolumeDb: null, keepOriginal, originalVolume };
     if (plan.music.length || plan.ambient.length) {
       job.progress = 92;
       const mixed = await audioMixer.mixBgmPlan(silentPath, outputPath, plan, {
+        keepSourceAudio: keepOriginal,
+        sourceVolume: originalVolume,
         onProgress: (p) => {
           const pct = p && typeof p.percent === 'number' ? p.percent : 0;
           job.progress = Math.min(99, 92 + pct * 0.07);
@@ -183,9 +193,14 @@ async function runJob(job, project) {
       audioInfo = {
         music: plan.music.length,
         ambient: plan.ambient.length,
-        meanVolumeDb: mixed.meanVolumeDb
+        meanVolumeDb: mixed.meanVolumeDb,
+        keepOriginal,
+        originalVolume,
+        keptSourceAudio: mixed.keptSourceAudio === true,
+        warnings: mixed.warnings || []
       };
     } else {
+      // 没有配乐：保留原声时这里已经带着源音轨，直接改名即可（旧实现会得到无声视频）。
       fs.renameSync(silentPath, outputPath);
       silentPath = null;
     }

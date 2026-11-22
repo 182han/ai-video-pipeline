@@ -159,6 +159,7 @@ const SUITES = [
   { name: 'editor-adjust', script: 'verify-editor-adjust.js', group: 'real', desc: '剪辑台逐段调节（17 项）' },
   { name: 'editor-audio', script: 'verify-editor-audio.js', group: 'real', desc: '剪辑台音频两轨（22 项）' },
   { name: 'editor-export', script: 'verify-editor-export.js', group: 'real', desc: '剪辑台导出（24 项）' },
+  { name: 'editor-keep-original-audio', script: 'verify-editor-keep-original-audio.js', group: 'real', desc: '剪辑台保留原声（21 项，真 ffmpeg 混音对照）' },
   { name: 'editor-final-source', script: 'verify-editor-final-source.js', group: 'real', desc: '剪辑台接成片：素材三来源/整段载入/导出归成片（P3，真 ffmpeg + ffprobe）' },
   { name: 'editor-media', script: 'verify-editor-media.js', group: 'real', desc: '剪辑台素材面板（21 项）' },
   { name: 'editor-nav', script: 'verify-editor-nav.js', group: 'real', desc: '剪辑台导航（12 项）' },

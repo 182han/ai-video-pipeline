@@ -267,7 +267,10 @@ function buildMixArgs(inputVideo, outputPath, plan, videoDuration, opts = {}) {
     loudness: opts.loudness === undefined ? config.BGM.loudness : Number(opts.loudness),
     ambientVolume: opts.ambientVolume === undefined ? 0.125 : Number(opts.ambientVolume),
     // 闪避默认读全局配置；调用方显式传 opts.ducking 时以调用方为准（便于测试/任务级覆盖）
-    ducking: opts.ducking === undefined ? config.BGM.ducking : opts.ducking
+    ducking: opts.ducking === undefined ? config.BGM.ducking : opts.ducking,
+    // 2026-11-22：剪辑台「保留原声」→ 把输入自带音轨作为额外一路混进来
+    keepSourceAudio: opts.keepSourceAudio === true,
+    sourceVolume: opts.sourceVolume
   });
   if (!built.ok) return { ok: false, error: built.error, warnings: built.warnings || [] };
 
@@ -311,12 +314,24 @@ async function mixBgmPlan(inputVideo, outputPath, plan, opts = {}) {
   if (resolvedPlan.missing.length > 0) {
     return { success: false, error: '音轨不存在: ' + resolvedPlan.missing.join(', ') };
   }
-  if (resolvedPlan.music.length === 0 && resolvedPlan.ambient.length === 0) {
+  if (resolvedPlan.music.length === 0 && resolvedPlan.ambient.length === 0 && opts.keepSourceAudio !== true) {
     return { success: false, error: '配乐计划为空（没有任何音频片段）' };
   }
 
-  const built = buildMixArgs(inputVideo, outputPath, resolvedPlan, videoDuration, opts);
-  if (!built.ok) return { success: false, error: built.error, warnings: built.warnings };
+  // 2026-11-22：要保留原声，先确认输入真的有音轨。
+  // 否则滤镜图里的 [0:a] 会让 ffmpeg 直接报「找不到对应流」，错误信息还很隐晦。
+  let keepSourceAudio = opts.keepSourceAudio === true;
+  let warnings = [];
+  if (keepSourceAudio) {
+    const hasAudio = await probeHasAudioStream(inputVideo);
+    if (!hasAudio) {
+      keepSourceAudio = false;
+      warnings.push('输入视频没有音频流，「保留原声」已自动忽略');
+    }
+  }
+
+  const built = buildMixArgs(inputVideo, outputPath, resolvedPlan, videoDuration, { ...opts, keepSourceAudio });
+  if (!built.ok) return { success: false, error: built.error, warnings: warnings.concat(built.warnings || []) };
 
   const runResult = await runFfmpeg(built.args, videoDuration, opts.onProgress);
   if (!runResult.ok) {
@@ -342,8 +357,9 @@ async function mixBgmPlan(inputVideo, outputPath, plan, opts = {}) {
     videoDurationSec: videoDuration,
     outputDurationSec: durCheck.actual,
     meanVolumeDb: check.meanVolume,
-    warnings: built.warnings || [],
-    segments: resolvedPlan.music.length + resolvedPlan.ambient.length
+    warnings: warnings.concat(built.warnings || []),
+    segments: resolvedPlan.music.length + resolvedPlan.ambient.length,
+    keptSourceAudio: keepSourceAudio
   };
 }
 
@@ -831,7 +847,7 @@ async function _wrapAsync(fn, ...args) {
 module.exports = {
   getManifest, listTracks, listTracksInOrder, toPublicTracks, findTrack, resolveTrack, pickRandomMusicTrack,
   getTrackById, addTrack, updateTrack, removeTrack, restoreTrack,
-  probeDuration, probeMeanVolume, validateMixedOutput, validateMixDuration,
+  probeDuration, probeMeanVolume, probeHasAudioStream, validateMixedOutput, validateMixDuration,
   mixBgm: (...args) => _wrapAsync(mixBgm, ...args),
   mixBgmPlan: (...args) => _wrapAsync(mixBgmPlan, ...args),
   buildMixArgs, resolvePlanPaths, buildAutoPlan, runFfmpeg,

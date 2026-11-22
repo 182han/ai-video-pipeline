@@ -136,6 +136,8 @@ export class PreviewEngine {
     this.texCache = new Map(); // LUT key -> WebGLTexture
     this.audioEls = [];
     this.audioPlan = [null, null];
+    // 2026-11-22：成片自带音频（「保留原声」）。默认关，由 editor 按工程设置打开。
+    this.sourcePlan = { enabled: false, volume: 1 };
     this._onResize = () => { if (!this.destroyed) this._render(); };
     if (typeof ResizeObserver !== 'undefined') {
       this.ro = new ResizeObserver(this._onResize);
@@ -264,6 +266,24 @@ export class PreviewEngine {
       this.host.appendChild(a);
       return a;
     });
+  }
+
+  // 2026-11-22：预览听到「成片自带音频」（导出保留原声时才启用）。
+  // 声音由两个 <video> 元素本身承载；转场时按叠化比例交叉淡化，避免两轨同时出声。
+  // 注意 HTMLMediaElement.volume 上限是 1：工程里设到 1.5 时预览按 1 播放（导出仍按 1.5 混）。
+  setSourceAudio(cfg) {
+    const c = cfg || {};
+    const vol = Number(c.volume);
+    this.sourcePlan = {
+      enabled: c.enabled === true,
+      volume: Number.isFinite(vol) ? Math.max(0, Math.min(1.5, vol)) : 1
+    };
+    for (const s of (this.slots || [])) {
+      if (!s || !s.video) continue;
+      s.video.muted = !this.sourcePlan.enabled;
+      try { s.video.volume = Math.min(1, this.sourcePlan.volume); } catch (e) { /* ignore */ }
+    }
+    if (!this.playing) this._render();
   }
 
   setAudio(plan, filmDuration) {
@@ -729,6 +749,13 @@ export class PreviewEngine {
       if (this.playing) {
         this._cue(1 - this.active, next, Math.max(0, local - (dur - F)));
       }
+    }
+
+    // 原声与画面走同一条叠化曲线：旧 slot 1→0、新 slot 0→1，避免接缝处两轨同时出声。
+    if (this.sourcePlan && this.sourcePlan.enabled) {
+      const base = Math.min(1, this.sourcePlan.volume);
+      try { a.video.volume = Math.max(0, base * (1 - mix)); } catch (e) { /* ignore */ }
+      try { if (b) b.video.volume = Math.max(0, base * mix); } catch (e) { /* ignore */ }
     }
 
     gl.useProgram(this.prog);

@@ -207,6 +207,39 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
   }
 
   return html`<div className="ed-audio">
+    ${(() => {
+      // 2026-11-22：保留原声（默认开）。成片自带的音频原本在导出时被无条件丢弃且无提示。
+      const keepOriginal = audio.keepOriginal !== false;
+      const ovRaw = Number(audio.originalVolume);
+      const originalVolume = Number.isFinite(ovRaw) ? Math.max(0, Math.min(1.5, ovRaw)) : 1;
+      return html`<div className="ed-audio-track" key="original">
+        <div className="ed-audio-head">
+          <b>${tr('editor.audio.keepOriginal')}</b>
+          <span className="ed-sub">${tr('editor.audio.keepOriginalHint')}</span>
+        </div>
+        <label className="ed-audio-row">
+          <input
+            type="checkbox"
+            checked=${keepOriginal}
+            onChange=${(e) => onCommit({ ...audio, keepOriginal: !!e.target.checked })}
+          />
+          <span>${tr('editor.audio.keepOriginalToggle')}</span>
+        </label>
+        ${keepOriginal && html`<label className="ed-audio-row">
+          <span>${tr('editor.audio.originalVolume')}</span>
+          <input
+            className="ed-slider-input"
+            type="range"
+            min="0"
+            max="1.5"
+            step="0.05"
+            value=${originalVolume}
+            onInput=${(e) => onCommit({ ...audio, originalVolume: Number(e.target.value) })}
+          />
+          <span className="ed-slider-val">${Math.round(originalVolume * 100)}%</span>
+        </label>`}
+      </div>`;
+    })()}
     ${KINDS.map((k) => {
       const seg = (audio[k.key] || [])[0];
       const track = seg ? byId[seg.trackId] : null;

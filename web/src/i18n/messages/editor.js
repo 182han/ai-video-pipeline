@@ -22,6 +22,10 @@ export default {
           ambientHint: '自然声景'
         },
         listenFailed: '试听失败：',
+        keepOriginal: '原声',
+        keepOriginalHint: '成片自带的音频',
+        keepOriginalToggle: '导出时保留原声',
+        originalVolume: '原声音量',
         fileMissing: '文件可能不存在',
         fileMissingParen: '（文件可能不存在）',
         browserBlocked: '浏览器拒绝播放',
@@ -148,6 +152,10 @@ export default {
           ambientHint: 'Natural soundscape'
         },
         listenFailed: 'Preview failed: ',
+        keepOriginal: 'Original audio',
+        keepOriginalHint: 'audio that came with the clip',
+        keepOriginalToggle: 'Keep original audio on export',
+        originalVolume: 'Original volume',
         fileMissing: 'file may be missing',
         fileMissingParen: ' (file may be missing)',
         browserBlocked: 'the browser refused to play it',

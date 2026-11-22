@@ -221,7 +221,7 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
   const music = Array.isArray(plan && plan.music) ? plan.music : [];
   const ambient = Array.isArray(plan && plan.ambient) ? plan.ambient : [];
 
-  if (music.length === 0 && ambient.length === 0) {
+  if (music.length === 0 && ambient.length === 0 && opts.keepSourceAudio !== true) {
     return { ok: false, error: '配乐计划为空（没有任何音频片段）' };
   }
 
@@ -273,7 +273,7 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
   const musicOut = emitTrack(music, 'music', 1);
   const ambientOut = emitTrack(ambient, 'ambient', ambientVolume);
 
-  if (!musicOut && !ambientOut) {
+  if (!musicOut && !ambientOut && opts.keepSourceAudio !== true) {
     return { ok: false, error: '所有片段均不合法，无法生成混音', warnings };
   }
 
@@ -296,7 +296,9 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
       filterParts.push(`${musicOut}${ambientOut}amix=inputs=2:normalize=0:dropout_transition=0[${mergedLabel}]`);
     }
   } else {
-    mergedLabel = musicOut ? 'musicout' : 'ambientout';
+    // 注意：两边都没有时必须给 null。否则会生成一个不存在的标签，
+    // ffmpeg 报「找不到该 label」，表现为混音莫名失败。
+    mergedLabel = musicOut ? 'musicout' : (ambientOut ? 'ambientout' : null);
   }
 
   // 整体响度归一化 + 对齐到成片时长
@@ -307,7 +309,43 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
   const tail = dur
     ? `${norm},atrim=0:${sec(dur)},asetpts=PTS-STARTPTS`
     : norm;
-  filterParts.push(`[${mergedLabel}]${tail}[aout]`);
+
+  // 2026-11-22：保留输入自带音轨（剪辑台「保留原声」）。
+  // 设计取舍：配乐仍走 loudnorm 归一化，**原声不参与归一化**（只按 sourceVolume 缩放），
+  // 否则用户听到的「原声」音量会被 loudnorm 改掉，与预期不符。
+  // 只有音乐轨 + 开闪避时，用原声做 sidechain key 压音乐（自然声景的常见组合）。
+  const keepSourceAudio = opts.keepSourceAudio === true;
+  const sourceVolume = num(opts.sourceVolume, 1);
+  const srcTrim = dur ? `,atrim=0:${sec(dur)}` : '';
+  let sourceLabel = null;
+  if (keepSourceAudio) {
+    const srcChain = `[0:a]asetpts=PTS-STARTPTS${srcTrim},aresample=${sr},`
+      + `aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${sec(sourceVolume)}`;
+    if (duck && musicOut && !ambientOut) {
+      filterParts.push(`${srcChain},asplit=2[srcmix][srcside]`);
+      filterParts.push(
+        `${musicOut}[srcside]sidechaincompress=`
+        + `threshold=${sec(duck.threshold)}:ratio=${sec(duck.ratio)}`
+        + `:attack=${duck.attack}:release=${duck.release}:makeup=${sec(duck.makeup)}`
+        + '[musicduck]'
+      );
+      mergedLabel = 'musicduck';
+    } else {
+      filterParts.push(`${srcChain}[srcmix]`);
+    }
+    sourceLabel = '[srcmix]';
+  }
+
+  if (mergedLabel) {
+    filterParts.push(`[${mergedLabel}]${tail}[${sourceLabel ? 'bgmmix' : 'aout'}]`);
+  }
+  if (sourceLabel) {
+    if (mergedLabel) {
+      filterParts.push(`[bgmmix]${sourceLabel}amix=inputs=2:normalize=0:dropout_transition=0[aout]`);
+    } else {
+      filterParts.push(`${sourceLabel}anull[aout]`);
+    }
+  }
 
   return {
     ok: true,

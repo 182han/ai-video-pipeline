@@ -106,7 +106,11 @@ function normAudio(audio) {
   return {
     music: take(a.music),
     ambient: take(a.ambient),
-    opts: a.opts && typeof a.opts === 'object' ? { ...a.opts } : {}
+    opts: a.opts && typeof a.opts === 'object' ? { ...a.opts } : {},
+    // 2026-11-22：保留成片自带音频（默认开）。
+    // 旧行为是导出时无条件丢弃源音轨，界面上也没提示；现在默认保号入档、可关。
+    keepOriginal: a.keepOriginal === undefined ? true : !!a.keepOriginal,
+    originalVolume: Math.round(clamp(num(a.originalVolume, 1), 0, 1.5) * 100) / 100
   };
 }
 
