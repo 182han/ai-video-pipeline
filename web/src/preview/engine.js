@@ -696,13 +696,25 @@ export class PreviewEngine {
       gl.clear(gl.COLOR_BUFFER_BIT);
       return;
     }
-    const w = Math.min(960, Math.max(320, Math.floor(this.canvas.clientWidth || 960)));
-    const h = Math.min(540, Math.round(w * 9 / 16));
+    // 2026-11-22：位图按「显示尺寸 × DPR」建，16:9 内容用 viewport 居中 letterbox。
+    // 旧实现把位图算成 960x540(或 w*9/16) 再由 CSS 拉伸：框不是 16:9 时画面被压扁/偏移
+    // （实测 bitmap 858x483 被塞进 858x398 的显示尺寸）。
+    const cssW = Math.max(340, Math.floor(this.canvas.clientWidth || 960));
+    const cssH = Math.max(190, Math.floor(this.canvas.clientHeight || Math.round(cssW * 9 / 16)));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.min(1920, Math.round(cssW * dpr));
+    const h = Math.min(1080, Math.round(cssH * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
     }
-    gl.viewport(0, 0, w, h);
+    // 黑底 + 居中 letterbox：保证任何容器比例下画面都完整居中、不变形。
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    let vw = w;
+    let vh = Math.round(w * 9 / 16);
+    if (vh > h) { vh = h; vw = Math.round(h * 16 / 9); }
+    gl.viewport(Math.round((w - vw) / 2), Math.round((h - vh) / 2), vw, vh);
 
     const a = this.slots[this.active];
     const next = this.segments[this.index + 1];

@@ -9,6 +9,11 @@
   height: 100vh;
   display: grid;
   grid-template-rows: 46px minmax(0, 1fr) 238px;
+  /* 2026-11-22：必须显式钉死列宽。
+     只写 template-rows 时隐式列为 auto，会按内容 max-content 撑开——
+     实测 .ed-main 被撑到 2924px（视口只有 1404），中间列拿到 2324，
+     预览框于是被推到右侧并被 overflow:hidden 裁掉（用户看到「只占右半侧」）。 */
+  grid-template-columns: minmax(0, 1fr);
   background: var(--s0, #0A0E0C);
   color: var(--ink, #F4F7F5);
   overflow: hidden;
@@ -143,8 +148,11 @@ a.ed-btn.ed-link {
    改成 flex 居中 + 明确宽度上限，盒子尺寸不再由内容反推。 */
 .ed-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px; overflow: hidden; }
 .ed-frame {
-  width: 100%; max-width: 860px; max-height: 100%; aspect-ratio: 16 / 9;
-  margin: auto; flex: 0 1 auto;
+  /* 2026-11-22：改成「填满舞台 + 画布内部 letterbox」。
+     旧写法 aspect-ratio:16/9 与 max-height:100% 同时存在，高度被压时比例会破，
+     canvas 位图被 CSS 拉伸 → 画面变形/错位（实测 858x483 被塞进 858x398）。 */
+  width: 100%; height: 100%; max-width: 860px;
+  flex: 0 1 auto;
   background: #050706; border: 1px solid rgba(244, 247, 245, .08);
   border-radius: 4px; display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;

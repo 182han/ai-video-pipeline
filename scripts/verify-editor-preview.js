@@ -205,11 +205,17 @@ async function waitReady(base, timeoutMs = 25000) {
       check(/removeAttribute\('crossorigin'\)/.test(js), '同源素材不再强制 CORS 模式（跨域才开 anonymous）');
 
       // 2026-11-22：预览只占右半侧、不居中（grid 隐式列宽被 canvas bitmap 宽度带偏）
-      const css = await (await fetch(base + '/app/styles/editor.css')).text();
+      const cssRaw = await (await fetch(base + '/app/styles/editor.css')).text();
+      // 去掉注释再断言：注释里会写「旧写法 aspect-ratio:16/9」，直接匹配会假红。
+      const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
       check(/\.ed-stage\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*center/s.test(css),
         '预览舞台用 flex 居中（不再让 grid 隐式列宽决定位置）');
-      check(!/\.ed-frame\s*\{[^}]*display:\s*grid/s.test(css),
-        '预览框不再用 grid 居中（canvas 改尺寸会带动列宽 → 画面偏移）');
+      check(/\.ed-root\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s.test(css),
+        '工作台根节点钉死列宽（否则隐式 auto 列会被内容撑到 2 倍视口，预览被推到右侧）');
+      check(!/(^|\n)\.ed-frame\s*\{[^}]*aspect-ratio:\s*16/s.test(css),
+        '预览框不再用 aspect-ratio 固定比例（高度被压时会变形，改由画布内部 letterbox）');
+      check(/clientHeight/.test(js) && /vw\s*=\s*Math\.round\(h \* 16 \/ 9\)/.test(js),
+        '画布按显示尺寸建位图并做居中 letterbox（16:9 内容不变形）');
     }
   } catch (e) {
     check(false, '运行时验收异常: ' + (e && e.message ? e.message : e));
