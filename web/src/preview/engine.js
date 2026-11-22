@@ -15,6 +15,15 @@ import { t as tr } from '../i18n/index.js';
 
 const LUT_SIZE = 17;
 const FALLBACK_F = 0.4;
+// 预览「静默黑屏」看门狗：见构造函数里的说明。
+const NO_FRAME_WATCHDOG_MS = 8000;
+
+// 给媒体 URL 加一次性 cache-buster（用于自动重载）。
+function bustUrl(url) {
+  const u = String(url || '');
+  if (!u) return u;
+  return u + (u.indexOf('?') >= 0 ? '&' : '?') + '_pv=' + Date.now();
+}
 
 const lutDataCache = new Map(); // JSON(adjust) -> Promise<Uint8Array|null>
 
@@ -115,6 +124,15 @@ export class PreviewEngine {
     this.raf = 0;
     this.lastEmit = 0;
     this.destroyed = false;
+    // 2026-11-21：静默黑屏防护（用户在剪辑台看到整块黑，页面却没有任何报错）。
+    //
+    // 机理：`_upload()` 对 readyState < 2 的视频直接 return，画布就一直停在初始的
+    // 1x1 黑色纹理上；整条链路不抛异常，所以既没有 onError 也没有提示 —— 用户只能看到黑。
+    // 现在：8s 内一帧都没画出来 → 先自动换 cache-buster URL 重载一次（治「缓存里存了坏响应」
+    // 与「上次加载中断」）→ 仍无帧 → 把 HTTP 状态 / readyState / video 错误码交给 UI 显示。
+    this.framesDrawn = 0;
+    this.watchdog = null;
+    this.recoveredOnce = false;
     this.texCache = new Map(); // LUT key -> WebGLTexture
     this.audioEls = [];
     this.audioPlan = [null, null];
@@ -206,17 +224,28 @@ export class PreviewEngine {
 
   _initVideos() {
     this.host = document.createElement('div');
-    this.host.style.display = 'none';
+    // 2026-11-21：原来是 display:none。部分 Chrome 版本会因此推迟/跳过视频解码，
+    // 结果 <video> 一直 readyState<2 —— 恰好就是「预览整块黑、还不报错」的现场。
+    // 改成「移出视口但仍在布局中」，浏览器就会正常解码首帧。
+    this.host.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;'
+      + 'overflow:hidden;opacity:0;pointer-events:none;';
     document.body.appendChild(this.host);
     this.slots = [0, 1].map(() => {
       const v = document.createElement('video');
       v.muted = true;
       v.playsInline = true;
       v.preload = 'auto';
-      v.crossOrigin = 'anonymous';
+      // 注意：crossOrigin 不在这里固定成 anonymous，改到 _cue() 里按「是否跨域」决定。
+      // 同源媒体强制走 CORS 模式没有任何好处，反而在个别浏览器/扩展组合下会让
+      // <video> 直接加载失败（表现为预览黑屏）。
       v.style.display = 'none';
       v.addEventListener('error', () => {
-        if (this.opts.onError) this.opts.onError(tr('editor.preview.mediaLoad', { src: v.currentSrc || '' }));
+        const e = v.error;
+        // 只传 ASCII 错误码，文案交给 i18n（strict 模式禁止代码内硬编码中文）。
+        const code = e ? String(e.code) : 'unknown';
+        if (this.opts.onError) {
+          this.opts.onError(tr('editor.preview.mediaLoadCode', { src: v.currentSrc || '', code }));
+        }
       });
       this.host.appendChild(v);
       return { video: v, src: null, lutKey: null, lutTex: null, lutTimer: null, ready: false };
@@ -342,10 +371,73 @@ export class PreviewEngine {
       const seg = this._seg();
       if (seg) this._ensureLut(this.active, seg);
       this._render();
+      this._armWatchdog();
       return;
     }
     if (this.playing) this._startAt(keep);
     else this.seek(keep);
+    this._armWatchdog();
+  }
+
+  // ---------- 静默黑屏看门狗 ----------
+  _clearWatchdog() {
+    if (this.watchdog) { clearTimeout(this.watchdog); this.watchdog = null; }
+  }
+
+  _armWatchdog() {
+    this._clearWatchdog();
+    if (this.destroyed || !this.segments.length) return;
+    const armedAt = this.framesDrawn;
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (this.destroyed || this.framesDrawn > armedAt) return;
+      const seg = this._seg();
+      if (!seg) return;
+      if (!this.recoveredOnce) {
+        this.recoveredOnce = true;
+        // 自动救一次：换 cache-buster 重载（命中「缓存里存了坏响应」这类现场）。
+        const slot = this.slots[this.active];
+        slot.src = null;
+        this._cue(0, { ...seg, url: bustUrl(seg.url) }, this._localOf(this.global))
+          .then(() => {
+            if (this.destroyed) return;
+            this._render();
+            this._armWatchdog();
+          })
+          .catch(() => {});
+        return;
+      }
+      this._reportNoFrame(seg);
+    }, NO_FRAME_WATCHDOG_MS);
+  }
+
+  // 把「为什么没画面」讲清楚：先分清是取不到文件（HTTP）还是取到了解不出帧（解码/readyState）。
+  // 注意：这里只组装 ASCII 诊断值，任何面向用户的自然语言都走 i18n（strict 扫描要求）。
+  async _reportNoFrame(seg) {
+    if (this.destroyed) return;
+    const slot = this.slots[this.active];
+    const v = slot && slot.video;
+    const videoError = v && v.error ? ('MEDIA_ERR ' + v.error.code) : 'none';
+    let http = 'n/a';
+    try {
+      const r = await fetch(seg.url, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Range: 'bytes=0-1' }
+      });
+      http = 'HTTP ' + r.status + ' ' + (r.headers.get('content-type') || '');
+    } catch (e) {
+      http = 'probe-error: ' + (e && e.message ? e.message : e);
+    }
+    if (this.destroyed) return;
+    if (this.opts.onError) {
+      this.opts.onError(tr('editor.preview.noFrame', {
+        http: http.trim(),
+        readyState: v ? v.readyState : -1,
+        videoError,
+        src: (v && (v.currentSrc || v.src)) || seg.url
+      }));
+    }
   }
 
   _indexAt(t) {
@@ -402,6 +494,7 @@ export class PreviewEngine {
 
   destroy() {
     this.destroyed = true;
+    this._clearWatchdog();
     this.pause();
     this._pauseAudio();
     window.removeEventListener('resize', this._onResize);
@@ -437,15 +530,40 @@ export class PreviewEngine {
       slot.lutTex = null;
       slot.ready = false;
       v.src = seg.url;
+      // 2026-11-21：只有真正跨域的素材才开 CORS 模式。
+      // 同源（本站 /output/*）若仍写 crossOrigin='anonymous'，浏览器会按 CORS 模式取流，
+      // 一旦响应没带 Access-Control-Allow-Origin（登录墙中间件/代理转发很容易漏），
+      // <video> 就静默失败 → 预览黑屏。同源本来就不需要它。
+      let sameOrigin = true;
+      try {
+        sameOrigin = new URL(seg.url, window.location.href).origin === window.location.origin;
+      } catch (e) { sameOrigin = true; }
+      if (sameOrigin) v.removeAttribute('crossorigin');
+      else v.crossOrigin = 'anonymous';
+      // 等到「真的有可绘制帧」（loadeddata → readyState>=2）再往下走。
+      // 2026-11-21：原来只等 loadedmetadata 就立刻 seek + 渲染，元数据到了但帧还没解码时
+      // _upload 会直接 return（readyState<2），画布就停在全黑 —— 且全程不报错。
+      // 这里只把 loadeddata / error 当作完成信号；metadata 不再提前放行。
       await new Promise((resolve) => {
         let done = false;
-        const finish = () => { if (!done) { done = true; resolve(); } };
-        v.addEventListener('loadedmetadata', finish, { once: true });
+        const finish = () => {
+          if (done) return;
+          done = true;
+          v.removeEventListener('loadeddata', finish);
+          v.removeEventListener('error', finish);
+          clearTimeout(timer);
+          resolve();
+        };
+        v.addEventListener('loadeddata', finish, { once: true });
         v.addEventListener('error', finish, { once: true });
-        setTimeout(finish, 4000);
+        const timer = setTimeout(finish, 5000);
       });
     }
     const target = Math.max(0, Math.min(Number(seg.outSec) || 0, (Number(seg.inSec) || 0) + offset));
+    // seek 完成后浏览器可能晚一点才把帧准备好；补一次渲染，避免「第一帧永远没上屏」。
+    v.addEventListener('seeked', () => {
+      if (!this.destroyed && !this.playing) this._render();
+    }, { once: true });
     try {
       if (Math.abs(v.currentTime - target) > 0.08) v.currentTime = target;
     } catch (e) { /* ignore */ }
@@ -610,6 +728,8 @@ export class PreviewEngine {
 
     this._upload(a, 0);
     this._upload(b, 1);
+    // 只有真正有帧可画时才计数；看门狗据此判断「一直没取到画面」。
+    if (a && a.video.readyState >= 2) this.framesDrawn += 1;
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);

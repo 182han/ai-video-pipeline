@@ -10,7 +10,9 @@ export default {
         webgl2: '当前浏览器不支持 WebGL2，实时预览不可用',
         shaderLink: '预览着色器链接失败: {log}',
         mediaLoad: '素材加载失败：{src}',
-        renderFailed: '预览渲染失败: {msg}'
+        mediaLoadCode: '素材加载失败（video 错误码 {code}）：{src}',
+        renderFailed: '预览渲染失败: {msg}',
+        noFrame: '预览取不到画面（{http}；readyState={readyState}；video 错误={videoError}；源={src}）。已自动重载一次仍失败，请把这条信息反馈给研发。'
       },
       audio: {
         kind: {
@@ -134,7 +136,9 @@ export default {
         webgl2: 'This browser does not support WebGL2; live preview is unavailable.',
         shaderLink: 'Preview shader link failed: {log}',
         mediaLoad: 'Failed to load media: {src}',
-        renderFailed: 'Preview render failed: {msg}'
+        mediaLoadCode: 'Failed to load media (video error code {code}): {src}',
+        renderFailed: 'Preview render failed: {msg}',
+        noFrame: 'Preview could not get a picture ({http}; readyState={readyState}; video error={videoError}; src={src}). Auto-reload was already tried once; please report this message.'
       },
       audio: {
         kind: {

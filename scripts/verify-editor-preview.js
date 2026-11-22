@@ -189,6 +189,20 @@ async function waitReady(base, timeoutMs = 25000) {
 
       const js = await (await fetch(base + '/app/src/preview/engine.js')).text();
       check(/texImage3D/.test(js), '浏览器可取到 preview/engine.js');
+
+      // ---- 2026-11-21：静默黑屏防护（用户报「成片在剪辑台显示不出来」）----
+      // 旧实现取不到帧时什么都不报：_upload 对 readyState<2 直接 return，画布一直是初始黑色纹理，
+      // 页面上既没有错误也没有提示。下面这些断言锁住「必须能报出来 + 必须自动救一次」。
+      check(/NO_FRAME_WATCHDOG_MS\s*=\s*\d+/.test(js), '有「取不到画面」看门狗常量');
+      check(/framesDrawn/.test(js) && /readyState\s*>=\s*2/.test(js), '按真实可绘制帧计数（不看是否调用过 render）');
+      check(/_reportNoFrame/.test(js) && /bytes=0-1/.test(js), '失败时探测 HTTP 状态（区分「取不到文件」与「取到了解不出帧」）');
+      check(/editor\.preview\.noFrame/.test(js), '失败文案带可诊断字段（HTTP / readyState / video 错误 / 源）');
+      check(/bustUrl\(/.test(js) && /_pv=/.test(js), '首次无帧会换 cache-buster 自动重载一次');
+      check(/'loadeddata'/.test(js), '等的是 loadeddata（有帧）而不是 metadata');
+      check(!/'loadedmetadata', finish/.test(js), '不再用 loadedmetadata 提前放行（会导致帧未解码就渲染 → 黑）');
+      check(/left:-9999px/.test(js) && /cssText/.test(js), 'video 宿主改为「移出视口但保留布局」，不再 display:none');
+      check(/MEDIA_ERR/.test(js), 'video 元素报错时把 MEDIA_ERR 码带出来');
+      check(/removeAttribute\('crossorigin'\)/.test(js), '同源素材不再强制 CORS 模式（跨域才开 anonymous）');
     }
   } catch (e) {
     check(false, '运行时验收异常: ' + (e && e.message ? e.message : e));
