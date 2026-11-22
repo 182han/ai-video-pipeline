@@ -203,6 +203,13 @@ async function waitReady(base, timeoutMs = 25000) {
       check(/left:-9999px/.test(js) && /cssText/.test(js), 'video 宿主改为「移出视口但保留布局」，不再 display:none');
       check(/MEDIA_ERR/.test(js), 'video 元素报错时把 MEDIA_ERR 码带出来');
       check(/removeAttribute\('crossorigin'\)/.test(js), '同源素材不再强制 CORS 模式（跨域才开 anonymous）');
+
+      // 2026-11-22：预览只占右半侧、不居中（grid 隐式列宽被 canvas bitmap 宽度带偏）
+      const css = await (await fetch(base + '/app/styles/editor.css')).text();
+      check(/\.ed-stage\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*center/s.test(css),
+        '预览舞台用 flex 居中（不再让 grid 隐式列宽决定位置）');
+      check(!/\.ed-frame\s*\{[^}]*display:\s*grid/s.test(css),
+        '预览框不再用 grid 居中（canvas 改尺寸会带动列宽 → 画面偏移）');
     }
   } catch (e) {
     check(false, '运行时验收异常: ' + (e && e.message ? e.message : e));
