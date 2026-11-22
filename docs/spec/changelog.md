@@ -3856,3 +3856,94 @@ $env:DATABASE_TYPE='json'; node scripts/verify-seam-qc.js; $env:DATABASE_TYPE=''
 仍有 40% 余量（均值 +7σ），真失败感知约 6.7 分钟。
 **不建议低于 400**：余量会掉到 <40%，而唯一一次超时是并发争抢造成的（当时 `GEN_CONCURRENCY=3`），
 尾部事件真实存在，不宜按「平均值 + 一点点」设阈值。
+
+## E15 · 剪辑台「保留原声」+ 预览黑屏/偏移三连修（2026-11-22）
+
+用户三连反馈：①剪辑台预览整块黑 → ②修好后画面只占右半侧、不居中 → ③成片自带音频被取消。
+三件事根因各不相同，逐条记录。
+
+### ① 预览静默黑屏
+
+现象：检出成片在剪辑台预览整块黑，页面无任何报错（无红条、无提示）。
+
+排查（服务端先排除掉）：`/api/library` 有条目且 `url=/output/<id>.mp4`；带登录态 GET 返回
+**206 / video/mp4**；成片 h264 **High@3.1** yuv420p + aac LC、`ftyp→moov→free→mdat`（faststart）；
+首帧亮度 YAVG≈119~131（不是黑帧）。按 editor 的取数链路（project + /api/library → segs）逐行复算，
+`url` 非空且时长正确 —— 即引擎拿到了地址，问题在「取帧」。
+
+根因（静默）：`PreviewEngine._upload()` 对 `readyState < 2` 直接 return，画布一直停在初始 1×1 黑色纹理，
+整条链路不抛异常，所以既没有 `onError` 也没有 UI 提示。叠加两个触发因素：
+`video` 宿主是 `display:none`（部分 Chrome 会推迟/跳过解码）；`_cue()` 只等 `loadedmetadata`
+就立刻 seek + 渲染（元数据到了但帧没解码）。
+
+修复：
+- `_cue()` 改为等 **`loadeddata`**（真的有一帧）再往下走，`seeked` 后再补一次渲染
+- video 宿主改「移出视口但保留布局」（`position:fixed;left:-9999px`），不再 `display:none`
+- 同源素材不再强制 `crossOrigin='anonymous'`（跨域才开，去掉一类 CORS 模式失败面）
+- 8s **看门狗**：一帧都没画出来 → 换 cache-buster 自动重载一次 → 仍失败就把
+  `HTTP 状态 / readyState / MEDIA_ERR / 源` 显示到预览框底部（新增 i18n `noFrame`/`mediaLoadCode`）
+
+### ② 画面只占右半侧、不居中
+
+自检浮层（新增 `?diag=1`，只读、无需 DevTools）实测：
+
+```
+vw=1404  main=0,46 2924x458  stage=300,46 2324x420  frame=1032,56 860x400
+canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
+```
+
+根因：`.ed-root` 只写了 `grid-template-rows`，**没有显式列**，隐式列按内容 `max-content` 撑到
+**2924px（≈2 倍视口）**；中间列拿到 2324 宽，预览框被算到 x=1032；`.ed-root` 又是 `overflow:hidden`，
+于是不是滚动、而是右侧被裁掉。
+
+修复：`.ed-root` 增加 `grid-template-columns: minmax(0,1fr)`；`.ed-stage`/`.ed-frame` 由 grid 改 flex 居中；
+`.ed-frame` 去掉 `aspect-ratio`（与 `max-height:100%` 打架会压扁），改为填满舞台；
+`engine._draw()` 位图按「显示尺寸 × DPR」建，并用 `gl.viewport` 做 **16:9 居中 letterbox**
+（旧实现位图恒为 `w*9/16`，被塞进 858x398 会纵向变形）。
+
+### ③ 成片自带音频被丢（本次新增功能）
+
+用户问：「视频自带的音频在剪辑模块会取消掉吗？正常吗？」
+
+事实：**预览静音是设计**（`engine` 里源视频一律 `muted`，只播配乐/环境音两轨），
+但**导出是真丢**——`editorExporter` 拼接阶段写死 `ignoreAudio:true`（先产出无声视频），
+随后 `audioMixer.buildMixArgs` 只 `-map 0:v` + 配乐轨 `[aout]`，**从不接 `0:a]`**；
+没有配乐时直接把无声中间文件改名成交付文件 = **导出无音轨视频**。
+且 `audioMixer.js` 注释里写了 `keepOriginalAudio` 却从未实现。顺带核实：流水线 `audio_mix`
+同样只混配乐，所以成片从来就没有「原声」——本例音轨是 BGM `calm_04`（-16dB）。
+
+用户选择方案 B（加开关、默认保留）。实现：
+- `bgmPlan.buildMixCommand`：支持 `keepSourceAudio`（`[0:a]` → 裁到成片时长/重采样/音量 → 与原配乐
+  `amix`）。**配乐走 loudnorm 归一化，原声不参与归一化**（只按 `sourceVolume` 缩放），否则用户听到的
+  「原声」会被改音量。只有音乐轨且开闪避时，用原声做 `sidechaincompress` 的 key 压音乐。
+  另修一个潜在缺陷：两轨都没有时 `mergedLabel` 曾错误置为 `'ambientout'`（不存在的 label）。
+- `audioMixer.mixBgmPlan`：新增 `keepSourceAudio` / `sourceVolume`；先 `probeHasAudioStream` 探测，
+  输入无音轨时自动降级并给 warning（避免 `[0:a]` 直接让 ffmpeg 报错）。
+- `editorExporter`：`ignoreAudio: !keepOriginal`；混音时传 `keepSourceAudio/sourceVolume`；
+  `job.audio` 记录 `keepOriginal/originalVolume/keptSourceAudio/warnings`。
+- `projectStore.normAudio`：新增 `keepOriginal`（默认 **true**）、`originalVolume`（默认 1，0~1.5）。
+- UI：`audioPanel` 新增「原声」卡片（开关 + 音量滑杆）；`i18n` 补 4 个键。
+- 预览：`PreviewEngine.setSourceAudio()` 打开时解除 `muted`，并按叠化比例做**交叉淡化**
+  （旧 slot 1→0、新 slot 0→1），避免接缝处两轨同时出声。
+
+**验收（真 ffmpeg，全部实跑）**
+
+- 新增 `scripts/verify-editor-keep-original-audio.js`（**21/0**，已注册进 `verify-all`）：
+  配乐音量置 0 做隔离 —— 保留原声 **-24.2 dB** vs 丢弃 **-91.0 dB**（**差 66.8 dB**），
+  证明源音轨真的进了混音；另覆盖「配乐+原声并存」「只保留原声（`[src]anull` 分支）」
+  「无音轨输入给出可读错误」。
+- 回归：`verify-transitions` 36/0、`verify-editor-preview` 42/0（新增 12 条断言：
+  看门狗/loadeddata/crossorigin/根节点列宽/letterbox）、`verify-editor-export` 31/0、
+  `verify-i18n --strict` 12/0、`verify-editor-media` 21/0、`verify-library` 38/0。
+- `verify-bgm-plan` 本机**跳过**（缺测试视频，属既有跳过，不计通过）。
+- `verify-all.js` 在本沙箱仍 `spawn EPERM`（已知环境限制），只能逐套件跑。
+
+**未验证**
+
+- 本沙箱无可用浏览器（Chrome 需命名管道被禁；Electron 未安装），三处**视觉/听感**结论均未在真机复验：
+  预览是否居中、原声是否可闻、转场交叉淡化是否自然。代码层面只能保证「不再静默失败」且新增断言在门禁里。
+- 存量工程没有 `audio.keepOriginal` 字段 → 走默认 `true`；`originalVolume` 同样默认 1。
+- 存量两条 `status=mixing` 的成片条目未迁移（不参与过滤，属显示层）。
+
+**影响面**：编辑器导出默认行为改变（以前丢原声、现在保留）。若某工程确实要纯配乐，可在「原声」卡片关掉开关。
+
