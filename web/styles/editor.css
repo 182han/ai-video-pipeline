@@ -125,6 +125,15 @@ a.ed-btn.ed-link {
 .ed-empty p { margin: 0 0 6px; color: var(--ink2, #A7B3AD); font-size: 12px; }
 .ed-empty .ed-sub { font-size: 11px; }
 
+/* 预览布局自检浮层（仅 ?diag=1）。纯只读显示，方便用户截图反馈。 */
+.ed-diag {
+  position: fixed; left: 8px; bottom: 8px; z-index: 9999;
+  margin: 0; padding: 8px 10px; border-radius: 6px;
+  background: rgba(0, 0, 0, .84); color: #9EF0B0;
+  font: 11px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre; pointer-events: none; max-width: 92vw; overflow: hidden;
+}
+
 /* ---------- 中：预览 ---------- */
 .ed-center { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s0, #0A0E0C); }
 /* 2026-11-22：预览「只占右半侧、不居中」。

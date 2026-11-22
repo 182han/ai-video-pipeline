@@ -25,6 +25,11 @@ const { useEffect, useMemo, useRef, useState } = React;
 
 const LAST_KEY = 'dsh.editor.lastProject';
 const SAVE_DEBOUNCE = 700;
+// 2026-11-22：预览布局自检浮层。加 ?diag=1 打开，左下角显示各盒子的真实坐标。
+// 目的：不需要开 DevTools、不需要粘贴代码，用户截一张图就能定位布局问题。
+const DIAG = (() => {
+  try { return new URLSearchParams(window.location.search).get('diag') === '1'; } catch (e) { return false; }
+})();
 const PPS_MIN = 8;
 const PPS_MAX = 80;
 
@@ -145,6 +150,7 @@ export function EditorView() {
   const [playing, setPlaying] = useState(false);
   const [previewErr, setPreviewErr] = useState('');
   const [previewReady, setPreviewReady] = useState(false);
+  const [diagText, setDiagText] = useState('');
   const [theater, setTheater] = useState(false);
 
   const pastRef = useRef([]);
@@ -303,6 +309,34 @@ export function EditorView() {
     if (previewRef.current) previewRef.current.destroy();
     previewRef.current = null;
     setPreviewReady(false);
+  }, []);
+
+  // 布局自检（仅 ?diag=1）：每 500ms 采一次盒子坐标。只读 DOM，不改任何状态。
+  useEffect(() => {
+    if (!DIAG) return undefined;
+    const box = (el) => {
+      if (!el) return '-';
+      const b = el.getBoundingClientRect();
+      return Math.round(b.x) + ',' + Math.round(b.y) + ' ' + Math.round(b.width) + 'x' + Math.round(b.height);
+    };
+    const disp = (el) => (el ? getComputedStyle(el).display : '-');
+    const tick = () => {
+      const st = document.querySelector('.ed-stage');
+      const fr = document.querySelector('.ed-frame');
+      const c = canvasRef.current;
+      setDiagText([
+        'vw=' + window.innerWidth + ' vh=' + window.innerHeight + ' dpr=' + (window.devicePixelRatio || 1),
+        'scrollW=' + document.documentElement.scrollWidth + ' bodyScrollW=' + document.body.scrollWidth,
+        'root=' + box(document.querySelector('.ed-root')),
+        'main=' + box(document.querySelector('.ed-main')) + ' disp=' + disp(document.querySelector('.ed-main')),
+        'stage=' + box(st) + ' disp=' + disp(st),
+        'frame=' + box(fr) + ' disp=' + disp(fr),
+        'canvas=' + box(c) + ' bitmap=' + (c ? (c.width + 'x' + c.height) : '-')
+      ].join('\n'));
+    };
+    tick();
+    const timer = setInterval(tick, 500);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -1373,6 +1407,10 @@ export function EditorView() {
             </div>
           </div>
         </div>
+      `}
+
+      ${DIAG && diagText && html`
+        <pre className="ed-diag">${diagText}</pre>
       `}
 
       ${toast && html`
