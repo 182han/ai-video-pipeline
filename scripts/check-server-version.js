@@ -88,6 +88,42 @@ function out(obj, lines) {
     issues.push(`运行中的图片模型 ${image.model} ≠ 当前配置 ${config.IMAGE_GEN_MODEL}`);
   }
 
+  // 2026-11-23 补齐：启动时加载的不止 server.js —— config.js、.env、src/**/*.js
+  // 也是启动时读进内存的。此前只比对 server.js，改了 src 没重启仍报 ✅（当天踩过两次）。
+  const newerFiles = [];
+  const startedMs = info && info.startedAt ? new Date(info.startedAt).getTime() : null;
+  if (startedMs && Number.isFinite(startedMs)) {
+    const appRoot = path.join(__dirname, '..');
+    const collect = (dir, acc) => {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return acc; }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) collect(full, acc);
+        else if (ent.isFile() && /\.js$/i.test(ent.name)) acc.push(full);
+      }
+      return acc;
+    };
+    const candidates = collect(path.join(appRoot, 'src'), []);
+    for (const p of [path.join(appRoot, 'config.js'), path.join(appRoot, '.env')]) {
+      try { if (fs.statSync(p).isFile()) candidates.push(p); } catch (e) { /* 忽略 */ }
+    }
+    for (const f of candidates) {
+      try {
+        const m = fs.statSync(f).mtimeMs;
+        if (m > startedMs + 1000) {
+          newerFiles.push({ path: path.relative(appRoot, f), mtime: new Date(m).toISOString() });
+        }
+      } catch (e) { /* 忽略 */ }
+    }
+    if (newerFiles.length) {
+      newerFiles.sort((a, b) => new Date(a.mtime) - new Date(b.mtime));
+      issues.push(`运行中的服务早于 ${newerFiles.length} 个启动时加载的文件（改完没重启）：`);
+      for (const n of newerFiles.slice(0, 10)) issues.push(`  ${n.path}  ${n.mtime}`);
+      if (newerFiles.length > 10) issues.push(`  ...还有 ${newerFiles.length - 10} 个`);
+    }
+  }
+
   const result = {
     ok: issues.length === 0,
     state: issues.length === 0 ? 'current' : 'stale',
@@ -97,6 +133,7 @@ function out(obj, lines) {
     runningServerMtime: info ? info.serverMtime : null,
     localServerMtime: localMtime,
     imageGen: image,
+    newerFiles,
     issues
   };
 
