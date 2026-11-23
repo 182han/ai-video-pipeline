@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { redactLogLine } = require('./src/utils/logRedact');
 
 // ===== 日志落盘（终端 + 文件双写）=====
 //
@@ -26,11 +27,11 @@ const _origLog = console.log.bind(console);
 const _origErr = console.error.bind(console);
 const _origWarn = console.warn.bind(console);
 function _logLine(level, args) {
-  const text = args.map(a => {
+  const text = redactLogLine(args.map(a => {
     if (typeof a === 'string') return a;
     if (a instanceof Error) return a.stack || a.message;
     try { return JSON.stringify(a); } catch (e) { return String(a); }
-  }).join(' ');
+  }).join(' '));
   try { fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [${level}] ${text}\n`); } catch (e) {}
 }
 console.log = (...a) => { _origLog(...a); _logLine('INFO', a); };
@@ -43,6 +44,8 @@ const imageGrade = require('./src/imageGrade');
 const taskManager = require('./src/taskManager');
 const storage = require('./src/storage');
 const auth = require('./src/auth');
+const passwordPolicy = require('./src/passwordPolicy');
+const usernamePolicy = require('./src/usernamePolicy');
 const pipeline = require('./src/pipeline');
 const promptOptimizer = require('./src/promptOptimizer');
 const promptSkill = require('./src/promptSkill');
@@ -236,19 +239,42 @@ app.use((req, res, next) => {
 
 // ===== 认证接口 =====
 
-// 登录：失败 5 次锁 IP 5 分钟；错误提示不区分「账号不存在」与「密码错误」
-app.post('/api/auth/login', async (req, res) => {
-  const ip = auth.getClientIp(req);
-  const lock = auth.checkLock(ip);
-  if (lock.locked) {
-    return res.status(429).json({
-      error: `尝试次数过多，请 ${lock.retryAfter} 秒后再试`,
-      code: 'LOCKED',
-      retryAfter: lock.retryAfter,
-      ...i18n.err(req.lang, 'api.auth.locked', { retryAfter: lock.retryAfter })
-    });
-  }
+const PASSWORD_ERROR_KEYS = {
+  EMPTY: 'api.users.passwordTooShort',
+  INVALID: 'api.users.passwordInvalid',
+  TOO_SHORT: 'api.users.passwordTooShort',
+  TOO_LONG: 'api.users.passwordTooLong',
+  COMMON: 'api.users.passwordTooCommon',
+  CONTAINS_USERNAME: 'api.users.passwordContainsUsername',
+  ALL_NUMERIC: 'api.users.passwordTooWeak',
+  TOO_SIMPLE: 'api.users.passwordTooWeak',
+  MISSING_CLASSES: 'api.users.passwordMissingClasses'
+};
 
+function minPasswordLength() {
+  return Math.min(
+    passwordPolicy.MAX_LENGTH,
+    Math.max(8, Number(config.AUTH && config.AUTH.minPasswordLength) || passwordPolicy.MIN_LENGTH_DEFAULT)
+  );
+}
+
+function passwordPolicyError(req, res, result) {
+  const key = PASSWORD_ERROR_KEYS[result.code] || 'api.users.passwordInvalid';
+  const params = { ...(result.params || {}) };
+  if (result.code === 'EMPTY') params.min = minPasswordLength();
+  return res.status(400).json({
+    error: i18n.t('zh', key, params),
+    code: 'PASSWORD_' + (result.code || 'INVALID'),
+    ...i18n.err(req.lang, key, params)
+  });
+}
+
+function safeLogName(value) {
+  return String(value || '').slice(0, 64).replace(/[\r\n\t]/g, ' ');
+}
+
+// 登录：失败 5 次锁 IP + 账号 5 分钟；错误提示不区分「账号不存在」与「密码错误」
+app.post('/api/auth/login', async (req, res) => {
   const username = String((req.body || {}).username || '').trim();
   const password = String((req.body || {}).password || '');
   if (!username || !password) {
@@ -256,6 +282,17 @@ app.post('/api/auth/login', async (req, res) => {
       error: '请输入账号和密码',
       code: 'AUTH_MISSING_CREDENTIALS',
       ...i18n.err(req.lang, 'api.auth.missingCredentials')
+    });
+  }
+
+  const ip = auth.getClientIp(req);
+  const lock = auth.checkLock(ip, username);
+  if (lock.locked) {
+    return res.status(429).json({
+      error: `尝试次数过多，请 ${lock.retryAfter} 秒后再试`,
+      code: 'LOCKED',
+      retryAfter: lock.retryAfter,
+      ...i18n.err(req.lang, 'api.auth.locked', { retryAfter: lock.retryAfter })
     });
   }
 
@@ -277,7 +314,8 @@ app.post('/api/auth/login', async (req, res) => {
 
   const ok = await auth.verifyPasswordConstant(password, user ? user.passwordHash : null);
   if (!ok) {
-    const r = auth.recordFailure(ip);
+    const r = auth.recordFailure(ip, username);
+    console.warn(`[auth] 登录失败: ${safeLogName(username)} (${ip})`);
     if (r.locked) {
       return res.status(401).json({
         error: '尝试次数过多，已锁定',
@@ -292,7 +330,18 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
-  auth.resetFailures(ip);
+  auth.resetFailures(ip, username);
+  // 旧 v1 哈希（2^14）或更低参数：登录成功后静默升级到当前参数。
+  // 失败不影响本次登录，也不改口令本身。
+  if (auth.needsRehash(user.passwordHash)) {
+    try {
+      const upgraded = await auth.hashPassword(password);
+      await storage.updateUserPassword(user.id, upgraded);
+      console.log(`[auth] 密码哈希已升级: ${user.username}`);
+    } catch (e) {
+      console.error('[auth] 密码哈希升级失败:', e.message);
+    }
+  }
   auth.markLogin(user.id);
   auth.setSessionCookie(res, auth.createSession(user));
   console.log(`[auth] 登录成功: ${user.username} (${ip})`);
@@ -315,9 +364,9 @@ app.get('/api/auth/me', (req, res) => {
 // ===== 成员管理（账号管理仅主账号；成员仍可改自己的密码）=====
 
 // 2026-11-23 公网交付加固：把「账号管理」收口到 AUTH_USER 指定的主账号。
-// 背景：项目没有角色分级，所有账号权限相同；且改密码不需要旧密码（见下面的
-// PUT /api/users/:id/password）。把账号交给外部体验方后，对方可以改掉主账号密码
+// 背景：项目没有角色分级，所有账号权限相同。把账号交给外部体验方后，对方可以改掉主账号密码
 // 或删掉主账号，交付方将永久进不去。这里只收口账号管理，不影响内容操作。
+// 2026-11-23 密码体系升级：本人改密必须提供当前密码；主账号重置他人仍属于管理员重置。
 const OWNER_USERNAME = String((config.AUTH && config.AUTH.bootstrapUser) || '').trim() || 'admin';
 
 function isOwner(req) {
@@ -390,24 +439,21 @@ app.get('/api/users', async (req, res) => {
 
 app.post('/api/users', requireOwner, async (req, res) => {
   try {
-    const username = String((req.body || {}).username || '').trim();
-    const password = String((req.body || {}).password || '');
+    const username = usernamePolicy.normalizeUsername((req.body || {}).username);
+    const rawPassword = (req.body || {}).password;
+    const password = typeof rawPassword === 'string' ? rawPassword : '';
     const role = String((req.body || {}).role || 'member');
-    const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
-    if (!/^[A-Za-z0-9_.@-]{2,32}$/.test(username)) {
+    const minLen = minPasswordLength();
+    const usernameCheck = usernamePolicy.validateUsername(username);
+    if (!usernameCheck.ok) {
       return res.status(400).json({
-        error: '账号需 2–32 位，仅限字母、数字、下划线、点、@、横线',
+        error: i18n.t('zh', 'api.users.badUsername'),
         code: 'USERNAME_INVALID',
         ...i18n.err(req.lang, 'api.users.badUsername')
       });
     }
-    if (password.length < minLen) {
-      return res.status(400).json({
-        error: `密码至少 ${minLen} 位`,
-        code: 'PASSWORD_TOO_SHORT',
-        ...i18n.err(req.lang, 'api.users.passwordTooShort', { min: minLen })
-      });
-    }
+    const check = passwordPolicy.validate(password, { username, minLength: minLen });
+    if (!check.ok) return passwordPolicyError(req, res, check);
     if (role !== 'member' && role !== 'demo') {
       return res.status(400).json({
         error: '角色只能是 member 或 demo',
@@ -468,15 +514,44 @@ app.delete('/api/users/:id', requireOwner, async (req, res) => {
 
 app.put('/api/users/:id/password', requireOwnerOrSelf, async (req, res) => {
   try {
-    const password = String((req.body || {}).password || '');
-    const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
-    if (password.length < minLen) {
-      return res.status(400).json({
-        error: `密码至少 ${minLen} 位`,
-        code: 'PASSWORD_TOO_SHORT',
-        ...i18n.err(req.lang, 'api.users.passwordTooShort', { min: minLen })
+    const password = typeof (req.body || {}).password === 'string' ? req.body.password : '';
+    const target = await storage.getUser(req.params.id);
+    if (!target) {
+      return res.status(404).json({
+        error: '账号不存在',
+        code: 'USER_NOT_FOUND',
+        ...i18n.err(req.lang, 'api.users.notFound')
       });
     }
+
+    const minLen = minPasswordLength();
+    const check = passwordPolicy.validate(password, { username: target.username, minLength: minLen });
+    if (!check.ok) return passwordPolicyError(req, res, check);
+
+    const isSelf = req.params.id === req.auth.userId;
+    // 本人改密必须验证当前口令（OWASP Authentication Cheat Sheet）。
+    // 主账号重置其他账号属于管理员重置，不要求对方旧口令；但重置自己仍要求当前口令。
+    if (isSelf) {
+      const currentPassword = String((req.body || {}).currentPassword || '');
+      if (!currentPassword) {
+        return res.status(400).json({
+          error: i18n.t('zh', 'api.users.currentPasswordRequired'),
+          code: 'CURRENT_PASSWORD_REQUIRED',
+          ...i18n.err(req.lang, 'api.users.currentPasswordRequired')
+        });
+      }
+      const me = await auth.findUserByUsername(req.auth.username);
+      const currentOk = me ? await auth.verifyPasswordConstant(currentPassword, me.passwordHash) : false;
+      if (!currentOk) {
+        console.warn(`[auth] 改密失败（当前密码错误）: ${safeLogName(req.auth.username)} (${auth.getClientIp(req)})`);
+        return res.status(400).json({
+          error: i18n.t('zh', 'api.users.currentPasswordWrong'),
+          code: 'CURRENT_PASSWORD_WRONG',
+          ...i18n.err(req.lang, 'api.users.currentPasswordWrong')
+        });
+      }
+    }
+
     const passwordHash = await auth.hashPassword(password);
     const user = await storage.updateUserPassword(req.params.id, passwordHash);
     if (!user) {
@@ -487,7 +562,7 @@ app.put('/api/users/:id/password', requireOwnerOrSelf, async (req, res) => {
       });
     }
     auth.destroySessionsOfUser(req.params.id);
-    console.log(`[auth] 重置密码: ${user.username}`);
+    console.log(`[auth] 重置密码: ${user.username} (by ${req.auth.username}, ${auth.getClientIp(req)})`);
     res.json({ ok: true, user });
   } catch (e) {
     res.status(400).json({

@@ -265,6 +265,10 @@
     margin:18px 0 0;font-size:10px;line-height:1.6;color:rgba(255,255,255,.42);
     letter-spacing:.02em;
   }
+  .rule-hint{
+    margin:14px 0 0;font-size:10px;line-height:1.65;color:rgba(255,255,255,.56);
+    letter-spacing:.02em;
+  }
 
   /* 语言切换（P0）：登录墙之前也要能用；显示「目标语言」 */
   .lang-toggle{
@@ -437,6 +441,7 @@
     </label>
     <p class="err" id="err" role="alert" aria-live="polite"></p>
     <button class="enter" id="submitBtn" type="submit">Sign in</button>
+    <p class="rule-hint" id="ruleHint">新账号/重置密码：账号名 2–10 位（中文/英文字母）；密码 8–15 位（含大写/小写/数字/符号）。</p>
     <p class="fine">会话只保留在本次浏览器会话中；关闭浏览器后需要重新登录。</p>
   </form>
 </main>
@@ -463,6 +468,7 @@
   // ---------- 语言（P0）：登录墙之前自包含实现 ----------
   // 与 web/src/i18n 使用同一持久化键与 cookie，登录后工作台会继承这里的语言。
   var fine = document.querySelector(".fine");
+  var ruleHint = document.getElementById("ruleHint");
   var langToggle = document.getElementById("langToggle");
   var brandCn = document.getElementById("brandCn");
   var brandHook = document.getElementById("brandHook");
@@ -486,6 +492,7 @@
       signIn: "Sign in",
       signingIn: "Signing in…",
       fine: "会话只保留在本次浏览器会话中；关闭浏览器后需要重新登录。",
+      ruleHint: "新账号/重置密码：账号名 2–10 位（中文/英文字母）；密码 8–15 位（含大写/小写/数字/符号）。",
       needUser: "请输入账号",
       needPass: "请输入密码",
       err429: "尝试次数过多，请稍后再试",
@@ -509,6 +516,7 @@
       signIn: "Sign in",
       signingIn: "Signing in…",
       fine: "Your session lasts only until you close this browser. You will need to sign in again next time.",
+      ruleHint: "New accounts / password resets: account 2–10 Chinese/English letters; password 8–15 chars with uppercase, lowercase, digit, and symbol.",
       needUser: "Please enter your account",
       needPass: "Please enter your password",
       err429: "Too many attempts. Please try again later.",
@@ -569,6 +577,7 @@
     user.placeholder = T().accountPh;
     pass.placeholder = T().passwordPh;
     if (fine) fine.textContent = T().fine;
+    if (ruleHint) ruleHint.textContent = T().ruleHint;
     hit.setAttribute("aria-label", T().hitAria);
     ask.setAttribute("aria-label", T().askAria);
     if (!submit.disabled) submit.textContent = T().signIn;

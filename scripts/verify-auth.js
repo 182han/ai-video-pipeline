@@ -10,8 +10,7 @@
 //
 // 环境隔离：用 DATABASE_TYPE=json 起临时服务，并把用户文件指到临时目录
 // （USERS_FILE 覆盖），这样既不会读 data/users.json 里的历史残留账号
-// （旧版曾因残留 verify_ 账号导致 bootstrap 跳过建号、登录全 401），
-// 也不会往真实用户文件里写测试账号。
+// （旧版曾因残留测试账号导致 bootstrap 跳过建号、登录全 401），也不会往真实用户文件里写测试账号。
 // ==========================================
 
 const { spawn, execSync } = require('child_process');
@@ -27,9 +26,11 @@ const PORT_B = 3198;
 const BASE_A = `http://127.0.0.1:${PORT_A}`;
 const BASE_B = `http://127.0.0.1:${PORT_B}`;
 
-const ADMIN = { username: 'verify_admin', password: 'Verify#2026' };
-const USER1 = { username: 'verify_user1', password: 'User1#2026' };
-const PREFIX = 'verify_';
+const ADMIN = { username: 'vfyadmin', password: 'Verify#2026Aa!Z' };
+const USER1 = { username: 'vfyuser', password: 'User1#2026Aa!Zx' };
+const USER1_NEXT = 'User1#2026Aa!Zy';
+const USER1_RESET = 'User1#2026Aa!Zw';
+const PREFIX = 'vfy';
 
 let pass = 0;
 const failures = [];
@@ -246,9 +247,27 @@ async function main() {
 
     const weak = await request(BASE_A, '/api/users', {
       method: 'POST', headers: { ...jsonHeaders(), cookie },
-      body: JSON.stringify({ username: 'verify_weak', password: '123' })
+      body: JSON.stringify({ username: 'vfyweak', password: '123' })
     });
     ok('密码太短 → 400', weak.status === 400, `status=${weak.status}`);
+
+    const badName = await request(BASE_A, '/api/users', {
+      method: 'POST', headers: { ...jsonHeaders(), cookie },
+      body: JSON.stringify({ username: 'vfy_1', password: USER1.password })
+    });
+    ok('账号名含下划线/数字 → 400', badName.status === 400, `status=${badName.status}`);
+
+    const weakCommon = await request(BASE_A, '/api/users', {
+      method: 'POST', headers: { ...jsonHeaders(), cookie },
+      body: JSON.stringify({ username: 'vfyweakc', password: 'Password1234567' })
+    });
+    ok('常见弱口令（15 位）→ 400', weakCommon.status === 400, `status=${weakCommon.status}`);
+
+    const weakName = await request(BASE_A, '/api/users', {
+      method: 'POST', headers: { ...jsonHeaders(), cookie },
+      body: JSON.stringify({ username: 'vfyname', password: 'vfyname_Ab1!' })
+    });
+    ok('密码包含账号名 → 400', weakName.status === 400, `status=${weakName.status}`);
 
     const created = await request(BASE_A, '/api/users', {
       method: 'POST', headers: { ...jsonHeaders(), cookie },
@@ -267,14 +286,37 @@ async function main() {
     const cookie1 = cookieOf(login1);
     ok('新账号拿到独立会话', !!cookie1 && cookie1 !== cookie, String(cookie1));
 
-    // ---------- 6. 改密码 ----------
+    // ---------- 6. 改密码（本人必须验证当前密码） ----------
     section('[6] 重置密码');
+
+    const selfNoCurrent = await request(BASE_A, `/api/users/${created.body.user.id}/password`, {
+      method: 'PUT', headers: { ...jsonHeaders(), cookie: cookie1 },
+      body: JSON.stringify({ password: USER1_NEXT })
+    });
+    ok('本人改密缺当前密码 → 400', selfNoCurrent.status === 400, `status=${selfNoCurrent.status}`);
+
+    const selfWrongCurrent = await request(BASE_A, `/api/users/${created.body.user.id}/password`, {
+      method: 'PUT', headers: { ...jsonHeaders(), cookie: cookie1 },
+      body: JSON.stringify({ password: USER1_NEXT, currentPassword: 'wrong-current-123' })
+    });
+    ok('本人改密当前密码错误 → 400', selfWrongCurrent.status === 400, `status=${selfWrongCurrent.status}`);
+
+    const selfOk = await request(BASE_A, `/api/users/${created.body.user.id}/password`, {
+      method: 'PUT', headers: { ...jsonHeaders(), cookie: cookie1 },
+      body: JSON.stringify({ password: USER1_NEXT, currentPassword: USER1.password })
+    });
+    ok('本人改密带正确当前密码 → 200', selfOk.status === 200, `status=${selfOk.status}`);
+
+    const oldAfterSelf = await login(BASE_A, USER1.username, USER1.password);
+    ok('本人改密后旧密码失效 → 401', oldAfterSelf.status === 401, `status=${oldAfterSelf.status}`);
+    const newAfterSelf = await login(BASE_A, USER1.username, USER1_NEXT);
+    ok('本人改密后新密码可登录 → 200', newAfterSelf.status === 200, `status=${newAfterSelf.status}`);
 
     const reset = await request(BASE_A, `/api/users/${created.body.user.id}/password`, {
       method: 'PUT', headers: { ...jsonHeaders(), cookie },
-      body: JSON.stringify({ password: 'User1#2026new' })
+      body: JSON.stringify({ password: USER1_RESET })
     });
-    ok('重置密码 → 200', reset.status === 200, `status=${reset.status}`);
+    ok('主账号重置成员密码 → 200', reset.status === 200, `status=${reset.status}`);
 
     const oldPwd = await login(BASE_A, USER1.username, USER1.password);
     ok('旧密码失效 → 401', oldPwd.status === 401, `status=${oldPwd.status}`);
@@ -282,7 +324,7 @@ async function main() {
     const kicked = await request(BASE_A, '/api/auth/me', { headers: { cookie: cookie1 } });
     ok('改密后该账号的旧会话被踢下线 → 401', kicked.status === 401, `status=${kicked.status}`);
 
-    const newPwd = await login(BASE_A, USER1.username, 'User1#2026new');
+    const newPwd = await login(BASE_A, USER1.username, USER1_RESET);
     ok('新密码可登录 → 200', newPwd.status === 200, `status=${newPwd.status}`);
     const cookie1b = cookieOf(newPwd) || '';
 
@@ -300,7 +342,7 @@ async function main() {
     });
     ok('删除其他账号 → 200', delOther.status === 200, `status=${delOther.status}`);
 
-    const gone = await login(BASE_A, USER1.username, 'User1#2026new');
+    const gone = await login(BASE_A, USER1.username, USER1_RESET);
     ok('被删账号无法再登录 → 401', gone.status === 401, `status=${gone.status}`);
 
     const afterCookie = await request(BASE_A, '/api/tasks', { headers: { cookie: cookie1b } });
@@ -374,7 +416,7 @@ async function main() {
   process.exit(0);
 }
 
-/** 只删除本脚本创建的 verify_ 前缀账号，绝不碰真实账号 */
+/** 只删除本脚本创建的 vfy 前缀账号，绝不碰真实账号 */
 function cleanupTestUsers(usersExistedBefore) {
   try {
     if (!fs.existsSync(USERS_FILE)) return;
@@ -390,7 +432,7 @@ function cleanupTestUsers(usersExistedBefore) {
       console.log(`\n[cleanup] 已删除 ${all.length - kept.length} 个测试账号，保留 ${kept.length} 个真实账号`);
     }
   } catch (e) {
-    console.error('[cleanup] 清理测试账号失败（可手动删除 data/users.json 里的 verify_* 账号）:', e.message);
+    console.error('[cleanup] 清理测试账号失败（可手动删除 data/users.json 里的 vfy* 账号）:', e.message);
   }
 }
 

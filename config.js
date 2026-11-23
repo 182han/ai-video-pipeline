@@ -472,7 +472,12 @@ module.exports = {
     // 首次启动创建管理员用（之后以数据库/JSON 里的账号为准）
     bootstrapUser: env('AUTH_USER', ''),
     bootstrapPassword: env('AUTH_PASSWORD', ''),
-    // 新建账号的密码最短长度
-    minPasswordLength: parseInt(env('AUTH_MIN_PASSWORD_LENGTH', '8'), 10)
+    // 新建/重置账号的密码最短长度。
+    // 2026-11-23 用户要求：密码 8–15 位，且必须含大写/小写/数字/符号。
+    // 上限 15 在 src/passwordPolicy.js 固定；这里只允许把下限调到 ≥8。
+    minPasswordLength: parseInt(env('AUTH_MIN_PASSWORD_LENGTH', '8'), 10),
+    // scrypt 的 N（必须为 2 的幂）。默认 2^17，对齐 OWASP Password Storage；
+    // 低内存机器可降到 2^16（64 MiB）或 2^15。旧哈希会按自身参数校验，并在登录后自动升级。
+    scryptN: parseInt(env('AUTH_SCRYPT_N', '131072'), 10)
   }
 };

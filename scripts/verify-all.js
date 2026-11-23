@@ -27,6 +27,12 @@ const SUITES = [
     desc: '登录墙（未登录 401/302、会话 cookie、成员管理、失败锁定、WS 握手，起两个临时服务）'
   },
   {
+    name: 'password-hardening',
+    script: 'verify-password-hardening.js',
+    group: 'fast',
+    desc: '密码策略/弱口令黑名单/scrypt 新旧格式兼容/按账号限流/日志脱敏（纯逻辑，不起服务）'
+  },
+  {
     name: 'stages',
     script: 'verify-stages.js',
     group: 'fast',

@@ -2,26 +2,38 @@
 // 认证与会话 - 单机共享账号体系
 // ==========================================
 // 设计约束（与 docs/spec/changelog.md 的「登录墙」一节一致）：
-//   1. 密码只存 scrypt 哈希（Node 内置 crypto，零新依赖），明文不落盘、不进日志；
+//   1. 密码只存 scrypt 哈希（Node 内置 crypto，零新依赖）；日志层对引导口令做脱敏，
+//      终端仍会显示一次（否则首次无法登录）；
 //   2. 会话 = 内存表 + 不设 Max-Age 的 cookie。关浏览器即失效；
 //      服务重启即全体失效；另用 AUTH_SESSION_HOURS（默认 8）兜底绝对过期；
-//   3. 登录失败按 IP 计数，连续 AUTH_MAX_FAILS（默认 5）次锁 AUTH_LOCK_MINUTES（默认 5）；
+//   3. 登录失败按「IP + 账号」计数，另设同 IP 跨账号的全局限流；
+//      连续 AUTH_MAX_FAILS（默认 5）次锁 AUTH_LOCK_MINUTES（默认 5）；
 //   4. 认证存储不可用时返回 503，绝不 fail-open —— 放行等于这堵墙白做；
 //   5. 会话 cookie 是 HttpOnly + SameSite=Lax，前端 JS 读不到。
 //
-// 注意：这里刻意不信任 X-Forwarded-For。本项目的部署形态是单机/内网，
-// 而信任 XFF 会让攻击者伪造 IP 绕过失败锁定。
+// 注意：默认不信任 X-Forwarded-For；只有显式 TRUST_PROXY 且来源为本机反代时才读转发头。
 // ==========================================
 
 const crypto = require('crypto');
+const passwordPolicy = require('./passwordPolicy');
+const usernamePolicy = require('./usernamePolicy');
 
 const COOKIE_NAME = 'vs_session';
-const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keylen: 64 };
-// 「用户不存在」时也跑一次同代价的哈希，抹平时序差异，避免靠响应时间枚举账号
-const DUMMY_HASH = 'scrypt$1$' + '0'.repeat(32) + '$' + '0'.repeat(128);
+const SCRYPT_VERSION = 2;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+const LEGACY_SCRYPT = { N: 16384, r: 8, p: 1 };
+// 「用户不存在」时也跑一次同代价的哈希，抹平时序差异，避免靠响应时间枚举账号。
+// 用当前参数生成，避免 N 升级后「不存在账号」比「存在账号」更快。
+const DUMMY_SALT = Buffer.alloc(16);
+// 失败计数：同一 IP + 同一账号、以及同一 IP 的全局限流各一份。
+// 30 分钟无失败自动过期，避免旧记录永久占用内存。
+const FAILURE_TTL_MS = 30 * 60 * 1000;
+const MAX_FAILURE_ENTRIES = 20000;
 
 const sessions = new Map();   // token -> { userId, username, createdAt, expiresAt }
-const failures = new Map();   // ip -> { fails, lockedUntil }
+const failures = new Map();   // key -> { fails, lockedUntil, lastFailure }
 
 let storage = null;
 let initPromise = null;
@@ -42,40 +54,108 @@ function isEnabled() {
 
 // ===== 密码哈希 =====
 
-function scryptAsync(password, salt) {
+function scryptParams() {
+  const cfg = authConfig();
+  let N = Number(cfg.scryptN);
+  // 只接受 2^14 ~ 2^18 的 2 的幂；配置写错时回退到 OWASP 基准 2^17。
+  if (!Number.isInteger(N) || N < 16384 || N > 262144 || (N & (N - 1)) !== 0) N = 131072;
+  return { N, r: SCRYPT_R, p: SCRYPT_P };
+}
+
+function scryptMaxmem(params) {
+  // Node 默认 maxmem 为 32 MiB；2^17/r=8 需要约 128 MiB。
+  return Math.max(64 * 1024 * 1024, 256 * params.N * params.r);
+}
+
+function scryptAsync(password, salt, params, keylen) {
   return new Promise((resolve, reject) => {
-    crypto.scrypt(String(password), salt, SCRYPT_PARAMS.keylen, {
-      N: SCRYPT_PARAMS.N, r: SCRYPT_PARAMS.r, p: SCRYPT_PARAMS.p
+    crypto.scrypt(String(password), salt, keylen, {
+      N: params.N, r: params.r, p: params.p, maxmem: scryptMaxmem(params)
     }, (err, key) => (err ? reject(err) : resolve(key)));
   });
 }
 
-/** 生成 scrypt 哈希串：scrypt$1$<saltHex>$<hashHex> */
+/**
+ * 解析哈希串，兼容两代格式：
+ *   v1（旧）：scrypt$1$<saltHex>$<hashHex>       参数固定 16384/8/1
+ *   v2（新）：scrypt$2$<N>$<r>$<p>$<saltHex>$<hashHex>
+ * 参数随哈希一起存，升级 N 不会让旧密码失效。
+ */
+function parseHash(stored) {
+  const raw = String(stored || '');
+  const parts = raw.split('$');
+  if (parts[0] !== 'scrypt') return null;
+  let params;
+  let saltHex;
+  let hashHex;
+  let version;
+  if (parts[1] === '1' && parts.length === 4) {
+    version = 1;
+    params = { ...LEGACY_SCRYPT };
+    saltHex = parts[2];
+    hashHex = parts[3];
+  } else if (parts[1] === '2' && parts.length === 7) {
+    version = 2;
+    const N = Number(parts[2]);
+    const r = Number(parts[3]);
+    const p = Number(parts[4]);
+    if (!Number.isInteger(N) || N < 16384 || N > 262144 || (N & (N - 1)) !== 0) return null;
+    if (!Number.isInteger(r) || r < 1 || r > 32) return null;
+    if (!Number.isInteger(p) || p < 1 || p > 16) return null;
+    params = { N, r, p };
+    saltHex = parts[5];
+    hashHex = parts[6];
+  } else {
+    return null;
+  }
+  if (!/^[0-9a-f]+$/i.test(saltHex) || !/^[0-9a-f]+$/i.test(hashHex)) return null;
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(hashHex, 'hex');
+  if (salt.length < 8 || expected.length < 32 || expected.length > 64) return null;
+  return { version, params, salt, expected };
+}
+
+/** 生成 scrypt 哈希串（v2：参数随哈希存储） */
 async function hashPassword(password) {
+  const params = scryptParams();
   const salt = crypto.randomBytes(16);
-  const key = await scryptAsync(password, salt);
-  return `scrypt$1$${salt.toString('hex')}$${key.toString('hex')}`;
+  const key = await scryptAsync(password, salt, params, SCRYPT_KEYLEN);
+  return `scrypt$${SCRYPT_VERSION}$${params.N}$${params.r}$${params.p}$${salt.toString('hex')}$${key.toString('hex')}`;
 }
 
 /** 校验密码（任何格式异常一律 false，不抛错） */
 async function verifyPassword(password, stored) {
   try {
-    const parts = String(stored || '').split('$');
-    if (parts.length !== 4 || parts[0] !== 'scrypt') return false;
-    const salt = Buffer.from(parts[2], 'hex');
-    const expected = Buffer.from(parts[3], 'hex');
-    if (!salt.length || !expected.length) return false;
-    const key = await scryptAsync(password, salt);
-    return key.length === expected.length && crypto.timingSafeEqual(key, expected);
+    const parsed = parseHash(stored);
+    if (!parsed) return false;
+    const key = await scryptAsync(password, parsed.salt, parsed.params, parsed.expected.length);
+    return key.length === parsed.expected.length && crypto.timingSafeEqual(key, parsed.expected);
   } catch (e) {
     return false;
   }
 }
 
-/** 恒时校验：用户不存在时也消耗一次 scrypt，防止「用户名枚举」 */
+/** 登录成功后是否需要把旧哈希升级到当前参数（由调用方决定是否写库） */
+function needsRehash(stored) {
+  const parsed = parseHash(stored);
+  if (!parsed) return false;
+  const current = scryptParams();
+  return parsed.version !== SCRYPT_VERSION
+    || parsed.params.N < current.N
+    || parsed.params.r !== current.r
+    || parsed.params.p !== current.p
+    || parsed.expected.length !== SCRYPT_KEYLEN;
+}
+
+/** 恒时校验：用户不存在时也消耗一次同代价 scrypt，防止「用户名枚举」 */
 async function verifyPasswordConstant(password, stored) {
-  const ok = await verifyPassword(password, stored || DUMMY_HASH);
-  return !!stored && ok;
+  if (!stored) {
+    try {
+      await scryptAsync(password, DUMMY_SALT, scryptParams(), SCRYPT_KEYLEN);
+    } catch (e) { /* 参数异常时仍然返回 false，不泄露内部错误 */ }
+    return false;
+  }
+  return verifyPassword(password, stored);
 }
 
 // ===== cookie =====
@@ -171,8 +251,16 @@ const sweeper = setInterval(() => {
   for (const [token, s] of sessions) {
     if (s.expiresAt <= now) sessions.delete(token);
   }
-  for (const [ip, rec] of failures) {
-    if (rec.lockedUntil && rec.lockedUntil <= now) failures.delete(ip);
+  for (const [key, rec] of failures) {
+    if (rec.lockedUntil && rec.lockedUntil <= now) {
+      // 保留 lockLevel，等 TTL 到期再删；这样连续触发会递增锁定时长。
+      rec.lockedUntil = 0;
+      failures.set(key, rec);
+      continue;
+    }
+    if (!rec.lockedUntil && rec.lastFailure && now - rec.lastFailure > FAILURE_TTL_MS) {
+      failures.delete(key);
+    }
   }
 }, 60 * 1000);
 if (sweeper.unref) sweeper.unref();
@@ -216,38 +304,111 @@ function getClientIp(req) {
   return peer;
 }
 
-function checkLock(ip) {
-  const rec = failures.get(ip);
-  if (!rec || !rec.lockedUntil) return { locked: false };
-  if (rec.lockedUntil <= Date.now()) {
-    failures.delete(ip);
-    return { locked: false };
-  }
-  return { locked: true, retryAfter: Math.ceil((rec.lockedUntil - Date.now()) / 1000) };
+function failureUserKey(ip, username) {
+  const name = String(username || '').trim().toLowerCase() || '(unknown)';
+  return `u:${ip}\u0000${name}`;
 }
 
-function recordFailure(ip) {
-  const maxFails = Number(authConfig().maxFails) || 5;
-  const lockMs = (Number(authConfig().lockMinutes) || 5) * 60 * 1000;
-  const rec = failures.get(ip) || { fails: 0, lockedUntil: 0 };
+function failureIpKey(ip) {
+  return `ip:${ip}`;
+}
+
+function failureThresholds() {
+  const maxFails = Math.max(1, parseInt(authConfig().maxFails, 10) || 5);
+  const lockMinutes = Math.max(1, parseInt(authConfig().lockMinutes, 10) || 5);
+  return {
+    maxFails,
+    // 同一 IP 跨账号的「撒网」上限。比单账号阈值宽，避免共享 NAT 一两下就锁死。
+    ipMaxFails: Math.max(maxFails, maxFails * 5),
+    lockMs: lockMinutes * 60 * 1000
+  };
+}
+
+function activeLock(key, now) {
+  const rec = failures.get(key);
+  if (!rec) return 0;
+  if (rec.lockedUntil) {
+    if (rec.lockedUntil > now) return rec.lockedUntil;
+    // 锁到期后不要删除记录：保留 lockLevel，下一次再触发时按递增时长锁定。
+    rec.lockedUntil = 0;
+    failures.set(key, rec);
+    return 0;
+  }
+  if (rec.lastFailure && now - rec.lastFailure > FAILURE_TTL_MS) {
+    failures.delete(key);
+    return 0;
+  }
+  return 0;
+}
+
+/** 检查「IP + 账号」与「IP 全局」两层锁定 */
+function checkLock(ip, username) {
+  const now = Date.now();
+  const until = Math.max(
+    activeLock(failureUserKey(ip, username), now),
+    activeLock(failureIpKey(ip), now)
+  );
+  if (!until) return { locked: false };
+  return { locked: true, retryAfter: Math.max(1, Math.ceil((until - now) / 1000)) };
+}
+
+function bumpFailure(key, threshold, lockMs, now) {
+  const rec = failures.get(key) || { fails: 0, lockedUntil: 0, lastFailure: 0, lockLevel: 0 };
   rec.fails += 1;
+  rec.lastFailure = now;
   let locked = false;
-  if (rec.fails >= maxFails) {
-    rec.lockedUntil = Date.now() + lockMs;
+  if (rec.fails >= threshold) {
     rec.fails = 0;
+    // 递增退避（参考 Microsoft Entra smart lockout）：5 → 10 → 15 → 20 分钟封顶。
+    const level = Math.min(4, (Number(rec.lockLevel) || 0) + 1);
+    rec.lockLevel = level;
+    rec.lockedUntil = now + lockMs * level;
     locked = true;
   }
-  failures.set(ip, rec);
-  return { locked, remaining: Math.max(0, maxFails - rec.fails) };
+  failures.set(key, rec);
+  return { locked, remaining: Math.max(0, threshold - rec.fails) };
 }
 
-function resetFailures(ip) {
-  failures.delete(ip);
+function pruneFailures() {
+  if (failures.size <= MAX_FAILURE_ENTRIES) return;
+  const entries = [...failures.entries()]
+    .sort((a, b) => (a[1].lastFailure || 0) - (b[1].lastFailure || 0));
+  const remove = Math.max(1, entries.length - Math.floor(MAX_FAILURE_ENTRIES * 0.9));
+  for (let i = 0; i < remove; i += 1) failures.delete(entries[i][0]);
 }
 
-function lockState(ip) {
-  const rec = failures.get(ip);
-  return rec ? { fails: rec.fails, lockedUntil: rec.lockedUntil || 0 } : { fails: 0, lockedUntil: 0 };
+function recordFailure(ip, username) {
+  const { maxFails, ipMaxFails, lockMs } = failureThresholds();
+  const now = Date.now();
+  const user = bumpFailure(failureUserKey(ip, username), maxFails, lockMs, now);
+  const global = bumpFailure(failureIpKey(ip), ipMaxFails, lockMs, now);
+  pruneFailures();
+  return { locked: user.locked || global.locked, remaining: user.remaining };
+}
+
+function resetFailures(ip, username) {
+  // 只清「这个 IP + 这个账号」；别的账号与全局 IP 计数不动。
+  // 旧实现是 failures.delete(ip)，导致任意一个有效账号登录成功就能清空 admin 的失败计数。
+  failures.delete(failureUserKey(ip, username));
+}
+
+function lockState(ip, username) {
+  const now = Date.now();
+  const userKey = failureUserKey(ip, username);
+  const ipKey = failureIpKey(ip);
+  const userRec = failures.get(userKey);
+  const ipRec = failures.get(ipKey);
+  let fails = 0;
+  if (userRec && !userRec.lockedUntil) {
+    if (userRec.lastFailure && now - userRec.lastFailure <= FAILURE_TTL_MS) fails = userRec.fails || 0;
+    else failures.delete(userKey);
+  }
+  const lockedUntilRaw = Math.max(
+    (userRec && userRec.lockedUntil) || 0,
+    (ipRec && ipRec.lockedUntil) || 0
+  );
+  const lockedUntil = lockedUntilRaw > now ? lockedUntilRaw : 0;
+  return { fails, lockedUntil };
 }
 
 // ===== 存储 =====
@@ -278,17 +439,30 @@ async function markLogin(userId) {
 
 // ===== 首次启动引导 =====
 
-function randomPassword(len = 12) {
-  const alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.randomBytes(len);
-  let out = '';
-  for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
-  return out;
+function randomPassword(len = 15) {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*()-_=+';
+  const all = upper + lower + digits + symbols;
+  const pick = (alphabet) => alphabet[crypto.randomInt(alphabet.length)];
+  const n = Math.max(4, Number(len) || 20);
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < n) chars.push(pick(all));
+  // Fisher-Yates；保证必选的四类字符不总在开头。
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomInt(i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join('');
 }
 
 /**
  * 启动时调用：没有任何账号时创建第一个。
  * 优先用 .env 的 AUTH_USER / AUTH_PASSWORD；缺密码则随机生成并打印一次。
+ * AUTH_PASSWORD 不符合策略时直接失败（不降级建弱口令账号）。
  * @returns {Promise<{created:boolean, username?:string, password?:string, count:number}>}
  */
 async function doBootstrap() {
@@ -302,17 +476,40 @@ async function doBootstrap() {
   if (count > 0) return { created: false, count };
 
   const cfg = authConfig();
-  const username = String(cfg.bootstrapUser || '').trim() || 'admin';
+  const username = usernamePolicy.normalizeUsername(cfg.bootstrapUser) || 'admin';
+  const usernameCheck = usernamePolicy.validateUsername(username);
+  if (!usernameCheck.ok) {
+    throw new Error(
+      `[auth] AUTH_USER 不符合账号名规则（${usernamePolicy.describe(usernameCheck)}）。`
+      + '账号名需 2–10 位，只能包含中文或英文字母。'
+    );
+  }
+  const minLen = Math.min(
+    passwordPolicy.MAX_LENGTH,
+    Math.max(8, parseInt(cfg.minPasswordLength, 10) || passwordPolicy.MIN_LENGTH_DEFAULT)
+  );
   let password = String(cfg.bootstrapPassword || '');
   let generated = false;
+
   if (!password) {
-    password = randomPassword(12);
-    generated = true;
+    // 随机生成到符合策略为止（用户名相似 / 常见词命中概率极低，但保留重试）。
+    for (let i = 0; i < 5; i += 1) {
+      const candidate = randomPassword(15);
+      if (passwordPolicy.validate(candidate, { username, minLength: minLen }).ok) {
+        password = candidate;
+        generated = true;
+        break;
+      }
+    }
+    if (!generated) throw new Error('[auth] 无法生成符合密码策略的随机口令');
   }
 
-  const minLen = Number(cfg.minPasswordLength) || 8;
-  if (password.length < minLen) {
-    console.warn(`[auth] 警告：AUTH_PASSWORD 只有 ${password.length} 位，小于建议的 ${minLen} 位`);
+  const check = passwordPolicy.validate(password, { username, minLength: minLen });
+  if (!check.ok) {
+    throw new Error(
+      `[auth] AUTH_PASSWORD 不符合密码策略（${passwordPolicy.describe(check)}，至少 ${minLen} 位）。`
+      + '请改成更强口令后重启，或把 AUTH_PASSWORD 留空由系统生成。'
+    );
   }
 
   const passwordHash = await hashPassword(password);
@@ -368,6 +565,7 @@ module.exports = {
   hashPassword,
   verifyPassword,
   verifyPasswordConstant,
+  needsRehash,
   parseCookies,
   tokenFromRequest,
   setSessionCookie,

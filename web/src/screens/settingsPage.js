@@ -30,6 +30,21 @@ function writeJson(k, patch) {
   return next;
 }
 
+function isValidAccountName(name) {
+  const chars = Array.from(String(name || ''));
+  return chars.length >= 2
+    && chars.length <= 10
+    && /^[\p{Script=Han}A-Za-z]+$/u.test(name);
+}
+
+function passwordHasRequiredClasses(value) {
+  const s = String(value || '');
+  return /[A-Z]/.test(s)
+    && /[a-z]/.test(s)
+    && /[0-9]/.test(s)
+    && /[\p{P}\p{S}]/u.test(s);
+}
+
 const GROUPS = [
   { id: 'seedance', titleKey: 'settings.group.seedance', collapsible: true, fields: [['seedanceKey', 'API Key', 'password'], ['seedanceBaseUrl', 'Base URL', 'text'], ['seedanceModel', '@model', 'text']] },
   { id: 'kling', titleKey: 'settings.group.kling', collapsible: true, fields: [['klingAk', 'AccessKey', 'text'], ['klingSk', 'SecretKey', 'password']] },
@@ -207,7 +222,11 @@ export function SettingsView() {
     if (!canManage) return;
     const name = nu.trim();
     if (!name || !np) { setMErr(t('settings.members.needFields')); return; }
-    if (np.length < 8) { setMErr(t('settings.members.passwordTooShort')); return; }
+    if (!isValidAccountName(name)) { setMErr(t('settings.members.usernameInvalid')); return; }
+    const npChars = Array.from(String(np)).length;
+    if (npChars < 8) { setMErr(t('settings.members.passwordTooShort')); return; }
+    if (npChars > 15) { setMErr(t('settings.members.passwordTooLong')); return; }
+    if (!passwordHasRequiredClasses(np)) { setMErr(t('settings.members.passwordMissingClasses')); return; }
     try {
       await fetchJson('/api/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -220,14 +239,23 @@ export function SettingsView() {
   }
 
   async function resetPwd(u) {
-    if (!canManage) return;
+    const isSelf = (u.userId || u.id) === selfId;
+    if (!canManage && !isSelf) return;
     const pwd = window.prompt(t('settings.members.resetPrompt', { name: u.username }));
     if (!pwd) return;
+    const pwdChars = Array.from(String(pwd)).length;
+    if (pwdChars < 8) { setMErr(t('settings.members.passwordTooShort')); return; }
+    if (pwdChars > 15) { setMErr(t('settings.members.passwordTooLong')); return; }
+    if (!passwordHasRequiredClasses(pwd)) { setMErr(t('settings.members.passwordMissingClasses')); return; }
+    const currentPassword = isSelf
+      ? (window.prompt(t('settings.members.currentPasswordPrompt')) || '')
+      : '';
+    if (isSelf && !currentPassword) return;
     setErr(''); setMsg(''); setMErr(''); setMMsg('');
     try {
       await fetchJson('/api/users/' + encodeURIComponent(u.userId || u.id) + '/password', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pwd })
+        body: JSON.stringify(isSelf ? { password: pwd, currentPassword } : { password: pwd })
       });
       setMMsg(t('settings.members.resetDone'));
     } catch (e) { setMErr(t('settings.members.resetFailed') + e.message); }
@@ -477,6 +505,7 @@ export function SettingsView() {
         </div>
         ${mErr && html`<p className="mb-2 text-[12px] text-danger">${mErr}</p>`}
         ${mMsg && html`<p className="mb-2 text-[12px] text-accent">${mMsg}</p>`}
+        <p className="mb-2 text-[11px] leading-[1.65] text-ink3">${t('settings.members.ruleHint')}</p>
         ${canManage && html`
         <div className="flex items-center gap-2 mb-2">
           <input value=${nu} onInput=${(e) => setNu(e.target.value)} placeholder=${t('settings.members.username')}
@@ -503,8 +532,8 @@ export function SettingsView() {
             <span className="text-[10px] text-ink3 font-num flex-1">
               ${(u.userId || u.id || '') === selfId ? t('settings.members.self') : ''}
             </span>
-            ${canManage && html`<button onClick=${() => resetPwd(u)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${t('settings.members.reset')}</button>`}
+            ${(canManage || (u.userId || u.id) === selfId) && html`<button onClick=${() => resetPwd(u)}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${(u.userId || u.id) === selfId ? t('settings.members.changeSelf') : t('settings.members.reset')}</button>`}
             ${canManage && html`<button onClick=${() => delUser(u)}
               className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${t('settings.members.delete')}</button>`}
           </div>

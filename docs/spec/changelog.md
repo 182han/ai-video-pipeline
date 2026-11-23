@@ -4197,6 +4197,74 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 - 「可以/行/好/OK」以及「确认生成吗/现在开始吗」在“有计划且上一条不是提问”时会确定性回确认语，不再走模型；若上一条是提问，仍交给模型（避免把回答抢成确认）。
 - 新增审计字段只追加，不改旧字段；`say` 元话术/复读被拒后回退规则路径（可能显示规则话术，而不是那句空话）。
 
+---
+
+## 2026-11-23 · 密码体系升级：8–15 位 + 四类组成、弱口令黑名单、scrypt 2^17、按账号限流
+
+**状态**：代码完成；纯逻辑验收 `verify-password-hardening` **53 通过 / 0 失败**；
+`verify-auth` 已同步扩充但**本轮未运行**（会起 3199/3198 两个临时实例，按仓库红线需用户明确同意）。
+
+### 调研依据（GitHub / 大厂 / 主流框架）
+
+- **NIST SP 800-63B-4（2025-07）**：单因子口令至少 15 位；有 MFA 时至少 8 位；允许 Unicode/空格、不强制组成规则、不静默截断；用黑名单拦常见/已泄露口令。
+  <https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63B-4.pdf>
+- **OWASP Authentication Cheat Sheet**：改口令必须验证当前口令；口令长度 + 黑名单；最大长度至少 64；限制失败尝试。
+  <https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html>
+- **Microsoft Entra Password Protection / Smart Lockout**：全局/自定义黑名单 + 小写/leet 归一化 + 模糊匹配 + 用户名子串；按账号锁定、锁定时间递增。
+  <https://learn.microsoft.com/en-us/entra/identity/authentication/concept-password-ban-bad>
+  <https://learn.microsoft.com/en-us/entra/identity/authentication/howto-password-smart-lockout>
+- **GitHub**：口令之外强制/推荐 2FA、passkey、设备验证；说明大厂的方向是「降低口令单点」而不是堆组成规则。
+  <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github>
+- **Django**：`MinimumLength / CommonPassword / NumericPassword / UserAttributeSimilarity` 校验器；哈希串带算法/参数；登录成功自动升级旧哈希。
+  <https://docs.djangoproject.com/en/6.1/topics/auth/passwords/>
+- **Spring Security**：`DelegatingPasswordEncoder` 用前缀区分算法，支持旧哈希继续校验 + 迁移；**Nextcloud** 有常见口令/HIBP/锁定策略；**Authelia** 用 Argon2id。
+  <https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html>
+  <https://docs.nextcloud.com/server/latest/admin_manual/configuration_user/user_password_policy.html>
+  <https://www.authelia.com/reference/guides/passwords/>
+
+### 改了什么
+
+- **新口令策略**（`src/passwordPolicy.js`）：**8–15 位**（用户 2026-11-23 要求，覆盖 NIST 单因子 15 位下限），
+  **必须同时包含大写字母、小写字母、数字、符号**；常见弱口令基线（含 leet、常见词+数字尾巴）、
+  不得包含用户名、拒绝全数字/全同字符/重复模式/连续序列；允许空格/Unicode；最大 15 位。
+- **账号名规则**（`src/usernamePolicy.js`）：**2–10 位**，只能包含中文（Han）或英文字母 A–Z/a–z；
+  不允许数字、下划线、点、@、横线、空格。已有旧账号不受影响（登录仍精确匹配旧名）；新建与首次引导建号套用新规则。
+- **scrypt 升级**（`src/auth.js`）：新格式 `scrypt$2$N$r$p$salt$hash`，默认 N=2^17/r=8/p=1（约 128 MiB/次）；
+  v1 旧哈希 `scrypt$1$...` 仍可校验，登录成功后按当前参数自动 rehash；参数随哈希存储，改 N 不会让旧密码失效。
+- **引导口令**：`AUTH_PASSWORD` 不符合策略时**拒绝建号**（不再只警告）；缺省随机 15 位；日志层脱敏
+  （`src/utils/logRedact.js` + `server.js`），终端仍显示一次，但 `data/logs` 不再落明文。
+- **防爆破**：从「只按 IP」改为「IP + 账号」双计数 + 同 IP 跨账号全局限流；成功登录只清本账号；
+  失败记录 30 分钟过期；锁定 5→10→15→20 分钟递增。
+- **改密**：本人改密必须提供当前口令（`currentPassword`）；主账号重置他人仍属管理员重置；
+  改密后踢掉该账号全部会话；设置页增加成员「修改我的密码」入口。
+- **可观测性**：登录失败写 warn（用户名截断/去换行）；重置密码日志记录操作者与 IP。
+- **规则提示**：登录页与设置页「成员管理」都显示账号名/密码规则（中英双语），避免用户创建后才发现不合格。
+- **测试/门禁**：新增 `scripts/verify-password-hardening.js`（纯逻辑、无端口），注册进 `verify-all.js`；
+  `verify-auth.js` 的固定口令同步到 8–15 位/四类组成，并新增弱口令/用户名相似/本人改密负向用例。
+
+### 兼容性与行为变化
+
+- 已有账号**仍可用旧口令登录**（校验不套新策略）；v1 哈希在首次成功登录后自动升级。
+- 新建/重置口令要求 **8–15 位且含大写/小写/数字/符号**；旧 `.env` 里 15 位引导口令需同时满足四类字符（当前值已校验通过）；不满足时首次建号会失败并写日志。
+- 账号名新建要求 2–10 位中文/英文字母；旧账号名即使含数字/下划线仍可登录，不做强制改名。
+- 以前「任意账号登录成功即可清零同 IP 全部失败计数」的绕过已关闭；共享 NAT 仍可能被同 IP 全局限流影响。
+- 未改 API 成功响应结构、会话 cookie、数据库 schema；未引入新依赖。
+
+### 验收（本机实跑）
+
+- `node scripts/verify-password-hardening.js` → **53 / 0**。
+- `node scripts/verify-security-hardening.js` → **54 / 0**。
+- `node scripts/verify-i18n.js --strict` → **12 / 0**；`verify-i18n-backend` → **104 / 0 / 1 跳过**。
+- `node scripts/verify-gate-registry.js` → **10 / 0**（111 实有 / 101 注册 / 9 手动 / 0 未归属）。
+- `node scripts/check-server-version.js` → 退出码 1：运行中的 3001 早于本次磁盘代码，**需重启生效**。
+
+### 未验证
+
+- `verify-auth` 未运行（起两个临时实例需用户同意）；登录/改密/锁定 HTTP 行为未在本轮运行态复验。
+- 真实数据库（postgres）里 admin 的现用口令强度仍未确认；本次只验证 `.env` 候选口令通过新策略。
+- 浏览器 UI（设置页改密/当前密码 prompt）未实测。
+- 未接入 HIBP 在线库 / MFA / passkey；黑名单是离线基线，不是完整泄露库。
+
 ## 2026-11-23 · 小智「上一次任务进行到哪一步」答非所问（重启中断后）
 
 ### 现象（用户实测截图）
