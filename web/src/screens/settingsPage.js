@@ -105,6 +105,7 @@ export function SettingsView() {
   const [ownerUsername, setOwnerUsername] = useState('');
   const [mErr, setMErr] = useState('');
   const [mMsg, setMMsg] = useState('');
+  const [creating, setCreating] = useState(false);
   const [imgStatus, setImgStatus] = useState(null);
   const [openGroups, setOpenGroups] = useState({});
   const [showKeys, setShowKeys] = useState({});
@@ -218,8 +219,8 @@ export function SettingsView() {
   }
 
   async function addUser() {
+    if (!canManage || creating) return;
     setErr(''); setMsg(''); setMErr(''); setMMsg('');
-    if (!canManage) return;
     const name = nu.trim();
     if (!name || !np) { setMErr(t('settings.members.needFields')); return; }
     if (!isValidAccountName(name)) { setMErr(t('settings.members.usernameInvalid')); return; }
@@ -227,6 +228,7 @@ export function SettingsView() {
     if (npChars < 8) { setMErr(t('settings.members.passwordTooShort')); return; }
     if (npChars > 15) { setMErr(t('settings.members.passwordTooLong')); return; }
     if (!passwordHasRequiredClasses(np)) { setMErr(t('settings.members.passwordMissingClasses')); return; }
+    setCreating(true);
     try {
       await fetchJson('/api/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -236,6 +238,7 @@ export function SettingsView() {
       await loadUsers();
       setMMsg(t('settings.members.created'));
     } catch (e) { setMErr(t('settings.members.createFailed') + e.message); }
+    finally { setCreating(false); }
   }
 
   async function resetPwd(u) {
@@ -517,8 +520,8 @@ export function SettingsView() {
             <option value="member">${t('settings.members.roleMember')}</option>
             <option value="demo">${t('settings.members.roleDemo')}</option>
           </select>
-          <button onClick=${addUser}
-            className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">${t('settings.members.add')}</button>
+          <button onClick=${addUser} disabled=${creating}
+            className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">${creating ? t('settings.members.creating') : t('settings.members.add')}</button>
         </div>
         `}
         ${!canManage && html`<p className="text-[11px] text-ink3 mb-2">${t('settings.members.manageHint')}</p>`}

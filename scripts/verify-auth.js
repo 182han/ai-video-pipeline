@@ -280,6 +280,10 @@ async function main() {
       body: JSON.stringify({ username: USER1.username, password: USER1.password })
     });
     ok('重复账号 → 409', dup.status === 409, `status=${dup.status}`);
+    ok('重复账号返回 USER_EXISTS 且不泄露 PG 原始错误',
+      dup.body && dup.body.code === 'USER_EXISTS'
+        && !/duplicate key|users_username_key/i.test(JSON.stringify(dup.body)),
+      JSON.stringify(dup.body));
 
     const login1 = await login(BASE_A, USER1.username, USER1.password);
     ok('新账号能登录 → 200', login1.status === 200, `status=${login1.status}`);

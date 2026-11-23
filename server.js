@@ -269,6 +269,22 @@ function passwordPolicyError(req, res, result) {
   });
 }
 
+function userExistsResponse(req, res) {
+  return res.status(409).json({
+    error: i18n.t(req.lang, 'api.users.exists'),
+    code: 'USER_EXISTS',
+    ...i18n.err(req.lang, 'api.users.exists')
+  });
+}
+
+function isDuplicateUserError(e) {
+  const msg = String((e && e.message) || '');
+  return (e && e.code === '23505')
+    || /duplicate key value violates unique constraint/i.test(msg)
+    || /users_username_key/i.test(msg)
+    || /账号已存在/.test(msg);
+}
+
 function safeLogName(value) {
   return String(value || '').slice(0, 64).replace(/[\r\n\t]/g, ' ');
 }
@@ -461,15 +477,20 @@ app.post('/api/users', requireOwner, async (req, res) => {
         ...i18n.err(req.lang, 'api.users.badRole')
       });
     }
+    // 先做一次快速重名检查，避免重复点击时仍先跑一遍昂贵的 scrypt。
+    // 并发窗口内的唯一键冲突由下面的 catch 统一转成 409。
+    const existing = await storage.getUserByUsername(username);
+    if (existing) return userExistsResponse(req, res);
     const passwordHash = await auth.hashPassword(password);
     const user = await storage.createUser({ username, passwordHash, role });
     console.log(`[auth] 新建账号: ${user.username}`);
     res.status(201).json({ user });
   } catch (e) {
+    if (isDuplicateUserError(e)) return userExistsResponse(req, res);
     const msg = String(e.message || '新建失败');
-    res.status(/已存在/.test(msg) ? 409 : 400).json({
+    res.status(400).json({
       error: msg,
-      code: /已存在/.test(msg) ? 'USER_EXISTS' : 'USER_CREATE_FAILED',
+      code: 'USER_CREATE_FAILED',
       ...i18n.err(req.lang, 'api.users.createFailed')
     });
   }

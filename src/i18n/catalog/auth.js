@@ -29,6 +29,7 @@ module.exports = {
     'api.users.badRole': '角色只能是 member 或 demo',
     'api.users.listFailed': '读取账号列表失败',
     'api.users.createFailed': '新建账号失败',
+    'api.users.exists': '账号已存在，请换一个名称',
     'api.users.updateFailed': '更新账号失败',
     'api.users.deleteFailed': '删除账号失败'
   },
@@ -56,6 +57,7 @@ module.exports = {
     'api.users.badRole': 'Role must be member or demo.',
     'api.users.listFailed': 'Could not list accounts.',
     'api.users.createFailed': 'Could not create the account.',
+    'api.users.exists': 'That account name already exists. Choose another.',
     'api.users.updateFailed': 'Could not update the account.',
     'api.users.deleteFailed': 'Could not delete the account.'
   }
