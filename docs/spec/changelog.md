@@ -4151,3 +4151,49 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 - 合法任务 id（`task_xxx`）不受影响；带点/斜杠的 id 会被 400 拒绝（正常不会出现）。
 - 登录后站内 `next` 仍可用；外站/反斜杠链接回落到 `/app`。
 
+---
+
+## 2026-11-23 · 小智「有雪景吗」答非所问 + JSON 元话术
+
+**状态**：代码完成，进程内/静态验收通过；真实模型抽检 18 条 + 服务级 HTTP 3 条已完成（见下）；浏览器 UI 未验。
+
+### 现象（用户截图）
+
+- 问「里面有雪景吗」→ 小智又贴「共 30 张，这里先列前 8 张」。
+- 说「可以」→ 小智回「好的，已按要求以 JSON 格式回复。」
+
+### 根因
+
+1. agent 只有「列卡」工具 `show_scene_cards`，没有按内容检索；`agentContextOf` 只给计划摘要（30 段/模型/分辨率），模型看不到卡名，只能把列表当答案。
+2. `show_scene_cards` 固定只列前 8 张（`SCENE_PREVIEW_LIMIT=8`），第 13/17 张的雪景被截掉。
+3. `say` 只校验 JSON 结构 + 金额/动作/承诺；模型在「可以」首轮格式失败后，重试把「遵守 JSON」当成回答，空话被原样显示。
+4. 裸确认「可以」没有确定性路径，模型自由发挥。
+
+### 改动
+
+- `src/assistant/agent.js`：新增只读工具 `search_scene_cards({query})`；prompt 增加「内容问题→search / 列表→show_scene_cards」「裸确认→confirm_plan」；新增 `checkSayQuality`（元话术/空泛确认/无理由复读拒绝）；重试提示带原问题并禁止 JSON 元话术。
+- `src/assistant/supervisor.js`：`searchPlanSceneCards` 在计划 30 张卡上按中英字段 + 同义词检索，返回「第 N 段 · 卡名 · 章节/地貌/季节」；空结果明确「没有匹配」；中英双语；只读，不占卡/不写冷却。
+- `src/assistant/agentRuntime.js`：裸确认/确认问句（可以/行/确认生成吗/现在开始吗）+ 有计划 + 上一条非提问 → 确定性 `confirm_plan`（不调模型）；审计增加 `args/replyDigest/replyChars/matchCount/agentUnanswered`。
+- `scripts/verify-assistant-queries.js`（新）+ `verify-all.js` 注册；`verify-assistant.js` 工具数 14→15（新增只读工具，非实现错）。
+
+### 验收（本机实跑）
+
+- 新用例先在旧代码跑红：**3 通过 / 16 失败**（`TOOL_NOT_ALLOWED`、元话术放行等）。
+- 改后：`node scripts/verify-assistant-queries.js` → **24 通过 / 0 失败**。
+- `verify-agent` 60/0；`verify-assistant` 348/0；`verify-assistant-followup` 48/0；`verify-agent-scenarios` 25/0；`verify-scene-cards` 58/0；`verify-assistant-frontend` 101/0；`verify-i18n --strict` 12/0；`verify-gate-registry` 10/0（110 实有 / 100 注册 / 0 未归属）；`doctor` 0 必须修复 / 6 提醒；`preflight` 3 通过 / 1 提醒（git 检查 EPERM 降级）。
+- 真实模型抽检（2026-11-23 16:4x，`deepseek-v4-flash-0731` / `agglm`，18 条，28 次文本请求）：16 条直接通过；1 条「你好」为脚本判据误报（回复是正常问候）；1 条「确认生成吗」模型同时输出 say + tool 被判 `AMBIGUOUS_OUTPUT`，已新增**确认问句确定性闸**并用零成本用例覆盖；生产回退规则路径对该句也能正确回答。
+- 服务级 HTTP 抽检（16:57:48 重启后，登录态经 `/api/assistant/message`）：**3/3 通过**——「有雪景吗」真实模型选 `search_scene_cards` 并列出实际计划命中的卡；「可以」「确认生成吗」均走确定性 `confirm_plan`（0 次模型调用）；未调用 `/execute`、未建任务。
+- 零真实视频/付费任务；真实模型抽检只发文本请求，不建任务、不出片、不重复扣费。
+
+### 未验证
+
+- 真实模型抽检只覆盖 `agglm` + `deepseek-v4-flash-0731`；其他 Base/模型未验；18 条中「你好」的判据误报已修正，但未再整批重跑（只对确认问句做了零成本复验）。
+- 3001 已于 16:57:48 重启（晚于 `agentRuntime.js` 16:50:47），search / say 质量闸 / 裸确认 / 确认问句闸均已加载；已做服务级 HTTP 3/3。**浏览器 UI 仍未实测**（本机无 Electron），视觉/交互未验证。
+- 「确认生成吗」的模型原始输出是 `{"say": "...", "tool": "confirm_plan"}`（两者同时非空）；本次用确定性闸绕开，没有放宽 `validateOutput` 的「恰好一个」契约。其他工具若出现 say+tool 歧义，仍回退规则路径。
+
+### 影响面
+
+- 工具数 15（新增只读 `search_scene_cards`）；`show_scene_cards` 列表行为逐字不变。
+- 「可以/行/好/OK」以及「确认生成吗/现在开始吗」在“有计划且上一条不是提问”时会确定性回确认语，不再走模型；若上一条是提问，仍交给模型（避免把回答抢成确认）。
+- 新增审计字段只追加，不改旧字段；`say` 元话术/复读被拒后回退规则路径（可能显示规则话术，而不是那句空话）。
+

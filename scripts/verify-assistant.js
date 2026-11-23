@@ -653,8 +653,10 @@ async function main() {
       tool, args, sessionId: sidA, userId: 'local', lang: 'zh'
     });
 
-    ok('工具门面白名单 14 个且**没有** execute',
-      supervisor.AGENT_TOOL_NAMES.length === 14
+    // 2026-11-23：新增 search_scene_cards（内容查询）→ 工具数 14 → 15。
+    // 不是实现错，而是注册表新增了一个只读工具；白名单/无 execute 的约束不变。
+    ok('工具门面白名单 15 个且**没有** execute',
+      supervisor.AGENT_TOOL_NAMES.length === 15
       && ['execute', 'delete', 'create_task', 'pay'].every((n) => supervisor.AGENT_TOOL_NAMES.indexOf(n) === -1),
       supervisor.AGENT_TOOL_NAMES.join(','));
 

@@ -79,6 +79,12 @@ const TOOLS = Object.freeze([
     params: {}
   },
   {
+    name: 'search_scene_cards',
+    desc: '在当前计划的场景卡里按内容搜索（雪/冰/海/沙漠/夜景/森林/瀑布…），返回命中的段号与卡名；空结果会明确说没有（只读）',
+    descEn: 'Search the current plan\'s scene cards by content (snow/ice/sea/desert/night/forest/waterfall...); returns matched clip numbers and card names; states explicitly when nothing matches (read-only)',
+    params: { query: 'string' }
+  },
+  {
     name: 'status',
     desc: '查任务进度/状态（只读）',
     descEn: 'Check task progress/status (read-only)',
@@ -211,9 +217,12 @@ function buildSystemPrompt(lang, ctx) {
       '  "card / cards / which scenes / which locations" -> show_scene_cards. When the utterance names BOTH (e.g. "the prompts of all 12 scenes"), the user wants the PROMPT text -> show_prompt.',
       '· If the user asks you to explain what you just said ("what did you write?", "what was that?") -> use say to explain the previous message; do NOT call show_plan and repeat the card.',
       '· "which cards does this plan use" -> show_scene_cards; "how many cards/photos are left" -> assets.',
+      '· "does the plan have snow/sea/desert/night clips?" or "which clips are snow/sea...?" -> search_scene_cards(query=keyword);',
+      '  "list all the cards" -> show_scene_cards. A content question is NOT a list request; never answer it with a card list.',
       '· "make it 1080p" with a plan present -> edit_plan(set_resolution); "default / from now on" -> settings_change.',
       '· "swap them all / another batch" -> edit_plan(action=swap_all).',
       '· "confirm / start" -> confirm_plan only (ask the user to press the button); NEVER execute.',
+      '· "yes / ok / sure" with a plan and your previous message was not a question -> confirm_plan only; never answer with a bare acknowledgement or meta-commentary about JSON.',
       '· "??? / blah blah whatever" -> clarify (or a short chat line), never a plan.',
       '· "30 seconds / 2 minutes" = TOTAL length -> plan_video(totalMinutes=0.5/2); "15 seconds per clip" -> clipDurationSec (10 or 15 only).',
       '· "swap clip 2 / change clip 2" with a plan -> edit_plan(action=swap_scene, segment=2); "15s per clip" with a plan -> edit_plan(action=set_clip_duration, clipDurationSec=15).',
@@ -264,9 +273,12 @@ function buildSystemPrompt(lang, ctx) {
     '· 「我要把这几张都给我看一下」这类只带数量/指代、不带对象的查看句 → 用 say 反问一句（要提示词原文还是场景卡清单），不要猜；',
     '· 用户让你解释你刚说过的话（「你写的什么」「刚才那段是什么」）→ 用 say 解释上一句，**不要**再调 show_plan 重复计划卡；',
     '· 「看当前计划用了哪些卡」= show_scene_cards；「还剩多少张卡/库存」= assets；',
+    '· 用户问卡里**有没有某类内容 / 哪几段是某类内容**（雪/冰/海/沙漠/夜景/森林/瀑布…）→ search_scene_cards(query=关键词)；',
+    '  只是要看全部卡/列卡 → show_scene_cards。前者是内容查询，后者是列表，不要拿列表糊弄内容问题。',
     '· 「改成 1080p」且已有计划 = edit_plan(set_resolution)；说「默认/以后都用」才是 settings_change；',
     '· 「换一组 / 都换掉」= edit_plan(action=swap_all)；',
     '· 「确认 / 开始吧」只回 confirm_plan（提醒用户点确认），**不要**执行；',
+    '· 「可以 / 行 / 好 / OK」且已有计划、你上一条不是在提问 → confirm_plan（提醒点「确认执行」）；不要只回一句空话，也不要用「已按要求/已按格式」这类话作答；',
     '· 「??? / 随便说点什么」= clarify 或一句简短聊天，不要排计划。',
     '· 「30 秒 / 2 分钟」= **整条视频总时长** → plan_video(totalMinutes=0.5/2)；只有「每段 15 秒」才用 clipDurationSec（场景卡模式只支持 10 或 15）。',
     '· 「第二段换个场景 / 把第二段换成 X」且已有计划 → edit_plan(action=swap_scene, segment=2)；「每段 15 秒」且已有计划 → edit_plan(action=set_clip_duration, clipDurationSec=15)。',
@@ -446,6 +458,49 @@ function checkSayGrounding(say, ctx) {
 }
 
 // ==========================================
+// say 质量闸（2026-11-23）
+// ------------------------------------------------------------
+// 背景：用户说「可以」，模型重试后把「遵守 JSON 格式」本身当成回答，
+// 回了一句「好的，已按要求以 JSON 格式回复。」，旧校验只查金额/动作/承诺，
+// 于是这句空话被原样落库并显示给用户。
+// 这里只拦三类**明确无信息量**的 say；不拦正常短回答：
+//   ① 元话术：谈论 JSON/格式/结构本身，而不是回答用户；
+//   ② 空泛确认：「好的。」「可以。」单独一句，没有内容；
+//   ③ 无理由复读：与上一条 assistant 文本相同，且用户没要求「再说一遍」。
+// ==========================================
+const RE_META_TALK = /(?:已按.*(?:要求|格式|结构)|(?:JSON|json)\s*(?:格式|对象|结构)|(?:只|仅)输出.*(?:JSON|json|对象)|按照?.*(?:JSON|json)|遵守.*(?:格式|结构)|格式要求)/;
+const RE_BARE_ACK = /^(?:好的|好|可以|行|收到|明白|了解|OK|ok|嗯|嗯嗯)[。！!，,.\s]*$/;
+const RE_REPEAT_REQUEST = /(?:再说一遍|重复一遍|再说一次|重复一下|repeat|again)/i;
+
+function normalizeSayForCompare(s) {
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/[\s。！!，,、；;：:？?…—\-]/g, '')
+    .toLowerCase();
+}
+
+/**
+ * 检查模型「自己说的话」是否值得显示给用户。
+ * @param {string} say
+ * @param {{userText?:string,lastAssistantText?:string}} [opts]
+ * @returns {{ok:boolean, reason?:string}}
+ */
+function checkSayQuality(say, opts) {
+  const text = String(say === undefined || say === null ? '' : say).trim();
+  if (!text) return { ok: false, reason: 'EMPTY' };
+  if (RE_META_TALK.test(text)) return { ok: false, reason: 'META_TALK' };
+  if (RE_BARE_ACK.test(text)) return { ok: false, reason: 'BARE_ACK' };
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const userText = String(o.userText || '');
+  const lastAssistantText = String(o.lastAssistantText || '');
+  if (lastAssistantText && !RE_REPEAT_REQUEST.test(userText)) {
+    const a = normalizeSayForCompare(text);
+    const b = normalizeSayForCompare(lastAssistantText);
+    if (a && a === b && a.length >= 8) return { ok: false, reason: 'REPEAT' };
+  }
+  return { ok: true };
+}
+
+// ==========================================
 // 调用
 // ==========================================
 /**
@@ -466,6 +521,8 @@ async function runTurn(opts) {
   const lang = String(o.lang || 'zh').toLowerCase().startsWith('en') ? 'en' : 'zh';
   const ctx = o.ctx && typeof o.ctx === 'object' ? o.ctx : {};
   const history = Array.isArray(o.history) ? o.history.slice(-8) : [];
+  const lastAssistant = history.slice().reverse().find((m) => m && m.role === 'assistant' && m.text);
+  const lastAssistantText = lastAssistant ? String(lastAssistant.text) : '';
   const messages = history
     .filter((m) => m && m.text)
     .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.text).slice(0, 2000) }));
@@ -531,13 +588,21 @@ async function runTurn(opts) {
             attempts: attempt
           };
         }
+        const quality = checkSayQuality(checked.say, { userText: text, lastAssistantText });
+        if (!quality.ok) {
+          lastFailure = { kind: 'SAY_QUALITY', reason: quality.reason };
+        } else {
+          return { ok: true, ...checked, raw, latencyMs: Date.now() - started, attempts: attempt };
+        }
+      } else {
+        return { ok: true, ...checked, raw, latencyMs: Date.now() - started, attempts: attempt };
       }
-      return { ok: true, ...checked, raw, latencyMs: Date.now() - started, attempts: attempt };
+    } else {
+      lastFailure = {
+        kind: checked.error || 'BAD_OUTPUT',
+        detail: [checked.tool, checked.arg, checked.reason].filter(Boolean).join('/') || null
+      };
     }
-    lastFailure = {
-      kind: checked.error || 'BAD_OUTPUT',
-      detail: [checked.tool, checked.arg, checked.reason].filter(Boolean).join('/') || null
-    };
     if (attempt === 1) {
       // 一次重试：把坏输出塞回去，明确要求只输出合法 JSON。
       // 2026-11-19：第一次默认关思考（快）；失败重试时自动开思考（质量兜底），
@@ -547,8 +612,8 @@ async function runTurn(opts) {
       messages.push({
         role: 'user',
         content: lang === 'en'
-          ? 'Your previous answer was not a valid decision. Reply with ONE JSON object only, following the schema. No markdown, no prose, no apology.'
-          : '你上一条输出不合法。只输出一个 JSON 对象，严格遵守上面的结构；不要 markdown、不要解释、不要道歉。'
+          ? `Your previous answer was not usable. The user's message was: "${text.slice(0, 300)}". Answer THAT message. Reply with ONE JSON object only, following the schema. No markdown, no prose, no apology, and no meta-commentary about JSON or format.`
+          : `你上一条输出不可用（格式不合法，或没有回答用户的问题）。用户的问题是：「${text.slice(0, 300)}」。仍然回答这个问题；只输出一个 JSON 对象，严格遵守上面的结构；不要 markdown、不要解释、不要道歉，也不要用「已按要求/已按格式」这类空话作答。`
       });
     }
   }
@@ -576,6 +641,7 @@ module.exports = {
   validateArgs,
   validateOutput,
   checkSayGrounding,
+  checkSayQuality,
   runTurn,
   isEnabled
 };

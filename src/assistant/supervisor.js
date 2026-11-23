@@ -556,6 +556,168 @@ function replyForPlanScenes(sessionId, lang) {
   }
 }
 
+// ==========================================
+// 场景卡内容检索（2026-11-23）
+// ------------------------------------------------------------
+// 背景：用户问「里面有雪景吗」时，旧实现只有 show_scene_cards（固定列前 8 张），
+// 模型只能把列表当答案，于是复读同一段。这里补「按内容查」：
+//   · 在当前计划的卡里按字段/同义词找关键词；
+//   · 返回段号 + 卡名；空结果明确说「没有」；
+//   · 纯函数 + 只读：不占卡、不写冷却、不建任务。
+// ==========================================
+const SCENE_SEARCH_LIMIT = 8;
+const SCENE_SEARCH_FIELDS = Object.freeze([
+  'scene_key', 'protagonist', 'biome', 'landform', 'feature', 'foreground', 'weather', 'season',
+  'light', 'shot', 'palette', 'climate',
+  'protagonist_en', 'biome_en', 'landform_en', 'feature_en', 'foreground_en', 'weather_en',
+  'season_en', 'light_en', 'shot_en', 'palette_en'
+]);
+const SCENE_SEARCH_GROUPS = Object.freeze([
+  { key: 'snow', aliases: ['雪', '雪景', '雪山', '雪原', '积雪', '初雪', '残雪', '融雪', '雾凇', 'snow', 'snowy'] },
+  { key: 'ice', aliases: ['冰', '冰川', '冰架', '冰瀑', '冰斗', '冰湖', '蓝冰', '冰裂纹', 'ice', 'glacier'] },
+  { key: 'sea', aliases: ['海', '海岸', '海边', '礁', '潮间带', '海蚀', 'sea', 'coast', 'reef', 'intertidal'] },
+  { key: 'desert', aliases: ['沙漠', '沙丘', '戈壁', '荒漠', '雅丹', 'desert', 'dune', 'gobi'] },
+  { key: 'night', aliases: ['夜景', '夜', '星空', '星', '银河', '极光', '天文', 'night', 'star', 'galaxy', 'aurora'] },
+  { key: 'lake', aliases: ['湖', '湖泊', 'lake'] },
+  { key: 'forest', aliases: ['森林', '林', 'forest'] },
+  { key: 'waterfall', aliases: ['瀑布', 'waterfall'] },
+  { key: 'volcano', aliases: ['火山', '地热', '温泉', 'volcano', 'geothermal'] },
+  { key: 'grassland', aliases: ['草原', '草甸', 'grassland', 'meadow'] },
+  { key: 'wetland', aliases: ['湿地', '沼泽', 'wetland'] },
+  { key: 'canyon', aliases: ['峡谷', '丹霞', '喀斯特', 'canyon', 'danxia', 'karst'] },
+  { key: 'rain', aliases: ['雨', '雨纹', 'rain'] },
+  { key: 'salt', aliases: ['盐', '盐湖', '盐盘', 'salt'] },
+  { key: 'polar', aliases: ['极地', 'polar'] }
+]);
+
+function normalizeSceneSearch(s) {
+  return String(s === undefined || s === null ? '' : s).toLowerCase().replace(/\s+/g, '');
+}
+
+function sceneSearchAliases(query) {
+  const q = normalizeSceneSearch(query);
+  if (!q) return [];
+  const out = new Set([q]);
+  for (const group of SCENE_SEARCH_GROUPS) {
+    const hit = group.aliases.some((a) => {
+      const alias = normalizeSceneSearch(a);
+      return alias && (q.indexOf(alias) !== -1 || alias.indexOf(q) !== -1);
+    });
+    if (hit) for (const a of group.aliases) out.add(normalizeSceneSearch(a));
+  }
+  return [...out].filter(Boolean);
+}
+
+function sceneSearchHit(card, aliases) {
+  for (const field of SCENE_SEARCH_FIELDS) {
+    const value = normalizeSceneSearch(card && card[field]);
+    if (!value) continue;
+    for (const alias of aliases) {
+      if (alias && value.indexOf(alias) !== -1) return { field, value: card[field] };
+    }
+  }
+  return null;
+}
+
+function sceneSearchLine(card, segment, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
+  const bits = [isEn ? `Segment ${segment}` : `第 ${segment} 段`];
+  if (isEn) {
+    bits.push(card.protagonist_en || card.scene_key || card.id || '(unknown card)');
+    if (card.feature_en && card.feature_en !== card.protagonist_en) bits.push(card.feature_en);
+  } else {
+    bits.push(card.scene_key || card.id || '(未知卡)');
+  }
+  const chapter = Number.isInteger(card.chapter) ? card.chapter : null;
+  const sequence = Number.isInteger(card.sequence) ? card.sequence : null;
+  if (chapter !== null && sequence !== null) {
+    bits.push(isEn ? `ch. ${chapter}-${sequence}` : `第 ${chapter} 章-${sequence}`);
+  }
+  const biome = isEn
+    ? [card.biome_en, card.landform_en].filter(Boolean).join('/')
+    : [card.biome, card.landform].filter(Boolean).join('/');
+  if (biome) bits.push(biome);
+  const season = isEn ? card.season_en : card.season;
+  if (season) bits.push(season);
+  const shot = isEn ? card.shot_en : card.shot;
+  if (shot) bits.push(shot);
+  return bits.join(' · ');
+}
+
+/**
+ * 在当前计划的场景卡里按内容检索。只读纯函数（不写卡库/冷却/任务）。
+ * @returns {{ok:true, reply:string, matches:Array, total:number, query:string, replyKey:string}}
+ */
+function searchPlanSceneCards(plan, query, lang) {
+  const isEn = i18n.normalizeLang(lang) === 'en';
+  const q = String(query === undefined || query === null ? '' : query).trim();
+  const replyKey = 'assistant.reply.sceneSearch';
+  if (plan && plan.sceneCards === false) {
+    return {
+      ok: true,
+      reply: isEn
+        ? 'This plan turned scene cards off (free-form prompts), so there is nothing to search. Start a new plan with scene cards to search cards by content.'
+        : '这条计划关掉了场景卡（自由提示词），没有可检索的卡；要按卡查内容，请新开一条带场景卡的计划。',
+      matches: [], total: 0, query: q, replyKey
+    };
+  }
+  const entries = planSceneEntries(plan);
+  const planCount = Number(plan && plan.clipCount) || entries.length;
+  if (!entries.length) {
+    return {
+      ok: true,
+      reply: isEn
+        ? 'The scene-card library cannot be read right now. The plan is intact; ask again in a moment.'
+        : '场景卡库暂时读不到，计划还在，稍后再问一次就行。',
+      matches: [], total: 0, query: q, replyKey
+    };
+  }
+  const aliases = sceneSearchAliases(q);
+  const matches = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    const card = sceneCardLibrary.getCardById(entry && entry.id);
+    if (!card) continue;
+    const hit = sceneSearchHit(card, aliases);
+    if (!hit) continue;
+    matches.push({
+      segment: i + 1,
+      id: card.id,
+      field: hit.field,
+      value: hit.value,
+      card
+    });
+  }
+  const total = matches.length;
+  const shown = matches.slice(0, SCENE_SEARCH_LIMIT);
+  const lines = shown.map((m) => sceneSearchLine(m.card, m.segment, isEn ? 'en' : 'zh'));
+  let reply;
+  if (!total) {
+    reply = isEn
+      ? `This plan has ${planCount} scene cards; none match "${q}".\nTry another keyword (snow / ice / sea / desert / night / forest / waterfall...) or say "show the scene cards" to list them.`
+      : `这 ${planCount} 张场景卡里没有匹配「${q}」的卡。\n可以换个关键词（雪 / 冰 / 海 / 沙漠 / 夜景 / 森林 / 瀑布…），或者说「看场景卡」查看全部。`;
+  } else {
+    reply = isEn
+      ? `This plan has ${planCount} scene cards; ${total} match "${q}":\n`
+      : `这 ${planCount} 张场景卡里有 ${total} 张匹配「${q}」：\n`;
+    reply += lines.join('\n');
+    if (total > shown.length) {
+      reply += isEn
+        ? `\n... ${total} in total; first ${shown.length} shown here.`
+        : `\n…… 共 ${total} 张，这里先列前 ${shown.length} 张。`;
+    }
+    reply += isEn ? '\n(Read-only query; the plan is unchanged.)' : '\n（只读查询，没有改动计划。）';
+  }
+  return {
+    ok: true,
+    reply,
+    matches: matches.map((m) => ({ segment: m.segment, id: m.id, field: m.field, value: m.value })),
+    total,
+    query: q,
+    replyKey
+  };
+}
+
 // 纯文生视频开关（2026-11-16 用户问题 b）
 // 实测「逐段出图」是前端 localStorage 状态（assistant.js 的 imagePerClip），不进计划卡；
 // 所以聊天里只能告诉用户去卡上点，不能假装已经改掉。
@@ -2768,6 +2930,19 @@ const AGENT_TOOL_HANDLERS = {
       ok: true, reply: replyForPlanScenes(sessionId, ctx.lang),
       replyKey: 'assistant.reply.planScenes', plan: null, actions: null
     };
+  },
+  search_scene_cards(sessionId, args, ctx) {
+    const plan = memory.lastPlan(sessionId);
+    if (!plan) return agentNoPlan(ctx.lang);
+    const query = String((args && args.query) || '').trim();
+    if (!query) {
+      return agentToolFail('AGENT_BAD_ARGS', 'search_scene_cards 需要 query（例如「雪」「海」「夜景」）');
+    }
+    try {
+      return { ...searchPlanSceneCards(plan, query, ctx.lang), plan: null, actions: null };
+    } catch (e) {
+      return agentToolFail('AGENT_TOOL_ERROR', '场景卡检索失败：' + (e && e.message ? e.message : e));
+    }
   },
   status(sessionId, args, ctx) {
     return { ok: true, reply: replyForStatus(sessionId, ctx && ctx.lang), replyKey: 'assistant.reply.status', plan: null, actions: null };

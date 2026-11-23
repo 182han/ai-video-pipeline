@@ -17,6 +17,7 @@
 const agent = require('./agent');
 const memory = require('./memory');
 const agentAudit = require('./agentAudit');
+const crypto = require('crypto');
 
 const AGENT_RUNTIME_VERSION = 'assistant-agent-runtime.v1.0.0';
 
@@ -27,6 +28,7 @@ const TOOL_INTENT = Object.freeze({
   show_plan: 'plan_edit',
   show_prompt: 'plan_edit',
   show_scene_cards: 'plan_scenes',
+  search_scene_cards: 'plan_scenes',
   status: 'status',
   last_video: 'last',
   budget: 'context',
@@ -42,6 +44,48 @@ const TOOL_INTENT = Object.freeze({
 
 function normalizeLang(lang) {
   return String(lang || '').toLowerCase().startsWith('en') ? 'en' : 'zh';
+}
+
+// ==========================================
+// 2026-11-23：可观测性 + 确认词闸
+// ------------------------------------------------------------
+// 事故：用户说「可以」，模型重试后回「好的，已按要求以 JSON 格式回复。」；
+// 而 agent 审计只记了 tool/延迟，看不出「同一段回复连续出现」。
+// 这里补：① 回复/参数摘要进审计；② 裸确认在计划卡语境下走确定性 confirm，
+// 不再让模型用 say 自由发挥（也不会误把「可以」当成 JSON 格式问题）。
+// ==========================================
+function digestText(text) {
+  return crypto.createHash('sha256').update(String(text === undefined || text === null ? '' : text)).digest('hex').slice(0, 16);
+}
+
+function previewArgs(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
+  const out = {};
+  for (const k of Object.keys(args).slice(0, 20)) {
+    const v = args[k];
+    out[k] = typeof v === 'string' ? v.slice(0, 200) : v;
+  }
+  return out;
+}
+
+const RE_BARE_CONFIRM = /^(?:可以|行|好|好的|确认|开始|开始吧|执行|确认执行|OK|ok|嗯|嗯嗯)[。！!，,.\s]*$/;
+// 2026-11-23 live 抽检：「确认生成吗」模型会同时输出 say + tool（AMBIGUOUS_OUTPUT），
+// 虽然回退规则路径也能答对，但没必要为此浪费一次模型调用；确认问句同样走确定性 confirm。
+const RE_CONFIRM_QUESTION = /^(?:那|那么|现在|就)?\s*(?:确认|确定|开始|执行)(?:生成|执行|开始)?(?:吗|嘛|么|吧)?[？?。！!\s]*$/;
+
+function isBareConfirm(text) {
+  const s = String(text || '').trim();
+  return RE_BARE_CONFIRM.test(s) || RE_CONFIRM_QUESTION.test(s);
+}
+
+/** 上一条 assistant 是不是在提问（决定「可以」是回答还是确认）。 */
+function lastAssistantIsQuestion(history) {
+  const last = (Array.isArray(history) ? history : [])
+    .slice().reverse().find((m) => m && m.role === 'assistant' && m.text);
+  if (!last) return false;
+  const t = String(last.text).trim();
+  return /[?？]\s*$/.test(t)
+    || /(?:吗|呢|要不要|你想|你要|请告诉我)[。！!…\s]*$/.test(t);
 }
 
 /**
@@ -66,6 +110,58 @@ async function handleAgentTurn(opts = {}) {
   const session = memory.getOrCreate(o.sessionId);
   const sessionId = session.id;
   const history = memory.listMessages(sessionId, 8);
+
+  // 2026-11-23：裸确认（可以/行/好/OK）+ 有计划 + 上一条不是提问 → 确定性 confirm。
+  // 不走模型：避免「可以」被模型翻译成空话，也避免一次无意义的 LLM 调用。
+  const planForConfirm = memory.lastPlan(sessionId);
+  if (planForConfirm && isBareConfirm(text) && !lastAssistantIsQuestion(history)) {
+    memory.appendMessage(sessionId, { role: 'user', text });
+    const out = supervisor.runAgentTool({
+      tool: 'confirm_plan', args: {}, sessionId, userId, lang
+    });
+    const replyText = (out && out.reply)
+      ? out.reply
+      : (lang === 'en'
+        ? 'The plan is ready; press "Confirm and run" on the plan card when you want to start.'
+        : '计划还在，点计划卡上的「确认执行」我才开始。');
+    const agentMeta = {
+      version: agent.AGENT_VERSION,
+      runtime: AGENT_RUNTIME_VERSION,
+      mode: 'tool',
+      tool: 'confirm_plan',
+      latencyMs: 0,
+      attempts: 0,
+      warnings: [],
+      deterministic: true
+    };
+    agentAudit.record({
+      sessionId,
+      lang,
+      model: o.model || null,
+      mode: 'tool',
+      tool: 'confirm_plan',
+      intent: 'confirm',
+      ok: !!(out && out.ok === true),
+      latencyMs: 0,
+      attempts: 0,
+      deterministic: true,
+      replyDigest: digestText(replyText),
+      replyChars: String(replyText).length,
+      text
+    });
+    return {
+      handled: true,
+      latencyMs: 0,
+      response: {
+        ...(out || {}),
+        ok: !!(out && out.ok === true),
+        reply: replyText,
+        intent: 'confirm',
+        lang,
+        agent: agentMeta
+      }
+    };
+  }
 
   let ctx = o.context;
   if (!ctx && typeof supervisor.agentContextOf === 'function') {
@@ -96,6 +192,7 @@ async function handleAgentTurn(opts = {}) {
       latencyMs: decision.latencyMs,
       attempts: decision.attempts,
       failureKind: (decision.failure && decision.failure.kind) || 'AGENT_FAILED',
+      agentUnanswered: true,
       text
     });
     return {
@@ -144,6 +241,8 @@ async function handleAgentTurn(opts = {}) {
         code: (out && out.code) || 'AGENT_TOOL_FAILED',
         latencyMs: decision.latencyMs,
         attempts: decision.attempts,
+        args: previewArgs(decision.args),
+        replyDigest: digestText(error),
         text
       });
       return {
@@ -179,6 +278,10 @@ async function handleAgentTurn(opts = {}) {
       ok: true,
       latencyMs: decision.latencyMs,
       attempts: decision.attempts,
+      args: previewArgs(decision.args),
+      replyDigest: digestText(out.reply),
+      replyChars: String(out.reply || '').length,
+      matchCount: Array.isArray(out.matches) ? out.matches.length : undefined,
       text
     });
     return {
@@ -205,6 +308,8 @@ async function handleAgentTurn(opts = {}) {
     ok: true,
     latencyMs: decision.latencyMs,
     attempts: decision.attempts,
+    replyDigest: digestText(replyText),
+    replyChars: String(replyText || '').length,
     text
   });
   return {

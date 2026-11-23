@@ -78,6 +78,12 @@ const SUITES = [
     desc: '2026-11-19 B 目标：agent 多轮剧本（协作生成→改段→预算→确认→进度→诊断 / 幻觉越权回退 / 总开关 / 英文；脚本化模型 0 花费，不证明真实模型理解力）'
   },
   {
+    name: 'assistant-queries',
+    script: 'verify-assistant-queries.js',
+    group: 'fast',
+    desc: '2026-11-23：小智内容查询/元话术闸（search_scene_cards 段号命中、空结果明确、英文无中文、裸确认确定性 confirm、say 元话术/复读拒绝、审计 args/replyDigest；stub 零计费）'
+  },
+  {
     name: 'create-config',
     script: 'verify-create-config.js',
     group: 'fast',
