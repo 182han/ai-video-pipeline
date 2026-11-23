@@ -357,6 +357,12 @@ const SUITES = [
     desc: '批量出图→逐图调色→自动通过→photoId 顺序对应（stub 出图，零计费）'
   },
   {
+    name: 'image-grade',
+    script: 'verify-image-grade.js',
+    group: 'real',
+    desc: '出图自动调色开关：off 单条 / calm 双条 / 计划卡只入库调色后一条 / 失败保留原图 / task.imageGrade 沿用 / 指纹（stub，零计费）'
+  },
+  {
     name: 'image-first-e2e',
     script: 'verify-image-first-e2e.js',
     group: 'real',

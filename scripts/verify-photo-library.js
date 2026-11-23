@@ -97,6 +97,82 @@ check(photoLibrary.get(rec.id).videoPrompt === '镜头缓慢推进，蒸汽上�
 check(photoLibrary.get(rec.id).imagePrompt === '手动补录的画面提示词', '视频提示词不覆盖画面提示词');
 check(photoLibrary.query({ q: '手动补录的画面提示词' }).length === 1, '搜索能命中画面提示词');
 
+// ---- 6b. 出图自动调色 grade 字段（2026-11-23 A 方案） ----
+check(rec.grade && rec.grade.mode === 'off' && rec.grade.status === 'off',
+  '未传 grade 的新记录默认 { mode:off, status:off }', JSON.stringify(rec.grade));
+const gradedPath = makeImage('task_demo_grade_img_0_graded.png');
+const gradedRec = photoLibrary.ingest({
+  id: 'task_demo_grade_img_0',
+  taskId: 'task_demo_grade',
+  index: 0,
+  filePath: gradedPath,
+  prompt: '带调色指标的图',
+  grade: {
+    mode: 'calm',
+    palette: 'calm',
+    status: 'applied',
+    before: { sat: 0.61, luma: 118.2, high: 3.1 },
+    after: { sat: 0.33, luma: 112.4, high: 0.8 },
+    params: { gain: 0.54, brightness: -0.015, contrast: 1.01 }
+  }
+});
+check(gradedRec.grade.mode === 'calm' && gradedRec.grade.status === 'applied'
+  && gradedRec.grade.palette === 'calm', 'grade 可写入 calm/applied + palette');
+check(gradedRec.grade.before.sat === 0.61 && gradedRec.grade.after.sat === 0.33
+  && gradedRec.grade.params.gain === 0.54, 'grade 原样保留 before/after/params');
+check(photoLibrary.update(gradedRec.id, { status: 'approved' }).grade.mode === 'calm',
+  'update 其它字段不会冲掉 grade');
+
+// 调色失败：保留原图 = filePath 指向原图，grade.status=failed + error
+const failedRec = photoLibrary.ingest({
+  id: 'task_demo_grade_img_1',
+  taskId: 'task_demo_grade',
+  index: 1,
+  filePath: makeImage('task_demo_grade_img_1.png'),
+  prompt: '调色失败的图',
+  grade: { mode: 'calm', status: 'failed', error: 'ffmpeg 调色失败' }
+});
+check(failedRec.grade.status === 'failed' && failedRec.grade.error === 'ffmpeg 调色失败',
+  'grade 可表达 failed + error（保留原图）');
+
+// 老记录没有 grade：读取时补默认 off，不迁移/不改写文件
+const legacyFile = makeImage('legacy_no_grade.png');
+const legacyRaw = {
+  id: 'legacy_no_grade',
+  fileName: 'legacy_no_grade.png',
+  filePath: legacyFile,
+  url: '/clips/legacy_no_grade.png',
+  prompt: '老记录',
+  status: 'approved',
+  createdAt: new Date().toISOString()
+};
+fs.writeFileSync(path.join(process.env.PHOTOS_DIR, 'legacy_no_grade.json'), JSON.stringify(legacyRaw), 'utf8');
+const legacy = photoLibrary.get('legacy_no_grade');
+check(legacy && legacy.grade && legacy.grade.mode === 'off' && legacy.grade.status === 'off',
+  '老记录缺 grade → 读取时补默认 off/off（不迁移文件）');
+check(JSON.parse(fs.readFileSync(path.join(process.env.PHOTOS_DIR, 'legacy_no_grade.json'), 'utf8')).grade === undefined,
+  '补默认只发生在读取期：历史 JSON 未被改写');
+
+// 幂等重复登记：默认 grade 可被真实调色结果补上，已有非默认值不被覆盖
+const filled = photoLibrary.ingest({
+  id: 'task_demo_grade_img_2',
+  taskId: 'task_demo_grade',
+  index: 2,
+  filePath: makeImage('task_demo_grade_img_2.png'),
+  prompt: '先默认后调色',
+  grade: { mode: 'off', status: 'off' }
+});
+photoLibrary.ingest({
+  id: 'task_demo_grade_img_2',
+  taskId: 'task_demo_grade',
+  index: 2,
+  filePath: filled.filePath,
+  prompt: '先默认后调色',
+  grade: { mode: 'calm', status: 'applied', before: { sat: 0.5 }, after: { sat: 0.32 } }
+});
+check(photoLibrary.get('task_demo_grade_img_2').grade.mode === 'calm',
+  '重复 ingest 时默认 grade 可被真实调色结果补上');
+
 // ---- 7. 删除（记录 + 源文件 → 2026-11-15 起改为移入回收站） ----
 const r = photoLibrary.remove(rec.id);
 check(r.success === true && r.trashed === true, 'remove 把记录与源文件移入回收站');

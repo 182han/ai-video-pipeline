@@ -1727,6 +1727,39 @@ async function main() {
     && !/30 分钟的雪山/.test(assistantJs)
     && /场景卡库/.test(assistantJs));
 
+  // 2026-11-23 A 方案：出图自动调色（静态接线；浏览器交互未验证）。
+  // 交互的运行时证据见 scripts/verify-image-grade.js（batch/pipeline 两条路径）。
+  {
+    const createSmartJs = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'createSmart.js'), 'utf8');
+    const settingsJs = fs.readFileSync(path.join(APP_DIR, 'web', 'src', 'screens', 'settingsPage.js'), 'utf8');
+    const serverJs2 = fs.readFileSync(path.join(APP_DIR, 'server.js'), 'utf8');
+    const iOn = planJs.indexOf('${imgOn ? html`');
+    const iToggle = planJs.indexOf('autoGradeToggle');
+    const iElse = iOn >= 0 ? planJs.indexOf('` : html`', iOn) : -1;
+    ok('计划卡：「出图后自动调色」只在逐段出图打开时出现',
+      iOn > 0 && iToggle > iOn && iElse > iToggle && /autoGradeOff/.test(planJs));
+    ok('确认执行 body 带 imageGrade（两个入口共用同一状态，且不写 localStorage）',
+      /imageGrade: imageGrade \|\| undefined/.test(assistantJs)
+      && /imageGrade=\$\{imageGrade\}/.test(assistantJs)
+      && /onToggleImageGrade=\$\{toggleImageGrade\}/.test(assistantJs)
+      && !/localStorage\.(?:get|set|remove)Item\([^)\n]*imageGrade/.test(assistantJs)
+      && !/imageGrade[^;\n]*localStorage\.(?:get|set|remove)Item/.test(assistantJs));
+    ok('批量图片优先后端 body 也带 imageGrade；按钮文案随值变化',
+      /imageGrade: imageGrade \|\| undefined/.test(assistantJs)
+      && /imageFirstGraded/.test(assistantJs));
+    ok('创建向导第③步读服务端默认 + 请求体带 imageGrade + 摘要显示调色选择',
+      /imageGrade\.default/.test(createSmartJs)
+      && /imageGrade: imageGrade \|\| undefined/.test(createSmartJs)
+      && /createSmart\.step5\.gradeLine/.test(createSmartJs));
+    ok('设置页只读展示服务端默认值（不写 vs_config、无编辑控件）',
+      /imageGradeDefault/.test(settingsJs)
+      && !/saveKey\(\{[^}]*imageGrade/.test(settingsJs)
+      && /imgStatus\.imageGrade/.test(settingsJs));
+    ok('服务端 execute 把 imageGrade 放进 options；POST /api/tasks 写入 task.imageGrade',
+      /imageGrade: imageGradeMode/.test(serverJs2)
+      && /imageGrade: imageGradeRaw/.test(serverJs2));
+  }
+
   // ================= [10] 小智 2.0 V1：A1–A10（§8.3 验收矩阵 / §9.1-1..7） =================
   console.log('\n[10] 小智 2.0 V1 验收 A1–A10：意图兜底 / 提示词工作流 / 确认门 / 负向不误伤');
   const taskCount = () => taskManager.getAllTasks().length;

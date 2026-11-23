@@ -3947,3 +3947,98 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 
 **影响面**：编辑器导出默认行为改变（以前丢原声、现在保留）。若某工程确实要纯配乐，可在「原声」卡片关掉开关。
 
+---
+
+## 2026-11-23 · 出图自动调色开关（A 方案）
+
+**状态**：代码与离线/契约验收完成；**真实 3001 实例未重启**（见「未验证」）。
+
+### 背景与决策
+
+出图默认会自动调色（`autoGrade`），但默认值此前没有服务端开关，也无法按次关闭。
+本次加一个**默认关**的开关：
+
+- 默认值只来自服务端 `.env`：`IMAGE_GEN_AUTO_GRADE_DEFAULT=off|calm`（缺省/非法 → `off`，启动告警一次），
+  通过 `GET /api/image-gen/status` 的 `imageGrade.default` 下发；**不写 localStorage 默认**（否则又变「每人一套」）。
+- 每次出图可在界面临时改；任务创建时写进 `task.imageGrade`，补跑/重生成沿用，**请求体不能覆盖**。
+- 设置页只读展示服务端默认值，不提供可编辑的全局开关（账号平权，避免任何人改全局 = 已排除的 B 方案）。
+
+### 字段与默认值
+
+- `imageGrade: 'off' | 'calm'`（`src/imageGrade.js` 导出 `OPTIONS / DEFAULT / normalize / resolve`）。
+  - `off`：不跑 autoGrade，只存模型原图。
+  - `calm`：跑现有 autoGrade（目标 0.32、只降不升、压高光），算法未改。
+- `task.imageGrade`：`createTask` 写入；**不进 `runtimeConfig`、不在 `_mergeRuntimeConfig` 白名单**。
+- `photo.grade`：`{ mode, status, palette?, before?, after?, params?, originalPath?, error? }`；
+  老记录读取时补 `{mode:'off',status:'off'}`，**不迁移、不改写历史 JSON**。
+- 配置键：`config.IMAGE_GEN_AUTO_GRADE_DEFAULT`（本仓库 `config.js` 是**扁平键**结构，
+  偏差：执行说明写的是 `config.IMAGE_GEN.AUTO_GRADE_DEFAULT`，实际按仓库现状使用扁平键）。
+
+### 两条路径的有意差异（不得「顺手统一」）
+
+| 路径 | 入库记录 | grade 写法 |
+|---|---|---|
+| 批量出图 `POST /api/images/generate-batch` | **两条**：调色后 + `_original`（既有用户要求） | 调色后 `calm/applied`（带 before/after/params）；原图 `off/off` |
+| 小智计划卡 / 逐段出图 `pipeline._generateClipImages` | **一条**：只入库调色后；原图留磁盘但不入库 | `calm/applied` + `originalPath`；失败时保留原图并写 `calm/failed + error` |
+
+原因：批量链路用户明确要「调色前/后都可见」；计划卡链路是 60–180 段批量出图，双条会让图片库翻倍，
+且用户已确认只要一张可用首帧。**代价**：计划卡路径手动调色的「原图基准」是已压过的图——已在图片库详情
+`originalPath`/说明里交代，未再拆回原图条目。
+
+### 实现范围
+
+- 后端：`src/imageGrade.js`（新）、`config.js`、`.env.example`、`server.js`（status / generate-batch /
+  `/api/tasks` / `/api/assistant/execute`）、`src/processors/imageBatch.js`、`src/pipeline.js`、
+  `src/taskManager.js`、`src/assistant/supervisor.js`、`src/submitGuard.js`、`src/photoLibrary.js`、
+  `src/i18n/catalog/{media,tasks}.js`。
+- 前端：`web/src/screens/createSmart.js`（第③步开关 + 第⑤步摘要 + 草稿）、
+  `web/src/components/{xiaozhiPlan,assistant}.js`（计划卡开关/两个入口共用状态）、
+  `web/src/screens/inventory.js`（角标/详情）、`web/src/screens/settingsPage.js`（只读行）、
+  5 个 i18n 词条文件 + `assistant.panel.imageFirstGraded`。
+- 偏差：执行说明要求改 `web/src/createDraft.js`；实际 `/create-smart` 用的是自己的
+  `vs_create_smart_draft_v1` 草稿（`createSmart.js` 内部 `loadDraft/saveDraft`），已在那里加 `imageGrade`，
+  **未改** 旧向导的 `createDraft.js`（旧 `/create` 本就不自动调色，属明确不做）。
+
+### 沿用规则与已挡住的坑
+
+- `task.imageGrade` 创建后不可变；`_mergeRuntimeConfig` 白名单不含它（`verify-image-grade` 有负向断言）。
+- 缺字段的老任务按 `off`；只影响之后新出的图。
+- 同提示词、不同 `imageGrade` 指纹不同，不会被 5 分钟去重误拦。
+- 非法值：HTTP 入口一律 `400 + code:'IMAGE_GRADE_INVALID'`，**不静默按 off**；模块内部兜底 `off` 仅用于直调脚本。
+- 计划卡调色失败：保留原图作为首帧、`photo.grade.status='failed'`、`console.warn`，**不计为出图失败**（不浪费已付费的图）。
+
+### 验收（本机实跑，零真实计费）
+
+- `node scripts/doctor.js`：**0 个必须修复 / 8 个提醒**（提醒均为既有环境项；其中 `.env 缺少 IMAGE_GEN_AUTO_GRADE_DEFAULT`
+  属预期——默认 off，不读/不改 `.env`）。
+- 新增 `scripts/verify-image-grade.js`（**31/0**，已注册进 `verify-all`）：off 单条 / calm 双条 /
+  计划卡只 ingest 一条 / 调色失败保留原图 / `task.imageGrade` 不被 runtimeConfig 覆盖 / 指纹 /
+  HTTP 入口静态断言。
+- `verify-image-batch` **18/0**（重写为隔离目录 + ffmpeg 测试图；off/calm/非法值/单张失败）。
+- `verify-photo-library` **50/0**（新增 grade 字段、老记录缺省、失败态、幂等补写）。
+- `verify-i2v` **50/0**（新增逐段出图读 `task.imageGrade` / `_nextGradedPath` / 失败保留原图断言；
+  顺手把该套件的 ffmpeg 临时目录改到 `app/output` 并重定向 TEMP，修掉本机 36 处 `os.tmpdir()` 假红之一）。
+- `verify-assistant` **348/0**（新增 execute body 带 `imageGrade`、开关只在逐段出图时出现、不写 localStorage）。
+- `verify-image-first-http` **51/0**（临时隔离实例真 HTTP：status 下发 `imageGrade`；generate-batch / tasks /
+  assistant execute 对非法值均返回 **400 IMAGE_GRADE_INVALID**，且没有创建任务）。
+- `verify-image-first-e2e` **11/0**（任务创建写入 `imageGrade:calm` 并保留）。
+- 真实 Chromium 渲染冒烟（临时 `web/src/_grade_harness.htm`，已删除；REA/Playwright headless，1280×720）：
+  `planOnHasToggle=1 / planOffHasToggle=0`、设置只读行文本正确且行内无输入控件、图片库三种角标
+  （已自动调色 / 未调色 / 调色失败（保留原图））全部出现、第③步开关默认关→点开生效、
+  请求体 `imageGrade=calm`；无页面异常（仅 favicon 404 与 Chrome 的 password-field 提示）。
+- 手工浏览器主流程（登录后的 3001）**未验证**：见下。
+
+### 未验证（必须如实交接）
+
+- **真实 3001 实例仍是旧进程**：本次改动完成后尝试按规范「先停旧进程再启新进程」，
+  但沙箱对该 node 进程 `Stop-Process` / `taskkill` / `process.kill` 均返回 `EPERM/Access denied`
+  （进程与当前 shell 同用户同 session，命令行为空，属受保护进程）。因此：
+  - 新代码只在**临时隔离实例**（`verify-image-first-http`）与**进程内单测**中生效过；
+  - 3001 上的 `/api/image-gen/status.imageGrade`、真实任务的 `task.imageGrade` 落库、补跑沿用
+    仍需重启后用真实请求各验一次；
+  - 重启会让所有用户登出、中断运行中任务（已确认日志最后一次活动为 2026-11-22 14:57，无在跑任务）。
+- 登录后的**手工浏览器主流程**未做：DSH 内置浏览器 provider 不可用（Electron 未安装），
+  REA 的 Chromium 是独立临时 profile、无登录态；上述渲染冒烟用 stub API 覆盖组件本身，
+  **不覆盖**「真实 status → 控件默认值 → 真实任务」端到端。
+- 真实出图/视频/LLM 一律未调用（按红线，验收零计费）。
+

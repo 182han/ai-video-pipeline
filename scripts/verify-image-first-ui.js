@@ -181,8 +181,9 @@ function slice(src, startRe, endRe, maxLen) {
   check('pendingPhotos 缺失时不谎报 0（回落成 generated）',
     /Number\.isFinite\(pendingRaw\) \? Math\.max\(0, Math\.floor\(pendingRaw\)\) : generated/.test(plan));
   check('「图已出好」标题', /图已出好/.test(plan));
-  check('「去审图」按钮 → navigate(/library)',
-    /xiaozhi\.review\.goReview/.test(plan) && /去审图/.test(zhMsgs) && /navigate\('\/library'\)/.test(assist));
+  // 2026-11-23：路由从 /library 迁到「库 · 图片」的 /photos（goReview 实际跳转）。
+  check('「去审图」按钮 → navigate(/photos)',
+    /xiaozhi\.review\.goReview/.test(plan) && /去审图/.test(zhMsgs) && /navigate\('\/photos'\)/.test(assist));
   check('「继续生成」按钮', /xiaozhi\.review\.continue/.test(plan) && /继续生成/.test(zhMsgs));
   check('unpause 调用带 taskId 与 same-origin',
     /'\/api\/tasks\/' \+ encodeURIComponent\(tid\) \+ '\/unpause'/.test(assist)
@@ -199,8 +200,8 @@ function slice(src, startRe, endRe, maxLen) {
 
   // ------------------------------------------------------------
   section('[6] xiaozhiPlan.js：计划卡出图行 + 状态条「等待审图」（契约 §1/§2.3）');
-  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey(+imageBackendReady/onSetResolution)',
-    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution \}\)/.test(plan));
+  check('PlanCard 签名含 imagePerClip/onToggleImage/unitCny/hasImageKey(+imageBackendReady/onSetResolution/imageGrade/onToggleImageGrade)',
+    /export function PlanCard\(\{ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, imageGrade, onToggleImageGrade, unitCny, hasImageKey, imageBackendReady, onSetResolution \}\)/.test(plan));
   check('计划卡可改分辨率（480P/720P/1080P 按钮 + 回调 onSetResolution）',
     /'480p', '720p', '1080p'/.test(plan) && /onSetResolution/.test(plan)
     && /assistant\.panel\.changeTo/.test(assist) && /改成 \{res\}/.test(zhMsgs));

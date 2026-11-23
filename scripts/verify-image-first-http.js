@@ -273,6 +273,37 @@ async function main() {
     ok('image 带 provider/model/size/hasServerKey 字段',
       image && 'provider' in image && 'model' in image && 'size' in image && typeof image.hasServerKey === 'boolean');
 
+    // ---------- [1b] 出图自动调色默认值（A 方案，2026-11-23） ----------
+    console.log('\n[1b] GET /api/image-gen/status → imageGrade');
+    const gradeStatus = await getJson('/api/image-gen/status');
+    const gradeInfo = gradeStatus.json && gradeStatus.json.imageGrade;
+    ok('status 200 且下发 imageGrade { default, options }',
+      gradeStatus.status === 200 && !!gradeInfo
+      && ['off', 'calm'].includes(gradeInfo.default)
+      && Array.isArray(gradeInfo.options) && gradeInfo.options.join(',') === 'off,calm',
+      gradeInfo && `default=${gradeInfo.default} options=${(gradeInfo.options || []).join(',')}`);
+    ok('默认值来自服务端（本验收实例未设置 env → off）',
+      gradeInfo && gradeInfo.default === 'off', gradeInfo && gradeInfo.default);
+
+    console.log('\n[1c] 非法 imageGrade → 400（在花钱之前拒绝）');
+    const beforeInvalid = await getJson('/api/tasks');
+    const beforeInvalidCount = Array.isArray(beforeInvalid.json) ? beforeInvalid.json.length : -1;
+    const badBatch = await postJson('/api/images/generate-batch', { prompts: ['测试'], imageGrade: 'bogus' });
+    ok('generate-batch 非法 imageGrade → 400 IMAGE_GRADE_INVALID',
+      badBatch.status === 400 && badBatch.json && badBatch.json.code === 'IMAGE_GRADE_INVALID',
+      `status=${badBatch.status} code=${badBatch.json && badBatch.json.code}`);
+    const badTask = await postJson('/api/tasks', { prompt: '测试', imageGrade: 'bogus' });
+    ok('/api/tasks 非法 imageGrade → 400 IMAGE_GRADE_INVALID',
+      badTask.status === 400 && badTask.json && badTask.json.code === 'IMAGE_GRADE_INVALID',
+      `status=${badTask.status} code=${badTask.json && badTask.json.code}`);
+    const badExec = await postJson('/api/assistant/execute', { sessionId: 'x', approved: true, imageGrade: 'bogus' });
+    ok('/api/assistant/execute 非法 imageGrade → 400 IMAGE_GRADE_INVALID',
+      badExec.status === 400 && badExec.json && badExec.json.code === 'IMAGE_GRADE_INVALID',
+      `status=${badExec.status} code=${badExec.json && badExec.json.code}`);
+    const afterBad = await getJson('/api/tasks');
+    const afterBadCount = Array.isArray(afterBad.json) ? afterBad.json.length : -1;
+    ok('非法值没有创建任何任务', afterBadCount === beforeInvalidCount, `${beforeInvalidCount} → ${afterBadCount}`);
+
     // ---------- [2] execute：出图未配置必须前置拒绝 ----------
     console.log('\n[2] POST /api/assistant/execute（imagePerClip=true 且未配置出图）');
     const before = await getJson('/api/tasks');

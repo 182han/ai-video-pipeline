@@ -231,10 +231,16 @@ console.log('================================================================');
   // 修复：首帧 >1.5MB 压成 JPEG（≤1280w），i2v 默认串行。这里验证压缩本身与接线。
   try {
     const fs = require('fs');
-    const os = require('os');
     const { execFileSync } = require('child_process');
     const config = require('../config');
-    const tmp = path.join(os.tmpdir(), 'i2v-shrink-' + Date.now() + '.png');
+    // 本机 ffmpeg 对系统 TEMP 无写权限（已知坑）：产物放 app/output 下的临时目录。
+    const tmpDir = fs.mkdtempSync(path.join(APP, 'output', 'verify_i2v_'));
+    // i2vImage 内部用 os.tmpdir() 落中间文件；本机 ffmpeg 对系统 TEMP 无写权限，
+    // 这里把 TEMP/TMP 也指向可写目录（只影响本脚本进程）。
+    process.env.TEMP = tmpDir;
+    process.env.TMP = tmpDir;
+    process.env.TMPDIR = tmpDir;
+    const tmp = path.join(tmpDir, 'shrink.png');
     execFileSync(config.FFMPEG_PATH, [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', 'testsrc2=size=2560x1440:duration=1', '-vf', 'noise=alls=40:allf=t',
@@ -250,7 +256,19 @@ console.log('================================================================');
     const pipeSrc = fs.readFileSync(path.join(APP, 'src', 'pipeline.js'), 'utf8');
     check(/I2V_CONCURRENCY/.test(pipeSrc) && /i2vImage\.shrinkForI2v/.test(pipeSrc),
       '流水线：i2v 串行 + 首帧压缩已接线');
-    try { fs.unlinkSync(tmp); } catch (e) { /* 忽略 */ }
+    // ===== 2026-11-23：出图自动调色开关（A 方案）逐段出图路径 =====
+    check(/imageGrade\.resolve\(task\.imageGrade\)/.test(pipeSrc)
+      && /task\.imageGrade/.test(pipeSrc),
+      '流水线：逐段出图读 task.imageGrade（缺字段按 off）');
+    check(/_nextGradedPath\(/.test(pipeSrc) && /_graded/.test(pipeSrc),
+      '流水线：调色产物用 <basename>_graded.png，不覆盖已有文件');
+    check(/autoGrade\.autoGradeImage\(out\.imagePath/.test(pipeSrc)
+      && /palette: 'calm'/.test(pipeSrc),
+      '流水线：calm 时调用现有 autoGrade（palette=calm）');
+    check(/status: 'failed', error: msg/.test(pipeSrc)
+      && /保留原图/.test(pipeSrc),
+      '流水线：调色失败保留原图并记 grade.status=failed');
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
   } catch (e) {
     check(false, 'i2v 压缩探针异常: ' + (e && e.message ? e.message : e));
   }
