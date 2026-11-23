@@ -1,0 +1,72 @@
+# ==========================================
+# AI 长视频自动生成流水线 — docker compose「开机清单」
+# ==========================================
+# 这个文件只干四件事：
+#   1. 用哪个 Dockerfile 打集装箱      → build
+#   2. 门开在哪个端口                  → ports
+#   3. 哪几个文件夹接到箱子外面        → volumes
+#   4. 怎么判断它还活着                → healthcheck
+#
+# 用法（在 app/ 目录下执行）：
+#   cp .env.example .env       # 先填 Key / DATABASE_URL，缺 .env 会直接报错
+#   docker compose up -d --build
+#   docker compose logs -f app # 首次启动会打印随机管理员密码，只打印一次
+#
+# ===== 四条硬约束（违反会丢数据或串号）=====
+#   1. 只能开 1 个副本：会话与登录失败计数在进程内存里，多副本会互相看不见；
+#      本项目的 JSON / Postgres 写入路径也未做多实例并发。
+#   2. output/ clips/ data/ 必须挂持久卷：容器删了这些目录就没了。
+#   3. 端口默认只绑 127.0.0.1：对外必须先挂 HTTPS 反代（nginx / Caddy）。
+#      反代挂上后，.env 里 TRUST_PROXY 要设 any（容器里看到的是 docker 网关 IP，
+#      不是 127.0.0.1；保持 true 会让「失败 5 次锁 IP」把所有人一起锁）。
+#   4. 反代要放行大请求体（client_max_body_size 80m 以上）：配乐上传走 base64，
+#      按 64MB JSON 设计。
+# ==========================================
+
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-video-pipeline:1.0.0
+    container_name: ai-video-pipeline
+    restart: unless-stopped
+
+    # .env 里的所有变量原样喂进容器；下面 environment 里写的优先
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # 与 .env、启动脚本、Dockerfile、文档保持同一个端口（全仓库统一 3001）
+      PORT: "3001"
+      TZ: Asia/Shanghai
+
+    ports:
+      # 只绑回环：公网访问请走反代。
+      # 若确实要直连（没有反代），改成 "3001:3001"，并把 .env 的 TRUST_PROXY 设为 false
+      - "127.0.0.1:3001:3001"
+
+    volumes:
+      # 成片与片段：必须持久化，重跑一次成本很高
+      - ./output:/app/output
+      - ./clips:/app/clips
+      # 任务 JSON 备份、账号（JSON 模式）、预算账本、片段库、图片库、缩略图、日志
+      - ./data:/app/data
+      # 配乐素材（镜像里被 .dockerignore 排除了，必须从宿主机挂进来）
+      - ./assets/bgm:/app/assets/bgm
+
+    healthcheck:
+      # 用 /healthz（只回 {"ok":true}），不用 /api/status（后者会暴露 pid 与模型名）
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
