@@ -1,0 +1,70 @@
+{
+  "currency": "USD",
+  "initialUsd": 194.33,
+  "balanceUsd": 194.27,
+  "spentUsd": 0.06,
+  "updatedAt": "2026-11-18T07:21:00.999Z",
+  "entries": [
+    {
+      "at": "2026-11-16T04:07:35.556Z",
+      "kind": "set",
+      "usd": 0,
+      "balanceAfterUsd": 196.34,
+      "meta": {
+        "note": "手动对账"
+      }
+    },
+    {
+      "at": "2026-11-16T05:12:46.226Z",
+      "kind": "image",
+      "taskId": "smart_mwit3r22",
+      "usd": 0.06,
+      "balanceAfterUsd": 196.28,
+      "meta": {
+        "count": 2,
+        "palette": "calm"
+      }
+    },
+    {
+      "at": "2026-11-16T05:35:54.685Z",
+      "kind": "video",
+      "taskId": "task_mwityi47_zhr9",
+      "usd": 2.003,
+      "balanceAfterUsd": 194.277,
+      "meta": {
+        "model": "openai-video",
+        "resolution": "720p",
+        "clips": 2,
+        "seconds": 10
+      },
+      "settled": true,
+      "actualUsd": 0,
+      "refundUsd": 2.003
+    },
+    {
+      "at": "2026-11-16T05:50:03.330Z",
+      "kind": "video",
+      "taskId": "task_mwiugoxq_z01l",
+      "usd": 2.003,
+      "balanceAfterUsd": 194.277,
+      "meta": {
+        "model": "dashscope",
+        "resolution": "720p",
+        "clips": 2,
+        "seconds": 10
+      },
+      "settled": true,
+      "actualUsd": 0,
+      "refundUsd": 2.003
+    },
+    {
+      "at": "2026-11-18T07:21:00.999Z",
+      "kind": "set",
+      "usd": 0,
+      "balanceAfterUsd": 194.27,
+      "meta": {
+        "note": "手动对账"
+      }
+    }
+  ]
+}
