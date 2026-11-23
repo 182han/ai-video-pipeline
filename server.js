@@ -296,7 +296,7 @@ app.post('/api/auth/login', async (req, res) => {
   auth.markLogin(user.id);
   auth.setSessionCookie(res, auth.createSession(user));
   console.log(`[auth] 登录成功: ${user.username} (${ip})`);
-  res.json({ ok: true, username: user.username, lang: req.lang });
+  res.json({ ok: true, username: user.username, role: user.role || 'member', lang: req.lang });
 });
 
 // 登出：销毁会话 + 立即过期 cookie
@@ -309,7 +309,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 // 当前登录者（中间件已保证有会话）
 app.get('/api/auth/me', (req, res) => {
-  res.json({ username: req.auth.username, userId: req.auth.userId, authEnabled: true });
+  res.json({ username: req.auth.username, userId: req.auth.userId, role: req.auth.role || 'member', authEnabled: true });
 });
 
 // ===== 成员管理（账号管理仅主账号；成员仍可改自己的密码）=====
@@ -343,10 +343,42 @@ function requireOwnerOrSelf(req, res, next) {
   return denyOwnerOnly(req, res);
 }
 
+// ===== 体验账号（role=demo）写操作白名单 =====
+// 目标：能生成/暂停/继续，不能删任何东西、不能改设置/成员、不能上传/生成图片。
+// 采用「默认拒绝」：除下面列出的写操作外，demo 的任何 POST/PUT/PATCH/DELETE 都 403。
+// 以后新增危险接口时，demo 默认也是安全的。
+const DEMO_ALLOWED_WRITES = [
+  ['POST', /^\/api\/tasks$/],                                              // 新建生成任务
+  ['POST', /^\/api\/tasks\/[^/]+\/(pause|unpause|resume|continue|retry)$/], // 暂停/继续/补跑/重试
+  ['POST', /^\/api\/optimize-prompt$/],                                    // 创建页提示词优化（只读性质）
+  ['POST', /^\/api\/estimate$/]                                            // 创建页成本估算（只读性质）
+];
+
+app.use((req, res, next) => {
+  if (!req.auth || req.auth.role !== 'demo' || isOwner(req)) return next();
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  // 允许体验账号改自己的密码（不属于成员管理）
+  if (method === 'PUT' && req.path === '/api/users/' + req.auth.userId + '/password') return next();
+  if (DEMO_ALLOWED_WRITES.some(([m, re]) => m === method && re.test(req.path))) return next();
+  return res.status(403).json({
+    error: '体验账号只能查看和使用生成功能',
+    code: 'DEMO_READONLY',
+    ...i18n.err(req.lang, 'api.auth.forbidden')
+  });
+});
+
 app.get('/api/users', async (req, res) => {
   try {
     const users = await storage.listUsers();
-    res.json({ users, authEnabled: auth.isEnabled(), selfId: req.auth.userId, lang: req.lang });
+    res.json({
+      users,
+      authEnabled: auth.isEnabled(),
+      selfId: req.auth.userId,
+      canManage: isOwner(req),
+      ownerUsername: OWNER_USERNAME,
+      lang: req.lang
+    });
   } catch (e) {
     res.status(503).json({
       error: e.message,
@@ -360,6 +392,7 @@ app.post('/api/users', requireOwner, async (req, res) => {
   try {
     const username = String((req.body || {}).username || '').trim();
     const password = String((req.body || {}).password || '');
+    const role = String((req.body || {}).role || 'member');
     const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;
     if (!/^[A-Za-z0-9_.@-]{2,32}$/.test(username)) {
       return res.status(400).json({
@@ -375,8 +408,15 @@ app.post('/api/users', requireOwner, async (req, res) => {
         ...i18n.err(req.lang, 'api.users.passwordTooShort', { min: minLen })
       });
     }
+    if (role !== 'member' && role !== 'demo') {
+      return res.status(400).json({
+        error: '角色只能是 member 或 demo',
+        code: 'ROLE_INVALID',
+        ...i18n.err(req.lang, 'api.users.badRole')
+      });
+    }
     const passwordHash = await auth.hashPassword(password);
-    const user = await storage.createUser({ username, passwordHash });
+    const user = await storage.createUser({ username, passwordHash, role });
     console.log(`[auth] 新建账号: ${user.username}`);
     res.status(201).json({ user });
   } catch (e) {

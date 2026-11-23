@@ -85,16 +85,28 @@ export function SettingsView() {
   const [selfId, setSelfId] = useState('');
   const [nu, setNu] = useState('');
   const [np, setNp] = useState('');
+  const [nr, setNr] = useState('member');
+  const [canManage, setCanManage] = useState(false);
+  const [ownerUsername, setOwnerUsername] = useState('');
   const [imgStatus, setImgStatus] = useState(null);
   const [openGroups, setOpenGroups] = useState({});
   const [showKeys, setShowKeys] = useState({});
   // 2026-11-19 B 目标：小智 agent 总开关（一键关回规则路径；保存后下一条消息生效）
   const [agentSwitch, setAgentSwitch] = useState(null);
 
+  async function loadUsers() {
+    try {
+      const j = await fetchJson('/api/users');
+      setUsers(j.users || []);
+      setAuthEnabled(!!j.authEnabled);
+      setSelfId(j.selfId || '');
+      setCanManage(!!j.canManage);
+      setOwnerUsername(j.ownerUsername || '');
+    } catch (e) { /* 保持静默，和原来一致 */ }
+  }
+
   useEffect(() => {
-    fetchJson('/api/users')
-      .then((j) => { setUsers(j.users || []); setAuthEnabled(!!j.authEnabled); setSelfId(j.selfId || ''); })
-      .catch(() => {});
+    loadUsers();
   }, []);
 
   useEffect(() => {
@@ -190,19 +202,20 @@ export function SettingsView() {
 
   async function addUser() {
     setErr(''); setMsg('');
+    if (!canManage) return;
     try {
       await fetchJson('/api/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: nu.trim(), password: np })
+        body: JSON.stringify({ username: nu.trim(), password: np, role: nr })
       });
-      setNu(''); setNp('');
-      const j = await fetchJson('/api/users');
-      setUsers(j.users || []);
+      setNu(''); setNp(''); setNr('member');
+      await loadUsers();
       setMsg(t('settings.members.created'));
     } catch (e) { setErr(t('settings.members.createFailed') + e.message); }
   }
 
   async function resetPwd(u) {
+    if (!canManage) return;
     const pwd = window.prompt(t('settings.members.resetPrompt', { name: u.username }));
     if (!pwd) return;
     setErr(''); setMsg('');
@@ -216,12 +229,12 @@ export function SettingsView() {
   }
 
   async function delUser(u) {
+    if (!canManage) return;
     if (!window.confirm(t('settings.members.deleteConfirm', { name: u.username }))) return;
     setErr(''); setMsg('');
     try {
       await fetchJson('/api/users/' + encodeURIComponent(u.userId || u.id), { method: 'DELETE' });
-      const j = await fetchJson('/api/users');
-      setUsers(j.users || []);
+      await loadUsers();
     } catch (e) { setErr(t('settings.members.deleteFailed') + e.message); }
   }
 
@@ -457,25 +470,36 @@ export function SettingsView() {
             ${tp('settings.members.count', users.length)}${authEnabled ? '' : t('settings.members.authOff')}
           </span>
         </div>
+        ${canManage && html`
         <div className="flex items-center gap-2 mb-2">
           <input value=${nu} onInput=${(e) => setNu(e.target.value)} placeholder=${t('settings.members.username')}
             className="h-8 w-[150px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
           <input value=${np} onInput=${(e) => setNp(e.target.value)} type="password" placeholder=${t('settings.members.password')}
             className="h-8 w-[170px] rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none placeholder:text-ink3" />
+          <select value=${nr} onChange=${(e) => setNr(e.target.value)}
+            className="h-8 rounded-[5px] border border-white/[.09] bg-s2 px-2 text-[12px] text-ink outline-none">
+            <option value="member">${t('settings.members.roleMember')}</option>
+            <option value="demo">${t('settings.members.roleDemo')}</option>
+          </select>
           <button onClick=${addUser}
             className="h-8 px-3 rounded-[6px] bg-accent text-onaccent text-[12px]">${t('settings.members.add')}</button>
         </div>
+        `}
+        ${!canManage && html`<p className="text-[11px] text-ink3 mb-2">${t('settings.members.manageHint')}</p>`}
         ${users.length === 0 && html`<p className="text-[11px] text-ink3">${t('settings.members.empty')}</p>`}
         ${users.map((u) => html`
           <div key=${u.userId || u.id || u.username} className="flex items-center gap-3 py-1.5 border-t border-white/[.05]">
-            <span className="text-[12px] text-ink w-[150px] truncate">${u.username}</span>
+            <span className="text-[12px] text-ink w-[140px] truncate">${u.username}</span>
+            <span className="text-[10px] text-ink3" style=${{ border: '1px solid rgba(255,255,255,.12)', borderRadius: '4px', padding: '0 4px' }}>
+              ${u.username === ownerUsername ? t('settings.members.owner') : (u.role === 'demo' ? t('settings.members.roleDemo') : t('settings.members.roleMember'))}
+            </span>
             <span className="text-[10px] text-ink3 font-num flex-1">
               ${(u.userId || u.id || '') === selfId ? t('settings.members.self') : ''}
             </span>
-            <button onClick=${() => resetPwd(u)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${t('settings.members.reset')}</button>
-            <button onClick=${() => delUser(u)}
-              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${t('settings.members.delete')}</button>
+            ${canManage && html`<button onClick=${() => resetPwd(u)}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:bg-white/[.06]">${t('settings.members.reset')}</button>`}
+            ${canManage && html`<button onClick=${() => delUser(u)}
+              className="h-7 px-2 rounded-[5px] text-[11px] text-ink3 hover:text-danger hover:bg-white/[.06]">${t('settings.members.delete')}</button>`}
           </div>
         `)}
       </div>

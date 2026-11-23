@@ -133,6 +133,7 @@ function createSession(user) {
   sessions.set(token, {
     userId: user.id,
     username: user.username,
+    role: user.role || 'member',
     createdAt: now,
     expiresAt: now + sessionTtlMs()
   });

@@ -195,6 +195,7 @@ create table if not exists users (
   id             text primary key,
   username       text not null unique,
   password_hash  text not null,
+  role           text not null default 'member',
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
   last_login_at  timestamptz

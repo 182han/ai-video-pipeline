@@ -56,6 +56,7 @@ function publicUser(u) {
   return {
     id: u.id,
     username: u.username,
+    role: u.role || 'member',
     createdAt: u.createdAt || null,
     updatedAt: u.updatedAt || null,
     lastLoginAt: u.lastLoginAt || null
@@ -226,13 +227,13 @@ module.exports = {
     return u ? publicUser(u) : null;
   },
 
-  async createUser({ username, passwordHash }) {
+  async createUser({ username, passwordHash, role }) {
     const all = readJson(USERS_FILE, []);
     const name = String(username || '').trim();
     if (!name) throw new Error('账号不能为空');
     if (all.some(u => u.username === name)) throw new Error('账号已存在');
     const now = new Date().toISOString();
-    const user = { id: newUserId(), username: name, passwordHash: String(passwordHash), createdAt: now, updatedAt: now, lastLoginAt: null };
+    const user = { id: newUserId(), username: name, passwordHash: String(passwordHash), role: role === 'demo' ? 'demo' : 'member', createdAt: now, updatedAt: now, lastLoginAt: null };
     all.push(user);
     writeJson(USERS_FILE, all);
     return publicUser(user);

@@ -76,9 +76,12 @@ async function ensureUsersTable() {
       password_hash text not null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
-      last_login_at timestamptz
+      last_login_at timestamptz,
+      role text not null default 'member'
     )
   `);
+  // 2026-11-23：已有库补列（幂等）。role: member=普通成员，demo=体验账号（只读+生成）
+  await q("alter table users add column if not exists role text not null default 'member'");
   usersTableReady = true;
 }
 
@@ -88,6 +91,7 @@ function rowToUser(row) {
   return {
     id: row.id,
     username: row.username,
+    role: row.role || 'member',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
     lastLoginAt: row.last_login_at ? new Date(row.last_login_at).toISOString() : null
@@ -393,7 +397,7 @@ module.exports = {
   // 幂等，且只在第一次用到账号时才执行。
   async listUsers() {
     await ensureUsersTable();
-    const res = await q('select id, username, created_at, updated_at, last_login_at from users order by created_at asc');
+    const res = await q('select id, username, role, created_at, updated_at, last_login_at from users order by created_at asc');
     return res.rows.map(rowToUser);
   },
 
@@ -415,20 +419,21 @@ module.exports = {
 
   async getUser(id) {
     await ensureUsersTable();
-    const res = await q('select id, username, created_at, updated_at, last_login_at from users where id = $1', [id]);
+    const res = await q('select id, username, role, created_at, updated_at, last_login_at from users where id = $1', [id]);
     return res.rows[0] ? rowToUser(res.rows[0]) : null;
   },
 
-  async createUser({ username, passwordHash }) {
+  async createUser({ username, passwordHash, role }) {
     await ensureUsersTable();
     const name = String(username || '').trim();
     if (!name) throw new Error('账号不能为空');
+    const safeRole = role === 'demo' ? 'demo' : 'member';
     const exists = await q('select 1 from users where username = $1', [name]);
     if (exists.rows.length) throw new Error('账号已存在');
     const id = 'usr_' + Date.now().toString(36) + '_' + require('crypto').randomBytes(4).toString('hex');
     const res = await q(
-      'insert into users (id, username, password_hash, created_at, updated_at) values ($1,$2,$3, now(), now()) returning id, username, created_at, updated_at, last_login_at',
-      [id, name, String(passwordHash)]
+      'insert into users (id, username, password_hash, role, created_at, updated_at) values ($1,$2,$3,$4, now(), now()) returning id, username, role, created_at, updated_at, last_login_at',
+      [id, name, String(passwordHash), safeRole]
     );
     return rowToUser(res.rows[0]);
   },
@@ -443,7 +448,7 @@ module.exports = {
   async updateUserPassword(id, passwordHash) {
     await ensureUsersTable();
     const res = await q(
-      'update users set password_hash = $2, updated_at = now() where id = $1 returning id, username, created_at, updated_at, last_login_at',
+      'update users set password_hash = $2, updated_at = now() where id = $1 returning id, username, role, created_at, updated_at, last_login_at',
       [id, String(passwordHash)]
     );
     return res.rows[0] ? rowToUser(res.rows[0]) : null;
@@ -452,7 +457,7 @@ module.exports = {
   async touchUserLogin(id) {
     await ensureUsersTable();
     const res = await q(
-      'update users set last_login_at = now() where id = $1 returning id, username, created_at, updated_at, last_login_at',
+      'update users set last_login_at = now() where id = $1 returning id, username, role, created_at, updated_at, last_login_at',
       [id]
     );
     return res.rows[0] ? rowToUser(res.rows[0]) : null;
