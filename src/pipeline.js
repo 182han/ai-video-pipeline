@@ -26,6 +26,9 @@ const objectStore = require('./storage/objectStore');
 const dashscopeUpload = require('./generators/dashscopeUpload');
 const { getI2VInfo } = require('./generators/i2vSupport');
 const i2vImage = require('./processors/i2vImage');
+// 出图自动调色（2026-11-23 A 方案）：逐段出图时按 task.imageGrade 决定是否调色。
+const autoGrade = require('./processors/autoGrade');
+const imageGrade = require('./imageGrade');
 
 const CLIPS_DIR = config.STORAGE.clipsDir;
 const OUTPUT_DIR = config.STORAGE.outputDir;
@@ -2430,6 +2433,20 @@ class Pipeline {
     return `${base}_v${Date.now()}`;
   }
 
+  // 调色产物路径：`<basename>_graded.png`，已存在就加 _v2/_v3 后缀，**绝不覆盖**已有文件
+  // （同一片段可能重出图，旧付费产物不能被新调色结果盖掉）。
+  _nextGradedPath(imagePath) {
+    const dir = path.dirname(imagePath);
+    const ext = path.extname(imagePath) || '.png';
+    const base = path.basename(imagePath, ext);
+    let candidate = path.join(dir, `${base}_graded${ext}`);
+    for (let v = 2; fs.existsSync(candidate) && v < 100; v++) {
+      candidate = path.join(dir, `${base}_graded_v${v}${ext}`);
+    }
+    if (fs.existsSync(candidate)) candidate = path.join(dir, `${base}_graded_v${Date.now()}${ext}`);
+    return candidate;
+  }
+
   // 用户明确打回（rejected）的片段：本次**不自动重出图**。
   // 理由（契约 §2.2 与 §2.4 的交界）：重出图 = 新的真实计费，必须由用户显式发起。
   // 若这里自动重出，接着 resumeTask 的「pending 视为通过」结算会把新图自动 approve，
@@ -2550,6 +2567,8 @@ class Pipeline {
     }
     const size = overrides.IMAGE_GEN_SIZE || config.IMAGE_GEN_SIZE || null;
     const outDir = config.STORAGE.clipsDir;
+    // 出图自动调色：任务创建时定值（缺字段的老任务按 off），这里不再接受任何运行时覆盖。
+    const gradeMode = imageGrade.resolve(task.imageGrade);
     const results = [];
     let cursor = 0;
     const workerCount = Math.min(this._imageGenConcurrency(), needCount);
@@ -2580,12 +2599,37 @@ class Pipeline {
             outDir
           });
           const photoId = this._nextImageId(taskId, index);
+          // 自动调色（A 方案，仅计划卡/逐段出图路径）：
+          //   · 成功：只入库**调色后**文件，原图留磁盘但不单独入库（photo.grade.originalPath 指回原图）；
+          //   · 失败：保留原图作为该段首帧，photo.grade.status='failed' + 原因，绝不把失败当成功。
+          let ingestPath = out.imagePath;
+          let photoGrade = { mode: 'off', status: 'off' };
+          if (gradeMode === 'calm') {
+            const gradedPath = this._nextGradedPath(out.imagePath);
+            try {
+              const graded = await autoGrade.autoGradeImage(out.imagePath, gradedPath, { palette: 'calm' });
+              ingestPath = gradedPath;
+              photoGrade = {
+                mode: 'calm',
+                palette: 'calm',
+                status: 'applied',
+                before: graded.before,
+                after: graded.after,
+                params: graded.params,
+                originalPath: out.imagePath
+              };
+            } catch (e) {
+              const msg = String((e && e.message) || e).slice(0, 500);
+              photoGrade = { mode: 'calm', status: 'failed', error: msg };
+              console.warn(`[${taskId}] 首帧图 ${index + 1}/${total} 自动调色失败（保留原图）: ${msg}`);
+            }
+          }
           const photo = photoLibrary.ingest({
             id: photoId,
             taskId,
             index,
-            filePath: out.imagePath,
-            url: '/clips/' + encodeURIComponent(path.basename(out.imagePath)),
+            filePath: ingestPath,
+            url: '/clips/' + encodeURIComponent(path.basename(ingestPath)),
             prompt,
             negativePrompt: typeof clip.negativePrompt === 'string' ? clip.negativePrompt : '',
             provider: out.provider || null,
@@ -2595,7 +2639,8 @@ class Pipeline {
             height: out.height,
             // 待审（不是 approved）：_i2vPayload 只认 approved，必须由审图结算改成 approved。
             status: 'pending',
-            source: 'generation'
+            source: 'generation',
+            grade: photoGrade
           });
           taskManager.updateClip(taskId, index, {
             photoId: photo.id,

@@ -30,6 +30,26 @@ const PHOTO_DIR = process.env.PHOTOS_DIR ? path.resolve(process.env.PHOTOS_DIR) 
 const CLIPS_DIR = process.env.CLIPS_DIR ? path.resolve(process.env.CLIPS_DIR) : path.join(APP_DIR, 'clips');
 
 const STATUSES = ['pending', 'approved', 'rejected'];
+// 出图自动调色（2026-11-23 A 方案）：grade 只记录「这条图片记录是怎么来的」。
+//   off + status=off      = 模型原图（未自动调色）
+//   calm + status=applied = 自动调色后的产物（before/after/params 可复现）
+//   calm + status=failed  = 调色失败、保留原图（error 写原因；详情必须能看见）
+// 老记录没有该字段：读取时补默认 off，不迁移文件、不改写历史 JSON。
+const GRADE_MODES = ['off', 'calm'];
+const GRADE_STATUSES = ['off', 'applied', 'failed'];
+function normalizeGrade(g) {
+  if (!g || typeof g !== 'object') return { mode: 'off', status: 'off' };
+  const mode = GRADE_MODES.includes(g.mode) ? g.mode : 'off';
+  const status = GRADE_STATUSES.includes(g.status) ? g.status : (mode === 'calm' ? 'applied' : 'off');
+  const out = { mode, status };
+  if (typeof g.palette === 'string' && g.palette) out.palette = g.palette;
+  if (g.before && typeof g.before === 'object') out.before = g.before;
+  if (g.after && typeof g.after === 'object') out.after = g.after;
+  if (g.params && typeof g.params === 'object') out.params = g.params;
+  if (typeof g.originalPath === 'string' && g.originalPath) out.originalPath = g.originalPath;
+  if (typeof g.error === 'string' && g.error) out.error = g.error.slice(0, 500);
+  return out;
+}
 
 let cache = null;
 let cacheSignature = '';
@@ -87,6 +107,8 @@ function normalizeEntry(e) {
       ? e.prompt : '';
   }
   if (typeof e.prompt !== 'string' || !e.prompt) e.prompt = e.imagePrompt;
+  // 老记录没有调色信息：补默认 off（只影响展示，不迁移文件）。
+  e.grade = normalizeGrade(e.grade);
   // 旧记录没有费用字段：按模型单价补一个只读估算，避免图片库显示“无价格”。
   if (!e.cost) e.cost = pricing.computeImageCost({ model: e.model });
   return e;
@@ -165,6 +187,13 @@ function ingest(data = {}) {
     if (!filled.generationPrompt) filled.generationPrompt = filled.prompt || '';
     if (!filled.imagePrompt) filled.imagePrompt = filled.generationPrompt || filled.prompt || '';
     if (typeof filled.videoPrompt !== 'string') filled.videoPrompt = '';
+    // 幂等重复登记：默认（off/off）可被显式传入的真实调色结果补上；
+    // 已有的非默认调色信息不覆盖（避免重扫文件时把指标冲掉）。
+    const incomingGrade = data.grade ? normalizeGrade(data.grade) : null;
+    const curGrade = normalizeGrade(filled.grade);
+    const curIsDefault = curGrade.mode === 'off' && curGrade.status === 'off';
+    const incomingIsDefault = !incomingGrade || (incomingGrade.mode === 'off' && incomingGrade.status === 'off');
+    filled.grade = (incomingGrade && curIsDefault && !incomingIsDefault) ? incomingGrade : curGrade;
     return saveEntry(filled);
   }
 
@@ -205,6 +234,8 @@ function ingest(data = {}) {
     reviewedAt: null,
     reviewNote: '',
     source: data.source || 'generation',
+    // 出图自动调色：缺省 off（老调用方/旧脚本不传也安全）。
+    grade: normalizeGrade(data.grade),
     promptAvailable: typeof data.prompt === 'string' && data.prompt.trim().length > 0,
     usedIn: [],
     createdAt: data.createdAt || new Date().toISOString(),
