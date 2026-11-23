@@ -117,6 +117,39 @@ for (const m of ['src/utils/security.js', 'src/auth.js', 'src/processors/audioMi
   ok(`require(${m})`, loaded, err);
 }
 
+console.log('\n[6] 2026-11-23 审计新增：开放重定向 / 垃圾箱路径穿越');
+const loginSrc = fs.readFileSync(path.join(ROOT, 'public', 'login.html'), 'utf8');
+ok('login.html 的 next 用 URL 解析后的 origin 比对',
+  loginSrc.includes('u.origin !== location.origin'));
+ok('login.html 显式拒绝反斜杠（字符类含 \\\\）', /\/\[\\\\/.test(loginSrc));
+
+// 负向证据：旧正则（只挡 //）确实会放过 /\evil.com，而 URL 解析会把它变成外站。
+const bs = String.fromCharCode(92);
+const bypass = '/' + bs + 'evil.example';
+ok('旧正则确实放过 /\\evil.com（负向证据）', /^\/(?!\/)/.test(bypass) === true);
+eq('URL 解析把 /\\evil.com 解析成外站 origin',
+  new URL(bypass, 'https://good.example').origin, 'https://evil.example');
+ok('新增 origin 比对能识破该绕过',
+  new URL(bypass, 'https://good.example').origin !== 'https://good.example');
+
+ok('/api/trash/:id 在拼路径前校验 id',
+  /const trashId[\s\S]{0,220}isSafeStorageId\(trashId\)/.test(serverSrc));
+const idCases = [
+  ['task_mvgw4hbo_ajuc', true],
+  ['task-abc_1', true],
+  ['../users', false],
+  ['..\\users', false],
+  ['a/b', false],
+  ['a.b', false],
+  ['', false],
+  [null, false],
+  ['a b', false]
+];
+for (const [input, expectOk] of idCases) {
+  eq(`isSafeStorageId(${JSON.stringify(input)}) → ${expectOk ? '允许' : '拒绝'}`,
+    security.isSafeStorageId(input), expectOk);
+}
+
 console.log(`\n结果: ${pass} 通过 / ${failures.length} 失败`);
 if (failures.length) {
   console.log('失败项:');

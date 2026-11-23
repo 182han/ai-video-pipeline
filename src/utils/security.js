@@ -60,6 +60,14 @@ function isSafeShellPath(p) {
   return !UNSAFE_SHELL_CHARS.test(p);
 }
 
+// 存储 id（任务 / 回收站条目）只允许字母、数字、下划线、横线，禁止点与路径分隔符。
+// 2026-11-23 审计：/api/trash/:id 曾直接 path.join('data/trash', id + '.json')，
+// 传 `../../data/users` 会解析到 data/users.json（任意 JSON 读取）。
+const SAFE_STORAGE_ID = /^[A-Za-z0-9_-]{1,120}$/;
+function isSafeStorageId(id) {
+  return typeof id === 'string' && SAFE_STORAGE_ID.test(id);
+}
+
 /** 是否是三个媒体静态目录下的请求（用于跟随登录墙）。 */
 const MEDIA_PREFIXES = ['/output', '/clips', '/bgm'];
 function isMediaRequestPath(p) {
@@ -76,6 +84,7 @@ module.exports = {
   resolveInside,
   resolveUnderOutput,
   isSafeShellPath,
+  isSafeStorageId,
   isMediaRequestPath,
   MEDIA_PREFIXES
 };

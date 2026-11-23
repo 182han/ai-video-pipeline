@@ -647,10 +647,21 @@
   }
 
   // ---------- 真实登录（2026-11-01）----------
-  // next 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向
+  // next 只接受站内相对路径，避免 ?next=https://evil 这类开放重定向。
+  // 2026-11-23 修复：旧正则只挡 `//`，挡不住 `/\evil.com`——浏览器 URL 解析会把
+  // 反斜杠当成 `/`，最终仍跳到 `//evil.com`。现在显式拒绝反斜杠/控制字符，
+  // 并用 URL 解析后的 origin 做最终判断（不靠字符串前缀猜）。
   var target = (function(){
     var raw = new URLSearchParams(location.search).get("next") || "/app";
-    return /^\/(?!\/)/.test(raw) ? raw : "/app";
+    try {
+      if (typeof raw !== "string" || !/^\/(?!\/)/.test(raw)) return "/app";
+      if (/[\\\u0000-\u001f]/.test(raw)) return "/app";
+      var u = new URL(raw, location.origin);
+      if (u.origin !== location.origin) return "/app";
+      return u.pathname + u.search + u.hash;
+    } catch (e) {
+      return "/app";
+    }
   })();
 
   function setBusy(busy){

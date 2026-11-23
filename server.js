@@ -4325,7 +4325,13 @@ app.post('/api/recycle/:type/purge', (req, res) => {
 
 // 获取垃圾箱任务详情
 app.get('/api/trash/:id', (req, res) => {
-  const trashPath = path.join(__dirname, 'data', 'trash', `${req.params.id}.json`);
+  // 2026-11-23 审计：id 直接拼进 path.join，`../../data/users` 可读到任意 .json。
+  // 垃圾箱文件名只可能是 task_xxx.json，先按 id 白名单拒绝路径分隔符与点。
+  const trashId = String(req.params.id || '');
+  if (!security.isSafeStorageId(trashId)) {
+    return res.status(400).json({ error: '任务 id 非法', code: 'BAD_TASK_ID' });
+  }
+  const trashPath = path.join(__dirname, 'data', 'trash', `${trashId}.json`);
   if (!fs.existsSync(trashPath)) {
     return res.status(404).json({
       error: '任务不存在',

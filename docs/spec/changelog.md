@@ -4109,3 +4109,45 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 - 新增 `verify-*.js` 若忘记注册，`gate-registry` 会失败并挡住 `--fast`。
 - 交付流程新增 `node scripts/preflight.js`（红线 26）；未跑或未写「未在运行态验证」即视为谎报状态。
 
+---
+
+## 2026-11-23 · 外发推送前安全复审：登录 next 开放重定向 + 垃圾箱路径穿越
+
+**状态**：代码修复 + 静态/纯函数验收通过；运行中的 3001 已在修复后重启
+（PID 52236，`serverMtime` 与磁盘一致），但未在登录态下打 `/api/trash` HTTP 负向请求 → 标「未验证」。
+
+### 问题（本轮审计新发现）
+
+| 位置 | 问题 | 可利用性 |
+|---|---|---|
+| `public/login.html` 的 `next` | 旧校验 `/^\/(?!\/)/` 只挡 `//`；`/\evil.com` 通过后，浏览器 URL 解析把 `\` 当 `/`，变成 `//evil.com` → 开放重定向 | 未登录可构造链接；登录成功后跳外站（钓鱼） |
+| `server.js` `/api/trash/:id` | `id` 直接 `path.join('data/trash', id + '.json')`；`../../data/users` 可解析到 `data/users.json` → 任意 JSON 读取（返回字段受限） | 需登录；可读 `data/` 下任意 `.json` |
+
+### 修复
+
+| 文件 | 改动 |
+|---|---|
+| `public/login.html` | `next` 先拒绝反斜杠/控制字符，再用 `new URL(raw, location.origin)` 比对 origin，只返回站内 path/search/hash |
+| `src/utils/security.js` | 新增 `isSafeStorageId()`：只允许 `[A-Za-z0-9_-]{1,120}`，禁止点与路径分隔符 |
+| `server.js` | `/api/trash/:id` 拼路径前校验 id，非法返回 400 `BAD_TASK_ID` |
+| `scripts/verify-security-hardening.js` | 新增 [6]：旧正则负向证据、URL 解析结果、`login.html` 静态接线、id 白名单用例 |
+| `.env.example` | 补 `QC_SCENE_MULTI_COLOR_MODE=warn`（doctor 报「未覆盖」的唯一键） |
+
+### 验收（本机实跑）
+
+- `node scripts/verify-security-hardening.js` → **54 通过 / 0 失败**（修前 39；新增 15 项）。
+- `node scripts/verify-auth.js` → **40/0**；`verify-recycle.js` → **35/0**；
+  `verify-frontend-contract.js` → **49/0**；`verify-i18n.js --strict` → **12/0**。
+- `node scripts/doctor.js` → **0 必须修复 / 6 提醒**（`QC_SCENE_MULTI_COLOR_MODE` 未覆盖项已消除）。
+- `node scripts/preflight.js` → **3 通过 / 1 提醒 / 0 失败**（git 状态检查仍因 `spawn EPERM` 降级）。
+
+### 未验证
+
+- `/api/trash` 的 HTTP 负向（`..%2F..%2Fdata%2Fusers` → 400）未在登录态下打真实请求；只验了纯函数 + 路由静态接线。
+- 登录页 `next` 的浏览器端跳转未用真实浏览器点一遍；只验了 URL 解析语义与代码接线。
+
+### 影响面
+
+- 合法任务 id（`task_xxx`）不受影响；带点/斜杠的 id 会被 400 拒绝（正常不会出现）。
+- 登录后站内 `next` 仍可用；外站/反斜杠链接回落到 `/app`。
+
