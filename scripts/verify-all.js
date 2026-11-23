@@ -33,9 +33,18 @@ const SUITES = [
     desc: '档位/依赖/补跑计算（纯函数）'
   },
   {
+    name: 'gate-registry',
+    script: 'verify-gate-registry.js',
+    group: 'fast',
+    desc: '门禁注册表（每个 verify-*.js 必须注册或在手动白名单里写明理由；无死注册/重名）'
+  },
+  {
     name: 'i18n',
     script: 'verify-i18n.js',
     group: 'fast',
+    // 2026-11-23：desc 一直写着「--strict 收口」，但运行时没传参 ——
+    // 于是「硬编码中文必须为 0」这条规则只是注释。现在显式传参。
+    args: ['--strict'],
     desc: '中英词条对等/占位符一致/使用中 key 存在/硬编码中文扫描（--strict 收口）'
   },
   {
@@ -511,6 +520,9 @@ function runOne(suite) {
     const tmpdir = path.join('output', `_vt_${suite.name}`);
     const argv = [path.join(SCRIPTS_DIR, suite.script)];
     if (NEEDS_TMPDIR.has(suite.name)) argv.push('--tmpdir', tmpdir);
+    // 2026-11-23：注册项可显式传参（例如 verify-i18n.js 的 --strict）。
+    // 旧实现只按 script 拉起，desc 里承诺的严格模式从未真正生效。
+    if (Array.isArray(suite.args)) argv.push(...suite.args);
 
     const t0 = Date.now();
     execFile(process.execPath, argv, {

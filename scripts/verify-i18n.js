@@ -19,6 +19,8 @@
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
+// 扫描逻辑与 preflight 共用一份，避免「门禁过了、自检没过」的两份真相。
+const cjk = require('./lib-cjk-scan');
 
 const ROOT = path.resolve(__dirname, '..');
 const WEB_SRC = path.join(ROOT, 'web', 'src');
@@ -39,36 +41,17 @@ function ok(name, condition, detail) {
   }
 }
 
+// 以下三个薄封装把共享库绑到本脚本的 ROOT（共享实现见 scripts/lib-cjk-scan.js）
 function walk(dir, out) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else if (entry.isFile() && /\.(js|mjs)$/.test(entry.name)) out.push(full);
-  }
-  return out;
+  return cjk.walk(dir, out);
 }
 
 function rel(file) {
-  return path.relative(ROOT, file).replace(/\\/g, '/');
+  return cjk.rel(ROOT, file);
 }
 
 function stripBlockComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '');
-}
-
-// 去掉行尾 // 注释：引号内的 // 不算（URL、正则等常见场景都能过）
-function stripLineComment(line) {
-  let quote = null;
-  let escaped = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === '\\') { escaped = true; continue; }
-    if (quote) { if (ch === quote) quote = null; continue; }
-    if (ch === "'" || ch === '"' || ch === '`') { quote = ch; continue; }
-    if (ch === '/' && line[i + 1] === '/') return line.slice(0, i);
-  }
-  return line;
+  return cjk.stripBlockComments(src);
 }
 
 function flatten(obj, prefix, out) {
@@ -109,36 +92,7 @@ function collectUsedKeys() {
 }
 
 function scanHardcodedCjk() {
-  const files = walk(WEB_SRC, []).filter((file) => {
-    const r = rel(file);
-    return !r.startsWith('web/src/i18n/messages/') && !r.startsWith('web/src/vendor/');
-  });
-  const byFile = [];
-  let total = 0;
-  let allowed = 0;
-  for (const file of files) {
-    const src = stripBlockComments(fs.readFileSync(file, 'utf8'));
-    const lines = src.split(/\r?\n/);
-    let count = 0;
-    const samples = [];
-    lines.forEach((line, index) => {
-      const code = stripLineComment(line);
-      const cjk = code.match(/[\u4e00-\u9fff]/g);
-      if (cjk) {
-        // 显式标记 i18n-allow：语言自称、后端中文错误前缀匹配、中文输入同义词表等
-        // 功能性中文不属于界面文案，逐行标记而不是整文件豁免。
-        if (/\bi18n-allow\b/.test(line)) { allowed += cjk.length; return; }
-        count += cjk.length;
-        if (samples.length < 2) samples.push({ line: index + 1, text: code.trim().slice(0, 90) });
-      }
-    });
-    if (count > 0) {
-      total += count;
-      byFile.push({ file: rel(file), count, samples });
-    }
-  }
-  byFile.sort((a, b) => b.count - a.count);
-  return { total, allowed, byFile };
+  return cjk.scanHardcodedCjk(ROOT);
 }
 
 function loginDictionaryKeys() {

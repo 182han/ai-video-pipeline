@@ -4042,3 +4042,70 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
   **不覆盖**「真实 status → 控件默认值 → 真实任务」端到端。
 - 真实出图/视频/LLM 一律未调用（按红线，验收零计费）。
 
+---
+
+## 2026-11-23 · 一周返工复盘 + 防复发加固（规则 22–27 / 4 个脚本）
+
+**背景**：用户要求复盘 11-16 → 11-23 的 bug、返工、回滚与重复修改，找出共同根因，
+并把可预防的部分沉淀成规则/自动化，避免反复支付同样的成本。完整报告见
+`docs/spec/retro-2026-11-16_23.md`。
+
+### 复盘事实（实测，可复现）
+
+- 7 天 **198** 个提交：docs **84（42%）**、feat 59、fix **36（18%）**、test 12；248 文件 **+45,056/−2,938**。
+- `report-churn.js` 自动聚类出 36 个文件「24h 内被 fix ≥2 次」，其中：
+  `xiaozhiPlan.js` 7 次/5.7h、`verify-assistant.js` 6 次/7.1h、`supervisor.js` 5 次/7.1h；
+  剪辑台预览 42 分钟内 3 刀、等待超时默认值 18 分钟内 300→600→450→400。
+- `git revert` **0 次**；但存在 3 次行为推翻（超时下调、小智方案重写、i2v 探测方式）。
+- changelog 里「重启」出现 **64 次**，周内至少 8 次「运行中的 3001 是旧代码」。
+
+### 根因（五条，按代价排序）
+
+1. **验证手段缺位**：UI/视觉/运行时字符串没有自动验收，用户是唯一测试机（53 处「未验证」）。
+2. **门禁有洞且不强制**：`verify-i18n` 的 desc 承诺 `--strict`，但 `runOne` 不传参；
+   9 个脚本无 machine-readable 归属；`verify-assistant.js` 一周改 29 次（断言追着实现）。
+3. **阈值靠猜**：300s 硬编码，n=9 成功样本最长 285.1s（余量 5%），超时是概率性必然。
+4. **静默失败/默认放行**：裸 `return`、`duration` 不落库、中间态当终态、写库失败只打日志。
+5. **事实源分裂**：受控 `app/docs/spec/changelog.md`（262 KB）与根 `docs/spec/changelog.md`（227 KB）
+   **互相缺章**（根多 8 节含 11-23 主题，受控多 12 节含 E11–E15），红线 15 记过同类事故仍复发。
+
+### 改动
+
+| 文件 | 内容 |
+|---|---|
+| `AGENTS.md` | 新增红线 **22–27**（防修了又修 / 阈值须有分布 / 门禁只认真跑过 / 静默失败零容忍 / 交付前证明服务=磁盘代码 / 英文零中文是验收项）；勘误套件数 62/67→**99/109**、手动 9、未归属 0；§7 标注两份 changelog 已分叉 |
+| `scripts/verify-i18n.js` | 修两个缺陷：① 块注释形式的 `i18n-allow` 被「先删块注释」自己删掉 → 语言自称「中」长期误判；② 删多行块注释会吞换行导致样例行号错位。扫描逻辑抽到 `lib-cjk-scan.js` |
+| `scripts/lib-cjk-scan.js` | **新增**：CJK 扫描单一实现，供门禁与 preflight 共用（避免两份真相） |
+| `scripts/verify-all.js` | `SUITES` 支持 `args`（`runOne` 真传参）；`i18n` 注册改为 `args:['--strict']`；注册 `gate-registry` |
+| `scripts/verify-gate-registry.js` | **新增**：每个 `verify-*.js` 必须注册或在 `MANUAL` 写明理由；无死注册/重名；纯 fs 不 spawn |
+| `scripts/preflight.js` | **新增**：一条命令自检 git 状态 + 服务版本 + 注册表 + 英文零中文；不能判定时降级为提醒 |
+| `scripts/report-churn.js` | **新增**：周度返工体检（fix 占比 / 同日反复改 / 修了又修链 / 门禁覆盖 / 文档占比），只读 |
+| `docs/spec/retro-2026-11-16_23.md` | **新增**：完整复盘报告（事实、根因、成本模型、后续） |
+
+### 验收（本机实跑）
+
+- `node scripts/verify-gate-registry.js` → **10 通过 / 0 失败**（109 实有 / 99 注册 / 9 手动 / 0 未归属）。
+- `node scripts/verify-i18n.js --strict` → **12 通过 / 0 失败**（89 处 i18n-allow）。修前为 **11/1**
+  （`langSwitch.js` L39「中」被误判；同一 commit 也修掉了「块注释吞换行」的行号问题）。
+- `node scripts/preflight.js` → **3 通过 / 1 提醒 / 0 失败**；提醒是 git 状态检查因本沙箱
+  `spawn EPERM` 降级为「请手动跑」，其余三项真实执行。
+- `node scripts/check-server-version.js` → 退出码 **0**：PID 63744，启动于 `2026-11-23T06:15:58Z`，
+  `running=disk`（说明上一条「仍是旧进程」已被重启解决，本次以实测为准）。
+- `node scripts/report-churn.js --input <git log 转储>` → 退出码 0，对本周 198 提交产出
+  36 个「fix ≥3 次」文件与体检结论。
+
+### 未验证
+
+- `node scripts/verify-all.js` 仍因 `spawn EPERM` 无法整体跑；只能逐个套件跑（AGENTS §2.4 已记）。
+  因此「门禁整体全绿」**未验证**，本条目只声称上述单脚本结果。
+- 视觉/布局/听感仍未在浏览器实测（本周 UI 缺陷 100% 由用户发现）；`preflight` 明确把它列为人工项。
+- changelog 分叉**未合并**：只标注了状态，合并需人工审阅（根版含 8 节独有内容，脚本盲合有丢内容风险）。
+- `preflight` / `report-churn` 的 git 分支在能 spawn 的环境未复验（本沙箱只验了降级路径）。
+
+### 影响面
+
+- `verify-all` 的 `i18n` 组从「只报告硬编码」变为「硬编码必须为 0」，**从此可能真的红**；
+  这是有意收紧，不是回归。若需临时放行，用 `i18n-allow` 逐行标注（禁止整文件豁免）。
+- 新增 `verify-*.js` 若忘记注册，`gate-registry` 会失败并挡住 `--fast`。
+- 交付流程新增 `node scripts/preflight.js`（红线 26）；未跑或未写「未在运行态验证」即视为谎报状态。
+
