@@ -7,6 +7,10 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, exec } = require('child_process');
 const config = require('../config');
+// 2026-11-23：长任务（拼接/转码/循环）改走 worker 线程执行，
+// 否则 execSync 会把 Node 事件循环占死数分钟，期间 HTTP 与 WS 进度全部排队。
+// 同步版 _runFFmpeg 保留（短命令、探测、降级路径继续用）。
+const ffmpegAsync = require('./processors/ffmpegAsync');
 // P2：失败结果补可选 errorKey（加法式）；中文 error 原文与判定逻辑不动。
 const i18n = require('./i18n');
 
@@ -64,6 +68,19 @@ class VideoProcessor {
 
   // 需要读取 stderr 的命令（解码校验）：直接把 stderr 重定向到临时文件再读，
   // 不依赖管道捕获，沙箱与生产环境行为一致。
+  // 2026-11-23：异步版（走 worker，主线程不阻塞），语义与 _runFFmpeg 对齐。
+  async _runFFmpegAsync(cmd, opts = {}) {
+    const exeOpts = opts && opts.cwd ? { cwd: opts.cwd } : {};
+    try {
+      const r = await ffmpegAsync.runFFmpegAsync(cmd, exeOpts);
+      if (r.ok) return { success: true };
+      // worker 里已做过 EPERM→stdio:'ignore' 的降级，这里如实返回失败
+      return { success: false, error: r.error || 'ffmpeg 命令失败' };
+    } catch (e) {
+      return { success: false, error: (e && e.message) || String(e) };
+    }
+  }
+
   _runCaptureStderr(cmd) {
     const os = require('os');
     const tmp = path.join(os.tmpdir(), `vp_err_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
@@ -90,7 +107,7 @@ class VideoProcessor {
     return this._mockConcatenate(clips, outputPath);
   }
 
-  _concatenateFFmpeg(clips, outputPath) {
+  async _concatenateFFmpeg(clips, outputPath) {
     const listPath = outputPath + '.txt';
     const cleanup = () => {
       try { if (fs.existsSync(listPath)) fs.unlinkSync(listPath); } catch (e) {}
@@ -120,7 +137,7 @@ class VideoProcessor {
         const listContent = clips.map(c => `file '${c.replace(/'/g, "'\\''")}'`).join('\n');
         fs.writeFileSync(listPath, listContent, 'utf8');
         const cmd = `"${FFMPEG_PATH}" -y -f concat -safe 0 -i "${listPath}" -c copy "${outputPath}"`;
-        const run = this._runFFmpeg(cmd);
+        const run = await this._runFFmpegAsync(cmd);
         if (!run.success) throw new Error(run.error || 'ffmpeg 拼接命令失败');
 
         // 改动点 2：退出码为 0 不代表拼全了（输入损坏时会静默只拼出前几段），必须实测时长
@@ -166,7 +183,7 @@ class VideoProcessor {
             const padded = `${outputPath}.pad${i}.mp4`;
             const padCmd = `"${FFMPEG_PATH}" -y -i "${clips[i]}" -f lavfi -i "anullsrc=r=44100:cl=stereo" `
               + `-shortest -map 0:v -map 1:a -c:v copy -c:a aac "${padded}"`;
-            const padRun = this._runFFmpeg(padCmd);
+            const padRun = await this._runFFmpegAsync(padCmd);
             if (!padRun.success) throw new Error(padRun.error || 'ffmpeg 补静音命令失败');            if (!fs.existsSync(padded) || fs.statSync(padded).size === 0) {
               throw new Error(`第 ${i + 1} 个片段补静音失败`);
             }
@@ -191,7 +208,7 @@ class VideoProcessor {
       const filter = `${filterParts}concat=n=${concatInputs.length}:v=1:a=${needAudio ? 1 : 0}[outv]`
         + (needAudio ? '[outa]' : '');
       const cmd = `"${FFMPEG_PATH}" -y ${inputs} -filter_complex "${filter}" ${maps} "${outputPath}"`;
-      const run = this._runFFmpeg(cmd);
+      const run = await this._runFFmpegAsync(cmd);
       if (!run.success) throw new Error(run.error || 'ffmpeg 重编码拼接命令失败');
 
       const v = this._validateConcatDuration(outputPath, clips);
@@ -326,7 +343,7 @@ class VideoProcessor {
         const audio = detail.hasAudio ? '-c:a aac -ar 44100 -ac 2' : '-an';
         const cmd = `"${FFMPEG_PATH}" -y ${ss} -i "${seg.path}" ${tt} -vf "${vf}" `
           + `-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p ${audio} "${tmp}"`;
-        const run = this._runFFmpeg(cmd);
+        const run = await this._runFFmpegAsync(cmd);
         if (!run.success) throw new Error(`第 ${i + 1} 段归一化失败: ${run.error || ''}`);
         if (!fs.existsSync(tmp) || fs.statSync(tmp).size === 0) {
           throw new Error(`第 ${i + 1} 段归一化失败（产物为空）`);
@@ -460,7 +477,7 @@ class VideoProcessor {
     return this._mockTranscode(inputPath, outputPath, resolution, fps);
   }
 
-  _transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec, adjustFilter = '', adjustCwd = '') {
+  async _transcodeFFmpeg(inputPath, outputPath, resolution, fps, codec, adjustFilter = '', adjustCwd = '') {
     const sizeMap = {
       '480p': '854x480',
       '720p': '1280x720',
@@ -477,7 +494,7 @@ class VideoProcessor {
     const cmd = `"${FFMPEG_PATH}" -y -i "${inputPath}" -vf "${vf}" -c:v ${codec} -crf 23 -preset medium -r ${fps} -c:a aac -b:a 128k -pix_fmt yuv420p "${outputPath}"`;
 
     try {
-      const run = adjustCwd ? this._runFFmpeg(cmd, { cwd: adjustCwd }) : this._runFFmpeg(cmd);
+      const run = adjustCwd ? await this._runFFmpegAsync(cmd, { cwd: adjustCwd }) : await this._runFFmpegAsync(cmd);
       if (!run.success) return { success: false, error: run.error };
       return { success: true, outputPath, resolution, fps };
     } catch (e) {
@@ -528,7 +545,7 @@ class VideoProcessor {
   //
   // 成片会比拼接产物短 F 秒，这是真无缝的必然代价（首尾必须重叠）。
   // 新建任务路径与改配乐重建路径都已使用同一 F（见 pipeline.js），保证两条路径时长一致。
-  _makeLoopFFmpeg(inputPath, outputPath, fadeDuration) {
+  async _makeLoopFFmpeg(inputPath, outputPath, fadeDuration) {
     const F = Number.isFinite(Number(fadeDuration)) ? Number(fadeDuration) : 0.5;
 
     const info = this.getVideoInfo(inputPath);
@@ -580,8 +597,15 @@ class VideoProcessor {
       + `-map "[v]" ${audioMap} -c:v libx264 -crf 23 -preset medium -pix_fmt yuv420p "${outputPath}"`;
 
     try {
-      // 走 _execText 的内置降级路径（本环境 stdio:'pipe' 会 EPERM）
-      this._execText(cmd);
+      // 2026-11-23：改走 worker（异步）。原 _execText 是同步 execSync，循环编码期间会占死主线程。
+      const loopRun = await this._runFFmpegAsync(cmd);
+      if (!loopRun.success) {
+        return {
+          success: false,
+          error: '循环处理失败: ' + (loopRun.error || 'ffmpeg 执行异常'),
+          sourceDuration: D
+        };
+      }
     } catch (e) {
       const detail = e.stderr ? e.stderr.toString().trim().split('\n').slice(-3).join(' | ') : '';
       return {

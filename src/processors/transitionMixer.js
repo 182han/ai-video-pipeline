@@ -41,6 +41,9 @@ const path = require('path');
 const os = require('os');
 const { execSync, spawn, spawnSync } = require('child_process');
 const config = require('../../config');
+// 2026-11-23：长命令改由 worker 线程执行，避免 execSync 把主线程事件循环占死
+// （拼接/归一化/解码校验期间 HTTP 与 WS 全部排队）。同步版保留给导出与验收脚本。
+const ffmpegAsync = require('./ffmpegAsync');
 const { hasAdjust, normalizeParams, buildCubeText } = require('./adjustChain');
 
 const FFMPEG_PATH = config.FFMPEG_PATH || 'ffmpeg';
@@ -317,6 +320,108 @@ function captureStderr(cmd) {
   }
 }
 
+// ============================================================
+// 2026-11-23：异步版执行器（走 worker 线程，主线程不阻塞）
+// ------------------------------------------------------------
+// 语义与上面的同步版逐条对齐：
+//   · runFFmpegAsync → { ok, error }，错误信息取 stderr 末尾 4 行（与 runFFmpeg 同款过滤）；
+//   · captureStdoutAsync / captureStderrAsync → 重定向到临时文件再读（不依赖管道捕获）；
+//   · probeMediaAsync / sampleRgbStatsAsync → 与同步版同参数、同返回结构。
+// 同步版**不删**：`_probeMedia` / `_sampleRgbStats` 被 6 个验收脚本同步调用。
+// ============================================================
+function errLines(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l))
+    .slice(-4);
+}
+
+async function runFFmpegAsync(cmd) {
+  const tmp = path.join(os.tmpdir(), `tr_arun_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+  try {
+    const r = await ffmpegAsync.runFFmpegAsync(cmd, { stderrFile: tmp });
+    if (r.ok) return { ok: true };
+    return { ok: false, error: errLines(readTmp(tmp)).join(' | ') || r.error || 'ffmpeg 执行失败' };
+  } finally {
+    cleanupTmp(tmp);
+  }
+}
+
+async function captureStdoutAsync(cmd) {
+  const tmp = path.join(os.tmpdir(), `tr_aout_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+  try {
+    await ffmpegAsync.runFFmpegAsync(`${cmd} > "${tmp}" 2>&1`);
+    return readTmp(tmp);
+  } finally {
+    cleanupTmp(tmp);
+  }
+}
+
+async function captureStderrAsync(cmd) {
+  const tmp = path.join(os.tmpdir(), `tr_aerr_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+  try {
+    const r = await ffmpegAsync.runFFmpegAsync(`${cmd} 2> "${tmp}"`);
+    return { ok: r.ok, text: readTmp(tmp) };
+  } finally {
+    cleanupTmp(tmp);
+  }
+}
+
+async function probeMediaAsync(file) {
+  const cmd = `"${FFPROBE_PATH}" -v error -show_format -show_streams -of json "${file}"`;
+  const out = await captureStdoutAsync(cmd);
+  return parseProbe(out);
+}
+
+// probeMedia 与 probeMediaAsync 共用的解析部分（纯函数，无 IO）
+function parseProbe(out) {
+  let info;
+  try {
+    info = JSON.parse(out);
+  } catch (e) {
+    return { success: false, error: '无法解析 ffprobe 输出（文件可能损坏）' };
+  }
+  const v = (info.streams || []).find(s => s.codec_type === 'video');
+  const a = (info.streams || []).find(s => s.codec_type === 'audio');
+  const duration = parseFloat(info.format && info.format.duration);
+  if (!v) return { success: false, error: '没有视频流' };
+  if (!(duration > 0)) return { success: false, error: '无法探测时长' };
+  return {
+    success: true,
+    duration,
+    width: v.width,
+    height: v.height,
+    codec: v.codec_name,
+    pixFmt: v.pix_fmt,
+    sar: v.sample_aspect_ratio || '1:1',
+    fpsNum: parseFps(v.r_frame_rate),
+    fps: v.r_frame_rate,
+    hasAudio: !!a
+  };
+}
+
+async function sampleRgbStatsAsync(file, duration) {
+  const dur = Number(duration);
+  if (!(dur > 0.05)) throw new Error('采样失败：片段时长不可用');
+  const target = Math.max(1, Math.min(CM_SAMPLE_FRAMES, Math.max(1, Math.floor(dur * 2))));
+  const rate = target / dur;
+  const frameBytes = CM_SAMPLE_W * CM_SAMPLE_H * 3;
+  const tmp = path.join(os.tmpdir(), `tr_argb_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.raw`);
+
+  try {
+    const cmd = `"${FFMPEG_PATH}" -y -hide_banner -loglevel error -i "${file}" `
+      + `-vf "fps=${rate.toFixed(6)},scale=${CM_SAMPLE_W}:${CM_SAMPLE_H}" `
+      + `-frames:v ${target} -pix_fmt rgb24 -f rawvideo "${tmp}"`;
+    const r = await runFFmpegAsync(cmd);
+    // 与同步版一致：先读文件再抛错，避免残留临时文件
+    if (!r.ok) throw new Error('抽帧失败: ' + r.error);
+    const stats = rgbStatsFromRaw(fs.readFileSync(tmp), frameBytes);
+    return stats;
+  } finally {
+    cleanupTmp(tmp);
+  }
+}
+
 function parseFps(fps) {
   const s = String(fps || '');
   if (s.includes('/')) {
@@ -418,6 +523,33 @@ const CM_SAMPLE_H = 36;
 // 一次 ffmpeg 调用取 N 帧（fps 滤镜重采样到 N/dur），落文件再读——
 // 逐帧起进程在短片段上开销会超过编码本身（实测 5 次/段 ≈ 2.4s）。
 // 捕获 stdout 会踩 EPERM（AGENTS.md §2.3），所以走文件。
+// 从 rgb24 raw 缓冲区算 RGB 均值/标准差（纯函数，供同步版与异步版共用）
+function rgbStatsFromRaw(buf, frameBytes) {
+  const frames = Math.floor(buf.length / frameBytes);
+  if (!frames) throw new Error('抽帧不完整（0 帧）');
+  const sum = [0, 0, 0];
+  const sumSq = [0, 0, 0];
+  for (let f = 0; f < frames; f++) {
+    const base = f * frameBytes;
+    for (let p = 0; p < CM_SAMPLE_W * CM_SAMPLE_H; p++) {
+      for (let c = 0; c < 3; c++) {
+        const v = buf[base + p * 3 + c];
+        sum[c] += v;
+        sumSq[c] += v * v;
+      }
+    }
+  }
+  const count = CM_SAMPLE_W * CM_SAMPLE_H * frames;
+  const mean = [0, 0, 0];
+  const sd = [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    mean[c] = sum[c] / count;
+    const variance = Math.max(0, sumSq[c] / count - mean[c] * mean[c]);
+    sd[c] = Math.sqrt(variance) || 1;
+  }
+  return { mean, sd, frames };
+}
+
 function sampleRgbStats(file, duration) {
   const dur = Number(duration);
   if (!(dur > 0.05)) throw new Error('采样失败：片段时长不可用');
@@ -433,30 +565,8 @@ function sampleRgbStats(file, duration) {
     const r = runFFmpeg(cmd);
     if (!r.ok) throw new Error('抽帧失败: ' + r.error);
     const buf = fs.readFileSync(tmp);
-    const frames = Math.floor(buf.length / frameBytes);
-    if (!frames) throw new Error('抽帧不完整（0 帧）');
-
-    const sum = [0, 0, 0];
-    const sumSq = [0, 0, 0];
-    for (let f = 0; f < frames; f++) {
-      const base = f * frameBytes;
-      for (let p = 0; p < CM_SAMPLE_W * CM_SAMPLE_H; p++) {
-        for (let c = 0; c < 3; c++) {
-          const v = buf[base + p * 3 + c];
-          sum[c] += v;
-          sumSq[c] += v * v;
-        }
-      }
-    }
-    const count = CM_SAMPLE_W * CM_SAMPLE_H * frames;
-    const mean = [0, 0, 0];
-    const sd = [0, 0, 0];
-    for (let c = 0; c < 3; c++) {
-      mean[c] = sum[c] / count;
-      const variance = Math.max(0, sumSq[c] / count - mean[c] * mean[c]);
-      sd[c] = Math.sqrt(variance) || 1;
-    }
-    return { mean, sd, frames };
+    // 统计逻辑抽到 rgbStatsFromRaw（同步/异步共用）
+    return rgbStatsFromRaw(buf, frameBytes);
   } finally {
     cleanupTmp(tmp);
   }
@@ -499,7 +609,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
   // 1) 探测源（调用方传了 detail 就复用，省掉逐段 ffprobe）
   const details = [];
   for (let i = 0; i < list.length; i++) {
-    const d = list[i].detail || probeMedia(list[i].path);
+    const d = list[i].detail || await probeMediaAsync(list[i].path);
     if (!d.success) {
       return { success: false, error: `第 ${i + 1} 段无法探测: ${d.error}` };
     }
@@ -604,7 +714,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
         cmd = `"${FFMPEG_PATH}" -y ${ss} -i "${seg.path}" ${tt} -vf "${vf}" `
           + `-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p ${audioArg} "${tmp}"`;
       }
-      const run = runFFmpeg(cmd);
+      const run = await runFFmpegAsync(cmd);
       if (!run.ok) {
         cleanupTemps();
         return { success: false, error: `第 ${i + 1} 段归一化失败: ${run.error}` };
@@ -620,7 +730,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     // 归一化后的实际时长才是权威值（-t 可能与预期差一帧）
     const actualDurs = [];
     for (let i = 0; i < prepared.length; i++) {
-      const d = probeMedia(prepared[i]);
+      const d = await probeMediaAsync(prepared[i]);
       if (!d.success) {
         cleanupTemps();
         return { success: false, error: `第 ${i + 1} 段归一化后无法探测时长: ${d.error}` };
@@ -674,7 +784,11 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     const luts = new Array(prepared.length).fill(null);
     if (cmEnabled) {
       try {
-        const stats = prepared.map((p, i) => sampleRgbStats(p, actualDurs[i]));
+        // 2026-11-23：逐段采样改走 worker（串行顺序与 map 一致，结果数组下标不变）
+        const stats = [];
+        for (let i = 0; i < prepared.length; i++) {
+          stats.push(await sampleRgbStatsAsync(prepared[i], actualDurs[i]));
+        }
         const detailsLuts = [];
         for (let i = 1; i < prepared.length; i++) {
           const lut = buildColorLut(stats[0], stats[i], cmMaxGain);
@@ -800,7 +914,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     }
 
     // 8) 不用退出码 0 当成功：时长必须 ≈ Σd − (N−1)·F
-    const outInfo = probeMedia(outputPath);
+    const outInfo = await probeMediaAsync(outputPath);
     if (!outInfo.success) {
       cleanupTemps();
       return { success: false, error: '转场拼接产物无法探测（不可判定，不视为成功）', undetermined: true };
@@ -819,7 +933,7 @@ async function concatWithTransitions(clips, outputPath, options = {}) {
     }
 
     // 9) 完整解码校验（时长对但解码报错的坏片必须抓到）
-    const decode = captureStderr(`"${FFMPEG_PATH}" -v error -i "${outputPath}" -f null -`);
+    const decode = await captureStderrAsync(`"${FFMPEG_PATH}" -v error -i "${outputPath}" -f null -`);
     const errorLines = String(decode.text || '')
       .split(/\r?\n/)
       .filter(l => l.trim() && !/^ffmpeg version|^  built with|^  configuration|^  lib/.test(l));
