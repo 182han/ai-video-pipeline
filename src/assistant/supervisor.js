@@ -32,6 +32,8 @@ const library = require('../library');
 const photoLibrary = require('../photoLibrary');
 const budget = require('../budget');
 const submitGuard = require('../submitGuard');
+// 出图自动调色（2026-11-23 A 方案）：只在创建任务时透传一次，之后沿用 task.imageGrade。
+const imageGrade = require('../imageGrade');
 const memory = require('./memory');
 const planCard = require('./planCard');
 const stateMachine = require('./stateMachine');
@@ -2146,7 +2148,7 @@ function handleMessage(opts = {}) {
   };
 }
 
-function makeFingerprint(plan) {
+function makeFingerprint(plan, gradeMode) {
   return submitGuard.fingerprint(submitGuard.build({
     model: plan.model,
     resolution: plan.resolution,
@@ -2157,7 +2159,8 @@ function makeFingerprint(plan) {
     sourcePhotoId: '',
     photoIds: [],
     transition: { enabled: true, duration: 0.4, type: 'fade' },
-    colorMatch: null
+    colorMatch: null,
+    imageGrade: gradeMode || ''
   }));
 }
 
@@ -2219,6 +2222,9 @@ function execute(opts = {}) {
   // ---- 余额 / 去重（与 POST /api/tasks 同口径）----
   const realModel = plan.model !== 'mock';
   const estimateUsd = plan.estimate && plan.estimate.budget ? plan.estimate.budget.usd : 0;
+  // 出图自动调色（A 方案）：HTTP 入口已按 .env 默认解析；这里只做一次严格归一化。
+  // 未提供（直接调用 supervisor 的脚本）→ undefined，由 createTask 套用服务端默认。
+  const requestedGrade = imageGrade.normalize(opts.options && opts.options.imageGrade);
   if (realModel) {
     if (!budget.canAfford(estimateUsd)) {
       const st = budget.status();
@@ -2231,7 +2237,7 @@ function execute(opts = {}) {
         lang
       };
     }
-    const fp = makeFingerprint(plan);
+    const fp = makeFingerprint(plan, requestedGrade);
     if (opts.force !== true) {
       const dup = submitGuard.check(fp);
       if (dup) {
@@ -2281,6 +2287,8 @@ function execute(opts = {}) {
         || plan.bgm
         || { enabled: true, mode: 'auto', wantMusic: true },
       transition: opts.options && opts.options.transition ? opts.options.transition : { enabled: true, duration: 0.4, type: 'fade' },
+      // 出图自动调色：创建时写入 task.imageGrade；未提供则由 createTask 用 .env 默认。
+      imageGrade: requestedGrade || undefined,
       runtimeConfig: (opts.options && opts.options.runtimeConfig) || {},
       source: 'assistant'
     });
@@ -2298,7 +2306,7 @@ function execute(opts = {}) {
         usd: estimateUsd, kind: 'video', taskId: task.taskId,
         meta: { model: plan.model, resolution: plan.resolution, clips: plan.clipCount, seconds: plan.clipDurationSec, source: 'assistant' }
       });
-      submitGuard.remember(makeFingerprint(plan), { taskId: task.taskId, model: plan.model, clips: plan.clipCount });
+      submitGuard.remember(makeFingerprint(plan, requestedGrade), { taskId: task.taskId, model: plan.model, clips: plan.clipCount });
     } catch (e) {
       taskManager.updateTaskStatus(task.taskId, 'failed', { error: '预算预留失败：' + e.message });
       return { ok: false, code: 'INSUFFICIENT_BUDGET', error: '预算预留失败：' + e.message, taskId: task.taskId };

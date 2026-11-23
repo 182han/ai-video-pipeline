@@ -8,6 +8,7 @@
 module.exports = {
   zh: {
     'api.tasks.promptRequired': '请输入提示词',
+    'api.tasks.imageGradeInvalid': '出图自动调色只能是 off（保留原图）或 calm（自动调色）',
     'api.tasks.unsupportedModel': '不支持的模型: {model}',
     'api.tasks.sourcePhotoMissing': '图生视频的源图片不存在: {id}',
     'api.tasks.sourcePhotoNotApproved': '图生视频的源图片还没通过审核（请到「照片」页点通过）',
@@ -48,6 +49,7 @@ module.exports = {
   },
   en: {
     'api.tasks.promptRequired': 'Enter a prompt.',
+    'api.tasks.imageGradeInvalid': 'Auto grade must be off (keep the original) or calm (auto-adjust).',
     'api.tasks.unsupportedModel': 'Unsupported model: {model}',
     'api.tasks.sourcePhotoMissing': 'The source image for image-to-video does not exist: {id}',
     'api.tasks.sourcePhotoNotApproved': 'The source image has not been approved yet. Approve it on the Photos page first.',

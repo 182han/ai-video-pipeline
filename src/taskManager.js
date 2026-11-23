@@ -11,6 +11,8 @@ const redact = require('./utils/redact');
 const { applyTaskDefaults } = require('./taskDefaults');
 const { resolveStages } = require('./pipelineStages');
 const budget = require('./budget');
+// 出图自动调色（2026-11-23 A 方案）：创建任务时定值，之后不再改。
+const imageGrade = require('./imageGrade');
 // 场景卡（P4）：任务创建时取一轮卡，promptComposer 运行时拼提示词（卡只读）
 const sceneCards = require('./sceneCards');
 const promptComposer = require('./promptComposer');
@@ -350,6 +352,19 @@ class TaskManager {
       adjustOption = require('./processors/adjustChain').normalizeParams(options.adjust) || null;
     }
 
+    // 出图自动调色（2026-11-23 A 方案）：off | calm，创建时写死、之后不再改。
+    // 补跑/重生成沿用这里的值；**不放进 runtimeConfig**，也不进 _mergeRuntimeConfig 白名单
+    // （否则请求体会在补跑时把任务创建时的选择覆盖掉）。
+    // HTTP 入口已对非法值返回 400；这里兜底直接调用 createTask 的脚本：非法值告警后回落服务端默认。
+    const imageGradeMode = (() => {
+      const raw = options.imageGrade;
+      if (raw === undefined || raw === null || raw === '') return config.IMAGE_GEN_AUTO_GRADE_DEFAULT;
+      const norm = imageGrade.normalize(raw);
+      if (norm) return norm;
+      console.warn(`[${taskId}] options.imageGrade="${String(raw)}" 非法（只能是 off | calm），已回退 ${config.IMAGE_GEN_AUTO_GRADE_DEFAULT}`);
+      return config.IMAGE_GEN_AUTO_GRADE_DEFAULT;
+    })();
+
     // 互斥组合：校色只在「转场开启」的重编码路径里做。
     // 要了校色却把转场关掉 → 不静默改成"没要求"，而是记一条 note 让原因可见；
     // 终检会据实际留痕报「校色未执行」并判不通过（AGENTS §4.1）。
@@ -412,6 +427,8 @@ class TaskManager {
       colorMatch: colorMatchOption,
       // 剪映「调节」参数：规范化后的对象，或 null（null = 不调节）
       adjust: adjustOption,
+      // 出图自动调色：创建时定值、之后不可被请求体覆盖；缺字段的老任务读取时按 off 处理。
+      imageGrade: imageGradeMode,
       currentStep: 'created',
       currentStepKey: null,
       outputPath: null,

@@ -38,6 +38,8 @@ console.error = (...a) => { _origErr(...a); _logLine('ERROR', a); };
 console.warn = (...a) => { _origWarn(...a); _logLine('WARN', a); };
 
 const config = require('./config');
+// 出图自动调色（A 方案）：选项/默认值统一从 src/imageGrade.js 取，避免各入口各写一套。
+const imageGrade = require('./src/imageGrade');
 const taskManager = require('./src/taskManager');
 const storage = require('./src/storage');
 const auth = require('./src/auth');
@@ -818,6 +820,12 @@ app.get('/api/image-gen/status', (req, res) => {
     // 图生视频：只有本清单里的视频模型才会被 /api/tasks 接受 sourcePhotoId
     i2vModels: listI2VModels(),
     i2v: { models: listI2VModels(), support: Object.fromEntries(listI2VModels().map((m) => [m, getI2VInfo(m)])) },
+    // 出图自动调色默认值（2026-11-23 A 方案）：来自服务端 .env，部署即生效、所有用户共享。
+    // 前端只读它作默认；不写 localStorage，避免又变成「每人一套」。
+    imageGrade: {
+      default: config.IMAGE_GEN_AUTO_GRADE_DEFAULT,
+      options: imageGrade.OPTIONS.slice()
+    },
     hint: status.usable
       ? `图片生成已就绪：${status.imageGen.provider} / ${status.imageGen.model}`
       : (!status.imageGen.hasApiKey
@@ -978,6 +986,21 @@ app.post('/api/images/generate-batch', async (req, res) => {
     });
   }
 
+  // 出图自动调色（2026-11-23 A 方案）：缺省 = 服务端 .env 默认；显式非法值 → 400。
+  // 不静默按 off 处理：用户勾了「自动调色」却拿到原图，比报错更难发现。
+  let imageGradeMode = config.IMAGE_GEN_AUTO_GRADE_DEFAULT;
+  if (body.imageGrade !== undefined && body.imageGrade !== null && body.imageGrade !== '') {
+    const norm = imageGrade.normalize(body.imageGrade);
+    if (!norm) {
+      return res.status(400).json({
+        error: 'imageGrade 只能是 off 或 calm（当前: ' + String(body.imageGrade) + '）',
+        code: 'IMAGE_GRADE_INVALID',
+        ...i18n.err(req.lang, 'api.images.gradeInvalid')
+      });
+    }
+    imageGradeMode = norm;
+  }
+
   const runtime = {};
   if (typeof body.apiKey === 'string' && body.apiKey.trim()) runtime.IMAGE_GEN_API_KEY = body.apiKey.trim();
   if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) runtime.IMAGE_GEN_BASE_URL = body.baseUrl.trim();
@@ -1028,6 +1051,8 @@ app.post('/api/images/generate-batch', async (req, res) => {
       prompts,
       taskId,
       palette,
+      // off = 只入库原图（单条）；calm = 调色后 + 调色前两条（既有批量口径）。
+      imageGrade: imageGradeMode,
       outDir,
       size: body.size || status.imageGen.size,
       negativePrompt: typeof body.negativePrompt === 'string' ? body.negativePrompt : '',
@@ -1051,6 +1076,7 @@ app.post('/api/images/generate-batch', async (req, res) => {
       ok: batch.items.length > 0,
       taskId: batch.taskId,
       palette: batch.palette,
+      imageGrade: batch.imageGrade,
       count: batch.count,
       succeeded: batch.items.length,
       failed: batch.errors.length,
@@ -2597,6 +2623,20 @@ app.post('/api/assistant/agent', (req, res) => {
 // runtimeConfig 只透传白名单字段（Key 不落任务文件，与 /api/tasks 同口径）。
 app.post('/api/assistant/execute', (req, res) => {
   const body = req.body || {};
+  // 出图自动调色（2026-11-23 A 方案）：缺省 = 服务端 .env 默认；显式非法 → 400（不静默改成 off）。
+  let imageGradeMode = config.IMAGE_GEN_AUTO_GRADE_DEFAULT;
+  if (body.imageGrade !== undefined && body.imageGrade !== null && body.imageGrade !== '') {
+    const norm = imageGrade.normalize(body.imageGrade);
+    if (!norm) {
+      return res.status(400).json({
+        ok: false,
+        code: 'IMAGE_GRADE_INVALID',
+        error: 'imageGrade 只能是 off 或 calm（当前: ' + String(body.imageGrade) + '）',
+        ...i18n.err(req.lang, 'api.tasks.imageGradeInvalid')
+      });
+    }
+    imageGradeMode = norm;
+  }
   // 逐段出图就绪度前置校验（2026-11-16 用户口径：场景卡 → 逐段出图 → 图生视频）。
   // 出图是真实计费调用；配置不全时**先拒绝**，而不是先建任务、跑到出图那一步再失败
   // （建了任务还得让用户去删，且会误导成「生成失败」）。
@@ -2658,7 +2698,9 @@ app.post('/api/assistant/execute', (req, res) => {
           imagePerClip: body.imagePerClip === true
         },
         bgm: (body.bgm && typeof body.bgm === 'object') ? body.bgm : undefined,
-        transition: (body.transition && typeof body.transition === 'object') ? body.transition : undefined
+        transition: (body.transition && typeof body.transition === 'object') ? body.transition : undefined,
+        // 逐段出图是否自动调色：写进 task.imageGrade，之后补跑/重生成沿用。
+        imageGrade: imageGradeMode
       }
     });
     res.json(withAssistantCodeKeys(out, {
@@ -2996,7 +3038,7 @@ app.post('/api/assistant/understand', async (req, res) => {
 
 // 创建任务
 app.post('/api/tasks', (req, res) => {
-  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, autoRetry, preset, stages, transition, colorMatch, adjust, sourcePhotoId, photoIds, sourcePhotoMotionPrompt, sceneCards } = req.body;
+  const { prompt, prompts, clipTracks, bgm, model, theme, clipCount, totalClips, resolution, clipDuration, apiKey, apiBaseUrl, modelId: genModelId, klingAccessKey, klingSecretKey, llmApiKey, llmBaseUrl, llmModel, multimodalApiKey, multimodalBaseUrl, multimodalModel, strictQcItems, autoRetry, preset, stages, transition, colorMatch, adjust, sourcePhotoId, photoIds, sourcePhotoMotionPrompt, sceneCards, imageGrade: imageGradeRaw } = req.body;
 
   // 多提示词模式（§10A）：支持 { text, theme } 对象数组，兼容旧格式字符串数组
   // 字符串行自动解析行尾【主题】标签（§10B）；无标签/未识别 → theme 为 null（无主题，只走通用规则）
@@ -3036,6 +3078,18 @@ app.post('/api/tasks', (req, res) => {
       code: 'PROMPT_REQUIRED',
       ...i18n.err(req.lang, 'api.tasks.promptRequired')
     });
+  }
+
+  // 出图自动调色（2026-11-23 A 方案）：off | calm。
+  // 显式非法值 → 400（不静默改成 off）；缺省 → createTask 用服务端 .env 默认。
+  if (imageGradeRaw !== undefined && imageGradeRaw !== null && imageGradeRaw !== '') {
+    if (!imageGrade.normalize(imageGradeRaw)) {
+      return res.status(400).json({
+        error: 'imageGrade 只能是 off 或 calm（当前: ' + String(imageGradeRaw) + '）',
+        code: 'IMAGE_GRADE_INVALID',
+        ...i18n.err(req.lang, 'api.tasks.imageGradeInvalid')
+      });
+    }
   }
 
   // 校验模型是否存在
@@ -3221,7 +3275,9 @@ app.post('/api/tasks', (req, res) => {
       sourcePhotoId: sourcePhoto ? sourcePhoto.id : '',
       photoIds: photoIdList || [],
       transition: transition || null,
-      colorMatch: colorMatch || null
+      colorMatch: colorMatch || null,
+      // 同提示词、不同调色选择 = 不同任务（画面产物不同），不能被去重拦下。
+      imageGrade: imageGradeRaw || ''
     }));
     if (!forceCreate) {
       const dup = submitGuard.check(dupFingerprint);
@@ -3304,6 +3360,8 @@ app.post('/api/tasks', (req, res) => {
     adjust: (adjust && typeof adjust === 'object') ? adjust : null,
     // 兼容：老前端仍传 clipTracks 时保留透传，由 createTask 收敛为整片主曲
     clipTracks: Array.isArray(clipTracks) ? clipTracks.slice(0, count) : undefined,
+    // 出图自动调色（A 方案）：off | calm。创建时写进 task.imageGrade，之后不再改。
+    imageGrade: imageGradeRaw,
     // 场景卡模式（P4）：取卡 + 拼提示词在 taskManager.createTask 内完成；
     // 这里只传开关。失败由外层 try/catch 转成明确的 4xx/5xx，不静默降级成普通任务。
     sceneCards: sceneCardRequested ? { enabled: true } : undefined,

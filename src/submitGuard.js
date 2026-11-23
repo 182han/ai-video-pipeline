@@ -40,7 +40,10 @@ function build(input = {}) {
     sourcePhotoId: input.sourcePhotoId ? String(input.sourcePhotoId) : '',
     photoIds: Array.isArray(input.photoIds) ? input.photoIds.map(String) : [],
     transition: input.transition === undefined ? null : input.transition,
-    colorMatch: input.colorMatch === undefined ? null : input.colorMatch
+    colorMatch: input.colorMatch === undefined ? null : input.colorMatch,
+    // 出图自动调色（A 方案）：同提示词但调色选择不同 → 产物不同，不算重复提交。
+    // 归一化大小写/空白，避免 'CALM' 与 'calm' 被当成两次不同任务。
+    imageGrade: String(input.imageGrade || '').trim().toLowerCase()
   };
 }
 

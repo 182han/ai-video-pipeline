@@ -29,6 +29,10 @@
   }
 })();
 
+// 出图自动调色开关：选项与默认值只在这里/ src/imageGrade.js 定义一份，
+// 供 config / server / taskManager / supervisor / processors 共用。
+const imageGrade = require('./src/imageGrade');
+
 // 解析项目内自带的 ffmpeg/ffprobe。
 // 找不到时返回空字符串，让调用方回退到系统 PATH（保持云上 Linux 容器行为不变）。
 // 注意：这里只做「文件存在」判断，不执行 -version，避免每次 require config 都拉起进程。
@@ -203,6 +207,18 @@ module.exports = {
   IMAGE_GEN_POLL_MS: parseInt(env('IMAGE_GEN_POLL_MS', '2000'), 10),
   // 是否让厂商在图上加水印（默认 false；本项目成片不应带第三方水印）
   IMAGE_GEN_WATERMARK: env('IMAGE_GEN_WATERMARK', 'false'),
+  // 出图后自动调色的**服务端默认值**（2026-11-23，A 方案）：
+  //   off  = 保留模型原图（默认；用户可去图片库手动调色）
+  //   calm = 跑现有 autoGrade（压回自然饱和区间，只降不升）
+  // 只接受 off|calm；非法值回落 off 并在启动时告警一次（不中断服务）。
+  // 该值通过 GET /api/image-gen/status 下发；前端每次出图可临时改，但默认值只有这一份。
+  IMAGE_GEN_AUTO_GRADE_DEFAULT: (() => {
+    const raw = env('IMAGE_GEN_AUTO_GRADE_DEFAULT', imageGrade.DEFAULT);
+    const norm = imageGrade.normalize(raw);
+    if (norm) return norm;
+    console.warn(`[config] IMAGE_GEN_AUTO_GRADE_DEFAULT="${raw}" 非法（只能是 off | calm），已回退 ${imageGrade.DEFAULT}`);
+    return imageGrade.DEFAULT;
+  })(),
 
   I2V_PROVIDER: env('I2V_PROVIDER'),
   I2V_API_KEY: env('I2V_API_KEY'),
