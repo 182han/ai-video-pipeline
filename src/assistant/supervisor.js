@@ -366,54 +366,183 @@ const STATE_LABELS_EN = Object.freeze({
   running: 'running', done: 'done', failed: 'failed', needs_user: 'needs your input'
 });
 
-function replyForStatus(sessionId, lang) {
+// ==========================================
+// 2026-11-23 修（用户实测）：重启后「上一次的任务进行到哪一步了」被答成
+// 「现在没有正在执行的任务。说个时长，我来排计划。」
+// ------------------------------------------------------------
+// 事故链路（三处叠加，缺一不可）：
+//   ① 会话 id 存在 sessionStorage（web/src/components/assistant.js:172），换窗口/重启后
+//      拿到新 id，会话记忆与计划全空；
+//   ② 空会话分支只查「在跑任务」（tasks.active），被重启回收成 failed 的任务不算在跑 →
+//      永远走到那句「没有正在执行的任务」；
+//   ③ 会话里有状态时又直接信 state.state（重启前写的 running），不看任务真实状态 →
+//      答「正在『生成中』」，而任务其实早已被回收成失败。
+// 现口径（确定性，不猜）：一律以**任务记录**为准。
+//   · 用户问「上一次 / 刚才」时，即使在跑清单非空，也先答那条任务；
+//   · 中断/失败必须给出：已成功几段、还差几段、怎么补跑、计费与 Key 的约束。
+// ==========================================
+const STEP_LABELS = Object.freeze({
+  pending: '排队', optimizing: '提示词优化', generating: '生成片段',
+  concatenating: '拼接', looping: '循环处理', transcoding: '转码',
+  mixing: '配乐混音', processing: '处理中', regenerating: '重新生成片段',
+  paused: '暂停', completed: '完成', failed: '失败'
+});
+const STEP_LABELS_EN = Object.freeze({
+  pending: 'queued', optimizing: 'prompt optimization', generating: 'clip generation',
+  concatenating: 'concatenation', looping: 'loop processing', transcoding: 'transcoding',
+  mixing: 'soundtrack mixing', processing: 'processing', regenerating: 'clip regeneration',
+  paused: 'paused', completed: 'done', failed: 'failed'
+});
+// 「上一次的任务」指代：用户问的是那条任务，不是「现在有什么在跑」。
+const RE_LAST_TASK_HINT = /上一次|上个|上一条|上条|刚才|上一个|前一条/;
+
+// 任务「最近一次有动静」的时间：创建 / 完成 / 最后更新三者取最大。
+// 不只看创建时间——补跑过的旧任务才是「刚做过的那条」。
+function taskRecency(task) {
+  const times = [task && task.completedAt, task && task.updatedAt, task && task.createdAt]
+    .map((v) => new Date(v || 0).getTime())
+    .filter((n) => Number.isFinite(n));
+  return times.length ? Math.max(...times) : 0;
+}
+
+function latestTaskAny() {
+  let tasks = [];
+  try { tasks = taskManager.getAllTasks() || []; } catch (e) { return null; }
+  return tasks
+    .filter((t) => t && t.taskId)
+    .sort((a, b) => taskRecency(b) - taskRecency(a))[0] || null;
+}
+
+function replyForStatus(sessionId, lang, text) {
   const isEn = i18n.normalizeLang(lang) === 'en';
   const state = memory.getState(sessionId);
-  if (!state) {
-    // 2026-11-17 V2（B1）：「现在跑到哪了？」要能回答**全局**任务，而不只是本会话自己的。
-    // 只读 taskManager 快照；不建任务、不改任何状态。
-    let live = [];
+  const stateTask = (() => {
+    if (!state) return null;
+    const id = state.finalTaskId || state.taskId;
+    return id ? taskManager.getTask(id) : null;
+  })();
+  const stateActive = !!(stateTask && ACTIVE_STATUS.has(String(stateTask.status || '')));
+  const wantsLast = RE_LAST_TASK_HINT.test(String(text || ''));
+  // 2026-11-17 V2（B1）：「现在跑到哪了？」要能回答**全局**任务，而不只是本会话自己的。
+  // 只读 taskManager 快照；不建任务、不改任何状态。
+  let live = [];
+  if (!wantsLast && !stateActive) {
     try { live = assistantContext.contextOf(sessionId).tasks.active; } catch (e) { live = []; }
-    if (live.length) {
-      if (isEn) {
-        return `[Briefing] ${live.length} task(s) running right now (global):\n`
-          + live.map((t) => `· ${t.taskId}: ${t.successClips}/${t.totalClips} clips (${t.percent}%), status ${t.status || 'running'}`).join('\n')
-          + '\n(Read-only: nothing was created or re-run.)';
-      }
-      return `【小智简报】现在有 ${live.length} 个任务在跑（全局）：\n`
-        + live.map((t) => `· ${diagnose.taskLabel(t)}（ID ${t.taskId}）：成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
-        + '\n（只读播报：不会新建任务、不会重跑。）';
-    }
-    return isEn
-      ? "Nothing is running right now. Tell me a length and I'll lay out a plan."
-      : '现在没有正在执行的任务。说个时长，我来排计划。';
   }
-  const task = state.finalTaskId ? taskManager.getTask(state.finalTaskId) : (state.taskId ? taskManager.getTask(state.taskId) : null);
-  if (state.state === stateMachine.STATES.DONE) {
-    const file = task && task.outputPath ? `, file ${require('path').basename(task.outputPath)}` : '';
-    if (isEn) return `Your last task is complete${file}. Open Library → Finals to view it.`;
-    const fileZh = task && task.outputPath ? `，成片 ${require('path').basename(task.outputPath)}` : '';
-    return `上一次任务已经完成${fileZh}。可以在「库 · 成片」里看到。`;
-  }
-  if (state.state === stateMachine.STATES.NEEDS_USER || state.state === stateMachine.STATES.FAILED) {
+  if (live.length) {
     if (isEn) {
-      return `The task stopped (state: ${STATE_LABELS_EN[state.state] || state.state}). `
-        + 'Open Library to review it, or ask me to diagnose the failure.';
+      return `[Briefing] ${live.length} task(s) running right now (global):\n`
+        + live.map((t) => `· ${t.taskId}: ${t.successClips}/${t.totalClips} clips (${t.percent}%), status ${t.status || 'running'}`).join('\n')
+        + '\n(Read-only: nothing was created or re-run.)';
     }
-    return `任务停在「${stateMachine.LABELS[state.state]}」：${state.reason || state.lastError || '原因未记录'}。`;
+    return `【小智简报】现在有 ${live.length} 个任务在跑（全局）：\n`
+      + live.map((t) => `· ${diagnose.taskLabel(t)}（ID ${t.taskId}）：成功 ${t.successClips}/${t.totalClips} 段（${t.percent}%），当前 ${t.currentStep || '…'}`).join('\n')
+      + '\n（只读播报：不会新建任务、不会重跑。）';
   }
+
+  const task = stateTask || latestTaskAny();
   if (!task) {
+    if (state) {
+      return isEn
+        ? `Task state: ${STATE_LABELS_EN[state.state] || state.state}.`
+        : `任务状态：${stateMachine.LABELS[state.state] || state.state}。`;
+    }
     return isEn
-      ? `Task state: ${STATE_LABELS_EN[state.state] || state.state}.`
-      : `任务状态：${stateMachine.LABELS[state.state] || state.state}。`;
+      ? 'Nothing is running right now, and there is no task record yet. Tell me a length and I will lay out a plan.'
+      : '现在没有正在执行的任务，任务库里也还没有记录。说个时长（比如「5 分钟」），我来排计划。';
   }
-  const ok = (task.clips || []).filter((c) => c.status === 'success').length;
+
+  const clips = Array.isArray(task.clips) ? task.clips : [];
+  const total = Number(task.totalClips) || clips.length || 0;
+  const okClips = clips.filter((c) => c && c.status === 'success');
+  const failClips = clips.filter((c) => c && c.status === 'failed');
+  const runClips = clips.filter((c) => c && (c.status === 'generating' || c.status === 'processing'));
+  const pendingClips = clips.filter((c) => !c || !c.status || c.status === 'pending');
+  const okSec = Math.round(okClips.reduce((s, c) => s + (Number(c.duration) || 0), 0));
+  const pct = total ? Math.round((okClips.length / total) * 100) : 0;
+  const clipDur = Number(task.clipDuration) || 0;
+  const totalSec = clipDur && total ? clipDur * total : 0;
+  const durLabel = totalSec >= 60 ? `${Number((totalSec / 60).toFixed(1))} 分钟` : (totalSec ? `${totalSec} 秒` : '');
+  const when = memory.formatWhen(task.createdAt);
+  const whenEn = memory.formatWhenEn(task.createdAt);
+  const stepOf = (s) => (isEn ? (STEP_LABELS_EN[s] || s || '') : (STEP_LABELS[s] || s || ''));
+  const tagsOf = (list, max = 4) => {
+    const all = (Array.isArray(list) ? list : [])
+      .map((c) => (c && Number.isInteger(c.index) ? '#' + (c.index + 1) : null))
+      .filter(Boolean);
+    return {
+      count: all.length,
+      text: all.length > max
+        ? (isEn ? `${all.slice(0, max).join(', ')} … (${all.length} clips)` : `${all.slice(0, max).join('、')} 等 ${all.length} 段`)
+        : (isEn ? all.join(', ') : all.join('、'))
+    };
+  };
+
+  if (String(task.status || '') === 'paused') {
+    if (isEn) {
+      return `Task ${task.taskId} is paused (${okClips.length}/${total} clips done). Press "Resume" in the task details to continue from the checkpoint.`;
+    }
+    return `上一次任务 ${task.taskId} 处于暂停（已成功 ${okClips.length}/${total} 段）：点任务详情里的「继续」从断点接着跑。`;
+  }
+  if (ACTIVE_STATUS.has(String(task.status || ''))) {
+    if (isEn) {
+      return `Task ${task.taskId} is running: ${stepOf(task.status)}, ${okClips.length}/${total} clips done (${pct}%).`;
+    }
+    return `${diagnose.taskLabel(task)}（ID ${task.taskId}）正在「${stepOf(task.status)}」：`
+      + `当前 ${task.currentStep || '…'}，成功片段 ${okClips.length}/${total} 段（${pct}%）。`;
+  }
+  if (String(task.status || '') === 'completed') {
+    const file = task.outputPath ? require('path').basename(task.outputPath) : '';
+    if (isEn) {
+      return `Your last task ${task.taskId} is complete${file ? `, file ${file}` : ''}. Open Library → Finals to view it.`;
+    }
+    return `上一次任务 ${task.taskId} 已经完成${file ? `，成片 ${file}` : ''}。可以在「库 · 成片」里看到。`;
+  }
+
+  const interrupted = !!(task.interruptedFrom
+    || /服务进程中断|暂停期间服务被重启/.test(String(task.error || '')));
+  const timeoutCount = failClips.filter((c) => /等待超时/.test(String((c && c.error) || ''))).length;
+  const need = Math.max(0, total - okClips.length);
+  const why = String(task.error || '').replace(/\s+/g, ' ').slice(0, 160);
+  const lines = [];
+
   if (isEn) {
-    return `Task ${task.taskId} is ${STATE_LABELS_EN[state.state] || state.state}: `
-      + `${ok}/${task.totalClips} clips done.`;
+    lines.push(`[Briefing] Last task ${task.taskId} (${total} clips × ${clipDur}s${task.model ? `, ${task.model}` : ''}${whenEn ? `, ${whenEn}` : ''}) is ${task.status === 'partial' ? 'partially done' : 'not finished'}.`);
+    lines.push(interrupted
+      ? `· Cause: the service was restarted while it was in "${stepOf(task.interruptedFrom || task.status)}", so the pipeline stopped with the process (not cancelled by you, not a model error).`
+      : '· Cause: the task is recorded as failed; open the task details to see the original error.');
+    lines.push(`· Progress: ${okClips.length}/${total} clips succeeded (${pct}%)${okSec ? `, ~${okSec}s of footage is kept` : ''}.`);
+    const bits = [];
+    if (failClips.length) { const t = tagsOf(failClips); bits.push(`${t.count} failed (${t.text})`); }
+    if (runClips.length) { const t = tagsOf(runClips); bits.push(`${t.count} were mid-generation at the restart (${t.text})`); }
+    if (pendingClips.length) bits.push(`${pendingClips.length} not started`);
+    if (bits.length) lines.push(`· Detail: ${bits.join('; ')}.`);
+    if (timeoutCount) {
+      lines.push(`  (${timeoutCount} of them were marked failed by a local wait timeout: the upstream job may already have completed and been billed, and a resume re-submits them.)`);
+    }
+    lines.push(`· Next: say "continue", or open this task in the task list and press "Continue": only the ${need} unfinished clips are regenerated, and the ${okClips.length} finished ones are reused${okClips.length ? ' without being billed again' : ''}.`);
+    lines.push('· Note: continuing is billed per clip and starts only after you confirm. The API key lives in this browser only, so continue from this browser (from another machine it silently falls back to Mock footage).');
+    return lines.join('\n');
   }
-  return `${diagnose.taskLabel(task)}（ID ${task.taskId}）正在「${stateMachine.LABELS[state.state] || state.state}」：`
-    + `当前 ${task.currentStep || task.status}，成功片段 ${ok}/${task.totalClips}。`;
+
+  // 2026-11-23：中文标题带提示词摘要（与 diagnose.taskLabel 同口径），
+  // 方便用户在多条任务里认出「是哪条」；英文仍只用 taskId（prompt 是中文内容，英文界面零中文）。
+  lines.push(`【小智简报】上一次任务「${diagnose.promptSummary(task)}」（ID ${task.taskId}${durLabel ? ' · ' + durLabel : ''} · ${total} 段 × ${clipDur} 秒${task.model ? ` · ${task.model}` : ''}${when ? ` · ${when}` : ''}）`);
+  lines.push(interrupted
+    ? `· 状态：中断 —— 服务重启时它还在「${stepOf(task.interruptedFrom || task.status)}」这一步，流水线随进程停止（不是你取消的，也不是模型报错）。`
+    : `· 状态：${task.status === 'partial' ? '部分完成（没走到成片）' : '失败'}${why ? ` —— ${why}` : ''}`);
+  lines.push(`· 进度：已成功 ${okClips.length}/${total} 段（${pct}%）${okSec ? `，约 ${okSec} 秒素材还在` : ''}。`);
+  const detail = [];
+  if (failClips.length) { const t = tagsOf(failClips); detail.push(`失败 ${t.count} 段（${t.text}）`); }
+  if (runClips.length) { const t = tagsOf(runClips); detail.push(`重启时正在生成 ${t.count} 段（${t.text}）`); }
+  if (pendingClips.length) detail.push(`还没开始 ${pendingClips.length} 段`);
+  if (detail.length) lines.push(`· 明细：${detail.join('；')}。`);
+  if (timeoutCount) {
+    lines.push(`  （其中 ${timeoutCount} 段是「本地等待超时」记的失败：上游可能已生成并计费，补跑会重新提交这几段。）`);
+  }
+  lines.push(`· 继续：说「补跑」，或在任务列表点开这条任务 →「补跑」：只补没成功的 ${need} 段，已成功的 ${okClips.length} 段不会重跑${okClips.length ? '、也不重复计费' : ''}。`);
+  lines.push('· 注意：补跑按段计费，点了确认才开始；Key 只存在浏览器本地，请在现在这个浏览器里补跑（换机器补跑会降级成 Mock 合成画面）。');
+  return lines.join('\n');
 }
 
 // ==========================================
@@ -973,6 +1102,7 @@ const CATEGORY_LABELS_EN = Object.freeze({
   model: 'Model capability mismatch',
   rate: 'Rate limited',
   timeout: 'Network / timeout',
+  interrupted: 'Service restart interruption',
   qc: 'QC failed',
   media: 'Media processing failed',
   unknown: 'Unclassified failure'
@@ -980,7 +1110,7 @@ const CATEGORY_LABELS_EN = Object.freeze({
 
 const SUGGESTION_LABELS_EN = Object.freeze({
   continue: (n) => (n > 0
-    ? `Retry the ${n} failed clip(s) — completed clips are reused, not regenerated`
+    ? `Retry the ${n} unfinished clip(s) — completed clips are reused, not regenerated`
     : 'Re-run this task — completed parts are reused'),
   switch_model: () => 'Switch to a channel that supports image-to-video (Bailian / Kling / Seedance / WhaleTV relay)',
   fix_key: () => 'Add the API key under Settings → Video and restart; or turn off per-clip images and use text-to-video',
@@ -1016,11 +1146,12 @@ function replyForRepair(sessionId, lang) {
   if (isEn) {
     const lines = ['[Briefing] Failure diagnosis (read-only):'];
     lines.push(`Task ${d.taskId} (${d.status || 'unknown'})`
-      + (d.failedClips.length ? ` — ${d.failedClips.length} clip(s) failed.` : ' — no final cut was produced.'));
+      + (Number(d.notSuccessClips) > 0 ? ` — ${d.notSuccessClips} clip(s) not finished.` : ' — no final cut was produced.'));
     lines.push(`Category: ${CATEGORY_LABELS_EN[d.category] || CATEGORY_LABELS_EN.unknown}`);
     lines.push('Suggested fixes (nothing runs until you confirm; nothing was charged):');
     d.suggestions.forEach((s, i) => {
-      const label = (SUGGESTION_LABELS_EN[s.id] && SUGGESTION_LABELS_EN[s.id](d.failedClips.length)) || 'Review the task details';
+      const label = (SUGGESTION_LABELS_EN[s.id]
+        && SUGGESTION_LABELS_EN[s.id](Number(d.notSuccessClips) || d.failedClips.length)) || 'Review the task details';
       const where = SUGGESTION_WHERE_EN[s.id];
       lines.push(`${i + 1}. ${label}${s.executable ? '' : ' (manual step; not executable in chat)'}`
         + (where ? ` — ${where}` : ''));
@@ -1029,7 +1160,12 @@ function replyForRepair(sessionId, lang) {
     return { reply: lines.join('\n'), diagnosis: d };
   }
   const lines = ['【小智简报】失败诊断（只读）：', d.summary, `分类：${d.categoryLabel}`
-    + (d.failedClips.length ? `；失败片段 ${d.failedClips.map((f) => '#' + (f.index + 1)).join('、')}` : '')];
+    + (d.failedClips.length
+      ? `；未完成片段 ${d.failedClips.map((f) => '#' + (f.index + 1)).join('、')}`
+        + (Number(d.notSuccessClips) > d.failedClips.length
+          ? `（这里只列前 ${d.failedClips.length} 段，共 ${d.notSuccessClips} 段未完成）`
+          : '')
+      : '')];
   lines.push('修复选项（都要你点确认才执行，未确认不会重跑、不会花钱）：');
   d.suggestions.forEach((s, i) => {
     lines.push(`${i + 1}. ${s.label}${s.executable ? '' : '（仅提示，需到设置页/库页手动处理）'}${s.where ? ` — ${s.where}` : ''}`);
@@ -2204,7 +2340,8 @@ function handleMessage(opts = {}) {
     reply = replyForGreeting(lang);
     replyKey = 'assistant.reply.greeting';
   } else if (intent.intent === 'status') {
-    reply = replyForStatus(sessionId, lang);
+    // 2026-11-23：把原话传进去——「上一次的任务…」要优先答那条任务，而不是「现在有什么在跑」。
+    reply = replyForStatus(sessionId, lang, text);
     replyKey = 'assistant.reply.status';
   } else if (intent.intent === 'plan_scenes') {
     // 2026-11-16 用户问题 a：问「选了哪几个场景」→ 只读预览，不重排计划、不占卡。

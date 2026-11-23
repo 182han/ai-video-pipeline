@@ -4197,3 +4197,77 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 - 「可以/行/好/OK」以及「确认生成吗/现在开始吗」在“有计划且上一条不是提问”时会确定性回确认语，不再走模型；若上一条是提问，仍交给模型（避免把回答抢成确认）。
 - 新增审计字段只追加，不改旧字段；`say` 元话术/复读被拒后回退规则路径（可能显示规则话术，而不是那句空话）。
 
+## 2026-11-23 · 小智「上一次任务进行到哪一步」答非所问（重启中断后）
+
+### 现象（用户实测截图）
+
+- 5 分钟任务（30 段 × 10 秒，`task_mwt21q0g_u3zo`）在 18:01 服务重启时被
+  `reconcileInterruptedTasks()` 回收为 `failed` + `interruptedFrom=generating`（10/30 段成功）。
+  用户连问「现在进度怎样」「上一次的任务进行到哪一步了」，小智两次都回
+  **「现在没有正在执行的任务。说个时长，我来排计划。」**；再问「我该怎么继续上一个任务」
+  连意图都不命中（`unknown`），拿不到补跑入口。
+
+### 根因（三处叠加，缺一不可）
+
+1. 会话 id 存 `sessionStorage`（`web/src/components/assistant.js:172`），换窗口/重启后拿到新 id，
+   会话记忆与计划全空；
+2. `replyForStatus` 的空会话分支只查「在跑任务」（`assistantContext.contextOf().tasks.active`），
+   被重启回收成 `failed` 的任务不算在跑 → 必然落到「没有正在执行的任务」那句；
+3. 会话里有状态时又直接信 `state.state`（重启前写的 `running`），不看任务真实状态 →
+   即使会话还在，也会答「正在『生成中』」。
+
+另外 `RE_REPAIR` 只认「补跑/重跑」，「怎么继续上一个任务」不命中任何意图。
+
+### 修法
+
+- `src/assistant/supervisor.js`：`replyForStatus(sessionId, lang, text)` 改为**以任务记录为准**：
+  - 用户问「上一次/刚才」（`RE_LAST_TASK_HINT`）时，即使在跑清单非空也先答那条任务；
+  - 会话指向的任务已失败/被回收时按 `task.status` / `interruptedFrom` 如实回答，不再信旧快照；
+  - 失败/中断给出口：已成功 X/Y 段、明细（超时 / 重启时在跑 / 未开始）、「补跑」入口、
+    计费与「Key 只在浏览器里，别换机器补跑（会降级 Mock）」的约束；
+  - 英文分支全程零中文（时间用 `formatWhenEn`，不贴 `task.error` 原文）。
+- `src/assistant/memory.js`：新增 `RE_RESUME_LAST`（继续/接着 + 任务/视频宾语）→ `repair`；
+  `RE_LAST` 对这类句子让位（否则会被「列历史记录」抢走），`traceMatches` 同步保持「首命中 = classify」。
+- `web/src/components/taskDrawer.js`：任务详情「补跑」原先发空 body → 重启后任务里的 Key 已被
+  redact 清空 → `createGenerator` 会**静默降级 Mock**。现带 `runtimeConfig`；浏览器里没有该通道
+  Key 时先 `confirm` 说明会降级 Mock。
+- `web/src/i18n/messages/tasks.js`：新增 `tasks.drawer.noKeyConfirm` 中英两份。
+
+### 验收（本机实跑）
+
+- 先在**旧代码**上跑新断言（负向证据）：`verify-assistant` → **348 通过 / 3 失败**，
+  三条 B1b 全红（红输出即上述现象原文）。
+- 修后：`node scripts/verify-assistant.js` → **351 / 0**。
+- `verify-assistant-frontend` 101/0、`verify-image-first-ui` 90/0、`verify-p6-offline` 41/0、
+  `verify-photo-adjust-ui` 67/0、`verify-i18n --strict` 12/0、`verify-gate-registry` 10/0。
+- 真实任务数据进程内探针（`ASSISTANT_DIR` 指临时目录，任务库只读）：
+  对 `task_mwt21q0g_u3zo` 的新回复为「5 分钟 · 30 段 × 10 秒」「中断于生成片段」
+  「已成功 10/30 段（33%）」「失败 3 段（#7、#8、#9）；重启时正在生成 3 段（#14–#16）；
+  还没开始 14 段」「只补 20 段」；「怎么继续上一个任务」→ `intent=repair` 且诊断命中同一 taskId。
+
+### 追加（同轮，用户追问「能不能直接在对话里让小智重试」）
+
+- **「重试」这个说法旧规则不认**：实测 `重试上一次失败的任务` → `last`（列历史记录）、`重试` → `unknown`。
+  修：`RE_REPAIR` 补 `重试`，新增 `isResumeLastQuery()`（补跑动词 + 任务宾语，且**带总时长的句子仍走 create**），
+  `RE_LAST` 对这类句子让位。实测 `重试上一次失败的任务` / `重试` / `继续上一个任务` → `repair`；
+  `继续做一个 5 分钟的视频` / `再来一条 5 分钟的视频` → `create`（零回归）。
+- **诊断说假话（同一任务实测两处）**：
+  ① 片段错误里的说明「本地等待上限，不代表模型生成失败」含「模型」二字，旧 classify 先命中 `model`，
+  于是「重启中断」被诊断成「模型/能力不匹配」并建议换通道；
+  ② `failedClipReasons` 只列前 10 条，却被当成总数——20 段未完成被说成「有 10 段没成功」。
+  修：classify 把限流/超时提到模型之前；新增 `interrupted`（服务中断）分类，重启/暂停打断不再判成模型问题、
+  也不给换通道建议；全量 `notSuccessClips` 用于摘要/建议文案，列表仍只列前 10 段并注明总数。
+- 验收（真实任务 `task_mwt21q0g_u3zo` 只读探针）：诊断卡现在写「有 20 段没成功」「分类：服务中断」
+  「补跑 20 段未完成片段」，不再出现「换一个支持图生视频的通道」；EN 侧同数据零中文
+  （`Task … — 20 clip(s) not finished / Category: Service restart interruption`）。
+- 先在旧代码跑新断言 → **352 通过 / 1 失败**（红：`category=model`、`有 10 段没成功`）；
+  修后 `verify-assistant` → **353 / 0**、`verify-assistant-followup` → **48 / 0**、
+  `verify-i18n --strict` → **12 / 0**。
+
+### 未验证 / 已知
+
+- **运行中的 3001 仍是旧代码**（`check-server-version` 退出码 1；本沙箱结束 PID 29912 返回
+  Access denied），需用户重启后生效；未做重启后的 HTTP 端到端复验。
+- `verify-en-data` 1 项红：它读 `data/tasks/task_mwityi47_zhr9.json`，该历史任务已被移到
+  `data/trash/`（非本次改动删除，也未擅自恢复）。
+- 补跑本身未执行（会真实计费，需用户同意）。

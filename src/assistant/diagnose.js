@@ -21,6 +21,8 @@ const CATEGORY_LABELS = Object.freeze({
   model: '模型/能力不匹配',
   rate: '限流',
   timeout: '网络/超时',
+  // 2026-11-23：服务重启/暂停打断单独一类——它不是模型、也不是网络问题。
+  interrupted: '服务中断',
   qc: '质检未通过',
   media: '媒体处理失败',
   unknown: '未归类失败'
@@ -84,9 +86,13 @@ function classify(reasonText) {
   const s = reasonText;
   if (/余额不足|预算|INSUFFICIENT_BUDGET|budget|额度/i.test(s)) return 'budget';
   if (/401|403|unauthor|鉴权|api[_\s-]?key|密钥|token|未配置|NO_.*KEY/i.test(s)) return 'key';
-  if (/模型|model|不支持|图生视频|i2v|能力/i.test(s)) return 'model';
+  // 2026-11-23：限流/超时提到模型之前。
+  // 事故：片段错误里的说明文字「本地等待上限，不代表模型生成失败」含「模型」二字，
+  // 旧顺序先命中 model → 把「重启中断 + 本地等待超时」诊断成「模型/能力不匹配」，
+  // 还建议「换一个支持图生视频的通道」——与真实原因无关（实测 5 分钟任务）。
   if (/429|限流|rate.?limit|too many/i.test(s)) return 'rate';
   if (/timeout|超时|ETIMEDOUT|ECONNRESET|ECONNREFUSED|网络|fetch failed|socket/i.test(s)) return 'timeout';
+  if (/模型|model|不支持|图生视频|i2v|能力/i.test(s)) return 'model';
   if (/nsfw|质检|qc|ssim|seam|接缝|黑帧|循环|画质|内容匹配/i.test(s)) return 'qc';
   if (/ffmpeg|拼接|concat|转码|transcode|编码|解码/i.test(s)) return 'media';
   return 'unknown';
@@ -151,17 +157,27 @@ function diagnose(task) {
 
   const joined = reasons.join('；');
   let category = classify(joined);
-  // 模型能力：任务明明要图生视频，却选了不支持 i2v 的模型 → 归到 model（比笼统 error 更有用）
+  // 2026-11-23：服务重启/暂停打断不是模型或网络问题，单独一类，且**不给换通道建议**。
+  const interruptedTask = !!(task.interruptedFrom
+    || /服务进程中断|暂停期间服务被重启/.test(String(task.error || '')));
+  if (interruptedTask) category = 'interrupted';
+  // 模型能力：任务明明要图生视频，却选了不支持 i2v 的模型 → 归到 model（比笼统 error 更有用）。
+  // 被重启打断的任务不该背这个锅（它可能只是没跑完）。
   const hasImageStage = !!(task.imageReview || task.imagePerClip || (task.steps && task.steps.image_generation));
-  if (hasImageStage && task.model && !getI2VInfo(task.model)) category = 'model';
+  if (!interruptedTask && hasImageStage && task.model && !getI2VInfo(task.model)) category = 'model';
 
   const failed = failedClips.length;
+  // 「有几段没成功」必须用**全量**计数：failedClipReasons 最多列 10 条，
+  // 拿它当总数会把 20 段未完成说成 10 段（2026-11-23 实测 5 分钟任务）。
+  const notSuccessTotal = (Array.isArray(task.clips) ? task.clips : [])
+    .filter((c) => c && c.status !== 'success').length;
+  const failedTotal = Math.max(notSuccessTotal, failed);
   const suggestions = [];
-  if (failed > 0 || ['failed', 'partial'].includes(task.status)) {
+  if (failedTotal > 0 || ['failed', 'partial'].includes(task.status)) {
     suggestions.push(suggestion(
       'continue',
       'continue',
-      failed > 0 ? `补跑 ${failed} 段失败片段（已成功片段复用，不重复生成）` : '重跑这条任务（已成功部分复用）',
+      failedTotal > 0 ? `补跑 ${failedTotal} 段未完成片段（已成功的片段复用，不重复生成）` : '重跑这条任务（已成功部分复用）',
       '只重新生成失败部分，费用低于整条重跑',
       { executable: true }
     ));
@@ -230,8 +246,8 @@ function diagnose(task) {
 
   const first = suggestions[0];
   const summary = `${taskLabel(task)}（任务 ID ${task.taskId}）`
-    + (failed ? `有 ${failed} 段没成功` : '未出成片')
-    + `：${reasons[0]}。建议：${first.label}。`;
+    + (failedTotal ? `有 ${failedTotal} 段没成功` : '未出成片')
+    + `：${String(reasons[0] || '').replace(/[。；;\s]+$/, '')}。建议：${first.label}。`;
 
   return {
     ok: true,
@@ -244,6 +260,7 @@ function diagnose(task) {
     reasons: reasons.slice(0, 8),
     summary,
     failedClips: failedClips.map((f) => ({ index: f.index, status: f.status, reason: f.reason })),
+    notSuccessClips: failedTotal,
     suggestions
   };
 }

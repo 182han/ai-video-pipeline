@@ -152,6 +152,7 @@ export default {
         hint: '点按钮会先确认；未确认不会重跑、不会花钱。',
         action: '补跑 / 继续',
         confirm: '即将执行「{label}」。这会复用已成功片段、可能产生费用；未确认不会执行。继续？',
+        noKeyConfirm: '浏览器里没有找到这个通道的 Key；继续会降级成 Mock 合成画面（不消耗真实额度，但不是你要的成片）。仍要继续吗？',
         busy: '正在执行…',
         ok: '已按你的确认补跑 {taskId}（待跑 {pending} 个环节）。',
         failed: '修复失败：{error}'
@@ -316,6 +317,7 @@ export default {
         hint: 'Clicking asks for confirmation first; nothing re-runs or costs money until you confirm.',
         action: 'Resume / continue',
         confirm: 'About to run "{label}". It reuses successful clips and may cost money; nothing runs unless you confirm. Continue?',
+        noKeyConfirm: 'No API key for this channel was found in the browser. Continuing would silently fall back to Mock footage (it does not spend real credit, but it is not the video you want). Continue anyway?',
         busy: 'Running…',
         ok: 'Resumed {taskId} as confirmed ({pending} steps pending).',
         failed: 'Repair failed: {error}'

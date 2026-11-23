@@ -2106,6 +2106,94 @@ async function main() {
     && taskCountV2() === b1Before,
     String(b1.reply || '').split('\n').slice(0, 2).join(' | '));
 
+  // ---- B1b：2026-11-23 用户实测「重启后小智答非所问」的两个负向面 ----
+  // 事故现场：5 分钟任务（30 段）在服务重启时被 reconcileInterruptedTasks 回收成
+  // failed + interruptedFrom=generating；浏览器会话 id 存在 sessionStorage，
+  // 重启后会话记忆为空 → 旧实现只查「在跑任务」，把
+  // 「上一次的任务进行到哪一步了」答成「现在没有正在执行的任务。说个时长，我来排计划。」
+  // 修后口径：以任务记录为准，答真实进度并给出「补跑」出口。
+  // B1 造出的在跑任务先收尾，否则下面的「上一次任务」用例会被全局在跑清单抢先。
+  taskManager.updateTaskStatus(b1Task.taskId, 'completed', { currentStep: '完成' });
+  const b1bTask = mkTaskV2('V2-B1b 重启中断的任务', { totalClips: 4 });
+  taskManager.updateClip(b1bTask.taskId, 0, { status: 'success', duration: 10 });
+  taskManager.updateClip(b1bTask.taskId, 1, { status: 'success', duration: 10 });
+  taskManager.updateClip(b1bTask.taskId, 2, { status: 'failed', error: '等待超时：已等 400s 仍未完成（本地等待上限，不代表模型生成失败）' });
+  taskManager.updateTaskStatus(b1bTask.taskId, 'failed', {
+    error: '服务进程中断导致流水线停止（中断时状态：generating）。已完成步骤：prompt_optimize。可直接点「补跑」从断点继续，已生成的片段不会重新生成。',
+    interruptedFrom: 'generating'
+  });
+  const b1bBefore = taskCountV2();
+  const b1b = supervisor.handleMessage({ sessionId: 's_v2_b1b_new_session', text: '上一次的任务进行到哪一步了' });
+  const b1bReply = String(b1b.reply || '');
+  ok('B1b 空会话（重启后会话丢失）+ 上一条任务被中断 → 按任务库答真实进度 + 「补跑」出口，不再说「没有正在执行的任务」',
+    b1b.ok === true && b1b.intent === 'status'
+    && b1bReply.includes(b1bTask.taskId)
+    && /已成功 2\/4 段（50%）/.test(b1bReply)
+    && /补跑/.test(b1bReply)
+    && !/现在没有正在执行的任务/.test(b1bReply)
+    && taskCountV2() === b1bBefore,
+    b1bReply.split('\n').slice(0, 3).join(' | '));
+
+  // 负向 2：会话里的状态快照是重启前写的 running，任务却已被回收成 failed。
+  // 旧实现直接信 state.state（并且只报「成功片段」），会答「正在『运行中』」。
+  assistantMemory.setState('s_v2_b1b_stale', {
+    version: 'assistant-state.v1',
+    planId: 'plan_v2_b1b_stale',
+    sessionId: 's_v2_b1b_stale',
+    taskId: b1bTask.taskId,
+    state: 'running',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    retries: 0, retrySpendCny: 0, fills: 0, fillRate: 0,
+    reason: null, lastError: null, events: []
+  });
+  const b1bStale = supervisor.handleMessage({ sessionId: 's_v2_b1b_stale', text: '上一次的任务现在进度怎样' });
+  const b1bStaleReply = String(b1bStale.reply || '');
+  ok('B1b 会话状态快照过期（state=running，任务实际已中断）→ 按任务真实状态回答，不再说「正在运行」',
+    b1bStale.ok === true && b1bStale.intent === 'status'
+    && b1bStaleReply.includes(b1bTask.taskId)
+    && /中断|失败/.test(b1bStaleReply)
+    && /补跑/.test(b1bStaleReply)
+    && !/正在「运行中」/.test(b1bStaleReply),
+    b1bStaleReply.split('\n').slice(0, 3).join(' | '));
+
+  // 负向 3：用户直接问「怎么继续上一个任务」——旧规则只认「补跑/重跑」，
+  // 这句会落到 last（列历史记录），不给出口。期望 repair + 可执行的补跑建议。
+  const b1bResume = supervisor.handleMessage({ sessionId: 's_v2_b1b_resume', text: '我该怎么继续上一个任务' });
+  ok('B1b「怎么继续上一个任务」→ repair + 可执行补跑建议（不再只列历史记录）',
+    b1bResume.ok === true && b1bResume.intent === 'repair'
+    && b1bResume.diagnosis && b1bResume.diagnosis.taskId === b1bTask.taskId
+    && b1bResume.diagnosis.suggestions.some((s) => s.executable === true && s.action === 'continue')
+    && /补跑/.test(String(b1bResume.reply || '')),
+    b1bResume.diagnosis ? `${b1bResume.diagnosis.taskId}/${b1bResume.diagnosis.suggestions.length}条建议` : (`intent=${b1bResume.intent}`));
+
+  // 负向 4（2026-11-23 用户口径）：「重试上一次失败的任务」——用户说的就是「重试」，
+  // 旧 RE_REPAIR 只有「补跑/重跑」，这句落 last（列历史记录），拿不到可执行入口。
+  const b1bRetry = supervisor.handleMessage({ sessionId: 's_v2_b1b_retry', text: '重试上一次失败的任务' });
+  ok('B1b「重试上一次失败的任务」→ repair + 命中该任务的可执行补跑建议',
+    b1bRetry.ok === true && b1bRetry.intent === 'repair'
+    && b1bRetry.diagnosis && b1bRetry.diagnosis.taskId === b1bTask.taskId
+    && b1bRetry.diagnosis.suggestions.some((s) => s.executable === true && s.action === 'continue'),
+    b1bRetry.diagnosis ? `${b1bRetry.diagnosis.taskId}` : (`intent=${b1bRetry.intent}`));
+
+  // 负向 5：诊断的分类与计数必须说真话。
+  // 2026-11-23 实测同一个 5 分钟任务：
+  //   ① 「等待超时…（不代表模型生成失败）」里的「模型」二字让 classify 先命中 model，
+  //      于是「重启中断」被诊断成「模型/能力不匹配」，还建议换通道；
+  //   ② 段数被 failedClipReasons 的 10 条上限截断：20 段未完成说成「有 10 段没成功」。
+  const b1bMany = mkTaskV2('V2-B1b 多段未完成', { totalClips: 12 });
+  taskManager.updateClip(b1bMany.taskId, 0, { status: 'success', duration: 10 });
+  taskManager.updateClip(b1bMany.taskId, 1, { status: 'failed', error: '等待超时：已等 400s 仍未完成（本地等待上限，不代表模型生成失败）' });
+  for (let i = 2; i < 12; i += 1) taskManager.updateClip(b1bMany.taskId, i, { status: 'pending' });
+  taskManager.updateTaskStatus(b1bMany.taskId, 'failed', { error: '服务进程中断导致流水线停止（中断时状态：generating）。' });
+  const b1bManyView = supervisor.handleMessage({ sessionId: 's_v2_b1b_many', text: '重试上一次失败的任务' });
+  ok('B1b 诊断：重启中断不判成「模型/能力不匹配」（不给换通道建议），且未完成段数不被 10 条上限截断',
+    b1bManyView.ok === true && b1bManyView.intent === 'repair'
+    && b1bManyView.diagnosis && b1bManyView.diagnosis.category === 'interrupted'
+    && !b1bManyView.diagnosis.suggestions.some((s) => s.action === 'switch_model')
+    && /有 11 段没成功/.test(String(b1bManyView.reply || '')),
+    b1bManyView.diagnosis ? `category=${b1bManyView.diagnosis.category} | ${String(b1bManyView.reply || '').split('\n')[1] || ''}` : 'no diagnosis');
+
   // ---- B2：这条为什么失败？ → 读任务 + 诊断摘要；不自动重跑 ----
   const b2Task = mkTaskV2('V2-B2 失败任务', { totalClips: 2 });
   taskManager.updateClip(b2Task.taskId, 0, { status: 'failed', error: '模型不支持图生视频（i2v）：wan-old' });

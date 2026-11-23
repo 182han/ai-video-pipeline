@@ -418,13 +418,25 @@ function isContextQuery(text) {
 // 放在 V1 的 plan_edit / bgm 之后、context / create 之前：只认显式词，
 // 不能抢「改成 1080p」（V1 断言仍是 unknown）、「配乐有哪些」（bgm）、「你选了哪些场景卡」（plan_scenes）。
 // ==========================================
-const RE_REPAIR = /(?:为什么|为何|怎么|咋)\s*(?:会)?\s*(?:失败|没成|没成功|没出片|挂了)|失败\s*(?:原因|了|怎么办)|诊断|(?:怎么|如何|帮我)\s*(?:修|修复|解决)|修复建议|一键修复|补跑|重跑/;
+const RE_REPAIR = /(?:为什么|为何|怎么|咋)\s*(?:会)?\s*(?:失败|没成|没成功|没出片|挂了)|失败\s*(?:原因|了|怎么办)|诊断|(?:怎么|如何|帮我)\s*(?:修|修复|解决)|修复建议|一键修复|补跑|重跑|重试/;
+// 2026-11-23（用户实测）：用户问「我该怎么继续上一个任务」「重试上一次失败的任务」时，
+// 旧规则一个意图都不命中（RE_LAST 不认「上一个」，repair 只认「补跑/重跑」），
+// 要么掉进排计划反问「要做多长」，要么被 RE_LAST 抢成「列历史记录」，拿不到补跑入口。
+// 判定 = 补跑动词（继续/接着/重试/重跑/补跑）+ 任务宾语（任务/视频/成片）。
+// 带总时长的是「排新计划」（例如「继续做一个 5 分钟的视频」），这里不抢。
+function isResumeLastQuery(text) {
+  const s = String(text || '');
+  if (!/(?:继续|接着|重试|重跑|补跑)/.test(s)) return false;
+  if (!/(?:任务|视频|成片)/.test(s)) return false;
+  return !RE_TOTAL_DURATION.test(s);
+}
 const RE_SETTINGS_CHANGE = /(?:默认|全局)\s*(?:通道|模型|分辨率|配乐风格)|(?:通道|模型|分辨率|设置)\s*(?:改成|改为|换成|设成|设为)|任务播报|播报\s*(?:关掉|关闭|打开|开启|恢复|开|停)|清空\s*(?:我的)?\s*(?:跨会话)?\s*(?:偏好|常用设置|常用偏好)|清除\s*(?:偏好|常用设置)/i;
 const RE_PREFS = /用我常用的设置|用我常用的|我常用的设置|常用设置是什么|我的(?:跨会话)?偏好|偏好是什么|跨会话偏好|上次的设置/;
 const RE_ASSETS = /图片库|图片库存|素材(?:库)?\s*(?:还有|剩|有多少)|能用的图片|多少张(?:能用的)?图|成片库|片段库|场景卡\s*(?:还有|剩|库存)/;
 
 function isRepairQuery(text) {
-  return RE_REPAIR.test(String(text || ''));
+  const s = String(text || '');
+  return RE_REPAIR.test(s) || isResumeLastQuery(s);
 }
 
 function isSettingsChange(text) {
@@ -444,7 +456,8 @@ function classify(text) {
   if (!s) return { intent: 'unknown', reason: 'empty' };
   if (RE_GREETING.test(s)) return { intent: 'greeting' };
   if (RE_STATUS.test(s)) return { intent: 'status' };
-  if (RE_LAST.test(s)) return { intent: 'last' };
+  // 2026-11-23：「继续/接着…（上一次）任务」要的是**补跑出口**，不能被 RE_LAST 抢成「列历史记录」。
+  if (RE_LAST.test(s) && !isResumeLastQuery(s)) return { intent: 'last' };
   // 2026-11-16：查「选了哪些场景卡」不排新计划（只读预览）；「不要出图」只回开关位置。
   // 2026-11-19 D2/D3：口径换成 isPlanScenesQuery（补裸名词 / 口语问法）；
   // 且句子**同时给出总时长**时先排计划（create）——否则「20 秒的…把场景卡给我看一下」
@@ -511,7 +524,7 @@ function traceMatches(text) {
   if (!s) return hits;
   add('greeting', RE_GREETING.test(s));
   add('status', RE_STATUS.test(s));
-  add('last', RE_LAST.test(s));
+  add('last', RE_LAST.test(s) && !isResumeLastQuery(s));
   // 2026-11-19 D2：时长信号优先于「看场景卡」（与 classify 的分支顺序一致）。
   add('create', isPlanScenesQuery(s) && RE_TOTAL_DURATION.test(s));
   // 2026-11-21：与 classify 同序——提示词查看句 / 场景查看句都排在 plan_scenes 与 create 之前。

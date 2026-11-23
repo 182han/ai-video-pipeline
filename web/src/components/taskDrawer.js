@@ -194,6 +194,15 @@ function buildRuntimeConfig(task) {
   return base;
 }
 
+// 浏览器里有没有「这个任务用的那个通道」的 Key（只看映射结果，不读值、不打印）。
+// mock 不需要 Key；可灵要 AccessKey+SecretKey；其余通道都用 apiKey。
+function hasRuntimeKey(rc, model) {
+  if (!model || model === 'mock') return true;
+  if (!rc) return false;
+  if (model === 'kling') return !!(rc.klingAccessKey && rc.klingSecretKey);
+  return !!rc.apiKey;
+}
+
 function Row({ label, children }) {
   return html`
     <div className="flex gap-3 py-[7px] border-b border-white/[.04] last:border-0">
@@ -210,14 +219,28 @@ export function TaskDrawer({ taskId, onClose }) {
   const [busyAct, setBusyAct] = useState('');
 
   // 失败任务的补救动作（接口已核实：retry / resume / continue / recheck-clips）
+  //
+  // 2026-11-23 修（用户重启后补跑 5 分钟任务）：`continue` 必须带上浏览器里的当前运行时配置。
+  // 任务落盘时 Key 会被 redact 清空，重启后服务端拿不到 Key；只发空 body 时
+  // createGenerator 会「静默降级 Mock」（src/generators/index.js:78），
+  // 用户以为在续跑付费任务，实际生成的是合成画面。
   async function postAction(path) {
     setActErr('');
+    let body = {};
+    if (path === 'continue') {
+      const runtime = buildRuntimeConfig(state.task);
+      if (hasRuntimeKey(runtime, state.task && state.task.model)) {
+        body = { runtimeConfig: runtime };
+      } else if (!window.confirm(tr('tasks.drawer.noKeyConfirm'))) {
+        return; // 没 Key 又不接受 Mock：一个请求都不发
+      }
+    }
     setBusyAct(path);
     try {
       const r = await fetch('/api/tasks/' + encodeURIComponent(taskId) + '/' + path, {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify(body)
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.success === false) throw new Error(j.error || ('HTTP ' + r.status));

@@ -25,6 +25,16 @@ export function executableRepairs(diagnosis) {
   return diagnosis.suggestions.filter((s) => s && s.executable === true && s.action === 'continue');
 }
 
+// 2026-11-23（同轮补）：浏览器里有没有这个通道的 Key（只看映射结果，不读值、不打印）。
+// 重启后任务落盘的 Key 已被 redact 清空，这里没 Key 时续跑会「静默降级 Mock」
+// （src/generators/index.js:78）——用户以为在续跑付费任务，实际生成的是合成画面。
+function hasRuntimeKey(rc, model) {
+  if (!model || model === 'mock') return true;
+  if (!rc) return false;
+  if (model === 'kling') return !!(rc.klingAccessKey && rc.klingSecretKey);
+  return !!rc.apiKey;
+}
+
 /** 修复请求体：确认门。confirmed !== true → null（绝不生成 approved:true）。 */
 export function buildRepairRequest(opts = {}) {
   if (opts.confirmed !== true) return null;
@@ -73,6 +83,9 @@ export function RepairCard({ diagnosis, sessionId, onResult } = {}) {
     // 确认门（L3）：未点「确定」不发请求、不带 approved。
     if (!window.confirm(tr('assistant.repair.confirm', { label: suggestion.label }))) return;
     const runtime = readRuntimeConfig(diagnosis && diagnosis.model ? diagnosis.model : undefined);
+    // 没 Key 又不接受 Mock：一个请求都不发（与任务详情「补跑」同一道保护）。
+    if (!hasRuntimeKey(runtime, diagnosis && diagnosis.model)
+      && !window.confirm(tr('assistant.repair.noKeyConfirm'))) return;
     const body = buildRepairRequest({
       taskId: diagnosis.taskId,
       sessionId,
