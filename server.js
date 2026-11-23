@@ -312,7 +312,36 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ username: req.auth.username, userId: req.auth.userId, authEnabled: true });
 });
 
-// ===== 成员管理（所有账号平权，无管理员/普通角色之分）=====
+// ===== 成员管理（账号管理仅主账号；成员仍可改自己的密码）=====
+
+// 2026-11-23 公网交付加固：把「账号管理」收口到 AUTH_USER 指定的主账号。
+// 背景：项目没有角色分级，所有账号权限相同；且改密码不需要旧密码（见下面的
+// PUT /api/users/:id/password）。把账号交给外部体验方后，对方可以改掉主账号密码
+// 或删掉主账号，交付方将永久进不去。这里只收口账号管理，不影响内容操作。
+const OWNER_USERNAME = String((config.AUTH && config.AUTH.bootstrapUser) || '').trim() || 'admin';
+
+function isOwner(req) {
+  return !!(req && req.auth && req.auth.username && req.auth.username === OWNER_USERNAME);
+}
+
+function denyOwnerOnly(req, res) {
+  return res.status(403).json({
+    error: '仅主账号可管理账号',
+    code: 'OWNER_ONLY',
+    ...i18n.err(req.lang, 'api.auth.forbidden')
+  });
+}
+
+function requireOwner(req, res, next) {
+  if (isOwner(req)) return next();
+  return denyOwnerOnly(req, res);
+}
+
+// 改自己的密码仍然允许；改别人的必须是主账号
+function requireOwnerOrSelf(req, res, next) {
+  if (isOwner(req) || (req.auth && req.params.id === req.auth.userId)) return next();
+  return denyOwnerOnly(req, res);
+}
 
 app.get('/api/users', async (req, res) => {
   try {
@@ -327,7 +356,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', requireOwner, async (req, res) => {
   try {
     const username = String((req.body || {}).username || '').trim();
     const password = String((req.body || {}).password || '');
@@ -360,7 +389,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requireOwner, async (req, res) => {
   try {
     const users = await storage.listUsers();
     if (users.length <= 1) {
@@ -397,7 +426,7 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id/password', async (req, res) => {
+app.put('/api/users/:id/password', requireOwnerOrSelf, async (req, res) => {
   try {
     const password = String((req.body || {}).password || '');
     const minLen = Number(config.AUTH && config.AUTH.minPasswordLength) || 8;

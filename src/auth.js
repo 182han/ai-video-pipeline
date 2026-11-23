@@ -187,19 +187,32 @@ function authorizeRequest(req) {
 function getClientIp(req) {
   // 2026-11-12 加固：前面挂 nginx/云反代时，remoteAddress 恒为 127.0.0.1，
   // 会让「连续失败锁 IP」退化成「锁所有人」，也让登录日志失去意义。
-  // 但默认仍然不信任 X-Forwarded-For（客户端可伪造），必须显式显开 TRUST_PROXY=1。
+  // 但默认仍然不信任 X-Forwarded-For（客户端可伪造），必须显式开 TRUST_PROXY=1。
+  //
+  // 2026-11-23 公网隧道加固：只有「本机反代」才可信转发头。
+  // cloudflared / 同机 nginx 的 peer 是回环；局域网直连可以伪造头，一律不认，
+  // 否则同一个网段的人就能靠伪造 IP 绕过登录失败锁定。
+  // 隧道场景优先用 CF-Connecting-IP（Cloudflare 边缘覆写，客户端改不了），
+  // 它比 X-Forwarded-For 可靠——XFF 可能是客户端自带值被边缘追加。
   const trustProxy = String(process.env.TRUST_PROXY || '').toLowerCase();
   const trust = trustProxy === '1' || trustProxy === 'true' || trustProxy === 'yes';
-  if (trust) {
+  // 逃生口：反代不在本机（Docker 跨容器、另一台机器）时设 any。
+  // 此时无法区分「反代」与「直连」，必须自行保证 3001 不对外暴露，否则可伪造转发头。
+  const trustAny = trustProxy === 'any' || trustProxy === '2';
+  const addr = (req && req.socket && req.socket.remoteAddress) || 'unknown';
+  // ::ffff:127.0.0.1 与 127.0.0.1 视为同一个来源
+  const peer = String(addr).replace(/^::ffff:/, '');
+  const isLoopback = peer === '::1' || /^127(?:\.\d{1,3}){3}$/.test(peer);
+  if (trustAny || (trust && isLoopback)) {
+    const cf = req && req.headers && req.headers['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) return cf.trim().replace(/^::ffff:/, '');
     const xff = req && req.headers && req.headers['x-forwarded-for'];
     if (typeof xff === 'string' && xff.trim()) {
       const first = xff.split(',')[0].trim();
       if (first) return first.replace(/^::ffff:/, '');
     }
   }
-  const addr = (req && req.socket && req.socket.remoteAddress) || 'unknown';
-  // ::ffff:127.0.0.1 与 127.0.0.1 视为同一个来源
-  return addr.replace(/^::ffff:/, '');
+  return peer;
 }
 
 function checkLock(ip) {
