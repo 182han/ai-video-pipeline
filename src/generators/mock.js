@@ -79,8 +79,15 @@ class MockGenerator extends BaseGenerator {
       fs.mkdirSync(this._outputDir, { recursive: true });
     }
     const filePath = path.join(this._outputDir, `${taskId}.mp4`);
-    const duration = options.duration || 30;
-    const resolution = options.resolution || '720p';
+    // 2026-11-23 安全审计：duration/resolution 可能来自请求体，必须先归一化。
+    // 旧实现把原始字符串拼进 shell 命令，`10" & echo X` 可跳出引号执行命令。
+    const rawDuration = Number(options.duration);
+    const duration = Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.min(60, rawDuration)
+      : 30;
+    const rawResolution = String(options.resolution || '');
+    // 只允许字母数字，避免 ../ 之类的值把 samplePath 拼到目录外。
+    const resolution = /^[A-Za-z0-9]{2,12}$/.test(rawResolution) ? rawResolution : '720p';
 
     // FFmpeg 不可用时退回文本占位
     if (!videoProcessor.hasFFmpeg) {
@@ -113,7 +120,9 @@ class MockGenerator extends BaseGenerator {
 
   // 用 FFmpeg 生成一个真实的测试样片（渐变色 + 静音）
   _generateSampleClip(outputPath, duration, resolution) {
-    const { execSync } = require('child_process');
+    // 2026-11-23 安全审计：改成 spawnSync + 参数数组，完全不经 shell。
+    // 旧实现是 execSync 字符串插值，duration 含 `"` 时可跳出引号执行任意命令。
+    const { spawnSync } = require('child_process');
     const config = require('../../config');
     const ffmpegPath = config.FFMPEG_PATH || 'ffmpeg';
 
@@ -121,17 +130,34 @@ class MockGenerator extends BaseGenerator {
       fs.mkdirSync(this._sampleDir, { recursive: true });
     }
 
-    // 解析分辨率
+    // 解析分辨率（非法值按 720p 处理）
     let width = 1280, height = 720;
-    if (resolution === '1080p') { width = 1920; height = 1080; }
-    else if (resolution === '480p') { width = 854; height = 480; }
+    const safeResolution = /^[A-Za-z0-9]{2,12}$/.test(String(resolution || ''))
+      ? String(resolution)
+      : '720p';
+    if (safeResolution === '1080p') { width = 1920; height = 1080; }
+    else if (safeResolution === '480p') { width = 854; height = 480; }
+
+    const rawDuration = Number(duration);
+    const safeDuration = Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.min(60, rawDuration)
+      : 30;
 
     try {
       // 生成明亮蓝色背景 + 静音的测试视频（明显看出是测试视频，不是黑屏）
-      execSync(`"${ffmpegPath}" -y -f lavfi -i "color=c=0x4a90d9:s=${width}x${height}:d=${duration}" -f lavfi -i "anullsrc=r=44100:cl=stereo:d=${duration}" -c:v libx264 -preset ultrafast -tune stillimage -pix_fmt yuv420p -c:a aac -shortest "${outputPath}"`, {
-        stdio: 'pipe',
-        timeout: 30000
-      });
+      const args = [
+        '-y',
+        '-f', 'lavfi', '-i', `color=c=0x4a90d9:s=${width}x${height}:d=${safeDuration}`,
+        '-f', 'lavfi', '-i', `anullsrc=r=44100:cl=stereo:d=${safeDuration}`,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-shortest', outputPath
+      ];
+      const result = spawnSync(ffmpegPath, args, { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe'] });
+      if (result.error) throw result.error;
+      if (result.status !== 0) {
+        const stderr = result.stderr ? String(result.stderr).trim().slice(0, 300) : '';
+        throw new Error(`ffmpeg 退出码 ${result.status}${stderr ? ': ' + stderr : ''}`);
+      }
       return true;
     } catch (e) {
       console.warn('[MockGenerator] FFmpeg 样片生成失败，使用文本占位:', e.message?.substring(0, 100));

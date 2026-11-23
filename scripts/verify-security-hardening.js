@@ -150,6 +150,55 @@ for (const [input, expectOk] of idCases) {
     security.isSafeStorageId(input), expectOk);
 }
 
+console.log('\n[7] 任务数值字段：拒绝字符串注入（2026-11-23 审计）');
+// 事故：clipDuration 只做 `<1 || >60`（NaN 比较恒 false），`10" & echo X` 原样通过，
+// 随后被 MockGenerator 拼进 execSync 的 shell 命令。这里锁定归一化行为与调用点。
+const durationCases = [
+  ['10', 10],
+  [10, 10],
+  ['10.5', 10.5],
+  ['10" & echo INJECTED', null],
+  ['abc', null],
+  [NaN, null],
+  [0, null],
+  [-1, null],
+  [61, null],
+  [[10], null],
+  [{}, null]
+];
+for (const [input, expected] of durationCases) {
+  eq(`normalizeClipDuration(${JSON.stringify(input)})`,
+    security.normalizeClipDuration(input, 15), expected);
+}
+const countCases = [
+  ['10', 10],
+  [10, 10],
+  [undefined, 10],
+  ['10&calc', null],
+  ['10.5', null],
+  [2.5, null],
+  [0, null],
+  [201, null],
+  [[10], null]
+];
+for (const [input, expected] of countCases) {
+  eq(`normalizeTaskCount(${JSON.stringify(input)})`,
+    security.normalizeTaskCount(input, 10), expected);
+}
+ok('server.js 用 normalizeClipDuration 校验单段时长',
+  /const duration = security\.normalizeClipDuration\(/.test(serverSrc));
+ok('server.js 用 normalizeTaskCount 校验片段数',
+  /const count = multiPrompts \? multiPrompts\.length : security\.normalizeTaskCount\(/.test(serverSrc));
+const taskManagerSrc = fs.readFileSync(path.join(ROOT, 'src', 'taskManager.js'), 'utf8');
+ok('taskManager 创建任务时也归一化 clipDuration/totalClips',
+  /normalizeClipDuration\(options\.clipDuration/.test(taskManagerSrc)
+  && /normalizeTaskCount\(options\.totalClips/.test(taskManagerSrc));
+const mockSrc = fs.readFileSync(path.join(ROOT, 'src', 'generators', 'mock.js'), 'utf8');
+ok('mock 生成器不再用 execSync 字符串拼接', !/execSync\s*\(/.test(mockSrc));
+ok('mock 生成器改用 spawnSync + 参数数组', /spawnSync\(ffmpegPath, args/.test(mockSrc));
+ok('mock 对 duration 做 Number 归一化', /Number\(options\.duration\)/.test(mockSrc));
+ok('mock 对分辨率做字母数字白名单（防路径穿越）', /\^\[A-Za-z0-9\]\{2,12\}\$/.test(mockSrc));
+
 console.log(`\n结果: ${pass} 通过 / ${failures.length} 失败`);
 if (failures.length) {
   console.log('失败项:');

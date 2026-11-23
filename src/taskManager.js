@@ -8,6 +8,7 @@ const config = require('../config');
 const wsManager = require('./wsManager');
 const storage = require('./storage');
 const redact = require('./utils/redact');
+const security = require('./utils/security');
 const { applyTaskDefaults } = require('./taskDefaults');
 const { resolveStages } = require('./pipelineStages');
 const budget = require('./budget');
@@ -168,8 +169,15 @@ class TaskManager {
         })
         .filter(p => p && p.text.length > 0)
       : null;
-    const totalClips = prompts ? prompts.length : (options.totalClips || 10);
-    const clipDuration = options.clipDuration || config.GENERATION.defaultClipDuration || 15;
+    // 2026-11-23 安全审计：所有调用方（HTTP / 小智 / 脚本）在这里统一归一化，
+    // 防止字符串型数值绕过 HTTP 校验后进入任务字段与 ffmpeg 命令拼接。
+    // 非法值回退默认值；HTTP 入口已在更早处对非法值返回 400。
+    const defaultClipDuration = config.GENERATION.defaultClipDuration || 15;
+    const totalClips = prompts
+      ? prompts.length
+      : (security.normalizeTaskCount(options.totalClips) || 10);
+    const clipDuration = security.normalizeClipDuration(options.clipDuration, defaultClipDuration)
+      ?? defaultClipDuration;
     const globalTheme = options.theme ?? null;
 
     // 初始化片段列表

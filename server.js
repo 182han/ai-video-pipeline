@@ -3283,8 +3283,14 @@ app.post('/api/tasks', (req, res) => {
   }
 
   // 校验片段数量（多提示词模式下以行数为准）
-  const count = multiPrompts ? multiPrompts.length : (clipCount || totalClips || 10);
-  if (count < 1 || count > 200) {
+  // 2026-11-23 安全审计：旧写法 `(clipCount || totalClips || 10)` 配 `<1 || >200`
+  // 会把 "10&calc" 这类字符串放行（NaN 比较恒为 false），再进入任务与命令拼接。
+  // 必须在入口转成有限整数；非法值直接 400，不能靠隐式类型转换。
+  const countRaw = (clipCount === undefined || clipCount === null || clipCount === '')
+    ? totalClips
+    : clipCount;
+  const count = multiPrompts ? multiPrompts.length : security.normalizeTaskCount(countRaw);
+  if (!Number.isInteger(count) || count < 1 || count > 200) {
     return res.status(400).json({
       error: '片段数量必须在 1-200 之间' + (multiPrompts ? `（当前输入了 ${multiPrompts.length} 行提示词）` : ''),
       code: 'CLIP_COUNT_RANGE',
@@ -3333,8 +3339,17 @@ app.post('/api/tasks', (req, res) => {
   }
 
   // 校验单段时长
-  const duration = clipDuration || config.GENERATION.defaultClipDuration || 15;
-  if (duration < 1 || duration > 60) {
+  // 2026-11-23 安全审计：旧写法只做 `duration < 1 || duration > 60`，
+  // 字符串（如 `10" & echo X`）与 NaN 比较恒 false → 原样通过并被拼进 shell 命令。
+  // 这里统一转有限数字；非法值返回 400（不静默回退默认值）。
+  const durationRaw = (clipDuration === undefined || clipDuration === null || clipDuration === '')
+    ? (config.GENERATION.defaultClipDuration || 15)
+    : clipDuration;
+  const duration = security.normalizeClipDuration(
+    durationRaw,
+    config.GENERATION.defaultClipDuration || 15
+  );
+  if (duration === null) {
     return res.status(400).json({
       error: '单段时长必须在 1-60 秒之间',
       code: 'CLIP_DURATION_RANGE',

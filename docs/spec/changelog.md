@@ -4339,3 +4339,64 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
 - `verify-en-data` 1 项红：它读 `data/tasks/task_mwityi47_zhr9.json`，该历史任务已被移到
   `data/trash/`（非本次改动删除，也未擅自恢复）。
 - 补跑本身未执行（会真实计费，需用户同意）。
+
+---
+
+## 2026-11-23 · 安全审计：`clipDuration` 校验绕过导致命令注入（已修）
+
+### 结论
+
+`POST /api/tasks` 对 `clipDuration` 只做 `duration < 1 || duration > 60`。JS 里字符串与数字比较会得到
+`NaN`，而 `NaN < 1` / `NaN > 60` 都是 `false`，所以形如 `10" & echo INJECTED & rem "` 的字符串
+**原样通过校验**，存入 `task.clipDuration`，最终由 `MockGenerator._createSampleClip` 拼进
+`execSync` 的 shell 命令。Windows `cmd.exe` 下 `"` 可跳出引号，`&` 可串联命令 →
+**已登录用户（含 demo 体验账号，`POST /api/tasks` 在 demo 白名单内）可在服务端执行任意命令**。
+
+严重度：高。利用前提：能登录（或 `AUTH_ENABLED=false` 时匿名）并创建任务；Mock 生成器在
+未配置真实模型 Key 时也会被走到，因此不要求付费渠道。
+
+### 复现（负向证据，未真正执行命令）
+
+用脚本把 `MockGenerator._generateSampleClip` 的 `execSync` 截获，不实际 spawn cmd.exe：
+
+- 输入 `duration = '10" & echo INJECTED> C:/tmp/proof.txt & rem "'`
+- 截获到的最终命令（节选）：
+  ```
+  "...ffmpeg.exe" ... -i "color=...:d=10" & echo INJECTED> C:/tmp/proof.txt & rem "" ...
+  ```
+- 判定：payload 已落到 shell 命令串（`payload reached shell command = true`）。
+
+本沙箱里 `cmd.exe` / ffmpeg 的 `spawn` 返回 `EPERM`，所以没有实际执行 echo；这恰好也说明
+**不能靠「跑一下试试」验证**，必须按命令串构造来判断。
+
+### 修法（三层）
+
+1. `src/utils/security.js`：新增 `normalizeTaskCount` / `normalizeClipDuration`：
+   只接受 number 或非空数字字符串，必须是有限数字，分别落在 `1–200`（整数）与 `1–60`；
+   非法返回 `null`，由调用方 400。
+2. `server.js` 的 `POST /api/tasks`：`clipDuration` / `clipCount` 先走上述归一化，
+   不再用隐式比较；非法值返回 400（`CLIP_DURATION_RANGE` / `CLIP_COUNT_RANGE`），不静默回退。
+3. `src/taskManager.js`：`createTask` 对 `totalClips` / `clipDuration` 再做一次归一化，
+   覆盖 HTTP / 小智 / 脚本所有入口；`src/generators/mock.js` 改为
+   `spawnSync(ffmpegPath, args)` 参数数组（完全不经 shell），并对 `duration` 转数字、
+   对 `resolution` 做字母数字白名单（防 `../` 拼到目录外）。
+
+### 验收（本机实跑）
+
+- `node scripts/verify-security-hardening.js` → **81 通过 / 0 失败**（新增 27 条：
+  字符串 payload、NaN、越界、数组/对象均被拒；server/taskManager/mock 接线断言）。
+- `node scripts/verify-password-hardening.js` → **53 / 0**。
+- `node scripts/verify-stages.js` → **45 / 0**；`verify-mock-vqc` → **14 / 0**。
+- `verify-assistant-frontend` → **101 / 0**；`verify-i18n --strict` → **12 / 0**；
+  `verify-gate-registry` → **10 / 0**。
+
+### 未验证 / 已知
+
+- **HTTP 端点未实跑**：按仓库红线，起第二个临时实例做端到端需要用户明确同意，本次没有起；
+  验证覆盖的是归一化函数 + 接线静态断言 + 命令串截获，不是「打接口」。
+- **运行中的 3001 仍是旧代码**（`node scripts/check-server-version.js` 退出码 1），需重启生效；
+  重启前该漏洞在运行实例上仍然存在。
+- 本沙箱 ffmpeg/`cmd.exe` 的 `spawn` 一律 `EPERM`，`verify-assistant` 的 Mock 全流程在转场拼接处
+  因环境失败；这是环境限制，不是本次改动引入（改动前同一后台任务的旧代码也在同一处失败）。
+- `verify-auth` 未运行（会起 3199/3198 两个临时实例，需用户同意）。
+- 未做完整 `npm audit`（本机无 npm）；本次只审计了用户可控数值进入 shell/路径的路径。

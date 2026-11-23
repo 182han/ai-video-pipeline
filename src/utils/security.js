@@ -78,6 +78,52 @@ function isMediaRequestPath(p) {
   return false;
 }
 
+// ==========================================
+// 任务数值字段校验（2026-11-23 审计新增）
+// ==========================================
+//
+// 事故：POST /api/tasks 的 clipDuration 只做 `duration < 1 || duration > 60`。
+// JS 里 `"10\" & echo X" < 1` 和 `> 60` 都是 false（NaN 比较），于是**原始字符串**
+// 通过校验 → 存进 task.clipDuration → MockGenerator 拼进 execSync 命令串，
+// 在 Windows cmd.exe 下可跳出引号执行任意命令（已用「截获最终命令串」复现）。
+//
+// 因此：所有进入任务、后续可能被拼进命令/路径的数值字段，必须在入口转成
+// **有限数字**并做范围校验；校验失败返回 null，由调用方返回 400，绝不静默放行。
+const TASK_COUNT_MIN = 1;
+const TASK_COUNT_MAX = 200;
+const TASK_CLIP_DURATION_MIN = 1;
+const TASK_CLIP_DURATION_MAX = 60;
+
+function toFiniteNumber(value) {
+  // 只接受 number / 非空 string；对象、数组、布尔都可能被 Number() 意外转成数字。
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 片段数：必须是 1–200 的整数；缺省返回 10。非法返回 null。 */
+function normalizeTaskCount(value, fallback = 10) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string' && !value.trim()) return fallback;
+  const n = toFiniteNumber(value);
+  if (n === null || !Number.isInteger(n)) return null;
+  if (n < TASK_COUNT_MIN || n > TASK_COUNT_MAX) return null;
+  return n;
+}
+
+/** 单段时长：必须是 1–60 的有限数字；缺省返回 fallback。非法返回 null。 */
+function normalizeClipDuration(value, fallback = 15) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string' && !value.trim()) return fallback;
+  const n = toFiniteNumber(value);
+  if (n === null) return null;
+  if (n < TASK_CLIP_DURATION_MIN || n > TASK_CLIP_DURATION_MAX) return null;
+  return n;
+}
+
 module.exports = {
   UNSAFE_PATH_CHARS,
   UNSAFE_SHELL_CHARS,
@@ -86,5 +132,12 @@ module.exports = {
   isSafeShellPath,
   isSafeStorageId,
   isMediaRequestPath,
-  MEDIA_PREFIXES
+  MEDIA_PREFIXES,
+  TASK_COUNT_MIN,
+  TASK_COUNT_MAX,
+  TASK_CLIP_DURATION_MIN,
+  TASK_CLIP_DURATION_MAX,
+  toFiniteNumber,
+  normalizeTaskCount,
+  normalizeClipDuration
 };
