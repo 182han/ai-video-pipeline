@@ -6,24 +6,59 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# 运行时产物（容器内重新生成；视频应该放对象存储而不是打进镜像）
+# ===== 运行时产物（容器内重新生成；视频应放对象存储而不是打进镜像）=====
 clips
 output
 data/tasks
 data/trash
+data/recycle
+data/library
+data/photos
+data/projects
+data/thumbnails
+data/waveforms
+data/assistant
+data/reports
+data/keep
+data/spike
+data/tmp
+data/logs
+data/adjust
 *.mp4
+*.mp4.txt
 *.log
+*.log.err
 _e2e_*.js
 
-# 配乐素材：单个 * 不跨目录，必须用 ** 才能匹配 calm/ epic/ 等子目录
+# ===== 本机凭据与账本（绝不能进镜像）=====
+# data/users.json 是登录墙账号（scrypt 哈希），data/budget.json 是预算余额账本。
+# 注意：data/ 不能整目录排除 —— 下面 3 个是 git 跟踪、镜像里必须有的：
+#   data/skill-fengguang.rules.md（风光规则层）  data/optimization_rules.txt
+#   data/templates.json
+# data/budget.json.bak-* 是历史备份（含余额痕迹），不进镜像。
+data/users.json
+data/budget.json
+data/budget.json.bak-*
+
+# ===== 配乐素材 =====
+# 单个 * 不跨目录，必须用 ** 才能匹配 calm/ epic/ 等子目录；
+# 容器里请用 docker-compose.yml 的卷把宿主机 assets/bgm 挂进来。
 assets/bgm/**/*.mp3
 assets/bgm/**/*.wav
 assets/bgm/**/*.m4a
+# 播放器偏好是运行时状态（每台机器不同）
+assets/bgm/prefs.json
 
-# 内置 ffmpeg 二进制（约 640MB）。镜像里用 apt 装的 ffmpeg，
-# 不能把 Windows 的 .exe 拷进 Linux 容器。
+# ===== 内置 ffmpeg 二进制（约 640MB）=====
+# 镜像里用 apt 装的 ffmpeg，不能把 Windows 的 .exe 拷进 Linux 容器。
 tools/ffmpeg/bin
 tools/ffmpeg/*.exe
+
+# ===== 离线语音识别（330MB，Windows 专用）=====
+# src/assistant/asr.js 里写死 sherpa-onnx-offline.exe 与 sherpa-win 目录，
+# Linux 容器里本来就用不了（状态会如实报 available:false）。
+# 排除它既省 330MB，也避免「文件在但跑不了」的误导。
+tools/asr
 
 .DS_Store
 Thumbs.db
