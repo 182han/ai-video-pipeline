@@ -88,6 +88,8 @@ export function SettingsView() {
   const [nr, setNr] = useState('member');
   const [canManage, setCanManage] = useState(false);
   const [ownerUsername, setOwnerUsername] = useState('');
+  const [mErr, setMErr] = useState('');
+  const [mMsg, setMMsg] = useState('');
   const [imgStatus, setImgStatus] = useState(null);
   const [openGroups, setOpenGroups] = useState({});
   const [showKeys, setShowKeys] = useState({});
@@ -201,41 +203,44 @@ export function SettingsView() {
   }
 
   async function addUser() {
-    setErr(''); setMsg('');
+    setErr(''); setMsg(''); setMErr(''); setMMsg('');
     if (!canManage) return;
+    const name = nu.trim();
+    if (!name || !np) { setMErr(t('settings.members.needFields')); return; }
+    if (np.length < 8) { setMErr(t('settings.members.passwordTooShort')); return; }
     try {
       await fetchJson('/api/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: nu.trim(), password: np, role: nr })
+        body: JSON.stringify({ username: name, password: np, role: nr })
       });
       setNu(''); setNp(''); setNr('member');
       await loadUsers();
-      setMsg(t('settings.members.created'));
-    } catch (e) { setErr(t('settings.members.createFailed') + e.message); }
+      setMMsg(t('settings.members.created'));
+    } catch (e) { setMErr(t('settings.members.createFailed') + e.message); }
   }
 
   async function resetPwd(u) {
     if (!canManage) return;
     const pwd = window.prompt(t('settings.members.resetPrompt', { name: u.username }));
     if (!pwd) return;
-    setErr(''); setMsg('');
+    setErr(''); setMsg(''); setMErr(''); setMMsg('');
     try {
       await fetchJson('/api/users/' + encodeURIComponent(u.userId || u.id) + '/password', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd })
       });
-      setMsg(t('settings.members.resetDone'));
-    } catch (e) { setErr(t('settings.members.resetFailed') + e.message); }
+      setMMsg(t('settings.members.resetDone'));
+    } catch (e) { setMErr(t('settings.members.resetFailed') + e.message); }
   }
 
   async function delUser(u) {
     if (!canManage) return;
     if (!window.confirm(t('settings.members.deleteConfirm', { name: u.username }))) return;
-    setErr(''); setMsg('');
+    setErr(''); setMsg(''); setMErr(''); setMMsg('');
     try {
       await fetchJson('/api/users/' + encodeURIComponent(u.userId || u.id), { method: 'DELETE' });
       await loadUsers();
-    } catch (e) { setErr(t('settings.members.deleteFailed') + e.message); }
+    } catch (e) { setMErr(t('settings.members.deleteFailed') + e.message); }
   }
 
   const sec = 'rounded-[8px] border border-white/[.08] bg-s1 px-4 py-3 mb-3.5';
@@ -470,6 +475,8 @@ export function SettingsView() {
             ${tp('settings.members.count', users.length)}${authEnabled ? '' : t('settings.members.authOff')}
           </span>
         </div>
+        ${mErr && html`<p className="mb-2 text-[12px] text-danger">${mErr}</p>`}
+        ${mMsg && html`<p className="mb-2 text-[12px] text-accent">${mMsg}</p>`}
         ${canManage && html`
         <div className="flex items-center gap-2 mb-2">
           <input value=${nu} onInput=${(e) => setNu(e.target.value)} placeholder=${t('settings.members.username')}
