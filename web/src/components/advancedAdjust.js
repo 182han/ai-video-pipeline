@@ -24,7 +24,7 @@ export const HSL_BANDS = [
 ];
 
 export const CURVE_CHANNELS = [
-  { key: 'rgb', labelKey: 'editor.adv.channels.rgb', color: '#D6B36A' },
+  { key: 'rgb', labelKey: 'editor.adv.channels.rgb', color: 'var(--accent)' },
   { key: 'r', label: 'R', color: '#E4574F' },
   { key: 'g', label: 'G', color: '#5DBE72' },
   { key: 'b', label: 'B', color: '#5A8FE0' }
@@ -190,7 +190,7 @@ function drawCurveCanvas(canvas, curves, chan) {
   ctx.fillStyle = '#0B100D';
   ctx.fillRect(0, 0, w, h);
 
-  ctx.strokeStyle = 'rgba(244,247,245,0.08)';
+  ctx.strokeStyle = 'rgb(var(--ink-rgb) / 0.08)';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const x = (i / 4) * (w - 1);
@@ -199,7 +199,7 @@ function drawCurveCanvas(canvas, curves, chan) {
     ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); ctx.stroke();
   }
   ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = 'rgba(244,247,245,0.18)';
+  ctx.strokeStyle = 'rgb(var(--ink-rgb) / 0.18)';
   ctx.beginPath(); ctx.moveTo(0, h - 1); ctx.lineTo(w - 1, 0); ctx.stroke();
   ctx.setLineDash([]);
 

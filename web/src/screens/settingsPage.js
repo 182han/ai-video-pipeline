@@ -382,7 +382,7 @@ export function SettingsView() {
                             display: 'grid', placeItems: 'center',
                             borderRadius: '4px', fontSize: '11px', lineHeight: '1',
                             color: 'var(--ink3)', background: 'transparent',
-                            border: '1px solid rgba(255,255,255,.10)', cursor: 'pointer'
+                            border: '1px solid rgb(var(--ink-rgb) / .10)', cursor: 'pointer'
                           }}
                           title=${showKeys[f[0]] ? t('settings.keys.hideKey') : t('settings.keys.showKey')}
                           aria-label=${showKeys[f[0]] ? t('settings.keys.hideKey') : t('settings.keys.showKey')}

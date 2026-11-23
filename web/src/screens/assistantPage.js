@@ -13,6 +13,7 @@
 import { navigate } from '../router.js';
 import { t } from '../i18n/index.js';
 import { LangSwitch } from '../components/langSwitch.js';
+import { ThemeToggle } from '../components/themeToggle.js';
 import { Assistant } from '../components/assistant.js';
 
 const { React } = window;
@@ -78,8 +79,9 @@ export function AssistantPage() {
         </nav>
 
         <div className="xz-rail-foot">
-          <div style=${{ display: 'flex', justifyContent: collapsed ? 'center' : 'flex-start', padding: '0 4px 8px' }}>
+          <div style=${{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: '6px', padding: '0 4px 8px', justifyContent: collapsed ? 'center' : 'flex-start' }}>
             <${LangSwitch} collapsed=${collapsed} />
+            <${ThemeToggle} compact=${collapsed} />
           </div>
           <${RailItem}
             item=${{ route: '/settings', label: t('nav.settings'), icon: '⚙', title: t('nav.settings') }}

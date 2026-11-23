@@ -376,10 +376,10 @@ export function ClipsPanel({ onChanged }) {
           style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.72)', display: 'grid', placeItems: 'center' }}
           onClick=${(e) => { if (e.target === e.currentTarget) setDetail(null); }}
         >
-          <div style=${{ width: 'min(760px, 92vw)', maxHeight: '86vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
+          <div style=${{ width: 'min(760px, 92vw)', maxHeight: '86vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '10px', padding: '14px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' }}>
               <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.clips.detailTitle')}</b>
-              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
             </div>
             <video src=${detail.url} controls playsInline style=${{ width: '100%', maxHeight: '340px', background: '#000', borderRadius: '6px' }}></video>
             <div style=${{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: '6px 10px', marginTop: '12px', fontSize: '11.5px', lineHeight: 1.7 }}>
@@ -421,11 +421,11 @@ export function ClipsPanel({ onChanged }) {
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
               <button
                 onClick=${() => { toggleFav(detail.id, detail.favorite); setDetail(null); }}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}
               >${detail.favorite ? tr('library.clips.unfavorite') : tr('library.clips.favorite')}</button>
               <button
                 onClick=${() => { regen(detail); setDetail(null); }}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}
               >${tr('library.clips.regenSamePrompt')}</button>
             </div>
           </div>
@@ -908,16 +908,16 @@ export function PhotosPanel({ onChanged }) {
           style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.72)', display: 'grid', placeItems: 'center' }}
           onClick=${(e) => { if (e.target === e.currentTarget) setDetail(null); }}
         >
-          <div style=${{ width: 'min(820px, 92vw)', maxHeight: '88vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '14px' }}>
+          <div style=${{ width: 'min(820px, 92vw)', maxHeight: '88vh', overflow: 'auto', background: 'var(--s1)', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '10px', padding: '14px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
               <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.detailTitle')}</b>
               <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${PHOTO_STATUS_KEYS[detail.status] ? tr(PHOTO_STATUS_KEYS[detail.status]) : detail.status}</span>
               <span style=${{ flex: 1 }}></span>
-              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.close')}</button>
+              <button onClick=${() => setDetail(null)} style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.close')}</button>
             </div>
             <img src=${withCacheBust(detail.url, adjBust[detail.id])} alt=${tr('library.photos.imageAlt')} onClick=${() => setZoomImg(detail.url)}
               style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in', ...(previewFilterText ? { filter: previewFilterText } : {}) }} />
-            <div style=${{ marginTop: '10px', padding: '8px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
+            <div style=${{ marginTop: '10px', padding: '8px 12px', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '8px', background: 'rgb(var(--ink-rgb) / .02)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.autoGradeTitle')}</b>
                 <span style=${{ color: gradeTone(detailGrade), fontSize: '10.5px' }}>${gradeText(detailGrade)}</span>
@@ -943,15 +943,15 @@ export function PhotosPanel({ onChanged }) {
                   ${tr('library.photos.gradeFailedReason', { error: detailGrade.error || '-' })}
                 </p>` : ''}
             </div>
-            <div style=${{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
+            <div style=${{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '8px', background: 'rgb(var(--ink-rgb) / .02)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '2px' }}>
                 <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.manualAdjust')}</b>
                 ${adjustVer
                   ? html`
-                    <span style=${{ padding: '1px 6px', borderRadius: '3px', border: '1px solid rgba(214,179,106,.45)', color: 'var(--accent)', fontSize: '10px' }}>${tr('library.photos.adjustedVersion', { n: adjustVer })}</span>
+                    <span style=${{ padding: '1px 6px', borderRadius: '3px', border: '1px solid rgb(var(--accent-rgb) / .45)', color: 'var(--accent)', fontSize: '10px' }}>${tr('library.photos.adjustedVersion', { n: adjustVer })}</span>
                     <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${adjustSummary(detail.adjust.params)}</span>
                     <button onClick=${loadLastAdjust}
-                      style=${{ height: '22px', padding: '0 8px', borderRadius: '4px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '10.5px', cursor: 'pointer' }}>${tr('library.photos.loadLast')}</button>`
+                      style=${{ height: '22px', padding: '0 8px', borderRadius: '4px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '10.5px', cursor: 'pointer' }}>${tr('library.photos.loadLast')}</button>`
                   : html`<span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>${tr('library.photos.notAdjusted')}</span>`}
                 <span style=${{ flex: 1 }}></span>
                 ${previewFilterText ? html`<span style=${{ color: 'var(--accent)', fontSize: '10.5px' }}>${tr('library.photos.previewing')}</span>` : ''}
@@ -973,13 +973,13 @@ export function PhotosPanel({ onChanged }) {
                 <button onClick=${applyAdjust}
                   disabled=${adjBusy !== '' || adjustIsZero}
                   title=${adjustIsZero ? tr('library.photos.zeroTitle') : tr('library.photos.applyTitle')}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: adjustIsZero ? 'var(--ink3)' : 'var(--accent)', fontSize: '11px', cursor: adjBusy !== '' || adjustIsZero ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || adjustIsZero ? 0.5 : 1 }}>${tr('library.photos.apply')}</button>
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: adjustIsZero ? 'var(--ink3)' : 'var(--accent)', fontSize: '11px', cursor: adjBusy !== '' || adjustIsZero ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || adjustIsZero ? 0.5 : 1 }}>${tr('library.photos.apply')}</button>
                 <button onClick=${resetAdjustSliders}
                   disabled=${adjBusy !== ''}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: adjBusy !== '' ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' ? 0.5 : 1 }}>${tr('library.photos.resetZero')}</button>
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: adjBusy !== '' ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' ? 0.5 : 1 }}>${tr('library.photos.resetZero')}</button>
                 <button onClick=${revertAdjust}
                   disabled=${adjBusy !== '' || !adjustVer}
-                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: adjustVer ? 'var(--ink2)' : 'var(--ink3)', fontSize: '11px', cursor: adjBusy !== '' || !adjustVer ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || !adjustVer ? 0.5 : 1 }}>${tr('library.photos.revert')}</button>
+                  style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: adjustVer ? 'var(--ink2)' : 'var(--ink3)', fontSize: '11px', cursor: adjBusy !== '' || !adjustVer ? 'not-allowed' : 'pointer', opacity: adjBusy !== '' || !adjustVer ? 0.5 : 1 }}>${tr('library.photos.revert')}</button>
                 <span style=${{ flex: 1 }}></span>
                 ${adjustIsZero && html`
                   <span style=${{ color: 'var(--ink3)', fontSize: '10px' }}>${tr('library.photos.zeroHint')}</span>`}
@@ -1027,7 +1027,7 @@ export function PhotosPanel({ onChanged }) {
               <div>
                 <textarea value=${editPrompt} onInput=${(e) => setEditPrompt(e.target.value)}
                   rows="3" placeholder=${tr('library.photos.imagePromptPh')}
-                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
+                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
                   ${tr('library.photos.generationPrompt', { value: generationText })}
                 </span>
@@ -1036,10 +1036,10 @@ export function PhotosPanel({ onChanged }) {
               <div>
                 <textarea value=${editVideoPrompt} onInput=${(e) => setEditVideoPrompt(e.target.value)}
                   rows="2" placeholder=${tr('library.photos.videoPromptPh')}
-                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
+                  style=${{ width: '100%', resize: 'vertical', background: 'var(--s2)', color: 'var(--ink)', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '6px', padding: '6px 8px', fontSize: '11.5px', lineHeight: 1.7, outline: 'none', fontFamily: 'inherit' }}></textarea>
                 <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
                   <button onClick=${() => savePrompt(detail.id)}
-                    style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.savePrompt')}</button>
+                    style=${{ height: '26px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.savePrompt')}</button>
                   <span style=${{ color: 'var(--ink3)', fontSize: '10.5px' }}>
                     ${detail.videoPromptUpdatedAt ? tr('library.photos.videoPromptUpdated', { time: String(detail.videoPromptUpdatedAt).slice(0, 19).replace('T', ' ') }) : tr('library.photos.videoNeverUsed')}
                   </span>
@@ -1070,18 +1070,18 @@ export function PhotosPanel({ onChanged }) {
             <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
               ${!detail.isFinal && html`
                 <button onClick=${() => makeFinal(detail.id)}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.setFinal')}</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.setFinal')}</button>`}
               <button onClick=${() => useInCreation(detail)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.useInVideo')}</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.useInVideo')}</button>
               ${detail.status !== 'approved' && html`
                 <button onClick=${() => review(detail.id, 'approved')}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(214,179,106,.45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.approve')}</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--accent-rgb) / .45)', background: 'transparent', color: 'var(--accent)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.approve')}</button>`}
               ${detail.status !== 'rejected' && html`
                 <button onClick=${() => review(detail.id, 'rejected')}
-                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.reject')}</button>`}
+                  style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.reject')}</button>`}
               <${DownloadLink} url=${detail.url} fileName=${detail.fileName} />
               <button onClick=${() => remove(detail.id)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.delete')}</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.photos.delete')}</button>
             </div>
           </div>
         </div>
@@ -1231,7 +1231,7 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
   const btn = (primary) => ({
     height: '26px', padding: '0 10px', borderRadius: '6px', background: 'transparent',
     fontSize: '11px', cursor: 'pointer',
-    border: primary ? '1px solid rgba(214,179,106,.45)' : '1px solid rgba(240,138,132,.35)',
+    border: primary ? '1px solid rgb(var(--accent-rgb) / .45)' : '1px solid rgb(var(--danger-rgb) / .35)',
     color: primary ? 'var(--accent)' : 'var(--danger)'
   });
 
@@ -1265,13 +1265,13 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
   return html`
     <div style=${{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,5,.55)' }}
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(520px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
+      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(520px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgb(var(--ink-rgb) / .12)', display: 'flex', flexDirection: 'column' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
           <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.taskTrash.title')}</b>
           <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.taskTrash.count', { n: list.length })}</span>
           <span style=${{ flex: 1 }}></span>
           <button onClick=${onClose}
-            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.taskTrash.close')}</button>
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.taskTrash.close')}</button>
         </div>
         <p style=${{ margin: '0 14px 8px', fontSize: '10.5px', color: 'var(--ink3)', lineHeight: 1.6 }}>
           ${tr('library.taskTrash.note')}
@@ -1282,7 +1282,7 @@ function TaskTrashDrawer({ open, items, loading, error, onClose, onChanged }) {
           ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.taskTrash.loading')}</p>`}
           ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${tr('library.taskTrash.empty')}</p>`}
           ${list.map((it) => html`
-            <div key=${it.taskId} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
+            <div key=${it.taskId} style=${{ border: '1px solid rgb(var(--ink-rgb) / .08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
               <div style=${{ fontSize: '11.5px', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${taskLabelText(it) || tr('library.common.noPrompt')}</div>
               <div style=${{ fontSize: '10px', color: 'var(--ink3)', marginTop: '4px', fontFamily: 'ui-monospace, Consolas, monospace', wordBreak: 'break-all' }}>
                 <span title=${tr('tasks.taskIdTooltip', { id: it.taskId || '' })}>${tr('tasks.shortId', { id: shortTaskId(it.taskId) })}</span>
@@ -1361,13 +1361,13 @@ function FinalsPanel({ items, tasks, loading, error, onChanged }) {
       ${play && html`
         <div style=${{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(4,7,5,.78)', display: 'grid', placeItems: 'center' }}
           onClick=${(e) => { if (e.target === e.currentTarget) setPlay(null); }}>
-          <div style=${{ width: 'min(880px, 94vw)', background: 'var(--s1)', border: '1px solid rgba(244,247,245,.12)', borderRadius: '10px', padding: '12px' }}>
+          <div style=${{ width: 'min(880px, 94vw)', background: 'var(--s1)', border: '1px solid rgb(var(--ink-rgb) / .12)', borderRadius: '10px', padding: '12px' }}>
             <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
               <b style=${{ fontSize: '13px', fontWeight: 500, color: 'var(--ink)' }}>${play.fileName || play.id}</b>
               <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${fmtDurSec(play.durationSec)} · ${play.resolution || '-'} · ${tr('library.finals.origin', { origin: originText(play.origin) })}</span>
               <span style=${{ flex: 1 }}></span>
               <button onClick=${() => setPlay(null)}
-                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
+                style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.clips.close')}</button>
             </div>
             <video src=${play.url} controls autoPlay playsInline
               style=${{ width: '100%', maxHeight: '68vh', background: '#000', borderRadius: '6px' }}></video>
@@ -1411,7 +1411,7 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
   const btn = (primary) => ({
     height: '26px', padding: '0 10px', borderRadius: '6px', background: 'transparent',
     fontSize: '11px', cursor: 'pointer',
-    border: primary ? '1px solid rgba(214,179,106,.45)' : '1px solid rgba(240,138,132,.35)',
+    border: primary ? '1px solid rgb(var(--accent-rgb) / .45)' : '1px solid rgb(var(--danger-rgb) / .35)',
     color: primary ? 'var(--accent)' : 'var(--danger)'
   });
 
@@ -1460,7 +1460,7 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
   return html`
     <div style=${{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(4,7,5,.55)' }}
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgba(244,247,245,.12)', display: 'flex', flexDirection: 'column' }}>
+      <aside style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', background: 'var(--s1)', borderLeft: '1px solid rgb(var(--ink-rgb) / .12)', display: 'flex', flexDirection: 'column' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 14px 10px' }}>
           <b style=${{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.recycle.title')}</b>
           <span style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.recycle.count', { n: (items || []).length })}</span>
@@ -1468,15 +1468,15 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
           <button onClick=${purgeAll} disabled=${busy === 'all' || (items || []).length === 0}
             style=${{ ...btn(false), opacity: (items || []).length ? 1 : .4 }}>${tr('library.recycle.clear')}</button>
           <button onClick=${onClose}
-            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgba(244,247,245,.12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.recycle.close')}</button>
+            style=${{ height: '28px', padding: '0 10px', borderRadius: '6px', border: '1px solid rgb(var(--ink-rgb) / .12)', background: 'transparent', color: 'var(--ink2)', fontSize: '11px', cursor: 'pointer' }}>${tr('library.recycle.close')}</button>
         </div>
         <div style=${{ display: 'flex', gap: '6px', padding: '0 14px 10px', flexWrap: 'wrap' }}>
           ${RECYCLE_TABS.map((t) => html`
             <button key=${t.key} onClick=${() => setOpenType(t.key)}
               style=${{
                 height: '26px', padding: '0 9px', borderRadius: '13px', fontSize: '11px', cursor: 'pointer',
-                border: '1px solid ' + (openType === t.key ? 'rgba(214,179,106,.5)' : 'rgba(244,247,245,.10)'),
-                background: openType === t.key ? 'rgba(214,179,106,.13)' : 'transparent',
+                border: '1px solid ' + (openType === t.key ? 'rgb(var(--accent-rgb) / .5)' : 'rgb(var(--ink-rgb) / .10)'),
+                background: openType === t.key ? 'rgb(var(--accent-rgb) / .13)' : 'transparent',
                 color: openType === t.key ? 'var(--accent)' : 'var(--ink3)'
               }}
             >${tr(t.labelKey)}</button>
@@ -1488,7 +1488,7 @@ function RecycleDrawer({ open, items, loading, error, onClose, onChanged }) {
           ${loading && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)' }}>${tr('library.recycle.loading')}</p>`}
           ${!loading && list.length === 0 && html`<p style=${{ fontSize: '11px', color: 'var(--ink3)', padding: '10px 0' }}>${openType === 'all' ? tr('library.recycle.emptyAll') : tr('library.recycle.emptyType')}</p>`}
           ${list.map((it) => html`
-            <div key=${it.type + '/' + it.id} style=${{ border: '1px solid rgba(244,247,245,.08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
+            <div key=${it.type + '/' + it.id} style=${{ border: '1px solid rgb(var(--ink-rgb) / .08)', borderRadius: '8px', padding: '10px', marginBottom: '8px', background: 'var(--s2)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style=${{ fontSize: '10px', color: 'var(--onaccent)', background: 'var(--accent)', borderRadius: '3px', padding: '1px 6px', flex: '0 0 auto' }}>${RECYCLE_TYPE_KEYS[it.type] ? tr(RECYCLE_TYPE_KEYS[it.type]) : it.type}</span>
                 <span style=${{ fontSize: '11.5px', color: 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${recycleItemLabel(it)}</span>

@@ -597,9 +597,9 @@ export function CreateSmartWizard() {
                 const idx = photos.findIndex((x) => x.id === p.id);
                 return html`<button key=${p.id} onClick=${() => togglePick(p)}
                   className=${'rounded-[6px] overflow-hidden border text-left ' + (idx >= 0 ? 'border-accent' : 'border-white/[.10]')}
-                  style=${{ position: 'relative', background: '#0f1712' }}>
+                  style=${{ position: 'relative', background: 'var(--s3)' }}>
                   ${p.url ? html`<img src=${p.url} alt=${tr('createSmart.step3.alt')} className="w-full h-[86px] object-cover" />` : html`<div className="w-full h-[86px] grid place-items-center text-[10px] text-ink3">${tr('createSmart.step3.noPreview')}</div>`}
-                  ${idx >= 0 && html`<span style=${{ position: 'absolute', top: '4px', left: '4px', height: '16px', minWidth: '16px', padding: '0 4px', borderRadius: '3px', background: 'var(--accent)', color: '#0b100d', fontSize: '10px', lineHeight: '16px', textAlign: 'center' }}>${idx + 1}</span>`}
+                  ${idx >= 0 && html`<span style=${{ position: 'absolute', top: '4px', left: '4px', height: '16px', minWidth: '16px', padding: '0 4px', borderRadius: '3px', background: 'var(--accent)', color: 'var(--onaccent)', fontSize: '10px', lineHeight: '16px', textAlign: 'center' }}>${idx + 1}</span>`}
                   <div className="px-1.5 py-1 text-[10px] text-ink3 truncate">${p.label || ''}${p.isFinal ? tr('createSmart.picker.finalSuffix') : ''}</div>
                 </button>`;
               })}

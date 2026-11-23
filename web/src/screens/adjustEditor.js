@@ -132,9 +132,9 @@ function SliderRow({ item, value, onChange, onReset }) {
   const pct = ((clampVal(value) + 50) / 100) * 100;
   const from = Math.min(50, pct);
   const to = Math.max(50, pct);
-  const track = 'linear-gradient(to right, rgba(244,247,245,.14) 0%, rgba(244,247,245,.14) ' + from +
-    '%, var(--accent) ' + from + '%, var(--accent) ' + to + '%, rgba(244,247,245,.14) ' + to +
-    '%, rgba(244,247,245,.14) 100%)';
+  const track = 'linear-gradient(to right, rgb(var(--ink-rgb) / .14) 0%, rgb(var(--ink-rgb) / .14) ' + from +
+    '%, var(--accent) ' + from + '%, var(--accent) ' + to + '%, rgb(var(--ink-rgb) / .14) ' + to +
+    '%, rgb(var(--ink-rgb) / .14) 100%)';
   const title = item.psnr
     ? tr('editor.adjust.psnrTitle', { psnr: item.psnr })
       + (item.noteKey ? tr('editor.adjust.psnrNote', { note: tr(item.noteKey) }) : '')

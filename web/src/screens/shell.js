@@ -20,6 +20,7 @@
 import { navigate } from '../router.js';
 import { t } from '../i18n/index.js';
 import { LangSwitch } from '../components/langSwitch.js';
+import { ThemeToggle } from '../components/themeToggle.js';
 import { JobBar, useTasksPoll } from '../components/jobBar.js';
 // 2026-11-16 用户口径（P4）：全局悬浮小助手下线 —— 小智只保留两处：
 // ① 首页 `/` 的整页小智（AssistantPage）② 左栏「小智 · 对话首页」入口。
@@ -120,8 +121,9 @@ function Rail({ view }) {
       )}
 
       <span className="flex-1"></span>
-      <div className="px-2.5 pb-2">
-        <${LangSwitch} />
+      <div className="px-2.5 pb-2 flex items-center gap-1.5">
+        <${LangSwitch} style=${{ flex: '1 1 auto', minWidth: 0 }} />
+        <${ThemeToggle} />
       </div>
       <${RailItem} item=${{ route: '/settings', label: t('nav.settings'), icon: '⚙' }} active=${view === 'settings'} />
     </aside>

@@ -27,16 +27,16 @@ export function LangSwitch({ compact = false, collapsed = false, style = null } 
         style=${{
           width: '30px',
           height: '24px',
-          border: '1px solid rgba(255,255,255,.12)',
+          border: '1px solid rgb(var(--ink-rgb) / .12)',
           borderRadius: '6px',
-          background: 'rgba(255,255,255,.03)',
+          background: 'rgb(var(--ink-rgb) / .03)',
           color: 'var(--ink2)',
           fontSize: '10px',
           lineHeight: '1',
           cursor: 'pointer',
           ...(style || {})
         }}
-      >${current === 'zh' ? '中' : 'EN'}</button> // i18n-allow: language badge glyph
+      >${/* i18n-allow: language badge glyph */ current === 'zh' ? '中' : 'EN'}</button>
     `;
   }
   return html`
@@ -48,9 +48,9 @@ export function LangSwitch({ compact = false, collapsed = false, style = null } 
         alignItems: 'center',
         gap: '2px',
         padding: '2px',
-        border: '1px solid rgba(255,255,255,.10)',
+        border: '1px solid rgb(var(--ink-rgb) / .10)',
         borderRadius: '6px',
-        background: 'rgba(255,255,255,.02)',
+        background: 'rgb(var(--ink-rgb) / .02)',
         ...(style || {})
       }}
     >

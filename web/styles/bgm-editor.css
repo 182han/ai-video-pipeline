@@ -46,14 +46,14 @@
   padding: 2px 7px;
   border-radius: 3px;
   color: var(--warn);
-  background: rgba(224, 179, 79, .09);
-  border: 1px solid rgba(224, 179, 79, .28);
+  background: rgb(var(--warn-rgb) / .09);
+  border: 1px solid rgb(var(--warn-rgb) / .28);
   white-space: nowrap;
 }
 .bgm-dirty.saved {
   color: var(--ink3);
   background: transparent;
-  border-color: rgba(255, 255, 255, .08);
+  border-color: rgb(var(--ink-rgb) / .08);
 }
 
 /* ---------- 按钮 ---------- */
@@ -61,7 +61,7 @@
   height: 32px;
   padding: 0 12px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, .10);
+  border: 1px solid rgb(var(--ink-rgb) / .10);
   background: transparent;
   color: var(--ink2);
   font-size: 12px;
@@ -75,7 +75,7 @@
   transition: background-color .15s, color .15s, border-color .15s;
 }
 .bgm-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, .05);
+  background: rgb(var(--ink-rgb) / .05);
   color: var(--ink);
 }
 .bgm-btn:disabled { opacity: .42; cursor: not-allowed; }
@@ -89,11 +89,11 @@
 .bgm-btn.sm { height: 26px; padding: 0 8px; font-size: 11px; border-radius: 5px; }
 .bgm-btn.danger:hover:not(:disabled) {
   color: var(--danger);
-  border-color: rgba(240, 138, 132, .45);
-  background: rgba(240, 138, 132, .08);
+  border-color: rgb(var(--danger-rgb) / .45);
+  background: rgb(var(--danger-rgb) / .08);
 }
-.bgm-btn.accent { color: var(--accent); border-color: rgba(214, 179, 106, .38); }
-.bgm-btn.accent:hover:not(:disabled) { background: rgba(214, 179, 106, .08); color: var(--accent); }
+.bgm-btn.accent { color: var(--accent); border-color: rgb(var(--accent-rgb) / .38); }
+.bgm-btn.accent:hover:not(:disabled) { background: rgb(var(--accent-rgb) / .08); color: var(--accent); }
 
 /* ---------- 状态 / 提示 ---------- */
 .bgm-status {
@@ -107,8 +107,8 @@
 .bgm-status.warn { color: var(--warn); }
 .bgm-status.busy { color: var(--ink2); }
 .bgm-warnbox {
-  border: 1px solid rgba(224, 179, 79, .30);
-  background: rgba(224, 179, 79, .06);
+  border: 1px solid rgb(var(--warn-rgb) / .30);
+  background: rgb(var(--warn-rgb) / .06);
   color: var(--warn);
   border-radius: 6px;
   padding: 7px 10px;
@@ -120,8 +120,8 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  border: 1px solid rgba(240, 138, 132, .38);
-  background: rgba(240, 138, 132, .07);
+  border: 1px solid rgb(var(--danger-rgb) / .38);
+  background: rgb(var(--danger-rgb) / .07);
   color: var(--ink2);
   border-radius: 6px;
   padding: 8px 10px;
@@ -145,7 +145,7 @@
 
 /* ---------- 卡片 ---------- */
 .bgm-card {
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 1px solid rgb(var(--ink-rgb) / .08);
   background: var(--s1);
   border-radius: 8px;
   overflow: hidden;
@@ -155,7 +155,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / .06);
   font-size: 12px;
   color: var(--ink);
 }
@@ -167,7 +167,7 @@
 .bgm-input {
   height: 30px;
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, .09);
+  border: 1px solid rgb(var(--ink-rgb) / .09);
   background: var(--s2);
   color: var(--ink);
   font-size: 12px;
@@ -175,7 +175,7 @@
   padding: 0 9px;
   outline: none;
 }
-.bgm-input:focus { border-color: rgba(214, 179, 106, .45); }
+.bgm-input:focus { border-color: rgb(var(--accent-rgb) / .45); }
 .bgm-input::placeholder { color: var(--ink3); }
 .bgm-input.grow { flex: 1 1 180px; min-width: 140px; }
 .bgm-task-grid {
@@ -185,7 +185,7 @@
 }
 .bgm-task {
   text-align: left;
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 1px solid rgb(var(--ink-rgb) / .08);
   background: var(--s1);
   border-radius: 8px;
   padding: 12px;
@@ -198,7 +198,7 @@
   transition: border-color .15s, background-color .15s;
 }
 .bgm-task:hover {
-  border-color: rgba(214, 179, 106, .45);
+  border-color: rgb(var(--accent-rgb) / .45);
   background: var(--s2);
 }
 .bgm-task-title {
@@ -236,20 +236,20 @@
   height: 20px;
   padding: 0 7px;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, .10);
+  border: 1px solid rgb(var(--ink-rgb) / .10);
   font-size: 10px;
   color: var(--ink3);
   white-space: nowrap;
 }
 .bgm-badge.ok {
   color: var(--accent);
-  border-color: rgba(214, 179, 106, .40);
-  background: rgba(214, 179, 106, .08);
+  border-color: rgb(var(--accent-rgb) / .40);
+  background: rgb(var(--accent-rgb) / .08);
 }
 .bgm-badge.warn {
   color: var(--warn);
-  border-color: rgba(224, 179, 79, .35);
-  background: rgba(224, 179, 79, .07);
+  border-color: rgb(var(--warn-rgb) / .35);
+  background: rgb(var(--warn-rgb) / .07);
 }
 .bgm-badge.plain { color: var(--ink3); }
 
@@ -269,7 +269,7 @@
 .bgm-video-wrap {
   position: relative;
   background: #000;
-  border: 1px solid rgba(255, 255, 255, .06);
+  border: 1px solid rgb(var(--ink-rgb) / .06);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -305,8 +305,8 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  border: 1px solid rgba(214, 179, 106, .28);
-  background: rgba(214, 179, 106, .06);
+  border: 1px solid rgb(var(--accent-rgb) / .28);
+  background: rgb(var(--accent-rgb) / .06);
   border-radius: 6px;
   padding: 6px 9px;
   font-size: 11px;
@@ -332,16 +332,16 @@
   font-family: inherit;
   cursor: pointer;
 }
-.bgm-tab:hover { color: var(--ink2); background: rgba(255, 255, 255, .04); }
+.bgm-tab:hover { color: var(--ink2); background: rgb(var(--ink-rgb) / .04); }
 .bgm-tab.active {
   color: var(--accent);
-  background: rgba(214, 179, 106, .10);
-  border-color: rgba(214, 179, 106, .25);
+  background: rgb(var(--accent-rgb) / .10);
+  border-color: rgb(var(--accent-rgb) / .25);
 }
 .bgm-lib {
   max-height: 236px;
   overflow: auto;
-  border-top: 1px solid rgba(255, 255, 255, .05);
+  border-top: 1px solid rgb(var(--ink-rgb) / .05);
   margin-top: 8px;
 }
 .bgm-lib-item {
@@ -357,7 +357,7 @@
   font-family: inherit;
   cursor: pointer;
 }
-.bgm-lib-item:hover { background: rgba(255, 255, 255, .05); color: var(--ink); }
+.bgm-lib-item:hover { background: rgb(var(--ink-rgb) / .05); color: var(--ink); }
 .bgm-lib-main { min-width: 0; flex: 1; }
 .bgm-lib-title { display: block; font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgm-lib-meta { display: block; font-size: 9.5px; color: var(--ink3); font-family: 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; }
@@ -383,7 +383,7 @@
   height: 28px;
   width: 100%;
   border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, .09);
+  border: 1px solid rgb(var(--ink-rgb) / .09);
   background: var(--s2);
   color: var(--ink);
   font-size: 12px;
@@ -392,20 +392,20 @@
   outline: none;
 }
 .bgm-field input:focus,
-.bgm-field select:focus { border-color: rgba(214, 179, 106, .45); }
+.bgm-field select:focus { border-color: rgb(var(--accent-rgb) / .45); }
 .bgm-props-note { margin-top: 8px; font-size: 10.5px; line-height: 1.6; color: var(--ink3); }
 .bgm-props-actions { display: flex; gap: 8px; margin-top: 10px; }
 .bgm-props-empty { font-size: 11px; line-height: 1.7; color: var(--ink3); }
 
 /* ---------- 时间轴 ---------- */
-.bgm-tl { border: 1px solid rgba(255, 255, 255, .08); background: var(--s1); border-radius: 8px; overflow: hidden; }
+.bgm-tl { border: 1px solid rgb(var(--ink-rgb) / .08); background: var(--s1); border-radius: 8px; overflow: hidden; }
 .bgm-tl-head {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   padding: 9px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / .06);
 }
 .bgm-tl-title { font-size: 12px; color: var(--ink); }
 .bgm-tl-hint { font-size: 10.5px; color: var(--ink3); }
@@ -417,8 +417,8 @@
   gap: 7px;
   padding: 2px 8px;
   border-radius: 3px;
-  border: 1px solid rgba(214, 179, 106, .38);
-  background: rgba(214, 179, 106, .10);
+  border: 1px solid rgb(var(--accent-rgb) / .38);
+  background: rgb(var(--accent-rgb) / .10);
   color: var(--accent);
   font-size: 10.5px;
   font-family: 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
@@ -428,12 +428,12 @@
 .bgm-drag-readout span { color: var(--ink2); }
 .bgm-tl-body { display: grid; grid-template-columns: 92px minmax(0, 1fr); }
 .bgm-tl-labels {
-  border-right: 1px solid rgba(255, 255, 255, .06);
+  border-right: 1px solid rgb(var(--ink-rgb) / .06);
   background: var(--s2);
   display: flex;
   flex-direction: column;
 }
-.bgm-ruler-spacer { height: 24px; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.bgm-ruler-spacer { height: 24px; border-bottom: 1px solid rgb(var(--ink-rgb) / .06); }
 .bgm-lane-label {
   display: flex;
   align-items: center;
@@ -441,7 +441,7 @@
   padding: 0 10px;
   font-size: 10.5px;
   color: var(--ink3);
-  border-bottom: 1px solid rgba(255, 255, 255, .05);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / .05);
   white-space: nowrap;
 }
 .bgm-lane-label b { color: var(--ink2); font-weight: 500; }
@@ -450,13 +450,13 @@
 .bgm-ruler {
   position: relative;
   height: 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / .06);
   background: var(--s2);
   cursor: crosshair;
   overflow: hidden;
 }
-.bgm-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .08); }
-.bgm-tick.major { background: rgba(255, 255, 255, .16); }
+.bgm-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgb(var(--ink-rgb) / .08); }
+.bgm-tick.major { background: rgb(var(--ink-rgb) / .16); }
 .bgm-tick span {
   position: absolute;
   top: 3px;
@@ -466,7 +466,7 @@
   font-family: 'SF Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
   white-space: nowrap;
 }
-.bgm-lane { position: relative; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.bgm-lane { position: relative; border-bottom: 1px solid rgb(var(--ink-rgb) / .05); }
 .bgm-lane:last-child { border-bottom: 0; }
 .bgm-lane-empty {
   position: absolute;
@@ -483,11 +483,11 @@
   position: absolute;
   top: 4px;
   bottom: 4px;
-  border: 1px solid rgba(255, 255, 255, .10);
+  border: 1px solid rgb(var(--ink-rgb) / .10);
   border-radius: 4px;
   background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, .045) 0 2px, transparent 2px 12px),
-    rgba(255, 255, 255, .03);
+    repeating-linear-gradient(90deg, rgb(var(--ink-rgb) / .045) 0 2px, transparent 2px 12px),
+    rgb(var(--ink-rgb) / .03);
   color: var(--ink3);
   font-size: 10px;
   display: flex;
@@ -501,15 +501,15 @@
   top: 4px;
   bottom: 4px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, .13);
+  border: 1px solid rgb(var(--ink-rgb) / .13);
   overflow: hidden;
   cursor: grab;
   user-select: none;
   touch-action: none;
 }
-.bgm-clip.music { background: rgba(214, 179, 106, .16); }
+.bgm-clip.music { background: rgb(var(--accent-rgb) / .16); }
 .bgm-clip.ambient { background: rgba(150, 182, 160, .18); }
-.bgm-clip.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(214, 179, 106, .55); }
+.bgm-clip.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / .55); }
 .bgm-clip:active { cursor: grabbing; }
 .bgm-clip canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: .92; pointer-events: none; }
 .bgm-clip-name {
@@ -535,7 +535,7 @@
   cursor: ew-resize;
   z-index: 3;
 }
-.bgm-clip-handle:hover { background: rgba(214, 179, 106, .45); }
+.bgm-clip-handle:hover { background: rgb(var(--accent-rgb) / .45); }
 .bgm-clip-handle.left { left: 0; }
 .bgm-clip-handle.right { right: 0; }
 .bgm-playhead {
@@ -544,7 +544,7 @@
   bottom: 0;
   width: 1px;
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(214, 179, 106, .5);
+  box-shadow: 0 0 6px rgb(var(--accent-rgb) / .5);
   pointer-events: none;
   z-index: 6;
 }
@@ -561,7 +561,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  border-left: 1px dashed rgba(240, 138, 132, .45);
+  border-left: 1px dashed rgb(var(--danger-rgb) / .45);
   pointer-events: none;
   z-index: 4;
 }
@@ -570,7 +570,7 @@
   gap: 16px;
   flex-wrap: wrap;
   padding: 7px 12px;
-  border-top: 1px solid rgba(255, 255, 255, .05);
+  border-top: 1px solid rgb(var(--ink-rgb) / .05);
   font-size: 10.5px;
   color: var(--ink3);
 }

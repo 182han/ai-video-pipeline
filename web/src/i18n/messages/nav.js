@@ -17,6 +17,8 @@ export default {
       libraryTitle: '成片 / 片段 / 图片',
       expand: '展开导航',
       collapse: '收起导航',
+      themeToDark: '切到夜间',
+      themeToLight: '切到日间',
       mainAria: '主导航'
     }
   },
@@ -35,6 +37,8 @@ export default {
       libraryTitle: 'Finals / Clips / Photos',
       expand: 'Expand navigation',
       collapse: 'Collapse navigation',
+      themeToDark: 'Switch to dark',
+      themeToLight: 'Switch to light',
       mainAria: 'Main navigation'
     }
   }

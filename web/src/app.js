@@ -8,6 +8,7 @@
 import { currentRoute } from './router.js';
 import { AppShell } from './screens/shell.js';
 import { Boundary } from './components/boundary.js';
+import { initTheme } from './theme.js';
 import { getLocale, subscribe, t } from './i18n/index.js';
 
 const { React, ReactDOM } = window;
@@ -49,3 +50,5 @@ function Router() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(html`<${Router} />`);
+// 与首屏内联脚本同源；这里再跑一次，顺带接上跨标签页同步（theme.js 的 storage 监听）
+initTheme();

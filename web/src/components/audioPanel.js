@@ -25,7 +25,7 @@ function drawPeaks(canvas, peaks) {
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = 'rgba(214, 179, 106, 0.55)';
+  ctx.fillStyle = 'rgb(var(--accent-rgb) / 0.55)';
   const n = Math.min(peaks.length, Math.floor(w / 2));
   const step = peaks.length / n;
   for (let i = 0; i < n; i++) {
@@ -319,7 +319,7 @@ export function AudioPanel({ project, bgm, duration, onCommit, onReloadBgm }) {
       ${libMsg && html`<p style=${{ margin: '0 0 6px', fontSize: '11px', color: 'var(--ink3)' }}>${libMsg}</p>`}
       ${tracks.length === 0 && html`<p className="ed-sub">${tr('editor.audio.emptyLibrary', { max: MAX_AUDIO_MB })}</p>`}
       ${tracks.map((t) => html`
-        <div key=${t.id} style=${{ padding: '5px 0', borderTop: '1px solid rgba(244,247,245,.05)' }}>
+        <div key=${t.id} style=${{ padding: '5px 0', borderTop: '1px solid rgb(var(--ink-rgb) / .05)' }}>
           <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button className="ed-btn" title=${playingId === t.id ? tr('editor.audio.stop') : tr('editor.audio.play')}
               style=${{ width: '26px', height: '26px', borderRadius: '50%', padding: 0, flex: '0 0 auto' }}

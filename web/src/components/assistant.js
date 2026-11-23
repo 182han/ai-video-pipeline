@@ -32,8 +32,8 @@ const POS_KEY = 'vs_assistant_pos';
 // V2 任务播报是「系统消息」：与普通回复区分（香槟金描边），沿用既有 xz-bubble，
 // 只加内联样式——web/styles 的 CSS 是离线生成的，本次不动样式表。
 const SYSTEM_BUBBLE_STYLE = {
-  border: '1px solid rgba(214,179,106,.30)',
-  background: 'rgba(214,179,106,.07)'
+  border: '1px solid rgb(var(--accent-rgb) / .30)',
+  background: 'rgb(var(--accent-rgb) / .07)'
 };
 
 // 逐段出图开关（2026-11-16 20:4x 用户决定）：**默认关闭**，用户可在计划卡手动打开。

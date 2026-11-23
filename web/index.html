@@ -10,6 +10,11 @@
 <link rel="stylesheet" href="/app/styles/adjust-editor.css">
 <link rel="stylesheet" href="/app/styles/editor.css">
 <link rel="stylesheet" href="/app/styles/assistant-home.css">
+<script>
+/* 首屏主题：在 React 挂载前先设属性，避免浅色用户看到一帧深色。
+   夜间是默认态，只有显式选过 light 才加属性。 */
+try { if (localStorage.getItem('vs_theme') === 'light') document.documentElement.setAttribute('data-theme', 'light'); } catch (e) {}
+</script>
 <script src="/app/vendor/react.production.min.js"></script>
 <script src="/app/vendor/react-dom.production.min.js"></script>
 <script src="/app/vendor/htm.umd.js"></script>

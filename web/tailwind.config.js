@@ -20,7 +20,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Inter', 'Segoe UI', '-apple-system', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
-        display: ['Bodoni MT', 'Perpetua Titling MT', 'Baskerville Old Face', 'Garamond', 'Georgia', 'serif'],
+        display: ['Bodoni MT', 'Perpetua Titling MT', 'Baskerville Old Face', 'Garamond', 'Georgia', 'PingFang SC', 'Microsoft YaHei', 'serif'],
         num: ['SF Mono', 'Cascadia Mono', 'Consolas', 'ui-monospace', 'monospace']
       }
     }

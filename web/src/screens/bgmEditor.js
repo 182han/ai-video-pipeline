@@ -175,7 +175,7 @@ function drawWave(canvas, peaks, opts) {
   const startIdx = Math.floor(from * list.length);
   const endIdx = Math.min(list.length, Math.max(startIdx + 1, Math.ceil(to * list.length)));
   const span = Math.max(1, endIdx - startIdx);
-  const color = opts.kind === 'ambient' ? 'rgba(158,190,170,.80)' : 'rgba(214,179,106,.80)';
+  const color = opts.kind === 'ambient' ? 'rgba(158,190,170,.80)' : 'rgb(var(--accent-rgb) / .80)';
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
 

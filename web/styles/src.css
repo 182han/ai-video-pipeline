@@ -22,8 +22,94 @@
   --accent-rgb: 214 179 106;
   --danger-rgb: 240 138 132;
   --warn-rgb: 224 179 79;
+  /* 正文墨色的通道值：手写 CSS 里 rgba(244,247,245,α) 这类覆盖层统一改用它 */
+  --ink-rgb: 244 247 245;
   color-scheme: dark;
 }
+
+/* ===== 日间（2026-11-23 新增）=====
+   只改上面这批变量 + 少量“深色专用”工具类；夜间保持原值不动。
+   冷白画布 + 纯白卡片 + 古铜金强调，保留深绿黑/香槟金同一族气质。 */
+html[data-theme="light"] {
+  --s0: #F3F5F7;
+  --s1: #FFFFFF;
+  --s2: #FFFFFF;
+  --s3: #F7F9FA;
+  --s4: #EDF0F3;
+  --s5: #DEE3E7;
+  --ink: #15191D;
+  --ink2: #495259;
+  --ink3: #636D75;
+  --accent: #8A6520;
+  --onaccent: #FFFFFF;
+  --danger: #A32A22;
+  --warn: #8A5A12;
+  --accent-rgb: 138 101 32;
+  --danger-rgb: 163 42 34;
+  --warn-rgb: 138 90 18;
+  --ink-rgb: 21 25 29;
+  color-scheme: light;
+}
+
+/* 滚动条：夜间是浅色拇指，日间要反过来 */
+html[data-theme="light"] * { scrollbar-color: rgba(21,25,29,.18) transparent; }
+html[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: rgba(21,25,29,.18); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+
+/* “深色专用”的半透明白：日间换成半透明墨色（同一套 <alpha> 语义） */
+html[data-theme="light"] .bg-white\/\[\.03\] { background-color: rgb(var(--ink-rgb) / .03); }
+html[data-theme="light"] .bg-white\/\[\.04\] { background-color: rgb(var(--ink-rgb) / .04); }
+html[data-theme="light"] .bg-white\/\[\.05\] { background-color: rgb(var(--ink-rgb) / .05); }
+html[data-theme="light"] .bg-white\/\[\.06\] { background-color: rgb(var(--ink-rgb) / .06); }
+html[data-theme="light"] .bg-white\/\[\.08\] { background-color: rgb(var(--ink-rgb) / .08); }
+html[data-theme="light"] .bg-white\/\[\.10\] { background-color: rgb(var(--ink-rgb) / .10); }
+html[data-theme="light"] .bg-white\/\[\.14\] { background-color: rgb(var(--ink-rgb) / .14); }
+
+html[data-theme="light"] .border-white\/\[\.04\] { border-color: rgb(var(--ink-rgb) / .04); }
+html[data-theme="light"] .border-white\/\[\.05\] { border-color: rgb(var(--ink-rgb) / .05); }
+html[data-theme="light"] .border-white\/\[\.06\] { border-color: rgb(var(--ink-rgb) / .06); }
+html[data-theme="light"] .border-white\/\[\.07\] { border-color: rgb(var(--ink-rgb) / .07); }
+html[data-theme="light"] .border-white\/\[\.08\] { border-color: rgb(var(--ink-rgb) / .08); }
+html[data-theme="light"] .border-white\/\[\.09\] { border-color: rgb(var(--ink-rgb) / .09); }
+html[data-theme="light"] .border-white\/\[\.10\] { border-color: rgb(var(--ink-rgb) / .10); }
+html[data-theme="light"] .border-white\/\[\.12\] { border-color: rgb(var(--ink-rgb) / .12); }
+
+html[data-theme="light"] .divide-white\/\[\.04\] > :not([hidden]) ~ :not([hidden]) { border-color: rgb(var(--ink-rgb) / .04); }
+html[data-theme="light"] .divide-white\/\[\.05\] > :not([hidden]) ~ :not([hidden]) { border-color: rgb(var(--ink-rgb) / .05); }
+
+html[data-theme="light"] .hover\:bg-white\/\[\.03\]:hover { background-color: rgb(var(--ink-rgb) / .03); }
+html[data-theme="light"] .hover\:bg-white\/\[\.04\]:hover { background-color: rgb(var(--ink-rgb) / .04); }
+html[data-theme="light"] .hover\:bg-white\/\[\.05\]:hover { background-color: rgb(var(--ink-rgb) / .05); }
+html[data-theme="light"] .hover\:bg-white\/\[\.06\]:hover { background-color: rgb(var(--ink-rgb) / .06); }
+
+/* ===== 左栏主题开关（两套 rail 共用） ===== */
+.theme-toggle {
+  width: 30px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(var(--ink-rgb) / .12);
+  border-radius: 6px;
+  background: rgb(var(--ink-rgb) / .03);
+  color: var(--ink2);
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+}
+.theme-toggle.is-compact { height: 24px; }
+.theme-toggle:hover {
+  background: rgb(var(--accent-rgb) / .10);
+  border-color: rgb(var(--accent-rgb) / .40);
+  color: var(--accent);
+}
+.theme-toggle svg { width: 14px; height: 14px; display: block; }
+.theme-toggle .ico-moon { display: none; }
+.theme-toggle .ico-sun { display: block; }
+html[data-theme="light"] .theme-toggle .ico-moon { display: block; }
+html[data-theme="light"] .theme-toggle .ico-sun { display: none; }
 
 /* 深色滚动条：不设会是一条白 */
 * { scrollbar-width: thin; scrollbar-color: rgba(244,247,245,.18) transparent; }

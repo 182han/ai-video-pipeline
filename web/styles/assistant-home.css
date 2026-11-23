@@ -27,9 +27,9 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    radial-gradient(1px 1px at 18% 26%, rgba(214, 179, 106, .55), transparent 60%),
+    radial-gradient(1px 1px at 18% 26%, rgb(var(--accent-rgb) / .55), transparent 60%),
     radial-gradient(1px 1px at 72% 18%, rgba(167, 243, 208, .55), transparent 60%),
-    radial-gradient(1px 1px at 84% 62%, rgba(214, 179, 106, .35), transparent 60%),
+    radial-gradient(1px 1px at 84% 62%, rgb(var(--accent-rgb) / .35), transparent 60%),
     radial-gradient(1.5px 1.5px at 36% 74%, rgba(110, 231, 183, .35), transparent 60%);
   opacity: .55;
 }
@@ -296,7 +296,8 @@
 }
 .xz-title {
   margin: 6px 0 0;
-  font-family: var(--font-display, 'Bodoni MT', Georgia, serif);
+  /* 中文走系统黑体；Latin 仍由前面的衬线字体接管 */
+  font-family: var(--font-display, 'Bodoni MT', 'Baskerville Old Face', Georgia, 'PingFang SC', 'Microsoft YaHei', serif);
   font-size: 26px;
   font-weight: 500;
   letter-spacing: .02em;
@@ -353,7 +354,7 @@
   font-size: 10px;
   letter-spacing: .18em;
   text-transform: uppercase;
-  color: rgba(214, 179, 106, .85);
+  color: rgb(var(--accent-rgb) / .85);
   font-family: var(--font-num, 'SF Mono', Consolas, monospace);
 }
 .xz-intro-sub {
@@ -432,8 +433,8 @@
   margin: 0 auto;
   padding: 10px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(224, 179, 79, .28);
-  background: rgba(224, 179, 79, .08);
+  border: 1px solid rgb(var(--warn-rgb) / .28);
+  background: rgb(var(--warn-rgb) / .08);
   font-size: 12px;
   line-height: 1.7;
   color: var(--warn);
@@ -604,7 +605,7 @@
   margin: 10px 0 0;
   font-size: 11px;
   line-height: 1.6;
-  color: rgba(240, 138, 132, .88);
+  color: rgb(var(--danger-rgb) / .88);
   word-break: break-all;
 }
 .xz-mic-actions {
@@ -627,7 +628,7 @@
 }
 .xz-mic-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, .08);
-  border-color: rgba(214, 179, 106, .35);
+  border-color: rgb(var(--accent-rgb) / .35);
 }
 .xz-mic-btn.is-primary {
   border-color: transparent;
@@ -678,7 +679,7 @@
   max-width: min(92vw, 520px);
   padding: 9px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(240, 138, 132, .35);
+  border: 1px solid rgb(var(--danger-rgb) / .35);
   background: rgba(18, 10, 9, .92);
   color: #f4f7f5;
   font-size: 12px;
@@ -724,3 +725,137 @@
 @media (max-width: 640px) {
   .xz-mic-status { bottom: 92px; font-size: 11.5px; padding: 8px 12px; }
 }
+
+/* ============================================================
+   日间（2026-11-23）：小智首页 / 对话
+   ------------------------------------------------------------
+   夜间是绿黑极光；日间换成冷白纸面 + 轻绿雾，球仍是同一套绿。
+   只覆盖“深色专用”的硬编码面，颜色变量（--ink/--accent…）自动跟随。
+   ============================================================ */
+html[data-theme="light"] .xz-root {
+  color: var(--ink);
+  background:
+    radial-gradient(1100px 720px at 52% -12%, rgba(52, 211, 153, .10), transparent 62%),
+    radial-gradient(820px 560px at 88% 12%, rgba(34, 211, 238, .05), transparent 60%),
+    linear-gradient(160deg, #F8FCFA 0%, #EFF6F3 52%, #F5F9F7 100%);
+}
+html[data-theme="light"] .xz-root::before { opacity: .18; }
+
+html[data-theme="light"] .xz-rail {
+  background: linear-gradient(180deg, rgba(255,255,255,.88) 0%, rgba(248,251,249,.72) 100%);
+  border-right-color: rgb(var(--ink-rgb) / .08);
+}
+html[data-theme="light"] .xz-dots {
+  border-color: rgb(var(--ink-rgb) / .12);
+  background: rgba(255,255,255,.72);
+  color: var(--ink2);
+}
+html[data-theme="light"] .xz-dots:hover {
+  color: #0B6B45;
+  border-color: rgba(15,122,88,.32);
+  background: rgba(15,122,88,.08);
+}
+html[data-theme="light"] .xz-nav-item {
+  background: transparent;
+  color: var(--ink2);
+}
+html[data-theme="light"] .xz-nav-item:hover {
+  color: #0B6B45;
+  background: rgba(15,122,88,.08);
+  border-color: rgba(15,122,88,.22);
+  box-shadow: 0 8px 22px rgba(20,40,32,.10);
+}
+html[data-theme="light"] .xz-nav-ico { background: rgb(var(--ink-rgb) / .05); color: #4C6B5E; }
+html[data-theme="light"] .xz-nav-item:hover .xz-nav-ico { background: rgba(15,122,88,.12); color: #0B6B45; }
+
+html[data-theme="light"] .rail-home {
+  background: rgba(15,122,88,.05);
+  border-color: rgba(15,122,88,.18);
+}
+html[data-theme="light"] .rail-home:hover {
+  background: rgba(15,122,88,.10);
+  border-color: rgba(15,122,88,.30);
+  color: #0B6B45;
+}
+html[data-theme="light"] .rail-home:hover .rail-home-title { color: #0B6B45; }
+
+html[data-theme="light"] .xz-kicker { color: rgba(9,95,61,.85); }
+html[data-theme="light"] .xz-title { color: var(--ink); }
+html[data-theme="light"] .xz-orb-wrap::before {
+  background: radial-gradient(circle, rgba(52,211,153,.26) 0%, rgba(34,211,238,.10) 44%, transparent 68%);
+}
+
+html[data-theme="light"] .xz-intro {
+  background: rgba(255,255,255,.88);
+  border-color: rgba(15,122,88,.16);
+  box-shadow: 0 24px 60px rgba(20,45,35,.12), inset 0 1px 0 rgba(255,255,255,.9);
+}
+html[data-theme="light"] .xz-intro::after {
+  background: radial-gradient(circle, rgba(52,211,153,.10), transparent 66%);
+}
+html[data-theme="light"] .xz-intro-title { color: var(--ink); }
+html[data-theme="light"] .xz-intro-kicker { color: var(--accent); }
+
+html[data-theme="light"] .xz-chip {
+  border-color: rgb(var(--ink-rgb) / .14);
+  background: rgba(255,255,255,.72);
+}
+html[data-theme="light"] .xz-chip:hover {
+  color: #0B6B45;
+  border-color: rgba(15,122,88,.32);
+  background: rgba(15,122,88,.07);
+}
+
+html[data-theme="light"] .xz-bubble.is-bot {
+  background: rgba(255,255,255,.90);
+  border-color: rgb(var(--ink-rgb) / .08);
+  box-shadow: 0 8px 24px rgba(20,40,32,.06);
+}
+html[data-theme="light"] .xz-bubble.is-user { box-shadow: 0 10px 24px rgba(138,101,32,.22); }
+
+html[data-theme="light"] .xz-composer-wrap {
+  background: linear-gradient(180deg, rgba(243,245,247,0) 0%, rgba(243,245,247,.72) 46%, rgba(243,245,247,.94) 100%);
+}
+html[data-theme="light"] .xz-inputbar {
+  background: rgba(255,255,255,.92);
+  border-color: rgb(var(--ink-rgb) / .13);
+  box-shadow: 0 18px 44px rgba(20,40,32,.12), inset 0 1px 0 rgba(255,255,255,.9);
+}
+html[data-theme="light"] .xz-input::placeholder { color: var(--ink3); }
+html[data-theme="light"] .xz-footnote { color: var(--ink3); }
+
+html[data-theme="light"] .xz-warning {
+  border-color: rgb(var(--warn-rgb) / .25);
+  background: rgb(var(--warn-rgb) / .07);
+}
+
+/* 麦克风权限卡（浮层） */
+html[data-theme="light"] .xz-mic-overlay { background: rgba(20,28,24,.42); }
+html[data-theme="light"] .xz-mic-card {
+  background:
+    radial-gradient(420px 240px at 12% -10%, rgba(52,211,153,.10), transparent 70%),
+    #FFFFFF;
+  border-color: rgb(var(--ink-rgb) / .12);
+  box-shadow: 0 30px 80px rgba(20,40,32,.18), inset 0 1px 0 rgba(255,255,255,.9);
+  color: var(--ink);
+}
+html[data-theme="light"] .xz-mic-title { color: var(--ink); }
+html[data-theme="light"] .xz-mic-body,
+html[data-theme="light"] .xz-mic-steps { color: var(--ink2); }
+html[data-theme="light"] .xz-mic-code {
+  border-color: rgb(var(--ink-rgb) / .10);
+  background: rgb(var(--ink-rgb) / .05);
+  color: var(--accent);
+}
+html[data-theme="light"] .xz-mic-btn {
+  border-color: rgb(var(--ink-rgb) / .14);
+  background: rgb(var(--ink-rgb) / .04);
+  color: var(--ink);
+}
+html[data-theme="light"] .xz-mic-btn:hover:not(:disabled) {
+  background: rgb(var(--ink-rgb) / .08);
+  border-color: rgb(var(--accent-rgb) / .35);
+}
+html[data-theme="light"] .xz-mic-note { color: var(--ink3); }
+html[data-theme="light"] .xz-mic-err { color: var(--danger); }
+/* 录音状态条保持深色：浮在浅色页面上需要醒目 */
