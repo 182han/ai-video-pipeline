@@ -101,6 +101,11 @@ export function CreateSmartWizard() {
   const [model, setModel] = useState(draft0 && draft0.model ? draft0.model : 'openai-video');
   const [transition, setTransition] = useState(draft0 ? draft0.transition !== false : true);
   const [bgm, setBgm] = useState(draft0 ? draft0.bgm !== false : true);
+  // 出图后自动调色（A 方案，2026-11-23）：默认值来自服务端 .env（GET /api/image-gen/status），
+  // **不写 localStorage 默认**；草稿里只记录本次向导里用户改过的值，刷新不丢。
+  const [imageGrade, setImageGrade] = useState(
+    draft0 && (draft0.imageGrade === 'off' || draft0.imageGrade === 'calm') ? draft0.imageGrade : null
+  );
   const [restored, setRestored] = useState(!!(draft0 && draft0.step > 1)); // 仅「开局就是从草稿恢复」时提示
   const [pickerOpen, setPickerOpen] = useState(false);
   const [libPhotos, setLibPhotos] = useState([]);
@@ -117,9 +122,10 @@ export function CreateSmartWizard() {
     if (step <= 1 && prompts.length === 0 && photos.length === 0) return;
     saveDraft({
       v: 1, step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed,
+      imageGrade,
       draftLang: uiLang(), at: new Date().toISOString()
     });
-  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed]);
+  }, [step, minutes, clipDur, cards, prompts, imagePrompts, photos, res, transition, bgm, model, seed, imageGrade]);
 
   // 2026-11-21 用户报「英文模式下提示词仍是中文」：草稿里的提示词是**上一语言**时留下的
   // （切换语言后草稿照旧恢复中文文案）。语言变了就把提示词按当前语言重新取一遍——
@@ -186,7 +192,15 @@ export function CreateSmartWizard() {
     let alive = true;
     fetch('/api/image-gen/status', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (alive && j && Array.isArray(j.i2vModels)) setI2vModels(j.i2vModels.map(String)); })
+      .then((j) => {
+        if (!alive || !j) return;
+        if (Array.isArray(j.i2vModels)) setI2vModels(j.i2vModels.map(String));
+        // 出图自动调色默认值：只认服务端 .env（imageGrade.default），本机不存默认。
+        const def = j.imageGrade && j.imageGrade.default;
+        if (def === 'off' || def === 'calm') {
+          setImageGrade((cur) => (cur === 'off' || cur === 'calm') ? cur : def);
+        }
+      })
       .catch(() => { /* 读不到就不禁用，提交时由服务端再校验（服务端有硬校验） */ });
     return () => { alive = false; };
   }, []);
@@ -284,6 +298,9 @@ export function CreateSmartWizard() {
           apiKey: cfg.imageKey || '', baseUrl: cfg.imageBaseUrl || '',
           provider: cfg.imageProvider || 'dashscope', model: cfg.imageModel || 'wan2.7-image',
           size: cfg.imageSize || '1696*960', palette: 'calm',
+          // 出图后自动调色（A 方案）：off = 只存原图；calm = 跑现有 autoGrade。
+          // 未取到服务端默认（null）时不传，由服务端按 .env 决定。
+          imageGrade: imageGrade || undefined,
           taskId: 'smart_' + Date.now().toString(36)
         })
       });
@@ -338,7 +355,9 @@ export function CreateSmartWizard() {
         model: effectiveModel, prompts, resolution: res, clipDuration: clipDur,
         preset: 'final', autoRetry: false,
         transition: { enabled: transition, duration: 0.4, type: 'fade' },
-        bgm: { enabled: bgm, mode: 'auto' }
+        bgm: { enabled: bgm, mode: 'auto' },
+        // 写进 task.imageGrade（之后补跑/重生成沿用，请求体不能再改）。
+        imageGrade: imageGrade || undefined
       };
       if (useImages) body.photoIds = approved.map((p) => p.id);
       const r = await fetch('/api/tasks', {
@@ -447,6 +466,15 @@ export function CreateSmartWizard() {
         <div className="rounded-[8px] border border-white/[.08] bg-s1 p-4">
           <p className="text-[12px] text-ink2 mb-1">${tr('createSmart.step3.optionalPrefix')}<b className="text-ink">${tr('createSmart.step3.optionalBold')}</b>${tr('createSmart.step3.optionalSuffix')}</p>
           <p className="text-[11px] text-ink3 mb-3">${tr('createSmart.step3.billingPrefix', { unit: yuan(IMAGE_UNIT), n: imagePrompts.length, total: yuan(imagePrompts.length * IMAGE_UNIT) })}<b className="text-ink2">${tr('createSmart.step3.billingBold')}</b>${tr('createSmart.step3.billingSuffix')}</p>
+          <label className="flex items-start gap-2 mb-3 text-[12px] text-ink2 cursor-pointer select-none">
+            <input type="checkbox" checked=${imageGrade === 'calm'}
+              onChange=${(e) => setImageGrade(e.target.checked ? 'calm' : 'off')}
+              className="mt-[3px] w-[15px] h-[15px] shrink-0 accent-accent" />
+            <span className="leading-[1.6]">
+              ${tr('createSmart.step3.autoGrade')}
+              <span className="block text-[10.5px] text-ink3">${tr('createSmart.step3.autoGradeHint')}</span>
+            </span>
+          </label>
           <div className="flex gap-2 mb-3 flex-wrap">
             <${Btn} primary=${true} disabled=${busy === 'images'} onClick=${genImages}>
               ${busy === 'images' ? tr('createSmart.step3.generating') : tr('createSmart.step3.generate', { n: imagePrompts.length })}
@@ -530,6 +558,9 @@ export function CreateSmartWizard() {
             ${tr('createSmart.step5.modelLine', { model: modelLabel(effectiveModel), res })}<br/>
             ${tr('createSmart.step5.durationLine', { clips, dur: clipDur, mins: (clips * clipDur / 60).toFixed(2) })}<br/>
             ${approved.length === prompts.length && prompts.length ? tr('createSmart.step5.visualI2v', { n: approved.length }) : tr('createSmart.step5.visualT2v')}<br/>
+            ${tr('createSmart.step5.gradeLine', {
+              grade: imageGrade === 'calm' ? tr('createSmart.step5.gradeAuto') : tr('createSmart.step5.gradeOff')
+            })}<br/>
             ${tr('createSmart.step5.transitionLine', {
               transition: transition ? tr('createSmart.step5.transitionFade') : tr('createSmart.step5.transitionOff'),
               bgm: bgm ? tr('createSmart.step5.bgmAuto') : tr('createSmart.step5.bgmOff')

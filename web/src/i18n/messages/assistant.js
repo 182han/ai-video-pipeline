@@ -109,9 +109,10 @@ export default {
         batchGenerated: '已生成 {n} 条（{sec} 秒/条）',
         fillCreate: '填入创作页',
         imageFirst: '图片优先：出图+调色+图生视频',
+        imageFirstGraded: '图片优先：出图（自动调色）+图生视频',
         imageFirstBusy: '执行中…',
         tryTwo: '先试 2 条',
-        billingNote: '会真实计费：{n} 张图 + {n} 段视频；出图后自动通过、逐图调色。',
+        billingNote: '会真实计费：{n} 张图 + {n} 段视频；出图后自动通过，调色按上方开关（默认关 = 保留原图）。',
         send: '发送',
         changeTo: '改成 {res}',
         placeholderXiaozhi: '说个总时长，或问上一次的视频…'
@@ -272,9 +273,10 @@ export default {
         batchGenerated: 'Generated {n} prompts ({sec}s each)',
         fillCreate: 'Fill into Create',
         imageFirst: 'Image-first: images + color + image-to-video',
+        imageFirstGraded: 'Image-first: images (auto-graded) + image-to-video',
         imageFirstBusy: 'Running…',
         tryTwo: 'Try 2 first',
-        billingNote: 'Billed for real: {n} images + {n} video clips; images are auto-approved and color-adjusted one by one.',
+        billingNote: 'Billed for real: {n} images + {n} video clips; images are auto-approved and grading follows the switch above (off by default = keep originals).',
         send: 'Send',
         changeTo: 'Change to {res}',
         placeholderXiaozhi: 'Say a duration, or ask about the last video…'

@@ -34,10 +34,13 @@ function imageBillingText(plan, unitCny) {
 
 // 2026-11-16 契约 §0/§1：全自动链路 = 场景卡 → 逐段出图 → 图生视频；出图后整批停一次审图。
 // 开关默认开启（用户口径「全自动」），状态由调用方存 localStorage（vs_image_per_clip）。
-export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, unitCny, hasImageKey, imageBackendReady, onSetResolution }) {
+// 2026-11-23：新增「出图后自动调色」（imageGrade），只在逐段出图打开时出现；
+// 默认值来自服务端 .env，调用方不写 localStorage。
+export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggleImage, imageGrade, onToggleImageGrade, unitCny, hasImageKey, imageBackendReady, onSetResolution }) {
   if (!plan) return null;
   const est = plan.estimate || {};
   const imgOn = imagePerClip === true;
+  const gradeOn = imageGrade === 'calm';
   const totalSec = Math.round(Number(plan.totalSec) || 0);
   const mins = Number(plan.totalMinutes);
   // 不到 1 分钟按秒显示（2026-11-16 支持「30 秒」这类短视频/快速验证）
@@ -53,6 +56,7 @@ export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggle
       ? [tr('xiaozhi.plan.scene'), tr('xiaozhi.plan.sceneAuto', { n: plan.clipCount })]
       : [tr('xiaozhi.plan.scene'), tr('xiaozhi.plan.sceneOff')],
     [tr('xiaozhi.plan.image'), imgOn ? tr('xiaozhi.plan.imageOn', { n: plan.clipCount }) : tr('xiaozhi.plan.imageOff')],
+    ...(imgOn ? [[tr('xiaozhi.plan.autoGrade'), gradeOn ? tr('xiaozhi.plan.autoGradeOn') : tr('xiaozhi.plan.autoGradeOff')]] : []),
     [tr('xiaozhi.plan.cost'), `${money(est.totalCny)}${est.autoQcRetries
       ? tr('xiaozhi.plan.costRetry', { cap: money(est.retryCapCny), n: est.autoQcRetries })
       : tr('xiaozhi.plan.costNoRetry')}`],
@@ -124,6 +128,18 @@ export function PlanCard({ plan, busy, onConfirm, onEdit, imagePerClip, onToggle
               ${tr('xiaozhi.plan.noImageKey')}
             </p>
           `}
+          <label className="mt-1 flex items-start gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked=${gradeOn}
+              disabled=${!!busy}
+              onChange=${(e) => onToggleImageGrade && onToggleImageGrade(e.target.checked)}
+              className="mt-[2px] w-[14px] h-[14px] shrink-0 accent-accent"
+            />
+            <span className="text-[11px] leading-[1.6] text-ink">
+              ${tr('xiaozhi.plan.autoGradeToggle')}<span className="text-ink3">${tr('xiaozhi.plan.autoGradeSub')}</span>
+            </span>
+          </label>
         ` : html`
           <p className="mt-1 text-[10px] leading-[1.6] text-ink3">
             ${tr('xiaozhi.plan.pureText')}

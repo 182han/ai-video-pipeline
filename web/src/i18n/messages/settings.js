@@ -91,6 +91,10 @@ export default {
         empty: '未填写',
         imageNote: '模型 / 尺寸留空即用默认 wan2.7-image / 1696x960（16:9）。填在这里的 Key 会随出图请求发送，不落服务端；也可写 app/.env 的 IMAGE_GEN_API_KEY 作为服务端全局配置。',
         imageBase: '第三方 / 中转 Key 必须填它给的 Base URL；官方百炼 Key 填',
+        imageGradeDefault: '出图自动调色默认值：{value}（由 app/.env 的 IMAGE_GEN_AUTO_GRADE_DEFAULT 控制，此处只读）',
+        imageGradeMissing: '服务端未提供（需重启 node server.js）',
+        gradeOn: '开（自动调色）',
+        gradeOff: '关（保留原图）',
         connected: '连接正常',
         failed: '测试失败',
         oldServer: '（服务端仍是旧进程，请重启 node server.js）'
@@ -224,6 +228,10 @@ export default {
         empty: 'not set',
         imageNote: 'Leave model / size blank to use the defaults wan2.7-image / 1696x960 (16:9). Keys entered here are sent with image requests and never stored server-side; you can also set IMAGE_GEN_API_KEY in app/.env as a server-side default.',
         imageBase: 'For third-party / proxy keys, fill in the Base URL they provide. For official Model Studio keys use',
+        imageGradeDefault: 'Default for auto-adjusting generated images: {value} (controlled by IMAGE_GEN_AUTO_GRADE_DEFAULT in app/.env; read-only here)',
+        imageGradeMissing: 'not provided by the server (restart node server.js)',
+        gradeOn: 'on (auto-adjust)',
+        gradeOff: 'off (keep original)',
         connected: 'Connected',
         failed: 'Test failed',
         oldServer: ' (the server is still running old code; restart with node server.js)'

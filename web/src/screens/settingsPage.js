@@ -414,6 +414,15 @@ export function SettingsView() {
                   <p className="mt-1 text-[11px] leading-[1.7] text-ink3">
                     ${t('settings.keys.imageNote')}
                   </p>
+                  <p className="mt-1 text-[11px] leading-[1.7] text-ink3">
+                    ${t('settings.keys.imageGradeDefault', {
+                      value: (imgStatus && imgStatus.imageGrade)
+                        ? (imgStatus.imageGrade.default === 'calm'
+                          ? t('settings.keys.gradeOn')
+                          : t('settings.keys.gradeOff'))
+                        : (imgStatus ? t('settings.keys.imageGradeMissing') : t('settings.keys.reading'))
+                    })}
+                  </p>
                   <p className="mt-1 text-[11px] leading-[1.7] text-warn">
                     ${t('settings.keys.imageBase')}
                     <code className="font-num"> https://{WorkspaceId}.{region}.maas.aliyuncs.com/api/v1</code>。

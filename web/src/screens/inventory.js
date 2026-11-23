@@ -121,6 +121,48 @@ function costSuffix(cost) {
   return cost.label ? ' · ' + cost.label : '';
 }
 
+// ---------------- 出图自动调色（2026-11-23 A 方案） ----------------
+// 后端 photo.grade：{ mode:'off'|'calm', status:'off'|'applied'|'failed', palette?, before?, after?, params?, error? }
+// 老记录读取时由 photoLibrary 补默认 off；这里再兜一层，避免任何缺字段导致页面崩。
+function gradeOf(p) {
+  const g = p && p.grade;
+  return (g && typeof g === 'object')
+    ? g
+    : { mode: 'off', status: 'off' };
+}
+function gradeTone(g) {
+  if (g.status === 'failed') return 'var(--danger)';
+  if (g.mode === 'calm' && g.status === 'applied') return 'var(--accent)';
+  return 'var(--ink3)';
+}
+function gradeText(g) {
+  if (g.status === 'failed') return tr('library.photos.gradeFailed');
+  if (g.mode === 'calm' && g.status === 'applied') return tr('library.photos.gradeAuto');
+  return tr('library.photos.gradeOff');
+}
+function gradeBadge(p) {
+  const g = gradeOf(p);
+  return html`<span style=${{ color: gradeTone(g) }}>${gradeText(g)}</span>`;
+}
+// 指标/参数只做只读展示，不做二次计算（数值来自 autoGrade 的实测结果）。
+function gradeMetricText(m) {
+  if (!m || typeof m !== 'object') return '-';
+  const parts = [];
+  if (Number.isFinite(Number(m.sat))) parts.push('sat ' + Number(m.sat).toFixed(3));
+  if (Number.isFinite(Number(m.luma))) parts.push('luma ' + Number(m.luma).toFixed(1));
+  if (Number.isFinite(Number(m.high))) parts.push('high ' + Number(m.high).toFixed(2) + '%');
+  return parts.join(' · ') || '-';
+}
+function gradeParamsText(params) {
+  if (!params || typeof params !== 'object') return '-';
+  const parts = [];
+  if (Number.isFinite(Number(params.gain))) parts.push('gain ' + Number(params.gain).toFixed(3));
+  if (Number.isFinite(Number(params.brightness))) parts.push('brightness ' + Number(params.brightness).toFixed(3));
+  if (Number.isFinite(Number(params.contrast))) parts.push('contrast ' + Number(params.contrast).toFixed(2));
+  if (parts.length) return parts.join(' · ');
+  return params.filter ? String(params.filter) : '-';
+}
+
 function qcText(qc) {
   if (!qc) return tr('library.qc.notChecked');
   if (qc.passed) return tr('library.qc.passed');
@@ -751,6 +793,8 @@ export function PhotosPanel({ onChanged }) {
   const adjustIsZero = ADJUST_KEYS.every(({ key }) => Math.round(Number(adjParams[key]) || 0) === 0);
   const adjustVer = detail ? adjustVersion(detail) : 0;
   const previewFilterText = adjustChanged ? adjustPreviewFilter(adjustDelta) : '';
+  // 出图自动调色的只读展示（A 方案）：老记录/缺字段一律按 off，不因缺字段渲染失败。
+  const detailGrade = detail ? gradeOf(detail) : { mode: 'off', status: 'off' };
 
   return html`
     <div>
@@ -807,6 +851,7 @@ export function PhotosPanel({ onChanged }) {
                   <p className="text-[10px] text-ink3 font-num">
                     ${PHOTO_STATUS_KEYS[p.status] ? tr(PHOTO_STATUS_KEYS[p.status]) : p.status}
                     ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
+                    ${' · '}${gradeBadge(g.after)}
                     ${' · ' + tr('library.photos.generatedCost', { cost: costText(g.before.cost) || '-' })}
                     ${' · ' + tr('library.photos.adjustedCost', { cost: costText(g.after.cost) || '-' })}
                   </p>
@@ -834,6 +879,7 @@ export function PhotosPanel({ onChanged }) {
                 <p className="text-[10px] text-ink3 font-num">
                   ${PHOTO_STATUS_KEYS[p.status] ? tr(PHOTO_STATUS_KEYS[p.status]) : p.status}
                   ${p.width && p.height ? ' · ' + p.width + '×' + p.height : ''}
+                  ${' · '}${gradeBadge(p)}
                   ${costText(p.cost) ? ' · ' + costText(p.cost) : ''}
                 </p>
                 <p className="mt-0.5 text-[10px] text-ink3">${usedText(p)}</p>
@@ -871,6 +917,32 @@ export function PhotosPanel({ onChanged }) {
             </div>
             <img src=${withCacheBust(detail.url, adjBust[detail.id])} alt=${tr('library.photos.imageAlt')} onClick=${() => setZoomImg(detail.url)}
               style=${{ width: '100%', maxHeight: '420px', objectFit: 'contain', background: '#000', borderRadius: '6px', cursor: 'zoom-in', ...(previewFilterText ? { filter: previewFilterText } : {}) }} />
+            <div style=${{ marginTop: '10px', padding: '8px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.autoGradeTitle')}</b>
+                <span style=${{ color: gradeTone(detailGrade), fontSize: '10.5px' }}>${gradeText(detailGrade)}</span>
+              </div>
+              ${detailGrade.mode === 'calm' && detailGrade.status === 'applied' ? html`
+                <p style=${{ margin: '4px 0 0', fontSize: '10.5px', color: 'var(--ink3)' }}>
+                  ${tr('library.photos.gradePalette', { palette: detailGrade.palette || '-' })}
+                </p>
+                ${detailGrade.before && detailGrade.after ? html`
+                  <p style=${{ margin: '2px 0 0', fontSize: '10.5px', color: 'var(--ink3)' }}>
+                    ${tr('library.photos.gradeMetrics', {
+                      before: gradeMetricText(detailGrade.before),
+                      after: gradeMetricText(detailGrade.after)
+                    })}
+                  </p>` : ''}
+                ${detailGrade.params ? html`
+                  <p style=${{ margin: '2px 0 0', fontSize: '10.5px', color: 'var(--ink3)' }}>
+                    ${tr('library.photos.gradeParams', { params: gradeParamsText(detailGrade.params) })}
+                  </p>` : ''}
+              ` : ''}
+              ${detailGrade.status === 'failed' ? html`
+                <p style=${{ margin: '4px 0 0', fontSize: '10.5px', color: 'var(--danger)' }}>
+                  ${tr('library.photos.gradeFailedReason', { error: detailGrade.error || '-' })}
+                </p>` : ''}
+            </div>
             <div style=${{ marginTop: '12px', padding: '10px 12px', border: '1px solid rgba(244,247,245,.12)', borderRadius: '8px', background: 'rgba(255,255,255,.02)' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '2px' }}>
                 <b style=${{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>${tr('library.photos.manualAdjust')}</b>

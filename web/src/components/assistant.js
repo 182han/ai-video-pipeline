@@ -159,6 +159,9 @@ export function Assistant({ page = false } = {}) {
   // 开关状态跨会话记住；默认开（用户口径是全自动：场景卡 → 首帧图 → 图生视频）。
   const [imagePerClip, setImagePerClip] = useState(readImagePerClip);
   const [reviewBusy, setReviewBusy] = useState(false);
+  // 出图后自动调色（2026-11-23 A 方案）：默认值**只**来自服务端 .env（GET /api/image-gen/status），
+  // 不写 localStorage；计划卡逐段出图与「图片优先」两个入口共用这一个状态。
+  const [imageGrade, setImageGrade] = useState(null);
 
   // ===== 小智（P5）：计划卡 / 状态机 / 记忆 / 语音 =====
   // 后端是旧进程时（没有 /api/assistant/info），退回原来的「提示词助手」对话，
@@ -229,6 +232,23 @@ export function Assistant({ page = false } = {}) {
         setBackend({ checked: true, ok: !!(j && j.ok), info: j || null });
       })
       .catch(() => { if (alive) setBackend({ checked: true, ok: false, info: null }); });
+    return () => { alive = false; };
+  }, []);
+
+  // 出图自动调色默认值：只读 GET，不落 localStorage（否则又变成「每人一套」）。
+  // 读不到就保持 null，创建任务时由服务端按 .env 默认。
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/image-gen/status', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive) return;
+        const def = j && j.imageGrade && j.imageGrade.default;
+        if (def === 'off' || def === 'calm') {
+          setImageGrade((cur) => (cur === 'off' || cur === 'calm') ? cur : def);
+        }
+      })
+      .catch(() => { /* 旧进程没有该字段：创建时由服务端默认 */ });
     return () => { alive = false; };
   }, []);
 
@@ -668,7 +688,7 @@ export function Assistant({ page = false } = {}) {
         // 注意：`...runtime` 必须紧跟 `approved: true,`（scripts/verify-assistant.js 的静态断言
         // 就认这个形状，也保证运行 Key 一定在请求体里）；imagePerClip 放在 spread 之后，
         // 避免被 runtime 里的同名键覆盖。
-        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true, ...runtime, imagePerClip: imagePerClip === true })
+        body: JSON.stringify({ sessionId, planId: plan.planId, approved: true, ...runtime, imagePerClip: imagePerClip === true, imageGrade: imageGrade || undefined })
       });
       const j = await r.json().catch(() => null);
       if (!j || j.ok !== true) {
@@ -702,6 +722,11 @@ export function Assistant({ page = false } = {}) {
     const next = on !== false;
     setImagePerClip(next);
     writeImagePerClip(next);
+  }
+
+  // 计划卡「出图后自动调色」：只影响本次任务（写进 task.imageGrade），**不存默认**、不写 localStorage。
+  function toggleImageGrade(on) {
+    setImageGrade(on === true ? 'calm' : 'off');
   }
 
   // 审图暂停的三个动作（契约 §2.3/§2.4：用户点「继续」才结算并开始花视频的钱）。
@@ -868,6 +893,8 @@ export function Assistant({ page = false } = {}) {
           model: all.imageModel || 'wan2.7-image',
           size: all.imageSize || '1696*960',
           palette: 'calm',
+          // 出图后自动调色（A 方案）：与计划卡共用同一状态；未取到默认时由服务端决定。
+          imageGrade: imageGrade || undefined,
           taskId: 'imgfirst_' + Date.now().toString(36)
         })
       });
@@ -896,6 +923,8 @@ export function Assistant({ page = false } = {}) {
           clipDuration: 10,
           preset: 'final',
           autoRetry: false,
+          // 同上：写进 task.imageGrade（本次任务内沿用；图片已出，不影响已生成的图）。
+          imageGrade: imageGrade || undefined,
           strictQcItems: ['blackFrame', 'duration', 'nsfw'],
           transition: { enabled: true, duration: 0.4, type: 'fade' },
           colorMatch: { enabled: false },
@@ -1036,6 +1065,8 @@ export function Assistant({ page = false } = {}) {
                   onEdit=${() => { if (inputRef.current) inputRef.current.focus(); }}
                   imagePerClip=${imagePerClip}
                   onToggleImage=${toggleImagePerClip}
+                  imageGrade=${imageGrade}
+                  onToggleImageGrade=${toggleImageGrade}
                   unitCny=${imageUnitCny}
                   hasImageKey=${imageKeyPresent}
                   imageBackendReady=${imageBackendReady}
@@ -1249,6 +1280,8 @@ export function Assistant({ page = false } = {}) {
               onEdit=${() => { if (inputRef.current) inputRef.current.focus(); }}
               imagePerClip=${imagePerClip}
               onToggleImage=${toggleImagePerClip}
+              imageGrade=${imageGrade}
+              onToggleImageGrade=${toggleImageGrade}
               unitCny=${imageUnitCny}
               hasImageKey=${imageKeyPresent}
               imageBackendReady=${imageBackendReady}
@@ -1285,7 +1318,7 @@ export function Assistant({ page = false } = {}) {
                 className="mt-2 ml-2 h-7 px-2.5 rounded-[5px] border border-accent/40 text-accent text-[11px] disabled:opacity-40"
                 onClick=${() => runImageFirst()}
                 disabled=${imageFirstBusy}
-              >${imageFirstBusy ? tr('assistant.panel.imageFirstBusy') : tr('assistant.panel.imageFirst')}</button>
+              >${imageFirstBusy ? tr('assistant.panel.imageFirstBusy') : (imageGrade === 'calm' ? tr('assistant.panel.imageFirstGraded') : tr('assistant.panel.imageFirst'))}</button>
               <button
                 className="mt-2 ml-2 h-7 px-2.5 rounded-[5px] border border-white/[.10] text-ink2 text-[11px] disabled:opacity-40"
                 onClick=${() => runImageFirst(batchItems.slice(0, 2))}
