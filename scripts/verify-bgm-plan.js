@@ -63,7 +63,21 @@ function meanVolume(p) {
 // 输出目录必须落在工作区内（沙箱对系统临时目录写入有额外限制），验证完自动清理
 const outDir = path.join(__dirname, '..', 'output', 'verify_bgm_' + Date.now());
 fs.mkdirSync(outDir, { recursive: true });
-const video = path.join(__dirname, '..', 'output', 'task_mv4v7qp2_m8r0_final.mp4');
+// 2026-11-23：固定夹具缺失时回退到 output/ 下最近的一条成片。
+// 原写法在夹具不存在时直接「跳过 → exit 0」，本套件在本机长期等于没跑（0 通过也算绿）。
+const video = (() => {
+  const fixed = path.join(__dirname, '..', 'output', 'task_mv4v7qp2_m8r0_final.mp4');
+  if (fs.existsSync(fixed)) return fixed;
+  try {
+    const dir = path.join(__dirname, '..', 'output');
+    const cand = fs.readdirSync(dir)
+      .filter(n => /_final\.mp4$/.test(n))
+      .map(n => ({ n, m: fs.statSync(path.join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.m - a.m)[0];
+    if (cand) return path.join(dir, cand.n);
+  } catch (e) { /* ignore */ }
+  return fixed;
+})();
 if (!fs.existsSync(video)) { console.log('缺少测试视频，跳过'); process.exit(0); }
 const videoDur = probeDuration(video);
 console.log('测试视频时长:', videoDur.toFixed(3), 's');
@@ -105,10 +119,25 @@ for (const s of scenarios) {
   console.log(`  ${status}  ${s.name}\n        dur=${d.toFixed(3)}s (期望 ${videoDur.toFixed(3)})  mean_volume=${mv}dB`);
   if (log.trim()) console.log('        log: ' + log.trim().slice(0, 300));
 }
+// 2026-11-23 回归断言：timelineStart>0 的段，adelay 必须是该链路最后一个滤镜。
+// 事故：原顺序是 adelay → atrim=0:wantDuration，等于把搬过去的音频裁回开头，
+// 5 分钟成片的后半段因此完全没声音（音频流 217.1s vs 视频 288.8s）。
+{
+  const built = planner.buildMixCommand({
+    music: [{ trackId: 'm', filePath: music, timelineStart: 20, timelineEnd: 35, sourceIn: 0, sourceOut: 15, volume: 1, speed: 1 }]
+  }, 35);
+  const seg = (built && built.filterComplex ? built.filterComplex : '').split(';').find(p => p.includes('adelay=')) || '';
+  const afterAdelay = seg ? seg.slice(seg.indexOf('adelay=')) : '';
+  const bad = !built.ok || !seg || /atrim=/.test(afterAdelay);
+  if (bad) fail++;
+  console.log((bad ? '  FAIL' : '  PASS') + '  回归: timelineStart>0 的段在 adelay 之后不再 atrim（否则整段音频被裁掉）'
+    + (bad ? (built && built.error ? ' — ' + built.error : ' — ' + afterAdelay.slice(0, 120)) : ''));
+}
+
 const realCheck = guard.diffRealBgm(realBefore);
 console.log((realCheck.ok ? '  PASS  ' : '  FAIL  ') + '真实 assets/bgm 隔离: ' + realCheck.message);
 if (!realCheck.ok) fail++;
-const total = scenarios.length + 1;
+const total = scenarios.length + 2;
 console.log('\n结果: ' + (total - fail) + '/' + total + ' 通过');
 try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) {}
 try { fs.rmSync(fixtureDir, { recursive: true, force: true }); } catch (e) {}

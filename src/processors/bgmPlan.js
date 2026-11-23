@@ -182,14 +182,20 @@ function buildSegmentFilters(seg, inputIndex, label, opts = {}) {
     filters[0] += `,afade=t=out:st=${sec(wantDuration - fadeOut)}:d=${sec(fadeOut)}`;
   }
 
-  // 5) 对齐到时间轴位置（延时插入静音）
+  // 5) 先裁到目标时长，避免 loop/atempo 累积误差导致总长短于预期。
+  //    2026-11-23 修：这一句必须在 adelay **之前**。
+  //    原顺序（adelay → atrim=0:wantDuration）对 timelineStart>0 的片段是错误的：
+  //    adelay 已把音频搬到 [start, start+wantDuration)，紧接着再 atrim 回 [0, wantDuration)
+  //    等于把搬过去的真实音频全部丢掉、只留下开头的静音。
+  //    实测事故：5 分钟成片的音频流只有 217.1s、后半段完全没声音；而配乐计划里第二段
+  //    （timeline 215.6→300、源 golden_sunset_piano 84.4s）本该覆盖到最后，被这条 atrim 吃掉。
+  filters[0] += `,atrim=0:${sec(wantDuration)},asetpts=PTS-STARTPTS`;
+
+  // 6) 对齐到时间轴位置（延时插入静音）——必须在裁切之后
   const delayMs = Math.round(timelineStart * 1000);
   if (delayMs > 0) {
     filters[0] += `,adelay=${delayMs}|${delayMs}`;
   }
-
-  // 6) 裁到目标时长，避免 loop/atempo 累积误差导致总长短于预期
-  filters[0] += `,atrim=0:${sec(wantDuration)},asetpts=PTS-STARTPTS`;
 
   filters[0] += `[${label}]`;
   return { filter: filters[0], duration: wantDuration };
@@ -306,8 +312,12 @@ function buildMixCommand(plan, videoDuration, opts = {}) {
   // loudnorm 默认会把流重采样到 192kHz（实测成片落到 96kHz），体积翻倍且无增益。
   // 在其后显式把采样率拨回目标值——这也是历史静音缺陷的同一个坑，必须钉死。
   const norm = `loudnorm=I=${loudness}:TP=-1.5:LRA=11,aformat=sample_rates=${sr}:channel_layouts=stereo`;
+  // 2026-11-23：末尾加 apad=whole_dur。
+  // 为什么：音频流比视频流短时，容器里会出现「视频 288.8s、音频 217.1s」——
+  // 播放器后半段要么静音、要么行为不一致。apad 保证音频流至少铺满成片时长；
+  // 配乐本身覆盖不够时补的是静音，但至少不再出现「音频流凭空消失」。
   const tail = dur
-    ? `${norm},atrim=0:${sec(dur)},asetpts=PTS-STARTPTS`
+    ? `${norm},atrim=0:${sec(dur)},apad=whole_dur=${sec(dur)},asetpts=PTS-STARTPTS`
     : norm;
 
   // 2026-11-22：保留输入自带音轨（剪辑台「保留原声」）。
