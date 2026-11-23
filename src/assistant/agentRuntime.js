@@ -33,6 +33,8 @@ const TOOL_INTENT = Object.freeze({
   last_video: 'last',
   budget: 'context',
   diagnose: 'repair',
+  // 2026-11-23：补跑确认卡。intent 用 repair，前端据此不弹计划卡（不是新建任务）。
+  resume_task: 'repair',
   bgm: 'bgm',
   settings_change: 'settings',
   prefs: 'prefs',

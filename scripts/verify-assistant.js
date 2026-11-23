@@ -654,11 +654,16 @@ async function main() {
     });
 
     // 2026-11-23：新增 search_scene_cards（内容查询）→ 工具数 14 → 15。
-    // 不是实现错，而是注册表新增了一个只读工具；白名单/无 execute 的约束不变。
-    ok('工具门面白名单 15 个且**没有** execute',
-      supervisor.AGENT_TOOL_NAMES.length === 15
+    // 2026-11-23（同日晚，用户实测）：新增 resume_task（补跑确认卡）→ 15 → 16。
+    // 两次都不是实现错，而是注册表新增了一个只读/需用户确认的工具；白名单/无 execute 的约束不变。
+    ok('工具门面白名单 16 个且**没有** execute',
+      supervisor.AGENT_TOOL_NAMES.length === 16
       && ['execute', 'delete', 'create_task', 'pay'].every((n) => supervisor.AGENT_TOOL_NAMES.indexOf(n) === -1),
       supervisor.AGENT_TOOL_NAMES.join(','));
+
+    // 2026-11-23 新增：resume_task 的三条断言在块末尾（见「全部工具调用结束」之后），
+    // 因为它们要 taskManager.createTask 自造任务，会改变任务数，必须先让「不建任务」计数断言跑完。
+
 
     const created = t('plan_video', { totalMinutes: 0.5, resolution: '1080p' });
     ok('plan_video(0.5 分钟/1080p) → 3 段计划 + plan 回传',
@@ -766,6 +771,40 @@ async function main() {
       actxEmpty.hasPlan === false && actxEmpty.planSummary === null);
 
     ok('全部工具调用结束：任务数不变', taskManager.getAllTasks().length === toolsBefore);
+
+    // 2026-11-23 新增：resume_task 必须在「已完成」和「失败」两种任务上给出不同结论。
+    // 负向（用户截图事故）：任务已完成时若还生成补跑卡，用户会以为要再花一次钱。
+    // 自造两条任务，不依赖库里恰好有历史数据（否则断言会被静默跳过）。
+    // 放在「任务数不变」之后：这一组会 +2 个任务，若放在前面会把计数断言弄红（已实测踩过）。
+    {
+      const doneTask = taskManager.createTask('verify resume_task completed branch', {
+        model: 'mock', totalClips: 1, clipDuration: 5, resolution: '720p', preset: 'final'
+      });
+      taskManager.updateTaskStatus(doneTask.taskId, 'completed', {
+        outputPath: 'C:/tmp/verify_resume_final.mp4'
+      });
+      const rDone = t('resume_task', { taskId: doneTask.taskId });
+      ok('resume_task 对已完成任务：明确回「已完成」+ 成片名，**不**给补跑卡（防重复计费）',
+        rDone.ok === true && rDone.diagnosis == null
+        && /已经完成/.test(rDone.reply) && /final\.mp4/.test(rDone.reply),
+        rDone.reply);
+
+      const badTask = taskManager.createTask('verify resume_task failed branch', {
+        model: 'mock', totalClips: 2, clipDuration: 5, resolution: '720p', preset: 'final'
+      });
+      taskManager.updateTaskStatus(badTask.taskId, 'failed', { error: 'verify 自造的失败任务' });
+      const rBad = t('resume_task', { taskId: badTask.taskId });
+      const execBad = rBad.diagnosis && Array.isArray(rBad.diagnosis.suggestions)
+        ? rBad.diagnosis.suggestions.filter((s) => s && s.executable === true && s.action === 'continue').length
+        : 0;
+      ok('resume_task 对失败任务：回传 diagnosis 且含 1 条 executable continue（前端据此出确认卡）',
+        rBad.ok === true && execBad === 1 && rBad.diagnosis.taskId === badTask.taskId,
+        `exec=${execBad} task=${rBad.diagnosis && rBad.diagnosis.taskId}`);
+
+      const none = t('resume_task', { taskId: 'task_not_exist_zz' });
+      ok('resume_task 对不存在的任务：明确说明、不抛错、不给卡',
+        none.ok === true && none.diagnosis == null && /没有需要补跑/.test(none.reply), none.reply);
+    }
   }
 
   // ================= [3a-6] 2026-11-19 B 目标：agent 运行时（路由/落会话/回退）=================

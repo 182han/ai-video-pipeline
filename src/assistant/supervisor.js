@@ -3102,6 +3102,73 @@ const AGENT_TOOL_HANDLERS = {
     const r = replyForRepair(sessionId, ctx && ctx.lang);
     return { ok: true, reply: r.reply, replyKey: 'assistant.reply.repair', plan: null, diagnosis: r.diagnosis, actions: null };
   },
+  // 2026-11-23（用户实测）：用户说「继续/接着/补跑上一个任务」时，agent 原先只有只读的 diagnose，
+  // prompt 还写着「你没有直接补跑工具」——于是它只能说「你去库→成片→补跑」，用户拿不到确认卡。
+  // 本工具把「补跑确认项」直接生成出来：不执行、不计费，前端 RepairCard 渲染「确认执行」按钮，
+  // 用户点它才走 POST /api/assistant/repair → repairTask({approved:true}) → pipeline.continueTask。
+  // 已完成的任务不生成卡（没有可补的），改为明确回答「已完成 + 成片名」，避免又去排 ¥180 的新计划。
+  resume_task(sessionId, args, ctx) {
+    const lang = (ctx && ctx.lang) || 'zh';
+    const isEn = i18n.normalizeLang(lang) === 'en';
+    const wanted = String((args && args.taskId) || '').trim();
+    const task = wanted ? taskManager.getTask(wanted) : pickTaskForDiagnosis(sessionId);
+    if (!task) {
+      return {
+        ok: true,
+        reply: isEn
+          ? 'Nothing to resume right now: there is no interrupted or failed task. A completed task does not need a resume.'
+          : '现在没有需要补跑的任务：没有中断/失败的条目（已完成的任务不需要补跑）。',
+        replyKey: 'assistant.reply.resumeNone',
+        plan: null, actions: null
+      };
+    }
+    if (String(task.status || '') === 'completed') {
+      const base = task.outputPath ? require('path').basename(task.outputPath) : '';
+      return {
+        ok: true,
+        reply: isEn
+          ? `Task ${task.taskId} is already complete${base ? ` (${base})` : ''} — there is nothing to resume. Tell me if you want a NEW plan or a re-mix of this one.`
+          : `任务 ${task.taskId} 已经完成了${base ? `（成片 ${base}）` : ''}，没有可补跑的步骤。要新做一条或重新配乐导出，再说一声。`,
+        replyKey: 'assistant.reply.resumeDone',
+        plan: null, actions: null
+      };
+    }
+    const d = diagnose.diagnose(task);
+    const hasContinue = Array.isArray(d.suggestions)
+      && d.suggestions.some((s) => s && s.executable === true && s.action === 'continue');
+    if (!hasContinue) {
+      d.suggestions.unshift({
+        id: 'continue',
+        action: 'continue',
+        label: isEn
+          ? 'Resume: regenerate only the unfinished parts; finished clips are reused'
+          : '补跑：只补未完成的部分，已成功的片段直接复用、不重复生成',
+        why: isEn
+          ? 'Finished clips are reused; only missing clips are billed'
+          : '已成功的片段复用，只有缺失的片段才会真实计费',
+        executable: true,
+        requiresConfirm: true,
+        where: null
+      });
+    }
+    const lines = isEn
+      ? [
+        '[Resume] A confirmable resume card is ready below — nothing runs until you press it.',
+        `Task ${task.taskId} · ${d.status || 'unknown'} · ${Number(d.notSuccessClips) || 0} clip(s) unfinished.`
+      ]
+      : [
+        '【补跑】下面已经生成补跑确认卡：你点「确认执行」它才会真正开始，没点之前不会跑、也不会花钱。',
+        `任务 ${task.taskId} · 状态 ${d.status || '未知'} · 未完成 ${Number(d.notSuccessClips) || 0} 段。`
+      ];
+    return {
+      ok: true,
+      reply: lines.join('\n'),
+      replyKey: 'assistant.reply.resumeTask',
+      plan: null,
+      diagnosis: d,
+      actions: null
+    };
+  },
   bgm(sessionId, args, ctx) {
     const lang = (ctx && ctx.lang) || 'zh';
     const action = String(args.action || 'list');

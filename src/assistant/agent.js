@@ -109,6 +109,12 @@ const TOOLS = Object.freeze([
     params: { taskId: 'string?' }
   },
   {
+    name: 'resume_task',
+    desc: '为中断/失败的任务生成「补跑确认卡」（不执行、不计费；用户点卡上确认才跑，已成功片段复用）',
+    descEn: 'Create a resume-from-checkpoint confirmation card for an interrupted/failed task (never runs or bills until the user confirms on the card; finished clips are reused)',
+    params: { taskId: 'string?' }
+  },
+  {
     name: 'bgm',
     desc: '配乐：列库 / 选第 N 首 / 换一首 / 关掉（改计划，不花钱）',
     descEn: 'BGM: list / pick #N / next / turn off (edits the plan, no cost)',
@@ -229,7 +235,7 @@ function buildSystemPrompt(lang, ctx) {
       '· "set the prompt to: X" with a plan -> edit_plan(action=set_prompt, segment=1, prompt=X); default to clip 1, do not ask back.',
       '· "change the default channel to Bailian" -> settings_change(key=model, value=dashscope); WhaleTV=openai-video, Kling=kling, Seedance=seedance.',
       '· Photo colour/saturation question: yes, the user can adjust it in Library -> Photos -> pick a photo -> Adjust (local, free). The video plan itself has no separate saturation parameter; only prompts or the adjusted first frame can influence it.',
-      '· If the user asks to rerun the last failed task -> call diagnose for taskId/reason, then tell them: Library -> Finals -> that task -> "Continue/Rerun". You have NO tool to rerun it yourself; do not claim you can.',
+      '· If the user asks to resume / continue / rerun the last task -> call resume_task (taskId optional). It returns a resume confirmation card; NOTHING runs or is billed until the user presses it on the card, and finished clips are reused. Never answer "I have no tool to do that". If the task is already completed, resume_task says so — then do NOT lay out a new plan; only do that when the user explicitly wants a new video.',
       '· If your previous message was a question and the user answers briefly ("same scene", "a bit warmer"), that IS the answer -> continue the task; do not ask the same question again.',
       '',
       'Current context (read-only):',
@@ -285,7 +291,7 @@ function buildSystemPrompt(lang, ctx) {
     '· 「提示词改成：X」且已有计划 → edit_plan(action=set_prompt, segment=1, prompt=X)；用户没指定第几段时默认第 1 段，不要反问。',
     '· 「把默认通道改成百炼」→ settings_change(key=model, value=dashscope)；WhaleTV 中转=openai-video、可灵=kling、即梦=seedance。',
     '· 用户问照片能不能调色/调饱和度 → 能：库 → 图片 → 选中照片 → 调色（本地、不计费）；视频计划本身没有单独的饱和度参数，只能靠提示词或调色后的首帧间接影响。',
-    '· 用户要补跑上一次失败的任务 → 先用 diagnose 找到 taskId 和失败原因，再告诉他：库 → 成片 → 该任务 → 「补跑 / 继续」；你**没有**直接补跑工具，不要声称能代跑。',
+    '· 用户要「继续 / 接着 / 补跑 / 重试」上一次任务 → 调 resume_task（taskId 可留空，自动选最近那条）：它会生成补跑确认卡，用户点卡上的「确认执行」才真跑，没点之前不跑也不花钱，已成功片段自动复用、不重复计费。不要说「我没有补跑工具」，也不要只让他自己去库里点。任务已完成时 resume_task 会明确回答「已完成 + 成片名」——此时**不要**替他排新计划，只有他明确要新片才排。',
     '· 如果上一条是你在提问（例如「第三段想换什么感觉」），用户短回答（「还是这个场景」「更暖一点」）就是在回答你的问题 → 直接接着办，不要重复问一遍。',
     '',
     '当前上下文（只读）：',
