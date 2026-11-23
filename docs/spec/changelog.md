@@ -4401,3 +4401,131 @@ canvas=1033,57 858x398  bitmap=858x483  scrollW=1404
   因环境失败；这是环境限制，不是本次改动引入（改动前同一后台任务的旧代码也在同一处失败）。
 - `verify-auth` 未运行（会起 3199/3198 两个临时实例，需用户同意）。
 - 未做完整 `npm audit`（本机无 npm）；本次只审计了用户可控数值进入 shell/路径的路径。
+
+---
+
+## 2026-11-23（晚）小智能代跑补跑了：新增 `resume_task`，已完成任务不再被推向新建计划
+
+### 事故（用户实测，有截图）
+
+用户重启服务后，任务 `task_mwt21q0g_u3zo` 被启动回收标成 `failed`；他点「补跑」跑完
+（日志「复用 30/30 个已成功片段，不重新生成」，0 元，成片 288.8s）。再问小智「继续任务吧」，
+小智回「补跑入口给你指出来了…我这边没有直接代跑的工具」；他说「给我计划卡呀」，
+小智排出**新建任务**计划卡：30 段 × 10 秒 · WhaleTV 万相 3.0 · 720p · **预估 ¥180**。
+而片段明明已经全部生成好了。
+
+### 根因（三处叠加，不是一处）
+
+1. `src/assistant/agent.js` 的系统提示词写着「用户要补跑上一次失败的任务 → 用 diagnose 找 taskId，
+   再告诉他去库→成片→补跑；你**没有**直接补跑工具，不要声称能代跑」（英文同款）。
+   agent 说的是实话：工具清单里确实没有补跑工具。
+2. `src/assistant/diagnose.js:176` 只在「有未成功片段 **或** 状态 failed/partial」时给
+   `executable:true` 的 continue 建议。任务一旦 `completed`，就没有任何可执行建议 →
+   前端 `RepairCard`（`web/src/components/assistant.js:1087`，条件是
+   `executableRepairs(diagnosis).length > 0`）不渲染，用户拿不到卡。
+3. 规则路径与 agent 路径都缺「已完成任务 + 用户说继续」的出口，于是用户被推向"新建计划"。
+
+### 改动
+
+- `src/assistant/supervisor.js`：新增 agent 工具 `resume_task`（约 60 行）
+  - 任务 `completed` → 明确回「已完成 + 成片名」，**不给卡**（防重复计费）；
+  - 任务 failed/paused/interrupted → 调 `diagnose` 并保证有 1 条 `executable:true, action:'continue'`，
+    前端渲染「确认执行」卡；没有该建议时补一条（兜底）；
+  - 无任务 → 明确说明，不抛错、不给卡。
+  - 仍然**不执行**：真跑只走已有的 `POST /api/assistant/repair` → `repairTask({approved:true})`
+    → `pipeline.continueTask`（付费确认门不变）。
+- `src/assistant/agent.js`：注册该工具；中英文提示词改为「用 resume_task 生成补跑确认卡；
+  任务已完成就不要替他排新计划」。
+- `src/assistant/agentRuntime.js`：`TOOL_INTENT.resume_task = 'repair'`（前端据此不弹计划卡）。
+
+### 验收（本机实测，逐条跑）
+
+- `node scripts/verify-assistant.js` → **356 通过 / 0 失败**（新增 4 条：16 个工具白名单、
+  已完成任务不给卡、失败任务给 executable continue、不存在任务明确说明）。
+- `node scripts/verify-agent.js` → **60 / 0**。
+- `node scripts/verify-assistant-frontend.js` → **101 / 0**。
+- `node scripts/verify-assistant-diagnostics.js` → **103 / 0**。
+- 负向基线：改动后首跑是 **352 / 1**，唯一红项是写死「工具门面 15 个」的断言；
+  确认改动只影响该点，然后把它更新为 16 并注明原因（不是实现错）。
+- 新断言的摆放位置有坑，已记：它要 `taskManager.createTask` 自造任务（+2），
+  必须放在「全部工具调用结束：任务数不变」**之后**，否则会把计数断言弄红（实测踩过）。
+
+### 未验证 / 已知
+
+- **运行中的 3001 仍是旧代码**：本会话沙箱拒绝 `Start-Process`（实测失败），
+  agent 无法自行重启，需用户重启后生效；重启前该缺口在运行实例上仍然存在。
+- **未在真实 LLM 下实跑**：agent 会不会按新提示词调用 `resume_task` 取决于模型；
+  本次验证的是工具契约与返回结构，不是模型行为。
+- **`execSync → spawn` 的阻塞问题未改**：本机 `spawn EPERM`（实测），
+  改了会让所有视频处理在本机直接失败，故不动。留作独立重构。
+
+### 遗留（同一会话的第二个问题）
+
+流水线用 `execSync` 同步调 ffmpeg（`src/videoProcessor.js:50/57/72/705/711`），
+Node 单线程在拼接/循环/转码期间被阻塞，所有 HTTP 请求排队——实测库接口本身只要 35ms
+（72 条目：listAll 24ms + 文件检查 10ms + 分组 1ms），用户看到的「剪辑台很慢、库直接没有」
+是这段阻塞造成的。根治需异步化或 `worker_threads`，属独立重构。
+
+---
+
+## 2026-11-23（深夜）ffmpeg 长任务移入 worker 线程：流水线运行期间页面不再整体卡死
+
+### 背景
+
+用户实测：4 分 49 秒成片那次，`19:19:44 → 19:24:01`（4 分 17 秒）里页面「剪辑台加载很慢、库直接没有」。
+先证明了不是接口慢（库接口 35ms），而是 `execSync` 把 Node 事件循环占死。
+本机 `spawn` 一律 `EPERM`（实测），所以不能照常规改 async 子进程——那会让视频处理在本机直接失败。
+
+### 关键实测（决定实现方式）
+
+```
+worker 里 execSync(stdio:'pipe')   → spawnSync cmd.exe EPERM
+worker 里 execSync(stdio:'ignore') → 成功
+```
+
+所以：**worker 线程 + execSync(ignore)** 是唯一在本机可验证、又不依赖 spawn 权限的方案。
+
+### 改动
+
+- 新增 `src/processors/ffmpegWorker.js`：worker 入口，串行执行 ffmpeg，`stdio:'ignore'`；
+  需要 stderr 时按仓库既有做法重定向到临时文件。
+- 新增 `src/processors/ffmpegAsync.js`：主线程侧常驻单 worker + 串行队列 + Promise 接口；
+  worker 崩溃时 reject 在飞请求并在下次调用重建，不让流水线悬死。
+- `src/processors/transitionMixer.js`：`concatWithTransitions` 内的 6 处同步调用改异步
+  （逐段 probeMedia → `probeMediaAsync`、归一化 `runFFmpeg` → `runFFmpegAsync`、
+  逐段色彩采样 → `sampleRgbStatsAsync`、产物探测、全片解码校验 `captureStderrAsync`）。
+  **同步函数全部保留**：`_probeMedia` / `_sampleRgbStats` 被 6 个验收脚本同步调用，签名不能动。
+- `src/videoProcessor.js`：新增 `_runFFmpegAsync`；`_concatenateFFmpeg` / `_transcodeFFmpeg` /
+  `_makeLoopFFmpeg` 改 async 并走 worker（拼接 3 处、转码 1 处、循环 1 处、归一化 1 处）。
+  短命令（ffprobe 探测、提帧）保持同步——秒级，不值得起跨线程往返。
+
+### 验收（本机实测）
+
+**决定性对照**（同一台机器，100ms 定时器在被测任务期间实际多久触发）：
+
+| 场景 | 任务耗时 | 定时器实际触发 | 判定 |
+|---|---|---|---|
+| worker 异步 | 917ms | **111ms** | 主线程未被阻塞 |
+| 主线程同步（改前） | 595ms | **597ms** | 被推迟到任务结束 |
+
+产物验收（ffprobe）：worker 产出 `4.000000s / 1280x720 / 30 fps`；同步产出 `2.000000s / 1280x720 / 30 fps`。
+
+**回归**：
+- `verify-concat-audio` → **17 / 0**；`verify-transitions` → **36 / 0**。
+- `verify-loop` → **24 通过 / 3 失败**；**改动前基线 3 通过 / 8 失败**（用 `git stash` 临时回退实测）。
+  失败变少的原因：旧 `_execText`（`execSync` + `encoding:'utf8'`）在本机 EPERM，循环处理整条跑不起来；
+  worker 的 `ignore` 路径能跑。**不是引入失败**。
+- `verify-loop` 剩余 3 条（`基线=null` / `duration=undefined` / wrap SSIM 0.8984 差阈值 0.0016）
+  都是质检数值判定问题，与执行方式无关，改动前同样存在（只是被更早的失败遮住）。
+
+### 踩到的坑（已修，别再踩）
+
+- **不要 `worker.unref()`**：主线程 `await` 期间没有其它活动句柄时进程会直接退出，
+  Promise 永不 settle（脚本表现为静默无输出、exit 0）。实测踩过一次。
+
+### 未验证 / 已知
+
+- **运行中的 3001 仍是重启前代码**（本次改动在 19:46 重启之后落地），需再重启一次生效。
+- **未在服务进程里做端到端 HTTP 并发验证**：本机 `spawn` EPERM，
+  `runFFmpegArgs`（最终大拼接，用 spawn）在这台机器上跑不了；需要用户在真实服务里跑一条任务确认。
+- 转码/循环的真实长片耗时未回归（没有 30 分钟素材）；本次只验到 4 秒切片与流程一致性。
